@@ -10,6 +10,26 @@
  *   `verifyWebhook()` passes on the raw body, `verifyTransaction()` re-fetches the transaction,
  *   and its status, amount, currency and txRef all match what we expect. Each transaction id is
  *   processed exactly once (unique index plus an idempotent handler, Phase 6).
+ *
+ * Phase 6 webhook route contract (read before building it):
+ * - Find the organisation from the request URL, never from the body. Use an unguessable,
+ *   per-organisation token in the path (for example `/api/webhooks/payments/[orgWebhookToken]`),
+ *   looked up server-side. Anything in the body (tx_ref prefix, meta, customer) is unverified
+ *   until `verifyWebhook()` passes, so reading the organisation from it would let a sender pick
+ *   whose secret is checked.
+ * - After `verifyTransaction()`, require that its txRef belongs to an invoice or payment link in
+ *   that same organisation, and that amount and currency match that document.
+ * - Value-giving idempotency is a unique index on (organisation_id, provider, transaction_id) on
+ *   the payments table, keyed on `VerifiedTransaction.transactionId`. Never key it on
+ *   `WebhookEvent.deliveryKey`: one transaction can arrive under more than one event name.
+ * - Never log `WebhookEvent`, `VerifiedTransaction` or a raw body, and never attach them to
+ *   Sentry. Store only `auditPayload`, which the adapter has already reduced to an allow-list of
+ *   non-personal fields (rule 9).
+ *
+ * Open question for the owner (docs/PHASE_0.md Decisions names `FLUTTERWAVE_WEBHOOK_SECRET_HASH`):
+ * this interface uses each organisation's own secret hash (rule 6). Until the owner records an
+ * answer, treat the env var as being for Metalira's own subscription billing or a sandbox only,
+ * never for tenant webhooks.
  */
 import type { Currency, Kobo } from "@/lib/money";
 
@@ -21,6 +41,30 @@ export interface ProviderCredentials {
   /** Shared secret the provider uses to sign or tag webhooks for this organisation. */
   webhookSecretHash: string;
 }
+
+/**
+ * How a provider proves a webhook came from it. Chosen per organisation (or per provider API
+ * version) and always passed explicitly: there is no default.
+ *
+ * - `hmac-sha256`: an HMAC-SHA256 of the raw body keyed with the secret hash. Preferred, because
+ *   it binds the signature to this exact body.
+ * - `static-hash`: the provider echoes the secret hash in a header. It does not cover the body,
+ *   so a leaked or replayed hash passes for any body. Acceptable only because value is never
+ *   given on a webhook alone (see `verifyTransaction()`).
+ */
+export type WebhookScheme = "hmac-sha256" | "static-hash";
+
+/** Options for building one organisation's provider. */
+export interface PaymentProviderOptions {
+  webhookScheme: WebhookScheme;
+}
+
+/**
+ * Provider payload reduced to an allow-list of non-personal fields (ids, reference, status,
+ * amounts, currency, timestamps). Safe to store in `audit_log` or a payments table. Customer,
+ * card and bank account objects are dropped by construction.
+ */
+export type ProviderAuditPayload = Readonly<Record<string, string | number | boolean | null>>;
 
 export interface CreateVirtualAccountInput {
   orgId: string;
@@ -81,8 +125,12 @@ export interface VerifiedTransaction {
   currency: Currency;
   /** ISO 8601 timestamp. */
   paidAt?: string;
-  /** Provider response as received, for the audit trail. Never used for decisions. */
-  raw: unknown;
+  /**
+   * Redacted provider response for the audit trail (allow-listed fields only). Never used for
+   * decisions. The full response is never exposed: it carries customer email, phone and card or
+   * account fragments (rule 9).
+   */
+  auditPayload: ProviderAuditPayload;
 }
 
 export interface TransferItem {
@@ -119,12 +167,18 @@ export type WebhookEventType = "charge.completed" | "transfer.completed" | "unkn
  * with `verifyTransaction()` and decide from that (rule 7).
  */
 export interface WebhookEvent {
-  /** Stable id for de-duplication, derived from the event type and the provider's object id. */
-  eventId: string;
+  /**
+   * Event type plus the provider's object id. For logging and for dropping repeat deliveries of
+   * the same webhook only. It is NOT the money idempotency key: that is a unique index on
+   * (organisation_id, provider, transactionId) taken from `verifyTransaction()`.
+   */
+  deliveryKey: string;
   type: WebhookEventType;
-  transactionId?: string;
+  /** Provider transaction id. Pass it to `verifyTransaction()`; trust nothing else in the body. */
+  transactionId: string;
   txRef?: string;
-  raw: unknown;
+  /** Redacted payload (allow-listed fields only), safe to store. Never log the raw body. */
+  auditPayload: ProviderAuditPayload;
 }
 
 export interface PaymentProvider {
@@ -136,8 +190,9 @@ export interface PaymentProvider {
   createBulkTransfer(input: CreateBulkTransferInput): Promise<BulkTransfer>;
   getBulkTransfer(providerBatchId: string): Promise<BulkTransfer>;
   /**
-   * Checks the webhook signature against this organisation's secret, in constant time, using the
-   * raw request body exactly as received (before any JSON parsing).
+   * Checks the webhook signature against this organisation's secret with this organisation's
+   * `WebhookScheme`, in constant time, using the raw request body exactly as received (before
+   * any JSON parsing). Passing it never gives value on its own (rule 7).
    */
   verifyWebhook(rawBody: string, headers: Headers): WebhookVerification;
   /** Parses the raw body into a `WebhookEvent`. Throws `InvalidWebhookPayloadError`. */

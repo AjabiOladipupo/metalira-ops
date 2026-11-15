@@ -44,17 +44,21 @@ export function toKobo(value: bigint | number | string): Kobo {
   return BigInt(trimmed);
 }
 
-const NAIRA_INPUT = /^(-)?(\d+|\d{1,3}(?:,\d{3})+)(?:\.(\d{1,2}))?$/;
+const NAIRA_INPUT = /^(-)?₦?(\d+|\d{1,3}(?:,\d{3})+)(?:\.(\d{1,2}))?$/;
 
 /**
  * Parses a naira amount typed by a person (or read from a fixture) into kobo.
  *
- * Accepts an optional leading minus, an optional ₦ sign, spaces, comma thousands separators
- * (correctly grouped) and up to two decimals: "₦642,312.50" gives 64231250n, "0.5" gives 50n.
- * Rejects more than two decimals, empty input and anything else.
+ * Accepts an optional leading minus, an optional ₦ sign (only as a prefix, after any minus),
+ * spaces, comma thousands separators (correctly grouped) and up to two decimals: "₦642,312.50"
+ * gives 64231250n, "0.5" gives 50n. Rejects more than two decimals, a ₦ anywhere but the front,
+ * empty input and anything else.
+ *
+ * For people's input only. Amounts from a payment provider go through the adapter's own strict
+ * parser (no sign, symbol or commas).
  */
 export function parseNairaToKobo(input: string): Kobo {
-  const cleaned = input.replace(/[\s ]/g, "").replace("₦", "");
+  const cleaned = input.replace(/[\s ]/g, "");
   const match = NAIRA_INPUT.exec(cleaned);
   if (!match) {
     throw new RangeError(`parseNairaToKobo: "${input}" is not a naira amount`);

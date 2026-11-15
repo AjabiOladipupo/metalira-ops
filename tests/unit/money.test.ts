@@ -49,12 +49,25 @@ describe("parseNairaToKobo", () => {
     expect(parseNairaToKobo(input)).toBe(expected);
   });
 
-  it.each(["1.234", "", "abc", "1.2.3", "₦", "1,00", "12,3456", "1.", ".5", "--1", "1e3", "₦₦1"])(
-    "rejects %j",
-    (input) => {
-      expect(() => parseNairaToKobo(input)).toThrow(RangeError);
-    },
-  );
+  it.each([
+    "1.234",
+    "",
+    "abc",
+    "1.2.3",
+    "₦",
+    "1,00",
+    "12,3456",
+    "1.",
+    ".5",
+    "--1",
+    "1e3",
+    "₦₦1",
+    "12₦3.45",
+    "1₦",
+    "₦-1",
+  ])("rejects %j", (input) => {
+    expect(() => parseNairaToKobo(input)).toThrow(RangeError);
+  });
 });
 
 describe("roundHalfUp", () => {

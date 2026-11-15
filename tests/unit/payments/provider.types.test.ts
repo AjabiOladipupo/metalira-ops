@@ -5,8 +5,10 @@ import {
   type CreatePaymentLinkInput,
   type CreateVirtualAccountInput,
   type PaymentProvider,
+  type PaymentProviderOptions,
   type TransferItem,
   type VerifiedTransaction,
+  type WebhookEvent,
 } from "@/lib/payments";
 
 describe("payment provider types", () => {
@@ -19,14 +21,20 @@ describe("payment provider types", () => {
     expectTypeOf<TransferItem["amountKobo"]>().not.toEqualTypeOf<number>();
   });
 
-  it("builds a provider from one organisation's credentials", () => {
-    const provider = getPaymentProvider({
-      publicKey: "pk",
-      secretKey: "sk",
-      encryptionKey: "enc",
-      webhookSecretHash: "hash",
-    });
+  it("builds a provider from one organisation's credentials and webhook scheme", () => {
+    const provider = getPaymentProvider(
+      { publicKey: "pk", secretKey: "sk", encryptionKey: "enc", webhookSecretHash: "hash" },
+      { webhookScheme: "hmac-sha256" },
+    );
     expectTypeOf(provider).toEqualTypeOf<PaymentProvider>();
     expect(typeof provider.verifyWebhook).toBe("function");
+    expectTypeOf(getPaymentProvider).parameter(1).toEqualTypeOf<PaymentProviderOptions>();
+  });
+
+  it("keys money idempotency on the transaction, not the webhook delivery", () => {
+    expectTypeOf<WebhookEvent["transactionId"]>().toEqualTypeOf<string>();
+    expectTypeOf<WebhookEvent>().not.toHaveProperty("eventId");
+    expectTypeOf<WebhookEvent>().not.toHaveProperty("raw");
+    expectTypeOf<VerifiedTransaction>().not.toHaveProperty("raw");
   });
 });
