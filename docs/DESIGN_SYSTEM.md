@@ -23,9 +23,11 @@ Status is a word plus a small dot, never colour alone and never red or green. Do
 
 ## Type
 
-- Headings: Space Grotesk 500/600. Body and UI: Inter 400/500. Numbers: Inter with `font-variant-numeric: tabular-nums`.
-- Scale (px): 12 caption · 14 body · 16 body-lg · 20 h3 · 24 h2 · 32 h1 · 40 KPI value.
-- Line height 1.5 body, 1.2 headings.
+- Headings: Space Grotesk 500/700. Body and UI: Inter 400/500/600. Numbers: tabular figures (`font-variant-numeric: tabular-nums`).
+- Scale (px), matching the prototype screens (decided 15 Nov 2026): 12 label (Space Grotesk 500, caps, 0.06em tracking) · 13 caption · 14 body · 15 body-lg · 20 h3 · 25 h2 · 31 KPI value (Space Grotesk 700) · 34 h1 (Space Grotesk 700, −0.02em).
+- The brand book's larger scale (61/49/39px) is for marketing pages only, not the app.
+- Line height 1.5 body, 1.1–1.2 headings.
+- Implemented as `type-*` utilities in `src/app/globals.css` (`type-h1`, `type-kpi`, `type-label`, …).
 
 ## Shape and spacing
 

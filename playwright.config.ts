@@ -20,7 +20,14 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
   ],
+  // Tests run against a production build so first-visit compile time never causes timeouts.
+  // Locally, an already running server on the same port (e.g. `pnpm dev`) is reused.
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
-    : { command: "pnpm dev", url: baseURL, reuseExistingServer: !process.env.CI, timeout: 120_000 },
+    : {
+        command: `pnpm build && pnpm start --port ${PORT}`,
+        url: baseURL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 240_000,
+      },
 });
