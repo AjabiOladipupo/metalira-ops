@@ -10,5 +10,8 @@ if (dsn) {
   Sentry.init({
     dsn,
     ...sharedSentryOptions(process.env.VERCEL_ENV || process.env.NODE_ENV),
+    // Never capture incoming request bodies: they hold passwords, PINs and identity numbers.
+    // scrubEvent also deletes request.data as a second line of defence.
+    integrations: [Sentry.httpIntegration({ maxRequestBodySize: "none" })],
   });
 }
