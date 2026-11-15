@@ -5,7 +5,7 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 ## Identity (Phase 0)
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| organisations | name, legal_name, rc_number, logo_path, invoice_email, plan, timezone (Africa/Lagos), pay_cycle_start_day (20), pay_day (25), work_days_per_week (5), standard_shift_minutes (480) | Tenant root. Pay settings default to the values shown; see RULES_NIGERIA.md "Pay policy" |
+| organisations | name, legal_name, rc_number, logo_path, invoice_email, plan, timezone (Africa/Lagos), pay_cycle_start_day (20), pay_day (25), work_days_per_week (5), standard_shift_minutes (480), hourly_rate_divisor_days (20) | Tenant root. Pay settings default to the values shown; see RULES_NIGERIA.md "Pay policy" |
 | profiles | user_id → auth.users, full_name | One per login |
 | memberships | user_id, organisation_id, role, worker_id null | Role enum: owner, admin, hr, finance, ops_manager, line_manager, worker, client_approver |
 | audit_log | actor_id, action, entity, entity_id, before jsonb, after jsonb, at | Insert-only |
@@ -40,6 +40,7 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 | timesheets / timesheet_lines | worker_id, period, status; work_unit_id, minutes, ot_minutes, exceptions text[] | |
 | leave_types / leave_balances / leave_requests | name, days_per_year, paid; worker_id, year, days; from, to, status, step (line_manager, hr) | |
 | queries | worker_id, raised_by, subject, body, reply, status | Kept on HR file |
+| public_holidays | date, name | Per organisation; work on these days is overtime |
 
 ## Payroll (Phase 5)
 | Table | Key columns | Notes |

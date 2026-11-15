@@ -24,9 +24,9 @@ Ten phases, about 24 weeks for one person building with Claude Code. Do not star
 ## Payment provider timeline
 
 - Payment provider is Flutterwave (decided 15 Nov 2026, replacing Monnify).
-- Phase 0: provider interface and a Flutterwave adapter stub only; no keys needed. `.env.example` lists the names.
-- Phase 2 (contract activation creates a client virtual account): add Flutterwave **test** keys to `.env.local` and Vercel Preview.
-- Phase 6: live keys in Vercel Production, webhook URL and secret hash set in the Flutterwave dashboard.
+- Phase 0: provider interface and a Flutterwave adapter stub only. `.env.example` lists the names. Test keys were added early (15 Nov 2026) to `.env.local` and to Vercel Preview and Production.
+- Phase 2 (contract activation creates a client virtual account): first code that calls Flutterwave, in test mode.
+- Phase 6: replace the Production test keys with live keys; set the webhook URL and secret hash in the Flutterwave dashboard and `FLUTTERWAVE_WEBHOOK_SECRET_HASH` in Vercel.
 
 ## Open decisions
 

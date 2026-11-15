@@ -15,6 +15,8 @@ Monochrome with one signal colour. Calm, numeric, built for people who read tabl
 
 Implement as CSS variables on `:root` and `.dark`, mapped into Tailwind and shadcn/ui theme keys.
 
+Where `docs/design/brand/` and this file disagree, this file wins. Dark `fg` is #FAFAFA, not pure white (owner decision, 15 Nov 2026).
+
 ## Status
 
 Status is a word plus a small dot, never colour alone and never red or green. Dot fill: solid fg = done/paid/approved; hollow ring = pending/draft; half-filled = partial; signal = needs your action. Words: Draft, Pending, Approved, Paid, Part paid, Overdue, Flagged.

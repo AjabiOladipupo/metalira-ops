@@ -31,20 +31,22 @@ Every rule here must be stored as a dated `tax_rule_sets` row, not hard-coded. E
 These are product defaults stored per organisation (`organisations` pay settings and dated `tax_rule_sets` rows), not hard-coded.
 
 - **Pay cycle**: 20th of the previous month to 19th of the current month. Salary is paid on the 25th of the current month. Example: the October 2026 run covers 20 Sep–19 Oct 2026 and pays on 25 Oct 2026.
-- **Working week**: 5 working days and 2 off days.
-- **Proration**: a worker who joins mid-cycle is paid monthly pay × (working days from start date to cycle end ÷ working days in the cycle).
+- **Working week**: 5 working days and 2 off days, following **each worker's own roster** (not a fixed Mon–Fri calendar). Guards who work weekends have their off days on other days.
+- **Working days in the cycle**: the days the worker's roster pattern schedules them to work between the 20th and the 19th.
+- **Proration (joiners and leavers)**: a worker who joins or leaves mid-cycle is paid monthly gross × (rostered working days they were employed in the cycle ÷ rostered working days in the full cycle). Joiners count from `start_date`; leavers count to `end_date`.
+- **Normal hourly rate (monthly-paid)**: monthly gross pay ÷ (20 days × standard shift hours). With the default 8-hour shift: monthly gross ÷ 160. Gross means basic + housing + transport + other allowances. The 20-day divisor is fixed and does not change with the length of the cycle (organisation setting `hourly_rate_divisor_days`, default 20).
+- **Normal hourly rate (daily workers)**: daily rate ÷ standard shift hours (default 8).
+- **Overtime**: only time worked past the end of the worker's **assigned shift** counts. A rostered 12-hour shift worked in full is not overtime.
 - **Overtime rate**: paid at the worker's normal hourly rate (multiplier 1.0×).
 - **Special project or task overtime**: a pay multiplier can be set on a project or task; overtime worked on it is paid at normal hourly rate × that multiplier.
 - **Off-day work**: a worker approved to work on an off day is paid one overtime shift of 8 hours at the overtime rate.
-- **Daily workers** (`employment_type = daily`): paid daily rate × days worked. No PAYE, no pension, no NSITF, no ITF, and they are left out of the employer levy base. Owner decision; **confirm with a tax adviser**.
+- **Public holidays**: work done on a public holiday is recorded as overtime. Each organisation keeps its own public holiday list, because federal holidays are declared year by year.
+- **Daily workers** (`employment_type = daily`): paid daily rate × days worked. Overtime is allowed and paid at their normal hourly rate. No PAYE, no pension, no NSITF, no ITF, and they are left out of the employer levy base. Owner decision; **confirm with a tax adviser**.
 
 Open points (ask before Phase 5 code depends on them):
 
-1. Normal hourly rate for monthly-paid workers: is it monthly gross ÷ (working days in the cycle × 8 hours), or basic only, or a fixed divisor?
-2. Working days: a fixed Mon–Fri calendar, or each worker's own roster pattern (guards often work weekends)? Are public holidays excluded?
-3. Overtime on a working day: does anything past 8 hours count (e.g. 12-hour guard shifts), or only hours past the rostered shift?
-4. Leavers mid-cycle: prorated the same way as joiners?
-5. Daily workers: can they earn overtime, and at what rate?
+1. Public holiday work: is it paid as the hours actually worked, or as a fixed 8-hour overtime shift like off-day work? Does a monthly worker who is rostered on a public holiday but does not work still get full pay?
+2. Is "gross" for the hourly rate the full monthly gross (basic + housing + transport + other allowances), as recorded above? The owner said "gross base pay".
 
 ## Invoicing
 - VAT 7.5% on taxable services, shown as its own line.
