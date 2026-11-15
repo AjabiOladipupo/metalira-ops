@@ -64,6 +64,23 @@ describe("sendEmail without an API key", () => {
     expect(line).toContain("a***@example.com");
     expect(line).not.toContain("ada@example.com");
     expect(line).not.toContain("Email is working");
+    expect(line).toContain("type=untagged");
+    expect(line).not.toContain("Test email from Metalira Ops");
+  });
+
+  it("logs the type tag, never the subject", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await sendEmail(
+      testInput({
+        subject: "Acme Ltd is set up",
+        tags: [{ name: "type", value: "welcome_owner" }],
+      }),
+    );
+
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("type=welcome_owner");
+    expect(line).not.toContain("Acme Ltd");
   });
 
   it("skips on a Vercel preview", async () => {
@@ -152,6 +169,9 @@ describe("sendEmail input validation", () => {
     ["an invalid address", { to: "not-an-email" }],
     ["an empty subject", { subject: "   " }],
     ["a subject over 200 characters", { subject: "a".repeat(201) }],
+    ["a subject with a line feed", { subject: "Hello\nBcc: x@example.com" }],
+    ["a subject with a carriage return", { subject: "Hello\rthere" }],
+    ["a subject with a control character", { subject: "Hello\u0007there" }],
     ["a non-element body", { react: "<p>hi</p>" }],
     ["a tag with spaces", { tags: [{ name: "type", value: "welcome owner" }] }],
   ])("rejects %s before any send", async (_label, overrides) => {
@@ -182,6 +202,41 @@ describe("sendWelcomeOwnerEmail", () => {
     expect(payload.html).toContain("https://preview.example.com/app");
     expect(payload.html).toContain("https://preview.example.com/brand/ops-logo.png");
     expect(options).toEqual({ idempotencyKey: `welcome-owner/${ORG_ID}` });
+  });
+
+  it.each([
+    ["a link in the organisation name", { organisationName: "Pay at https://evil.example" }],
+    ["a www address in the organisation name", { organisationName: "Visit www.evil.example" }],
+    ["angle brackets in the organisation name", { organisationName: "<b>Acme</b>" }],
+    ["a line feed in the organisation name", { organisationName: "Acme\nBcc: x@example.com" }],
+    ["a control character in the owner name", { ownerName: "Ada\u0000Okafor" }],
+    ["a link in the owner name", { ownerName: "Ada http://evil.example" }],
+  ])("rejects %s before any send", async (_label, overrides) => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+
+    await expect(
+      sendWelcomeOwnerEmail({
+        to: "ada@example.com",
+        ownerName: "Ada Okafor",
+        organisationName: "Coastline Facility Services",
+        organisationId: ORG_ID,
+        ...overrides,
+      }),
+    ).rejects.toThrow();
+    expect(resend.send).not.toHaveBeenCalled();
+  });
+
+  it("accepts ordinary names with punctuation", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      sendWelcomeOwnerEmail({
+        to: "ada@example.com",
+        ownerName: "Ada O'Brien-Okafor",
+        organisationName: "Coastline Facility Services Ltd. & Co (Lagos)",
+        organisationId: ORG_ID,
+      }),
+    ).resolves.toEqual({ status: "skipped", reason: "no_api_key" });
   });
 
   it("rejects a missing organisation id", async () => {

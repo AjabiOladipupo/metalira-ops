@@ -32,7 +32,14 @@ const tagPart = z
 
 export const sendEmailSchema = z.object({
   to: z.email(),
-  subject: z.string().trim().min(1).max(200),
+  // No CR, LF or other control characters: the subject can carry user text (an organisation
+  // name), so header and log injection must be impossible whatever Resend does.
+  subject: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(/^[^\p{Cc}]*$/u, "Subject must not contain control characters"),
   react: z.custom<ReactElement>((value) => isValidElement(value), {
     message: "Expected a React Email element",
   }),
@@ -79,9 +86,9 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     if (isProductionEmailEnv()) {
       throw new EmailConfigError("RESEND_API_KEY is not set");
     }
-    console.warn(
-      `[email] RESEND_API_KEY not set, skipped: "${email.subject}" to ${maskEmail(email.to)}`,
-    );
+    // Log the template tag, never the subject: the subject can carry user-chosen text.
+    const type = email.tags?.find((tag) => tag.name === "type")?.value ?? "untagged";
+    console.warn(`[email] RESEND_API_KEY not set, skipped: type=${type} to ${maskEmail(email.to)}`);
     return { status: "skipped", reason: "no_api_key" };
   }
 
