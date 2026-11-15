@@ -10,8 +10,8 @@ Owner: Meta Lira Technology LTD. Product docs live in `docs/`. Read `docs/PRODUC
 
 ## Stack
 
-- Next.js (App Router) + TypeScript (strict), deployed on Vercel. One repo, one app.
-- Supabase: Postgres + PostGIS, Auth, Storage, pg_cron. Migrations in `supabase/migrations`.
+- Next.js 16 (App Router) + TypeScript (strict, `noUncheckedIndexedAccess`), Node 24, deployed on Vercel. One repo, one app. Next 16 differs from older versions: read the guide in `node_modules/next/dist/docs/` before using an unfamiliar API (see `AGENTS.md`).
+- Supabase: Postgres + PostGIS, Auth, Storage, pg_cron. Migrations in `supabase/migrations`. The project uses Supabase's new keys: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` replaces the anon key and `SUPABASE_SECRET_KEY` replaces the service-role key. Where the docs say anon or service role, read publishable or secret.
 - Tailwind CSS + shadcn/ui, styled per `docs/DESIGN_SYSTEM.md`.
 - Resend + React Email for every outbound message. @react-pdf/renderer for invoices, receipts, payslips.
 - Flutterwave for collections (virtual accounts, hosted checkout / payment links) and payouts (bulk transfers), behind `src/lib/payments/provider.ts`. No provider names outside `src/lib/payments/` and `src/server/billing/`.
