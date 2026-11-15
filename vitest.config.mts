@@ -2,11 +2,33 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Root-level options are shared by every project through `extends: true`.
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   test: {
-    include: ["tests/unit/**/*.test.ts", "tests/rls/**/*.test.ts", "src/**/*.test.ts"],
     environment: "node",
+    projects: [
+      {
+        extends: true,
+        test: {
+          // Docker-free: runs in the CI "check" job with `pnpm test`.
+          name: "unit",
+          include: ["tests/unit/**/*.test.ts", "src/**/*.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          // Needs the local Supabase stack: `pnpm db:start`, then `pnpm test:rls`.
+          name: "rls",
+          include: ["tests/rls/**/*.test.ts"],
+          globalSetup: ["tests/rls/global-setup.ts"],
+          fileParallelism: false,
+          testTimeout: 30_000,
+          hookTimeout: 60_000,
+        },
+      },
+    ],
   },
 });
