@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Revenue · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:#0A0A0A;text-decoration:none;font:500 14px Inter,sans-serif}
+.nav a:hover{background:#F4F4F5;color:#0A0A0A}
+.nav a.on{background:#F4F4F5;color:#6D4CFF}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 14px;border-radius:8px;font:500 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 220px; box-sizing: border-box; padding: 20px 12px; border-right: 1px solid #E4E4E7; display: flex; flex-direction: column; gap: 16px">
+    <a href="Main.dc.html" aria-label="Metalira Ops home" style="display: flex; align-items: center; gap: 10px; padding: 4px 12px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif; letter-spacing: -0.01em">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <nav class="nav" aria-label="Main" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="Main.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>Home</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Workforce</div>
+      <a href="Roster.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Roster</a>
+      <a href="Attendance.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>Live attendance</a>
+      <a href="Timesheets.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>Timesheets</a>
+      <a href="People.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>People</a>
+      <a href="Team.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m16 11 2 2 4-4"></path></svg>My team</a>
+      <a href="Leave.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M9 16h6"></path></svg>Leave</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Payroll</div>
+      <a href="Payroll.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path></svg>Payroll run</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Business</div>
+      <a href="Projects.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path><path d="M8 10v4M12 10v2M16 10v6"></path></svg>Projects</a>
+      <a href="Unbilled.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6M16 13H8M16 17H8"></path></svg>Unbilled work</a>
+      <a href="Collections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>Collections</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Revenue</div>
+      <a class="on" href="Revenue.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"></path><path d="M16 7h6v6"></path></svg>Revenue</a>
+    </nav>
+  </aside>
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 32px; border-bottom: 1px solid #E4E4E7">
+      <span class="lbl">Revenue Layer · October to date · Sample data</span>
+      <span style="flex: 1 1 auto"></span>
+      <button type="button" class="btn2">Export CSV</button>
+    </header>
+    <main style="padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; max-width: 1240px; box-sizing: border-box; width: 100%">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif; letter-spacing: -0.015em">Labour is 67.2% of billed revenue this month</h1>
+        <p style="margin: 0; font-size: 15px; color: #52525B">Down from 69.2% in September. Apapa Warehouse 3 is the only site losing money.</p>
+      </div>
+      <section aria-label="Key figures" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+        <div style="padding: 16px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 6px"><span class="lbl">Billed revenue</span><span style="font: 700 31px/1.1 'Space Grotesk', sans-serif">₦14.30m</span><span style="font-size: 13px; color: #52525B">Posted invoices only</span></div>
+        <div style="padding: 16px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 6px"><span class="lbl">Labour cost</span><span style="font: 700 31px/1.1 'Space Grotesk', sans-serif">₦9.61m</span><span style="font-size: 13px; color: #52525B">Provisional until payroll approval</span></div>
+        <div style="padding: 16px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 6px"><span class="lbl">Gross margin</span><span style="font: 700 31px/1.1 'Space Grotesk', sans-serif">₦3.93m</span><span style="font-size: 13px; color: #52525B">27.5% after ₦0.75m site expenses</span></div>
+        <a href="Unbilled.dc.html" style="padding: 16px; border: 1.5px solid #0A0A0A; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: #0A0A0A"><span class="lbl" style="color: #0A0A0A">Unbilled work</span><span style="font: 700 31px/1.1 'Space Grotesk', sans-serif">₦3.42m</span><span style="font-size: 13px; color: #52525B">Not in revenue until invoiced</span></a>
+      </section>
+
+      <section aria-labelledby="trend" style="border: 1px solid #E4E4E7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: baseline">
+          <h2 id="trend" style="margin: 0; font: 500 20px 'Space Grotesk', sans-serif">Billed revenue and labour cost by month</h2>
+          <span style="display: flex; gap: 16px; font-size: 13px"><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #0A0A0A"></span>Billed</span><span style="display: inline-flex; align-items: center; gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #A1A1AA"></span>Labour cost</span></span>
+        </div>
+        <div role="img" aria-label="{{chartLabel}}" style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; align-items: end; height: 220px; border-bottom: 1px solid #E4E4E7">
+          <sc-for list="{{months}}" as="mo" hint-placeholder-count="6">
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%">
+              <span style="font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums">{{mo.lp}}</span>
+              <div style="display: flex; gap: 4px; align-items: flex-end; width: 100%; max-width: 72px; height: 170px">
+                <div style="flex: 1 1 0; background: #0A0A0A; border-radius: 4px 4px 0 0; height: {{mo.bh}}"></div>
+                <div style="flex: 1 1 0; background: #A1A1AA; border-radius: 4px 4px 0 0; height: {{mo.lh}}"></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px; margin-top: -8px">
+          <sc-for list="{{months}}" as="mo" hint-placeholder-count="6">
+            <span style="text-align: center; font-size: 13px; color: #52525B">{{mo.m}}</span>
+          </sc-for>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">Figures above each pair are labour cost as a share of billed revenue. October is month to date.</p>
+      </section>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+        <section aria-labelledby="sitesh" style="flex: 999 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="sitesh" style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">Margin by site</h2>
+          <div style="border: 1px solid #E4E4E7; border-radius: 12px; overflow: hidden">
+            <sc-for list="{{sites}}" as="s" hint-placeholder-count="5">
+              <button type="button" onClick="{{s.pick}}" aria-pressed="{{s.pressed}}" style="{{s.style}}">
+                <span style="flex: 0 0 170px; font: 600 14px Inter, sans-serif; text-align: left">{{s.name}}</span>
+                <span style="flex: 1 1 auto; height: 10px; background: #F4F4F5; border-radius: 999px; overflow: hidden"><span style="display: block; height: 100%; width: {{s.w}}; background: #0A0A0A; border-radius: 999px"></span></span>
+                <span style="flex: 0 0 64px; text-align: right; font: 600 14px Inter, sans-serif; font-variant-numeric: tabular-nums">{{s.margin}}</span>
+              </button>
+            </sc-for>
+          </div>
+        </section>
+        <section aria-labelledby="pl" style="flex: 1 1 380px; border: 1px solid #E4E4E7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box">
+          <span class="lbl">Site P&amp;L · {{p.client}}</span>
+          <h2 id="pl" style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">{{p.name}}</h2>
+          <dl style="margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; font-size: 15px">
+            <dt>Billed</dt><dd style="margin: 0; text-align: right; font-variant-numeric: tabular-nums">{{p.billed}}</dd>
+            <dt>Labour (provisional)</dt><dd style="margin: 0; text-align: right; font-variant-numeric: tabular-nums">{{p.labour}}</dd>
+            <dt>Site expenses</dt><dd style="margin: 0; text-align: right; font-variant-numeric: tabular-nums">{{p.exp}}</dd>
+            <dt style="font-weight: 600; padding-top: 10px; border-top: 1px solid #E4E4E7">Margin</dt><dd style="margin: 0; text-align: right; font-weight: 600; padding-top: 10px; border-top: 1px solid #E4E4E7; font-variant-numeric: tabular-nums">{{p.marginN}} · {{p.margin}}</dd>
+            <dt style="color: #52525B">Coverage</dt><dd style="margin: 0; text-align: right">{{p.cov}}</dd>
+          </dl>
+          <p style="margin: 0; padding: 12px; background: #F4F4F5; border-radius: 8px; font-size: 14px">{{p.note}}</p>
+          <a href="Roster.dc.html" style="font: 500 14px Inter, sans-serif">See this site's roster</a>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { sel: 0 }; }
+  renderVals() {
+    const ng = (n) => (n < 0 ? '−' : '') + '₦' + Math.abs(Math.round(n)).toLocaleString('en-NG');
+    const mdata = [['May',15.8,11.2],['Jun',16.4,11.5],['Jul',16.9,11.9],['Aug',17.0,11.9],['Sep',17.2,11.9],['Oct',14.3,9.61]];
+    const months = mdata.map(([m, b, l]) => ({ m, bh: Math.round(b / 18 * 170) + 'px', lh: Math.round(l / 18 * 170) + 'px', lp: (l / b * 100).toFixed(1) + '%' }));
+    const data = [
+      { name: 'Apapa Warehouse 3', client: 'Coastline Logistics', b: 2400000, l: 2316000, e: 127200, cov: '88%', note: 'Night overtime made up 14% of paid hours, and the client rate card has not changed since January while pay rose in September. Price the next renewal or cut overtime.' },
+      { name: 'Lekki Estate Gate B', client: 'Greenfield Estates', b: 2850000, l: 2194500, e: 136800, cov: '94%', note: 'Margin is fine, but ₦1.6m of approved work here is not yet invoiced.' },
+      { name: 'Ikeja City Mall', client: 'Ikeja Retail Ltd', b: 4200000, l: 2520000, e: 231000, cov: '100%', note: 'Full coverage all month. Consumables are the largest expense line.' },
+      { name: 'VI Tower', client: 'Marina Holdings', b: 3100000, l: 1705000, e: 182900, cov: '97%', note: 'Healthy margin. ₦2.33m is still outstanding on INV-0391.' },
+      { name: 'Yaba Tech Hub', client: 'Hubspace NG', b: 1750000, l: 875000, e: 77000, cov: '100%', note: 'Job-priced deep cleans give the best margin of any site.' }
+    ];
+    const sel = this.state.sel;
+    const sites = data.map((d, i) => {
+      const m = (d.b - d.l - d.e) / d.b * 100;
+      return { name: d.name, margin: m.toFixed(1) + '%', w: Math.max(2, m / 50 * 100).toFixed(0) + '%', pressed: i === sel ? 'true' : 'false',
+        pick: () => this.setState({ sel: i }),
+        style: 'display: flex; align-items: center; gap: 16px; width: 100%; padding: 14px 16px; border: 0; border-bottom: 1px solid #E4E4E7; cursor: pointer; color: #0A0A0A; font-family: Inter, sans-serif; ' +
+          (i === sel ? 'background: #F4F4F5; box-shadow: inset 0 0 0 1.5px #6D4CFF' : 'background: #FFFFFF') };
+    });
+    const d = data[sel]; const mn = d.b - d.l - d.e;
+    return { months, sites, chartLabel: 'Billed revenue and labour cost, May to October. Labour share fell from 70.9% in May to 67.2% in October.',
+      p: { name: d.name, client: d.client, billed: ng(d.b), labour: ng(d.l), exp: ng(d.e), marginN: ng(mn), margin: (mn / d.b * 100).toFixed(1) + '%', cov: d.cov, note: d.note } };
+  }
+}
+</script>
+</body>
+</html>

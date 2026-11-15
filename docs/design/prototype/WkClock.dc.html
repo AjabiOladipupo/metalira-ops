@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clock in · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.big{display:flex;align-items:center;justify-content:center;gap:10px;height:60px;border-radius:12px;border:0;background:#0A0A0A;color:#FFFFFF;font:700 20px 'Space Grotesk',sans-serif;cursor:pointer;text-decoration:none;width:100%}
+.big:hover{background:#27272A;color:#FFFFFF}
+.ghost{display:flex;align-items:center;justify-content:center;height:52px;border-radius:12px;border:1px solid #0A0A0A;background:#FFFFFF;color:#0A0A0A;font:600 16px Inter,sans-serif;cursor:pointer;text-decoration:none;width:100%}
+.chipbtn{height:44px;padding:0 14px;border-radius:8px;border:1px solid #E4E4E7;background:#FFFFFF;font:500 15px Inter,sans-serif;color:#0A0A0A;cursor:pointer;text-align:left}
+a:focus-visible,button:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF; overflow: hidden">
+  <div role="status" style="display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: #0A0A0A; color: #FFFFFF; font-size: 13px">No network. Saved on phone, will send when network returns.</div>
+  <div style="display: flex; align-items: center; gap: 8px; padding: 12px 8px 4px">
+    <a href="WkHome.dc.html" aria-label="Back" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #0A0A0A"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
+    <span style="font: 700 20px 'Space Grotesk', sans-serif">Clock in</span>
+  </div>
+  <ol aria-label="Steps" style="list-style: none; margin: 0; padding: 4px 16px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px">
+    <sc-for list="{{bar}}" as="b" hint-placeholder-count="3">
+      <li style="display: flex; flex-direction: column; gap: 6px"><span style="height: 4px; border-radius: 999px; background: {{b.c}}"></span><span style="font-size: 12px; color: #52525B">{{b.label}}</span></li>
+    </sc-for>
+  </ol>
+
+  <div style="flex: 1 1 auto; display: flex; flex-direction: column; padding: 16px; gap: 16px">
+    <sc-if value="{{isLocating}}" hint-placeholder-val="{{true}}">
+      <div style="flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; text-align: center">
+        <span aria-hidden="true" style="width: 72px; height: 72px; border-radius: 999px; border: 4px solid #E4E4E7; border-top-color: #0A0A0A; animation: spin 1s linear infinite; box-sizing: border-box"></span>
+        <h1 style="margin: 0; font: 700 25px 'Space Grotesk', sans-serif">Finding your location</h1>
+        <p style="margin: 0; font-size: 16px; color: #52525B">This takes up to 20 seconds. Stay outside if you can.</p>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isInside}}" hint-placeholder-val="{{false}}">
+      <div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 16px">
+        <div style="position: relative; height: 220px; border-radius: 12px; background: #F4F4F5; overflow: hidden" role="img" aria-label="You are inside the site area">
+          <span style="position: absolute; left: 95px; top: 30px; width: 160px; height: 160px; border-radius: 999px; border: 2px dashed #52525B; box-sizing: border-box"></span>
+          <span style="position: absolute; left: 169px; top: 104px; width: 12px; height: 12px; border-radius: 3px; background: #52525B"></span>
+          <span style="position: absolute; left: 196px; top: 80px; width: 22px; height: 22px; border-radius: 999px; background: #0A0A0A; border: 3px solid #FFFFFF; box-sizing: border-box"></span>
+        </div>
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif">You are 40 m from the site</h1>
+        <p style="margin: 0; font-size: 16px">Inside Apapa Warehouse 3. Next, take a selfie.</p>
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px">
+          <button type="button" class="big" onClick="{{toSelfie}}">Take selfie</button>
+          <button type="button" class="ghost" onClick="{{toOutside}}">Try the outside-site case</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isOutside}}" hint-placeholder-val="{{false}}">
+      <div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 14px">
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif">You are 620 m from the site</h1>
+        <p style="margin: 0; font-size: 16px">You can still clock in. Your supervisor will check it. Why are you outside?</p>
+        <div role="group" aria-label="Reason" style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{reasons}}" as="r" hint-placeholder-count="4">
+            <button type="button" class="chipbtn" onClick="{{r.pick}}" aria-pressed="{{r.pressed}}" style="{{r.style}}">{{r.label}}</button>
+          </sc-for>
+        </div>
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px">
+          <button type="button" class="big" onClick="{{toSelfie}}">Send anyway</button>
+          <button type="button" class="ghost" onClick="{{restart}}">Check location again</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isSelfie}}" hint-placeholder-val="{{false}}">
+      <div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 16px">
+        <div style="height: 380px; border-radius: 12px; background: #0A0A0A; display: flex; align-items: center; justify-content: center" role="img" aria-label="Camera preview">
+          <span style="width: 200px; height: 260px; border-radius: 999px; border: 3px solid #FFFFFF; box-sizing: border-box"></span>
+        </div>
+        <p style="margin: 0; font-size: 15px; color: #52525B; text-align: center">Put your face in the oval. The photo is small and used only to confirm it is you.</p>
+        <button type="button" class="big" onClick="{{capture}}" style="margin-top: auto">Capture and clock in</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isDone}}" hint-placeholder-val="{{false}}">
+      <div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 16px; justify-content: center">
+        <span style="width: 72px; height: 72px; border-radius: 999px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg></span>
+        <h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif">Clocked in at 05:56</h1>
+        <p style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 16px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v8M8 6l4 4 4-4"></path><rect x="4" y="14" width="16" height="8" rx="2"></rect></svg>Saved on phone. Will send when network returns.</p>
+        <p style="margin: 0; font-size: 15px; color: #52525B">{{doneNote}}</p>
+        <a class="ghost" href="WkHome.dc.html" style="margin-top: 12px">Back to home</a>
+        <button type="button" class="chipbtn" onClick="{{restart}}" style="text-align: center; border: 0; color: #6D4CFF">Run the flow again</button>
+      </div>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { stage: 'locating', outside: false, reason: 0 }; }
+  componentDidMount() { this.arm(); }
+  componentWillUnmount() { clearTimeout(this.t); }
+  arm() { clearTimeout(this.t); this.t = setTimeout(() => this.setState({ stage: 'inside' }), 1800); }
+  renderVals() {
+    const s = this.state;
+    const order = ['locating','inside','selfie','done'];
+    const idx = s.stage === 'outside' ? 1 : order.indexOf(s.stage);
+    const bar = ['Location','Selfie','Done'].map((label, i) => ({ label, c: idx > i || (i === 0 && idx >= 1) || (idx === 3) ? '#0A0A0A' : '#E4E4E7' }));
+    const rlist = ['Gate locked, waiting outside','Sent on an errand by supervisor','Phone location is wrong','Other'];
+    const reasons = rlist.map((label, i) => ({ label, pressed: i === s.reason ? 'true' : 'false', pick: () => this.setState({ reason: i }),
+      style: i === s.reason ? 'border: 1.5px solid #6D4CFF; font-weight: 600' : '' }));
+    return {
+      bar, reasons,
+      isLocating: s.stage === 'locating', isInside: s.stage === 'inside', isOutside: s.stage === 'outside', isSelfie: s.stage === 'selfie', isDone: s.stage === 'done',
+      toSelfie: () => this.setState({ stage: 'selfie' }),
+      toOutside: () => this.setState({ stage: 'outside', outside: true }),
+      capture: () => this.setState({ stage: 'done' }),
+      restart: () => { this.setState({ stage: 'locating', outside: false, reason: 0 }); this.arm(); },
+      doneNote: s.outside ? 'Sent for review because you were outside the site. Reason: ' + rlist[s.reason] + '.' : 'Inside the site, selfie taken. Have a good shift.'
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Month-end simulation · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 18px;border-radius:8px;font:600 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:8px;font:500 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.tbl{width:100%;border-collapse:collapse;font:400 14px Inter,sans-serif;color:#0A0A0A}
+.tbl th{text-align:left;font-weight:600;padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.num{text-align:right !important;font-variant-numeric:tabular-nums}
+.kpi{padding:16px;background:#F4F4F5;border-radius:12px;display:flex;flex-direction:column;gap:4px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF; min-height: 100vh">
+  <header style="border-bottom: 1px solid #E4E4E7">
+    <div style="max-width: 1240px; margin: 0 auto; padding: 14px 32px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; box-sizing: border-box">
+      <a href="Main.dc.html" aria-label="Dashboard" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #0A0A0A">
+        <span style="width: 36px; height: 36px; border-radius: 8px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font: 700 13px 'Space Grotesk', sans-serif" aria-hidden="true">AFS</span>
+        <span style="font: 600 15px Inter, sans-serif">Adebayo Facility Services</span>
+      </a>
+      <span style="flex: 1 1 auto"></span>
+      <span style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1.5px solid #0A0A0A; border-radius: 999px; font: 600 13px Inter, sans-serif"><span class="dot"></span>Simulation · nothing is paid or sent</span>
+      <button type="button" class="btn2" onClick="{{reset}}" style="height: 36px">Start over</button>
+    </div>
+  </header>
+  <main style="max-width: 1240px; margin: 0 auto; padding: 28px 32px 56px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span class="lbl">October 2026 · 6 employees · 3 clients</span>
+      <h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif; letter-spacing: -0.02em">From clock-in to paid invoice</h1>
+      <p style="margin: 0; font-size: 15px; color: #52525B">The simulation uses 6 of your employees so every number can be followed by hand.</p>
+    </div>
+    <ol aria-label="Steps" style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px">
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+        <li style="display: flex"><button type="button" onClick="{{s.go}}" aria-current="{{s.current}}" style="{{s.style}}"><span style="font: 700 13px 'Space Grotesk', sans-serif">{{s.mark}}</span><span>{{s.label}}</span></button></li>
+      </sc-for>
+    </ol>
+
+    <sc-if value="{{is1}}" hint-placeholder-val="{{true}}">
+      <section style="display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">October clock-ins</h2>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Employee</th><th>Client · site</th><th>Line manager</th><th class="num">Shifts</th><th class="num">Hours</th><th>Exceptions</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight: 600">Musa Ibrahim</td><td>Coastline Logistics · Apapa</td><td>Kola Adebayo</td><td class="num">22 day</td><td class="num">264</td><td style="color: #52525B">1 late, queried</td></tr>
+              <tr><td style="font-weight: 600">Ibrahim Sani</td><td>Coastline Logistics · Apapa</td><td>Kola Adebayo</td><td class="num">20 night</td><td class="num">252</td><td style="color: #52525B">12 h overtime</td></tr>
+              <tr><td style="font-weight: 600">Chiamaka Obi</td><td>Marina Holdings · VI Tower</td><td>Blessing Udo</td><td class="num">22</td><td class="num">176</td><td style="color: #52525B">None</td></tr>
+              <tr><td style="font-weight: 600">Grace Edet</td><td>Marina Holdings · VI Tower</td><td>Blessing Udo</td><td class="num">22</td><td class="num">176</td><td style="color: #52525B">2 by supervisor</td></tr>
+              <tr><td style="font-weight: 600">Tunde Bakare</td><td>Greenfield Estates · Lekki</td><td>Emeka Nwankwo</td><td class="num">22</td><td class="num">264</td><td style="color: #52525B">None</td></tr>
+              <tr><td style="font-weight: 600">Funmi Adeyemi</td><td>Head office · not billable</td><td>Oluwaseun Adeola</td><td class="num">22</td><td class="num">176</td><td style="color: #52525B">None</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+          <sc-if value="{{tsOpen}}" hint-placeholder-val="{{true}}"><button type="button" class="btn" onClick="{{approveTs}}">Approve all as line managers</button></sc-if>
+          <sc-if value="{{tsDone}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="dot f"></span>1,308 hours approved · 108 client shifts became billable Work Units</span></sc-if>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is2}}" hint-placeholder-val="{{false}}">
+      <section style="display: flex; flex-direction: column; gap: 14px">
+        <h2 style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">October payroll</h2>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Employee</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Pension 8%</th><th class="num">Net pay</th><th class="num">Employer cost</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight: 600">Musa Ibrahim</td><td class="num">₦120,000</td><td class="num">₦5,660</td><td class="num">₦9,600</td><td class="num" style="font-weight: 600">₦104,740</td><td class="num">₦134,400</td></tr>
+              <tr><td style="font-weight: 600">Ibrahim Sani</td><td class="num">₦135,000</td><td class="num">₦8,630</td><td class="num">₦10,800</td><td class="num" style="font-weight: 600">₦115,570</td><td class="num">₦151,200</td></tr>
+              <tr><td style="font-weight: 600">Chiamaka Obi</td><td class="num">₦85,000</td><td class="num">₦1,130</td><td class="num">₦6,800</td><td class="num" style="font-weight: 600">₦77,070</td><td class="num">₦95,200</td></tr>
+              <tr><td style="font-weight: 600">Grace Edet</td><td class="num">₦70,000</td><td class="num">₦0</td><td class="num">₦5,600</td><td class="num" style="font-weight: 600">₦64,400</td><td class="num">₦78,400</td></tr>
+              <tr><td style="font-weight: 600">Tunde Bakare</td><td class="num">₦210,000</td><td class="num">₦17,480</td><td class="num">₦16,800</td><td class="num" style="font-weight: 600">₦175,720</td><td class="num">₦235,200</td></tr>
+              <tr><td style="font-weight: 600">Funmi Adeyemi</td><td class="num">₦250,000</td><td class="num">₦22,250</td><td class="num">₦20,000</td><td class="num" style="font-weight: 600">₦207,750</td><td class="num">₦280,000</td></tr>
+              <tr style="background: #F4F4F5"><td style="font-weight: 600">Total</td><td class="num" style="font-weight: 600">₦870,000</td><td class="num" style="font-weight: 600">₦55,150</td><td class="num" style="font-weight: 600">₦69,600</td><td class="num" style="font-weight: 600">₦745,250</td><td class="num" style="font-weight: 600">₦974,400</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">Nigeria Tax Act 2025 bands: first ₦800,000 a year at 0%, then 15%. Rent relief applied where declared. Employer cost adds 10% pension, 1% NSITF and a 1% ITF accrual.</p>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+          <sc-if value="{{prOpen}}" hint-placeholder-val="{{true}}"><button type="button" class="btn" onClick="{{approvePr}}">Submit, then approve as Finance</button><span style="font-size: 13px; color: #52525B">Two different people must prepare and approve.</span></sc-if>
+          <sc-if value="{{prDone}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="dot f"></span>Prepared by Oluwaseun A. · approved by Adaeze N. · payslips ready for 6 phones</span></sc-if>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is3}}" hint-placeholder-val="{{false}}">
+      <section style="display: flex; flex-direction: column; gap: 16px">
+        <h2 style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">Pay salaries from your bank</h2>
+        <div role="group" aria-label="Payout method" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px">
+          <sc-for list="{{methods}}" as="m" hint-placeholder-count="3">
+            <button type="button" onClick="{{m.pick}}" aria-pressed="{{m.pressed}}" style="{{m.style}}"><span style="font: 600 15px Inter, sans-serif">{{m.name}}</span><span style="font-size: 13px; opacity: .85">{{m.body}}</span></button>
+          </sc-for>
+        </div>
+        <div style="border: 1px solid #E4E4E7; border-radius: 12px; overflow: hidden">
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; background: #F4F4F5">
+            <span style="font: 600 14px ui-monospace, Menlo, monospace">{{fileName}}</span>
+            <button type="button" class="btn" onClick="{{download}}" style="height: 36px">{{downloadLabel}}</button>
+          </div>
+          <div style="overflow-x: auto">
+            <table class="tbl" style="font-family: ui-monospace, Menlo, monospace; font-size: 13px">
+              <thead><tr><th>S/N</th><th>Beneficiary</th><th>Account</th><th>Bank code</th><th class="num">Amount</th><th>Narration</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td>MUSA IBRAHIM</td><td>••••••7712</td><td>058</td><td class="num">104740.00</td><td>OCT2026 SALARY AFS</td></tr>
+                <tr><td>2</td><td>IBRAHIM SANI</td><td>••••••3301</td><td>044</td><td class="num">115570.00</td><td>OCT2026 SALARY AFS</td></tr>
+                <tr><td>3</td><td>CHIAMAKA OBI</td><td>••••••8820</td><td>50515</td><td class="num">77070.00</td><td>OCT2026 SALARY AFS</td></tr>
+                <tr><td>4</td><td>GRACE EDET</td><td>••••••0457</td><td>011</td><td class="num">64400.00</td><td>OCT2026 SALARY AFS</td></tr>
+                <tr><td>5</td><td>TUNDE BAKARE</td><td>••••••6128</td><td>057</td><td class="num">175720.00</td><td>OCT2026 SALARY AFS</td></tr>
+                <tr><td>6</td><td>FUNMI ADEYEMI</td><td>••••••2093</td><td>033</td><td class="num">207750.00</td><td>OCT2026 SALARY AFS</td></tr>
+                <tr style="background: #F4F4F5"><td></td><td style="font-weight: 600">6 transfers</td><td></td><td></td><td class="num" style="font-weight: 600">745250.00</td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">{{methodNote}} Account names were checked against each bank before the file was made.</p>
+        <h2 style="margin: 8px 0 0; font: 500 22px 'Space Grotesk', sans-serif">Statutory payments</h2>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Pay to</th><th class="num">Amount</th><th>Due</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+              <sc-for list="{{remits}}" as="r" hint-placeholder-count="4">
+                <tr><td style="font-weight: 600">{{r.to}}</td><td class="num">{{r.amt}}</td><td>{{r.due}}</td><td><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="{{r.dot}}"></span>{{r.status}}</span></td>
+                  <td style="text-align: right"><sc-if value="{{r.open}}" hint-placeholder-val="{{true}}"><button type="button" class="btn2" onClick="{{r.mark}}" style="height: 36px">Mark paid and add receipt</button></sc-if></td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is4}}" hint-placeholder-val="{{false}}">
+      <section style="display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px">
+          <div style="display: flex; flex-direction: column; gap: 4px"><h2 style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">3 invoices drafted from approved hours</h2><span style="font-size: 14px; color: #52525B">Priced at each contract's rate card. Review, then send to each client's billing email.</span></div>
+          <sc-if value="{{invOpen}}" hint-placeholder-val="{{true}}"><button type="button" class="btn" onClick="{{sendAll}}">Send 3 invoices</button></sc-if>
+          <sc-if value="{{invDone}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="dot f"></span>Sent from billing@adebayofs.example · copies in your inbox</span></sc-if>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+          <div role="tablist" aria-label="Invoices" style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 8px">
+            <sc-for list="{{invTabs}}" as="t" hint-placeholder-count="3">
+              <button type="button" role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="{{t.style}}"><span style="font: 600 15px Inter, sans-serif">{{t.client}}</span><span style="font-size: 13px; opacity: .85">{{t.no}} · {{t.total}}</span><span style="font-size: 13px; opacity: .85">{{t.status}}</span></button>
+            </sc-for>
+          </div>
+          <article aria-label="Invoice preview" style="flex: 999 1 560px; min-width: 0; border: 1px solid #E4E4E7; border-radius: 12px; padding: 32px; display: flex; flex-direction: column; gap: 20px; box-sizing: border-box">
+            <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px">
+              <div style="display: flex; align-items: center; gap: 12px">
+                <span aria-hidden="true" style="width: 52px; height: 52px; border-radius: 10px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font: 700 17px 'Space Grotesk', sans-serif">AFS</span>
+                <span style="display: flex; flex-direction: column; font-size: 13px; color: #52525B"><span style="font: 600 15px Inter, sans-serif; color: #0A0A0A">Adebayo Facility Services Ltd</span>RC 1234567 · TIN 12345678-0001<br>12 Admiralty Way, Lekki Phase 1, Lagos</span>
+              </div>
+              <div style="text-align: right; display: flex; flex-direction: column; gap: 2px"><span style="font: 700 28px 'Space Grotesk', sans-serif">Invoice</span><span style="font-size: 14px">{{inv.no}} · 31 Oct 2026</span><span style="font-size: 14px; color: #52525B">Due 30 Nov 2026</span></div>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 14px">
+              <div style="flex: 1 1 200px"><div class="lbl">Bill to</div><div style="font-weight: 600; margin-top: 4px">{{inv.client}}</div><div style="color: #52525B">{{inv.email}}</div></div>
+              <div style="flex: 1 1 200px"><div class="lbl">Work</div><div style="margin-top: 4px">{{inv.project}}</div><div style="color: #52525B">1 – 31 October 2026 · {{inv.site}}</div></div>
+            </div>
+            <table class="tbl">
+              <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th></tr></thead>
+              <tbody>
+                <sc-for list="{{inv.lines}}" as="l" hint-placeholder-count="3">
+                  <tr><td style="white-space: normal"><span style="display: flex; flex-direction: column"><span>{{l.d}}</span><span style="font-size: 12px; color: #52525B">{{l.src}}</span></span></td><td class="num">{{l.q}}</td><td class="num">{{l.r}}</td><td class="num">{{l.a}}</td></tr>
+                </sc-for>
+              </tbody>
+            </table>
+            <dl style="margin: 0 0 0 auto; display: grid; grid-template-columns: auto auto; gap: 8px 32px; font-size: 15px; min-width: 280px">
+              <dt>Subtotal</dt><dd class="num" style="margin: 0">{{inv.sub}}</dd>
+              <dt>VAT 7.5%</dt><dd class="num" style="margin: 0">{{inv.vat}}</dd>
+              <dt style="font-weight: 600; padding-top: 8px; border-top: 1px solid #E4E4E7">Total due</dt><dd class="num" style="margin: 0; font-weight: 700; padding-top: 8px; border-top: 1px solid #E4E4E7">{{inv.total}}</dd>
+            </dl>
+            <div style="display: flex; flex-wrap: wrap; gap: 16px; padding: 16px; background: #F4F4F5; border-radius: 10px; font-size: 14px">
+              <div style="flex: 1 1 220px"><div class="lbl">Pay by bank transfer</div><div style="margin-top: 4px; font-weight: 600">Wema Bank · {{inv.dva}}</div><div style="color: #52525B">Account for {{inv.client}} only</div></div>
+              <div style="flex: 1 1 220px"><div class="lbl">Or pay online</div><div style="margin-top: 4px"><a href="Simulate.dc.html">pay.flutterwave.example/{{inv.no}}</a></div><div style="color: #52525B">Card, transfer or USSD</div></div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is5}}" hint-placeholder-val="{{false}}">
+      <section style="display: flex; flex-direction: column; gap: 16px">
+        <h2 style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">Clients pay, receipts go out</h2>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <sc-for list="{{pays}}" as="p" hint-placeholder-count="3">
+            <article style="border: 1px solid #E4E4E7; border-radius: 12px; padding: 16px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px">
+              <div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 2px"><span style="font: 600 16px Inter, sans-serif">{{p.client}}</span><span style="font-size: 14px; color: #52525B">{{p.no}} · {{p.total}}</span></div>
+              <div style="flex: 2 1 320px; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: {{p.weight}}"><span class="{{p.dot}}"></span>{{p.status}}</div>
+              <sc-if value="{{p.open}}" hint-placeholder-val="{{true}}">
+                <span style="display: flex; flex-wrap: wrap; gap: 8px"><button type="button" class="btn" onClick="{{p.byBank}}" style="height: 40px">Simulate bank transfer</button><button type="button" class="btn2" onClick="{{p.byLink}}" style="height: 40px">Simulate Flutterwave payment</button></span>
+              </sc-if>
+            </article>
+          </sc-for>
+        </div>
+        <sc-if value="{{hasReceipt}}" hint-placeholder-val="{{false}}">
+          <article aria-label="Receipt" style="max-width: 560px; border: 1.5px solid #0A0A0A; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; justify-content: space-between; align-items: center"><span style="display: flex; align-items: center; gap: 10px"><span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 8px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font: 700 13px 'Space Grotesk', sans-serif">AFS</span><span style="font: 700 22px 'Space Grotesk', sans-serif">Receipt {{rc.no}}</span></span><span class="lbl">Emailed</span></div>
+            <dl style="margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 20px; font-size: 14px">
+              <dt style="color: #52525B">Received from</dt><dd style="margin: 0; font-weight: 600">{{rc.client}}</dd>
+              <dt style="color: #52525B">Amount</dt><dd style="margin: 0; font-weight: 600">{{rc.total}}</dd>
+              <dt style="color: #52525B">For</dt><dd style="margin: 0">{{rc.inv}}, paid in full</dd>
+              <dt style="color: #52525B">Method</dt><dd style="margin: 0">{{rc.method}}</dd>
+              <dt style="color: #52525B">Sent to</dt><dd style="margin: 0">{{rc.email}}, copy to billing@adebayofs.example</dd>
+            </dl>
+            <p style="margin: 0; font-size: 13px; color: #52525B">Recorded in the receivables ledger and matched to the invoice automatically.</p>
+          </article>
+        </sc-if>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is6}}" hint-placeholder-val="{{false}}">
+      <section style="display: flex; flex-direction: column; gap: 16px">
+        <h2 style="margin: 0; font: 500 25px 'Space Grotesk', sans-serif">October, end to end</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+          <div class="kpi"><span class="lbl">Billed (before VAT)</span><span style="font: 700 28px 'Space Grotesk', sans-serif">₦1,411,500</span><span style="font-size: 13px; color: #52525B">3 invoices from 1,132 billable hours</span></div>
+          <div class="kpi"><span class="lbl">Labour cost</span><span style="font: 700 28px 'Space Grotesk', sans-serif">₦974,400</span><span style="font-size: 13px; color: #52525B">₦694,400 on client sites, 49.2% of billed</span></div>
+          <div class="kpi"><span class="lbl">Margin after all pay</span><span style="font: 700 28px 'Space Grotesk', sans-serif">₦437,100</span><span style="font-size: 13px; color: #52525B">31.0% of billed</span></div>
+          <div class="kpi" style="background: #FFFFFF; border: 1.5px solid #0A0A0A"><span class="lbl" style="color: #0A0A0A">Collected</span><span style="font: 700 28px 'Space Grotesk', sans-serif">{{collected}}</span><span style="font-size: 13px; color: #52525B">{{collectedNote}}</span></div>
+        </div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.7">
+          <li>{{tsLine}}</li>
+          <li>{{prLine}}</li>
+          <li>{{remitLine}}</li>
+          <li>{{invLine}}</li>
+        </ul>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px"><a class="btn" href="Revenue.dc.html">Open revenue by site</a><a class="btn2" href="Collections.dc.html">Open collections</a><a class="btn2" href="WkPayslip.dc.html">See Musa's payslip</a></div>
+      </section>
+    </sc-if>
+
+    <div style="display: flex; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid #E4E4E7">
+      <button type="button" class="btn2" onClick="{{back}}">Back</button>
+      <button type="button" class="btn" onClick="{{next}}">{{nextLabel}}</button>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = this.fresh(); }
+  fresh() { return { step: 1, ts: false, pr: false, method: 0, downloaded: false, remit: {}, inv: 0, sent: false, paid: {}, last: null }; }
+  renderVals() {
+    const s = this.state;
+    const ng = (n) => '₦' + n.toLocaleString('en-NG', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
+    const labels = ['Clock-ins','Payroll','Pay salaries','Invoices','Payments','Result'];
+    const steps = labels.map((label, i) => { const n = i + 1, cur = n === s.step, done = n < s.step;
+      return { label, mark: done ? '✓' : String(n), current: cur ? 'step' : 'false', go: () => this.setState({ step: n }),
+        style: 'display: flex; align-items: center; gap: 10px; width: 100%; height: 44px; padding: 0 12px; border-radius: 8px; cursor: pointer; font: 500 14px Inter, sans-serif; text-align: left; ' +
+          (cur ? 'background: #0A0A0A; color: #FFFFFF; border: 1px solid #0A0A0A' : done ? 'background: #F4F4F5; color: #0A0A0A; border: 1px solid #F4F4F5' : 'background: #FFFFFF; color: #52525B; border: 1px solid #E4E4E7') }; });
+    const mdefs = [
+      ['GTBank bulk upload (.csv)', 'Upload in GTBank internet banking; approve there with your token.', 'payroll_oct2026_gtbank.csv', 'Your bank charges its normal transfer fees.'],
+      ['Paystack bulk transfer', 'Sent from your own Paystack balance after you confirm with OTP.', 'Paystack transfer batch · 6 recipients', 'Paystack charges ₦10–₦50 per transfer, depending on amount.'],
+      ['Other bank (.xlsx)', 'Access, Zenith, First Bank, UBA and others use their own column layouts.', 'payroll_oct2026_bank.xlsx', 'Pick your bank in Settings to match its template.']];
+    const methods = mdefs.map(([name, body], i) => ({ name, body, pressed: i === s.method ? 'true' : 'false', pick: () => this.setState({ method: i, downloaded: false }),
+      style: 'display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px; border-radius: 12px; cursor: pointer; text-align: left; font-family: Inter, sans-serif; ' +
+        (i === s.method ? 'background: #0A0A0A; color: #FFFFFF; border: 1px solid #0A0A0A' : 'background: #FFFFFF; color: #0A0A0A; border: 1px solid #E4E4E7') }));
+    const rdefs = [['PAYE · Lagos State IRS', 55150, '10 Nov'], ['Pension · 6 PFAs (8% + 10%)', 156600, '7 Nov'], ['NSITF · 1% of payroll', 8700, '16 Nov'], ['ITF · 1% accrual', 8700, 'Yearly return']];
+    const remits = rdefs.map(([to, amt, due], i) => ({ to, amt: ng(amt), due, open: !s.remit[i], status: s.remit[i] ? 'Paid · receipt saved' : 'Due', dot: s.remit[i] ? 'dot f' : 'dot',
+      mark: () => this.setState({ remit: Object.assign({}, s.remit, { [i]: true }) }) }));
+    const INV = [
+      { no: 'INV-0412', client: 'Coastline Logistics', email: 'accounts@coastline.example', project: 'Coastline guarding contract', site: 'Apapa Warehouse 3', dva: '99 1234 5671', sub: 597500, vat: 44812.5, total: 642312.5,
+        lines: [['Day guard shifts, 12 h', '22 approved shifts · Musa Ibrahim', '22', 12500, 275000], ['Night guard shifts, 12 h', '20 approved shifts · Ibrahim Sani', '20', 15000, 300000], ['Night overtime at 1.5×', '12 approved hours · Ibrahim Sani', '12 h', 1875, 22500]] },
+      { no: 'INV-0413', client: 'Marina Holdings', email: 'ap@marinaholdings.example', project: 'VI Tower refit clean', site: 'VI Tower', dva: '99 1234 5672', sub: 418000, vat: 31350, total: 449350,
+        lines: [['Cleaner shifts, 8 h', '44 approved shifts · Chiamaka Obi, Grace Edet', '44', 9500, 418000]] },
+      { no: 'INV-0414', client: 'Greenfield Estates', email: 'finance@greenfield.example', project: 'Greenfield guarding contract', site: 'Lekki Estate Gate B', dva: '99 1234 5673', sub: 396000, vat: 29700, total: 425700,
+        lines: [['Site supervisor shifts, 12 h', '22 approved shifts · Tunde Bakare', '22', 18000, 396000]] }];
+    const invTabs = INV.map((v, i) => ({ client: v.client, no: v.no, total: ng(v.total), sel: i === s.inv ? 'true' : 'false', status: s.paid[i] ? 'Paid' : s.sent ? 'Sent to ' + v.email : 'Draft',
+      pick: () => this.setState({ inv: i }),
+      style: 'display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px 16px; border-radius: 12px; cursor: pointer; text-align: left; font-family: Inter, sans-serif; ' +
+        (i === s.inv ? 'background: #0A0A0A; color: #FFFFFF; border: 1px solid #0A0A0A' : 'background: #FFFFFF; color: #0A0A0A; border: 1px solid #E4E4E7') }));
+    const v = INV[s.inv];
+    const inv = { no: v.no, client: v.client, email: v.email, project: v.project, site: v.site, dva: v.dva, sub: ng(v.sub), vat: ng(v.vat), total: ng(v.total),
+      lines: v.lines.map(([d, src, q, r, a]) => ({ d, src, q, r: ng(r), a: ng(a) })) };
+    const pay = (i, how) => () => this.setState({ paid: Object.assign({}, s.paid, { [i]: how }), last: i, sent: true });
+    const pays = INV.map((x, i) => { const how = s.paid[i];
+      return { client: x.client, no: x.no, total: ng(x.total), open: !how, dot: how ? 'dot f' : 'dot', weight: how ? '600' : '400',
+        status: how === 'bank' ? 'Paid by transfer into Wema ' + x.dva + ' · matched · receipt emailed' : how === 'link' ? 'Paid through Flutterwave link · matched · receipt emailed' : (s.sent ? 'Sent ' + '31 Oct · waiting for payment' : 'Not sent yet'),
+        byBank: pay(i, 'bank'), byLink: pay(i, 'link') }; });
+    const paidIdx = Object.keys(s.paid).map(Number);
+    const collectedN = paidIdx.reduce((a, i) => a + INV[i].total, 0);
+    const L = s.last !== null ? INV[s.last] : null;
+    const rc = L ? { no: 'RCT-000' + (paidIdx.indexOf(s.last) + 1), client: L.client, total: ng(L.total), inv: L.no, email: L.email,
+      method: s.paid[s.last] === 'bank' ? 'Bank transfer to Wema ' + L.dva + ' (Paystack dedicated account)' : 'Flutterwave payment link' } : {};
+    const remitCount = Object.values(s.remit).filter(Boolean).length;
+    return {
+      steps, methods, remits, invTabs, inv, pays, rc, hasReceipt: !!L,
+      is1: s.step === 1, is2: s.step === 2, is3: s.step === 3, is4: s.step === 4, is5: s.step === 5, is6: s.step === 6,
+      tsOpen: !s.ts, tsDone: s.ts, approveTs: () => this.setState({ ts: true }),
+      prOpen: !s.pr, prDone: s.pr, approvePr: () => this.setState({ pr: true }),
+      fileName: mdefs[s.method][2], methodNote: mdefs[s.method][3],
+      download: () => this.setState({ downloaded: true }), downloadLabel: s.downloaded ? (s.method === 1 ? 'Sent for OTP' : 'Downloaded') : (s.method === 1 ? 'Send to Paystack' : 'Download file'),
+      invOpen: !s.sent, invDone: s.sent, sendAll: () => this.setState({ sent: true }),
+      collected: ng(collectedN), collectedNote: 'of ' + ng(1517362.5) + ' invoiced incl. VAT',
+      tsLine: s.ts ? '1,308 hours approved by line managers.' : 'Timesheets not approved yet.',
+      prLine: s.pr ? 'Payroll approved; ₦745,250 net pay ' + (s.downloaded ? 'sent to the bank.' : 'waiting for the bank file.') : 'Payroll not approved yet.',
+      remitLine: remitCount + ' of 4 statutory payments marked paid with receipts.',
+      invLine: s.sent ? '3 invoices sent; ' + paidIdx.length + ' paid and receipted.' : 'Invoices not sent yet.',
+      reset: () => this.setState(this.fresh()),
+      back: () => this.setState({ step: Math.max(1, s.step - 1) }),
+      next: () => this.setState({ step: Math.min(6, s.step + 1) }),
+      nextLabel: s.step === 6 ? 'Done' : 'Next'
+    };
+  }
+}
+</script>
+</body>
+</html>

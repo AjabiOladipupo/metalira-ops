@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leave · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.fld{display:flex;flex-direction:column;gap:6px;font:500 14px Inter,sans-serif}
+.fld input,.fld textarea{min-height:48px;padding:10px;border:1px solid #E4E4E7;border-radius:8px;font:400 16px Inter,sans-serif;color:#0A0A0A;background:#FFFFFF;box-sizing:border-box}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 8px; padding: 12px 8px 4px">
+    <a href="WkHome.dc.html" aria-label="Back" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #0A0A0A"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
+    <span style="font: 700 20px 'Space Grotesk', sans-serif">Leave</span>
+  </div>
+  <div style="flex: 1 1 auto; overflow-y: auto; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 16px">
+    <section aria-label="Days left" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+      <div style="padding: 12px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 2px"><span style="font: 700 25px 'Space Grotesk', sans-serif">{{annualLeft}}</span><span style="font-size: 13px; color: #52525B">Annual left of 15</span></div>
+      <div style="padding: 12px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 2px"><span style="font: 700 25px 'Space Grotesk', sans-serif">10</span><span style="font-size: 13px; color: #52525B">Sick left of 12</span></div>
+      <div style="padding: 12px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 2px"><span style="font: 700 25px 'Space Grotesk', sans-serif">3</span><span style="font-size: 13px; color: #52525B">Casual left of 3</span></div>
+    </section>
+
+    <sc-if value="{{notSent}}" hint-placeholder-val="{{true}}">
+      <section aria-labelledby="req" style="display: flex; flex-direction: column; gap: 14px">
+        <h1 id="req" style="margin: 0; font: 700 25px 'Space Grotesk', sans-serif">Ask for leave</h1>
+        <div role="group" aria-label="Leave type" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <sc-for list="{{types}}" as="t" hint-placeholder-count="4">
+            <button type="button" onClick="{{t.pick}}" aria-pressed="{{t.pressed}}" style="{{t.style}}">{{t.label}}</button>
+          </sc-for>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+          <label class="fld">From<input type="date" value="2026-11-11"></label>
+          <label class="fld">To<input type="date" value="2026-11-13"></label>
+        </div>
+        <p style="margin: 0; font-size: 15px"><b>3 working days.</b> Covers 3 rostered shifts at Gate A.</p>
+        <label class="fld">Reason (optional)<textarea rows="2" placeholder="A short reason helps your manager decide"></textarea></label>
+        <button type="button" onClick="{{send}}" style="height: 56px; border-radius: 12px; border: 0; background: #0A0A0A; color: #FFFFFF; font: 700 18px 'Space Grotesk', sans-serif; cursor: pointer">Send request</button>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{sent}}" hint-placeholder-val="{{false}}">
+      <section aria-labelledby="sent" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1.5px solid #0A0A0A; border-radius: 12px">
+        <h1 id="sent" style="margin: 0; font: 700 22px 'Space Grotesk', sans-serif">{{typeName}} · 11 – 13 Nov</h1>
+        <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 15px">
+          <li style="display: flex; align-items: center; gap: 10px"><span class="dot f"></span>Sent, saved on phone</li>
+          <li style="display: flex; align-items: center; gap: 10px; font-weight: 600"><span class="dot"></span>Line manager: Kola Adebayo</li>
+          <li style="display: flex; align-items: center; gap: 10px; color: #52525B"><span class="dot"></span>HR: after your manager</li>
+        </ol>
+        <p style="margin: 0; font-size: 14px; color: #52525B">You will get a message when it is decided. Your manager arranges cover for your shifts.</p>
+      </section>
+    </sc-if>
+
+    <section aria-labelledby="past" style="display: flex; flex-direction: column">
+      <h2 id="past" class="lbl" style="margin: 0 0 4px">Past requests</h2>
+      <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E4E4E7; font-size: 15px"><span>Annual · 18 – 21 Aug</span><span style="display: inline-flex; align-items: center; gap: 6px"><span class="dot f"></span>Approved</span></div>
+      <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E4E4E7; font-size: 15px"><span>Sick · 2 – 3 Jun</span><span style="display: inline-flex; align-items: center; gap: 6px"><span class="dot f"></span>Approved</span></div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { type: 0, sent: false }; }
+  renderVals() {
+    const s = this.state;
+    const names = ['Annual','Sick','Casual','Unpaid'];
+    const types = names.map((label, i) => ({ label, pressed: i === s.type ? 'true' : 'false', pick: () => this.setState({ type: i }),
+      style: 'height: 48px; border-radius: 8px; cursor: pointer; font: 600 15px Inter, sans-serif; ' + (i === s.type ? 'background: #0A0A0A; color: #FFFFFF; border: 1px solid #0A0A0A' : 'background: #FFFFFF; color: #0A0A0A; border: 1px solid #E4E4E7') }));
+    return { types, sent: s.sent, notSent: !s.sent, send: () => this.setState({ sent: true }), typeName: names[s.type] + ' leave',
+      annualLeft: s.sent && s.type === 0 ? '11 → 8' : '11' };
+  }
+}
+</script>
+</body>
+</html>

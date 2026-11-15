@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My team · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:#0A0A0A;text-decoration:none;font:500 14px Inter,sans-serif}
+.nav a:hover{background:#F4F4F5;color:#0A0A0A}
+.nav a.on{background:#F4F4F5;color:#6D4CFF}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.tbl{width:100%;border-collapse:collapse;font:400 14px Inter,sans-serif;color:#0A0A0A}
+.tbl th{text-align:left;font-weight:600;padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.num{text-align:right !important;font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:8px;font:600 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;font:500 13px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.fld{display:flex;flex-direction:column;gap:6px;font:500 13px Inter,sans-serif}
+.fld select,.fld input,.fld textarea{min-height:40px;padding:8px 10px;border:1px solid #E4E4E7;border-radius:8px;font:400 14px Inter,sans-serif;color:#0A0A0A;background:#FFFFFF;box-sizing:border-box}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 220px; box-sizing: border-box; padding: 20px 12px; border-right: 1px solid #E4E4E7; display: flex; flex-direction: column; gap: 16px">
+    <a href="Main.dc.html" aria-label="Metalira Ops home" style="display: flex; align-items: center; gap: 10px; padding: 4px 12px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif; letter-spacing: -0.01em">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <nav class="nav" aria-label="Main" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="Main.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>Home</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Workforce</div>
+      <a href="Roster.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Roster</a>
+      <a href="Attendance.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>Live attendance</a>
+      <a href="Timesheets.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>Timesheets</a>
+      <a href="People.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>People</a>
+      <a class="on" href="Team.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m16 11 2 2 4-4"></path></svg>My team</a>
+      <a href="Leave.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M9 16h6"></path></svg>Leave</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Payroll</div>
+      <a href="Payroll.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path></svg>Payroll run</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Business</div>
+      <a href="Projects.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path><path d="M8 10v4M12 10v2M16 10v6"></path></svg>Projects</a>
+      <a href="Unbilled.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6M16 13H8M16 17H8"></path></svg>Unbilled work</a>
+      <a href="Collections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>Collections</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Revenue</div>
+      <a href="Revenue.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"></path><path d="M16 7h6v6"></path></svg>Revenue</a>
+    </nav>
+  </aside>
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 32px; border-bottom: 1px solid #E4E4E7">
+      <span class="lbl">Signed in as Kola Adebayo · line manager · Sample data</span>
+    </header>
+    <main style="padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 20px; max-width: 1240px; box-sizing: border-box; width: 100%">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif; letter-spacing: -0.015em">9 people report to you</h1>
+        <p style="margin: 0; font-size: 15px; color: #52525B">Security services · Apapa Warehouse 3 · you report to Emeka Nwankwo</p>
+      </div>
+      <div role="tablist" aria-label="Team" style="display: flex; gap: 4px; border-bottom: 1px solid #E4E4E7">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+          <button type="button" role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}</button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{isPeople}}" hint-placeholder-val="{{true}}">
+        <sc-if value="{{assigning}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 16px; border: 1.5px solid #0A0A0A; border-radius: 12px">
+            <span style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 2px"><span class="lbl">Assign a shift</span><span style="font: 600 16px Inter, sans-serif">{{assignName}}</span></span>
+            <label class="fld" style="flex: 2 1 280px">Open shift
+              <select><option>Sat 31 Oct · Gate A night · 18:00–06:00</option><option>Sat 31 Oct · Patrol night · 18:00–06:00</option><option>Mon 2 Nov · Floor day · 07:00–19:00</option></select>
+            </label>
+            <button type="button" class="btn" onClick="{{confirmAssign}}">Assign</button>
+            <button type="button" class="btn2" onClick="{{cancelAssign}}" style="height: 40px">Cancel</button>
+          </div>
+        </sc-if>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Employee</th><th>Today</th><th class="num">Hours this week</th><th class="num">Annual leave left</th><th>Next shift</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody>
+              <sc-for list="{{people}}" as="p" hint-placeholder-count="9">
+                <tr>
+                  <td><span style="display: flex; flex-direction: column"><span style="font-weight: 600">{{p.name}}</span><span style="font-size: 12px; color: #52525B">{{p.title}}</span></span></td>
+                  <td><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: {{p.weight}}"><span class="{{p.dot}}"></span>{{p.today}}</span></td>
+                  <td class="num">{{p.hours}}</td>
+                  <td class="num">{{p.leave}}</td>
+                  <td>{{p.next}}</td>
+                  <td style="text-align: right"><span style="display: inline-flex; gap: 8px"><button type="button" class="btn2" onClick="{{p.assign}}">Assign shift</button><button type="button" class="btn2" onClick="{{p.query}}">Query</button></span></td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{isLeave}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <sc-for list="{{leaves}}" as="l" hint-placeholder-count="2">
+            <article style="border: 1px solid #E4E4E7; border-radius: 12px; padding: 16px 20px; display: flex; flex-wrap: wrap; gap: 16px 24px; align-items: center">
+              <div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 4px">
+                <span style="font: 600 16px Inter, sans-serif">{{l.name}}</span>
+                <span style="font-size: 14px">{{l.what}}</span>
+                <span style="font-size: 13px; color: #52525B">{{l.reason}}</span>
+              </div>
+              <div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 4px; font-size: 14px">
+                <span>{{l.balance}}</span>
+                <span style="font-weight: 600">{{l.cover}}</span>
+              </div>
+              <sc-if value="{{l.open}}" hint-placeholder-val="{{true}}">
+                <span style="display: flex; gap: 8px"><button type="button" class="btn" onClick="{{l.approve}}">Approve</button><button type="button" class="btn2" onClick="{{l.decline}}" style="height: 40px">Decline</button></span>
+              </sc-if>
+              <sc-if value="{{l.done}}" hint-placeholder-val="{{false}}">
+                <span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="dot f"></span>{{l.status}}</span>
+              </sc-if>
+            </article>
+          </sc-for>
+          <p style="margin: 0; font-size: 13px; color: #52525B">Approving opens the affected shifts in the roster so you can fill them. HR sees every decision in Leave.</p>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{isQueries}}" hint-placeholder-val="{{false}}">
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+          <section aria-labelledby="qlist" style="flex: 999 1 420px; display: flex; flex-direction: column; gap: 12px">
+            <h2 id="qlist" style="margin: 0; font: 500 20px 'Space Grotesk', sans-serif">Queries you have raised</h2>
+            <sc-for list="{{queries}}" as="q" hint-placeholder-count="2">
+              <article style="border: 1px solid #E4E4E7; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+                <span style="display: flex; justify-content: space-between; gap: 12px"><span style="font: 600 15px Inter, sans-serif">{{q.name}} · {{q.type}}</span><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600"><span class="{{q.dot}}"></span>{{q.status}}</span></span>
+                <span style="font-size: 14px">{{q.body}}</span>
+                <span style="font-size: 13px; color: #52525B">{{q.meta}}</span>
+              </article>
+            </sc-for>
+          </section>
+          <section aria-labelledby="qnew" style="flex: 1 1 340px; border: 1px solid #E4E4E7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box">
+            <h2 id="qnew" style="margin: 0; font: 500 20px 'Space Grotesk', sans-serif">New query</h2>
+            <label class="fld">Employee
+              <select value="{{qWho}}" onChange="{{setWho}}"><sc-for list="{{names}}" as="n" hint-placeholder-count="9"><option value="{{n}}">{{n}}</option></sc-for></select>
+            </label>
+            <label class="fld">Type
+              <select value="{{qType}}" onChange="{{setType}}"><option value="Lateness">Lateness</option><option value="Absence without leave">Absence without leave</option><option value="Conduct">Conduct</option><option value="Performance">Performance</option></select>
+            </label>
+            <label class="fld">What happened
+              <textarea rows="3" placeholder="Dates, times and what you saw. Stick to facts."></textarea>
+            </label>
+            <label class="fld">Reply needed by
+              <input type="date" value="2026-11-02">
+            </label>
+            <p style="margin: 0; font-size: 13px; color: #52525B">The employee gets it in their app and can reply there. The query and reply go on their HR file.</p>
+            <button type="button" class="btn" onClick="{{sendQuery}}">Send query</button>
+          </section>
+        </div>
+      </sc-if>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { tab: 'people', assignFor: null, assigned: {}, leave: {}, qWho: 'Daniel Okon', qType: 'Lateness', sent: [] }; }
+  renderVals() {
+    const s = this.state;
+    const ppl = [
+      ['Musa Ibrahim','Security guard','On site','dot',48,'11 days','Sun 1 Nov · Gate A day'],
+      ['Ibrahim Sani','Security guard','Off today','dot',52,'9 days','Sun 1 Nov · Gate A night'],
+      ['Halima Bello','Floor marshal','Late 14 min','dot f',47,'13 days','Sat 31 Oct · Floor day'],
+      ['Daniel Okon','Security guard','Late 22 min','dot f',36,'7 days','Sun 1 Nov · Gate A night'],
+      ['Bayo Kareem','Security guard','Sick, not approved','dot f',24,'12 days','None'],
+      ['Peter Ade','Patrol guard','On site','dot',48,'15 days','Mon 2 Nov · Patrol night'],
+      ['Sule Musa','Patrol guard','No-show','dot f',36,'10 days','Sun 1 Nov · Patrol night'],
+      ['Ngozi Eze','Floor marshal','On site','dot',48,'6 days','Mon 2 Nov · Floor day'],
+      ['Musa Danladi','Security guard','On site','dot',40,'11 days','Leave request pending']];
+    const names = ppl.map(p => p[0]);
+    const tabDefs = [['people','Reportees · 9'],['leave','Leave requests · ' + [0,1].filter(i => !s.leave[i]).length],['queries','Queries · ' + (1 + s.sent.length)]];
+    const tabs = tabDefs.map(([id, label]) => ({ label, sel: id === s.tab ? 'true' : 'false', pick: () => this.setState({ tab: id }),
+      style: 'height: 44px; padding: 0 16px; border: 0; background: none; cursor: pointer; font: 600 14px Inter, sans-serif; margin-bottom: -1px; ' +
+        (id === s.tab ? 'color: #0A0A0A; border-bottom: 2px solid #0A0A0A' : 'color: #52525B; border-bottom: 2px solid transparent') }));
+    const people = ppl.map(([name, title, today, dot, hours, leave, next], i) => ({ name, title, today, dot, weight: dot === 'dot f' ? '600' : '400', hours: hours + ' h', leave,
+      next: s.assigned[i] ? 'Sat 31 Oct · assigned by you' : next,
+      assign: () => this.setState({ assignFor: i }),
+      query: () => this.setState({ tab: 'queries', qWho: name }) }));
+    const lv = [
+      ['Musa Danladi','Annual leave · Wed 4 – Fri 6 Nov · 3 days','"Family wedding in Kano."','Balance 11 days, 8 after this','Opens 3 shifts: Gate A day, 4–6 Nov'],
+      ['Bayo Kareem','Sick leave · Fri 30 Oct · 1 day','Doctor\'s note attached (PDF, 180 KB)','Sick leave used: 2 of 12 days','Gate C day today already covered by Yusuf Bello']];
+    const leaves = lv.map(([name, what, reason, balance, cover], i) => ({ name, what, reason, balance, cover, open: !s.leave[i], done: !!s.leave[i], status: s.leave[i],
+      approve: () => this.setState({ leave: Object.assign({}, s.leave, { [i]: 'Approved' }) }),
+      decline: () => this.setState({ leave: Object.assign({}, s.leave, { [i]: 'Declined' }) }) }));
+    const queries = s.sent.map(q => ({ name: q.who, type: q.type, body: 'Sent from this screen.', meta: 'Sent just now · reply needed by 2 Nov', status: 'Awaiting reply', dot: 'dot f' }))
+      .concat([{ name: 'Sule Musa', type: 'Absence without leave', body: 'You did not report for your patrol night shift on 27 October and did not call in.', meta: 'Sent 28 Oct · replied 29 Oct: "My mother was in hospital."', status: 'Replied', dot: 'dot' }]);
+    return {
+      tabs, people, leaves, queries, names,
+      isPeople: s.tab === 'people', isLeave: s.tab === 'leave', isQueries: s.tab === 'queries',
+      assigning: s.assignFor !== null, assignName: s.assignFor !== null ? ppl[s.assignFor][0] : '',
+      confirmAssign: () => this.setState({ assigned: Object.assign({}, s.assigned, { [s.assignFor]: true }), assignFor: null }),
+      cancelAssign: () => this.setState({ assignFor: null }),
+      qWho: s.qWho, qType: s.qType,
+      setWho: (e) => this.setState({ qWho: e.target.value }), setType: (e) => this.setState({ qType: e.target.value }),
+      sendQuery: () => this.setState({ sent: [{ who: s.qWho, type: s.qType }].concat(s.sent) })
+    };
+  }
+}
+</script>
+</body>
+</html>

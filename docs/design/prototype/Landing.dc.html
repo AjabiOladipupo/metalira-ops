@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Metalira Ops · Workforce and business operations</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 13px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 22px;border-radius:8px;font:600 15px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 20px;border-radius:8px;font:600 15px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.navl{color:#0A0A0A;text-decoration:none;font:500 15px Inter,sans-serif}
+.navl:hover{color:#6D4CFF}
+.chk{display:flex;gap:10px;align-items:flex-start;font-size:15px;line-height:1.45}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+a:focus-visible,button:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <header style="border-bottom: 1px solid #E4E4E7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 16px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 24px; box-sizing: border-box">
+      <a href="Landing.dc.html" aria-label="Metalira Ops" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #0A0A0A">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+        <span style="font: 500 20px 'Space Grotesk', sans-serif">Metalira <b style="font-weight: 700">Ops</b></span>
+      </a>
+      <nav aria-label="Site" style="display: flex; flex-wrap: wrap; gap: 24px; flex: 1 1 auto">
+        <a class="navl" href="#product">Product</a>
+        <a class="navl" href="#how">How it works</a>
+        <a class="navl" href="#pricing">Pricing</a>
+      </nav>
+      <a class="navl" href="Main.dc.html">Sign in</a>
+      <a class="btn" href="Setup.dc.html" style="height: 40px">Start setup</a>
+    </div>
+  </header>
+
+  <section style="max-width: 1200px; margin: 0 auto; padding: 72px 24px 64px; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; box-sizing: border-box">
+    <div style="flex: 1 1 480px; display: flex; flex-direction: column; gap: 22px">
+      <span class="lbl">For Nigerian businesses that run shift-based teams</span>
+      <h1 style="margin: 0; font: 700 61px/1 'Space Grotesk', sans-serif; letter-spacing: -0.03em">Every shift, accounted for.</h1>
+      <p style="margin: 0; font-size: 20px; line-height: 1.5; color: #52525B; max-width: 560px">Rosters, clock-ins, payroll and client invoices in one record. See what each site earns after the people who staffed it are paid.</p>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px">
+        <a class="btn" href="Setup.dc.html">Set up your business</a>
+        <a class="btn2" href="Simulate.dc.html">See a month run</a>
+      </div>
+      <p style="margin: 0; font-size: 14px; color: #52525B">Free for up to 10 workers. Import your staff from a spreadsheet.</p>
+    </div>
+    <div aria-hidden="true" style="flex: 1 1 440px; border: 1px solid #E4E4E7; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: #FFFFFF">
+      <div style="display: flex; justify-content: space-between; align-items: center"><span class="lbl">October · all sites</span><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px"><span class="dot f"></span>Payroll ready</span></div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+        <div style="padding: 14px; background: #F4F4F5; border-radius: 12px"><div style="font-size: 13px; color: #52525B">Billed</div><div style="font: 700 28px 'Space Grotesk', sans-serif">₦14.30m</div></div>
+        <div style="padding: 14px; background: #F4F4F5; border-radius: 12px"><div style="font-size: 13px; color: #52525B">Labour cost</div><div style="font: 700 28px 'Space Grotesk', sans-serif">67.2%</div></div>
+        <div style="padding: 14px; background: #F4F4F5; border-radius: 12px"><div style="font-size: 13px; color: #52525B">On shift now</div><div style="font: 700 28px 'Space Grotesk', sans-serif">118</div></div>
+        <div style="padding: 14px; border: 1.5px solid #0A0A0A; border-radius: 12px"><div style="font-size: 13px">Not yet billed</div><div style="font: 700 28px 'Space Grotesk', sans-serif">₦3.42m</div></div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px">
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #E4E4E7"><span>Apapa Warehouse 3</span><span style="font-weight: 600">−1.8% margin</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #E4E4E7"><span>Lekki Estate Gate B</span><span style="font-weight: 600">18.2%</span></div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0"><span>Ikeja City Mall</span><span style="font-weight: 600">34.5%</span></div>
+      </div>
+      <span style="font-size: 12px; color: #52525B">Sample data</span>
+    </div>
+  </section>
+
+  <section id="product" style="background: #F4F4F5">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 32px; box-sizing: border-box">
+      <div style="display: flex; flex-direction: column; gap: 10px; max-width: 720px">
+        <span class="lbl">Product</span>
+        <h2 style="margin: 0; font: 700 39px/1.1 'Space Grotesk', sans-serif; letter-spacing: -0.02em">Two tools. One record of what work earned.</h2>
+        <p style="margin: 0; font-size: 17px; line-height: 1.55; color: #52525B">Use either tool alone. Turn on both and every hour worked is tied to a client, an invoice and a payment.</p>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px">
+        <article style="background: #FFFFFF; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+          <h3 style="margin: 0; font: 700 25px 'Space Grotesk', sans-serif">Workforce Ops</h3>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Employees mapped to departments, line managers, clients and projects</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Rosters built against each site's headcount</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Clock-in with location and selfie, even offline</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Leave, overtime and line-manager approvals</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Payroll with 2026 PAYE, pension, NSITF and ITF, plus bank files</div>
+        </article>
+        <article style="background: #FFFFFF; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+          <h3 style="margin: 0; font: 700 25px 'Space Grotesk', sans-serif">Business Ops</h3>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Clients, sites and contracts with rate cards</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Projects split into phases, sub-jobs, KPIs and review calls</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Invoices drafted from approved hours, with 7.5% VAT</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Clients pay into their own account number or by Paystack or Flutterwave</div>
+          <div class="chk"><span class="dot f" style="margin-top: 7px"></span>Payments matched and receipts sent automatically</div>
+        </article>
+        <article style="background: #0A0A0A; color: #FFFFFF; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+          <h3 style="margin: 0; font: 700 25px 'Space Grotesk', sans-serif">Revenue Layer</h3>
+          <p style="margin: 0; font-size: 15px; line-height: 1.55; color: #D4D4D8">Turns on when you use both tools.</p>
+          <div class="chk"><span class="dot" style="margin-top: 7px; border-color: #FFFFFF"></span>Labour cost as a share of billed revenue</div>
+          <div class="chk"><span class="dot" style="margin-top: 7px; border-color: #FFFFFF"></span>Margin per site, client and project</div>
+          <div class="chk"><span class="dot" style="margin-top: 7px; border-color: #FFFFFF"></span>Work done but not yet invoiced</div>
+          <div class="chk"><span class="dot" style="margin-top: 7px; border-color: #FFFFFF"></span>Cash collected against next payroll</div>
+        </article>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 16px Inter, sans-serif">Works on cheap phones</span><span style="font-size: 15px; color: #52525B">Clock-ins save on the phone and send when the network returns.</span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 16px Inter, sans-serif">You keep the money</span><span style="font-size: 15px; color: #52525B">Payroll and client payments run through your own bank or payment account.</span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 16px Inter, sans-serif">Proof, not promises</span><span style="font-size: 15px; color: #52525B">Upload PAYE and pension receipts so you can show what was paid.</span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px"><span style="font: 600 16px Inter, sans-serif">Your data, exportable</span><span style="font-size: 15px; color: #52525B">Download everything at any time. Built for Nigeria's data protection rules.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 28px; box-sizing: border-box">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <span class="lbl">How it works</span>
+      <h2 style="margin: 0; font: 700 39px/1.1 'Space Grotesk', sans-serif; letter-spacing: -0.02em">Running in an afternoon</h2>
+    </div>
+    <ol style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px">
+      <li style="border: 1px solid #E4E4E7; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px"><span style="font: 700 31px 'Space Grotesk', sans-serif">01</span><span style="font: 600 17px Inter, sans-serif">Add your business</span><span style="font-size: 15px; color: #52525B">Name, logo, TIN, the email invoices go out from, and where clients pay.</span></li>
+      <li style="border: 1px solid #E4E4E7; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px"><span style="font: 700 31px 'Space Grotesk', sans-serif">02</span><span style="font: 600 17px Inter, sans-serif">Import your people</span><span style="font-size: 15px; color: #52525B">Fill our template with staff, line managers, clients and projects. Upload it once.</span></li>
+      <li style="border: 1px solid #E4E4E7; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px"><span style="font: 700 31px 'Space Grotesk', sans-serif">03</span><span style="font: 600 17px Inter, sans-serif">Clock in and approve</span><span style="font-size: 15px; color: #52525B">Staff clock in on their phones; line managers approve hours and leave.</span></li>
+      <li style="border: 1px solid #E4E4E7; border-radius: 16px; padding: 22px; display: flex; flex-direction: column; gap: 10px"><span style="font: 700 31px 'Space Grotesk', sans-serif">04</span><span style="font: 600 17px Inter, sans-serif">Pay and get paid</span><span style="font-size: 15px; color: #52525B">Run payroll to a bank file, send invoices built from approved hours, record payments.</span></li>
+    </ol>
+  </section>
+
+  <section id="pricing" style="background: #F4F4F5">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-direction: column; gap: 28px; box-sizing: border-box">
+      <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 16px">
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <span class="lbl">Pricing</span>
+          <h2 style="margin: 0; font: 700 39px/1.1 'Space Grotesk', sans-serif; letter-spacing: -0.02em">Pay for the workers who clocked in</h2>
+          <p style="margin: 0; font-size: 16px; color: #52525B">An active worker is anyone who clocked in at least once that month. Prices in naira, VAT excluded.</p>
+        </div>
+        <div role="group" aria-label="Billing period" style="display: flex; gap: 4px; padding: 4px; background: #FFFFFF; border-radius: 10px; border: 1px solid #E4E4E7">
+          <sc-for list="{{periods}}" as="p" hint-placeholder-count="2">
+            <button type="button" onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" style="{{p.style}}">{{p.label}}</button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; align-items: stretch">
+        <sc-for list="{{plans}}" as="p" hint-placeholder-count="4">
+          <article style="{{p.box}}">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 26px">
+              <h3 style="margin: 0; font: 700 22px 'Space Grotesk', sans-serif">{{p.name}}</h3>
+              <sc-if value="{{p.best}}" hint-placeholder-val="{{false}}"><span style="font: 500 12px 'Space Grotesk', sans-serif; letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: 4px; background: #6D4CFF; color: #FFFFFF">Everything</span></sc-if>
+            </div>
+            <p style="margin: 0; font-size: 14px; line-height: 1.5; opacity: .8; min-height: 42px">{{p.blurb}}</p>
+            <div style="display: flex; flex-direction: column; gap: 2px">
+              <span style="font: 700 34px/1.1 'Space Grotesk', sans-serif">{{p.price}}</span>
+              <span style="font-size: 14px; opacity: .8">{{p.unit}}</span>
+            </div>
+            <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto">
+              <sc-for list="{{p.items}}" as="i" hint-placeholder-count="5">
+                <li class="chk" style="font-size: 14px"><span class="dot f" style="margin-top: 6px; {{p.dotStyle}}"></span>{{i}}</li>
+              </sc-for>
+            </ul>
+            <a href="Setup.dc.html" style="{{p.cta}}">{{p.ctaLabel}}</a>
+          </article>
+        </sc-for>
+      </div>
+      <p style="margin: 0; font-size: 13px; color: #52525B">Pilot pricing, subject to change. Payment provider fees (Paystack, Flutterwave, banks) are charged by the provider.</p>
+    </div>
+  </section>
+
+  <section style="max-width: 1200px; margin: 0 auto; padding: 72px 24px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 24px; box-sizing: border-box">
+    <h2 style="margin: 0; font: 700 39px/1.1 'Space Grotesk', sans-serif; letter-spacing: -0.02em; max-width: 640px">Bring last month's staff list. Leave with a payroll and an invoice run.</h2>
+    <a class="btn" href="Setup.dc.html">Set up your business</a>
+  </section>
+
+  <footer style="border-top: 1px solid #E4E4E7">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 14px; color: #52525B; box-sizing: border-box">
+      <span>Metalira Ops is a product of Meta Lira Technology LTD, Lagos.</span>
+      <span style="display: flex; gap: 20px"><a href="Landing.dc.html">Privacy</a><a href="Landing.dc.html">Terms</a><a href="Landing.dc.html">Contact</a></span>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2600}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { annual: false }; }
+  renderVals() {
+    const a = this.state.annual;
+    const base = 'height: 36px; padding: 0 14px; border-radius: 8px; border: 0; cursor: pointer; font: 600 14px Inter, sans-serif;';
+    const periods = [['Monthly', false], ['Yearly · save 15%', true]].map(([label, v]) => ({ label, pressed: a === v ? 'true' : 'false', pick: () => this.setState({ annual: v }),
+      style: base + (a === v ? 'background: #0A0A0A; color: #FFFFFF' : 'background: transparent; color: #52525B') }));
+    const k = a ? 0.85 : 1;
+    const ng = (n) => '₦' + Math.round(n * k).toLocaleString('en-NG');
+    const defs = [
+      { name: 'Starter', blurb: 'For small teams trying it out.', price: '₦0', unit: 'Up to 10 workers, free forever',
+        items: ['Rosters and clock-in', 'Leave requests', 'Basic invoices', 'Worker mobile app'] },
+      { name: 'Workforce', blurb: 'Run your people, payroll and compliance.', price: ng(2000), unit: 'per active worker a month',
+        items: ['Everything in Starter', 'Employee mapping and line managers', 'Payroll, payslips and bank files', 'PAYE, pension, NSITF and ITF schedules', 'Supervisor crew clock-in'] },
+      { name: 'Business', blurb: 'Run your clients, projects and cash.', price: ng(50000), unit: 'per company a month',
+        items: ['Clients, contracts and rate cards', 'Projects, phases, KPIs and reviews', 'Invoices with 7.5% VAT', 'Paystack and Flutterwave collections', 'Receipts and payment matching'] },
+      { name: 'Ops Suite', best: true, blurb: 'Both tools, joined, with the Revenue Layer.', price: ng(1600) + ' + ' + ng(40000), unit: 'per active worker + per company a month',
+        items: ['Everything in Workforce and Business', 'Invoices drafted from approved hours', 'Margin per site, client and project', 'Unbilled work alerts', 'Guided setup with your data'] }
+    ];
+    const plans = defs.map(d => {
+      const dark = !!d.best;
+      return Object.assign({}, d, { best: dark,
+        box: 'display: flex; flex-direction: column; gap: 18px; padding: 24px; border-radius: 16px; ' + (dark ? 'background: #0A0A0A; color: #FFFFFF' : 'background: #FFFFFF; color: #0A0A0A'),
+        dotStyle: dark ? 'background: #FFFFFF; border-color: #FFFFFF' : '',
+        cta: 'display: flex; align-items: center; justify-content: center; height: 48px; border-radius: 8px; text-decoration: none; font: 600 15px Inter, sans-serif; ' +
+          (dark ? 'background: #FFFFFF; color: #0A0A0A' : 'background: #FFFFFF; color: #0A0A0A; border: 1px solid #0A0A0A'),
+        ctaLabel: d.name === 'Starter' ? 'Start free' : 'Choose ' + d.name });
+    });
+    return { periods, plans };
+  }
+}
+</script>
+</body>
+</html>

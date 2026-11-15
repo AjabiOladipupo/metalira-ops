@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My profile · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #E4E4E7;font-size:15px}
+.kv span:first-child{color:#52525B}
+.kv span:last-child{text-align:right;font-weight:500}
+a:focus-visible,button:focus-visible,textarea:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 8px; padding: 12px 8px 4px">
+    <a href="WkHome.dc.html" aria-label="Back" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #0A0A0A"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
+    <span style="font: 700 20px 'Space Grotesk', sans-serif">Me</span>
+  </div>
+  <div style="display: flex; align-items: center; gap: 14px; padding: 8px 16px 12px">
+    <span style="width: 56px; height: 56px; border-radius: 999px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font: 600 18px Inter, sans-serif" aria-hidden="true">MI</span>
+    <span style="display: flex; flex-direction: column; gap: 2px"><span style="font: 700 22px 'Space Grotesk', sans-serif">Musa Ibrahim</span><span style="font-size: 14px; color: #52525B">Security guard · MO-0114</span></span>
+  </div>
+  <div role="tablist" aria-label="Profile" style="display: flex; padding: 0 16px; border-bottom: 1px solid #E4E4E7">
+    <sc-for list="{{tabs}}" as="t" hint-placeholder-count="2">
+      <button type="button" role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}</button>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{isProfile}}" hint-placeholder-val="{{true}}">
+    <div style="flex: 1 1 auto; overflow-y: auto; padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 18px">
+      <section aria-labelledby="w">
+        <h2 id="w" class="lbl" style="margin: 0 0 2px">Work</h2>
+        <div class="kv"><span>Department</span><span>Security services</span></div>
+        <div class="kv"><span>Line manager</span><span>Kola Adebayo</span></div>
+        <div class="kv"><span>Site</span><span>Apapa Warehouse 3</span></div>
+        <div class="kv"><span>Project</span><span>Coastline guarding contract</span></div>
+        <div class="kv"><span>Started</span><span>3 March 2024 · permanent</span></div>
+      </section>
+      <section aria-labelledby="p">
+        <h2 id="p" class="lbl" style="margin: 0 0 2px">Pay and pension</h2>
+        <div class="kv"><span>Bank</span><span>GTBank ••••7712</span></div>
+        <div class="kv"><span>Pension</span><span>Stanbic IBTC · PEN••••4421</span></div>
+        <div class="kv"><span>Tax state</span><span>Lagos</span></div>
+        <div class="kv"><span>Rent declared</span><span>₦360,000 a year</span></div>
+      </section>
+      <section aria-labelledby="i">
+        <h2 id="i" class="lbl" style="margin: 0 0 2px">Identity and contact</h2>
+        <div class="kv"><span>NIN</span><span>Verified</span></div>
+        <div class="kv"><span>Phone</span><span>0803 ••• 4410</span></div>
+        <div class="kv"><span>Next of kin</span><span>Aisha Ibrahim · sister</span></div>
+      </section>
+      <section aria-labelledby="d">
+        <h2 id="d" class="lbl" style="margin: 0 0 2px">Documents</h2>
+        <div class="kv"><span>Employment letter</span><span><a href="WkProfile.dc.html">View</a></span></div>
+        <div class="kv"><span>Guard licence</span><span>Expires 14 Feb 2027</span></div>
+      </section>
+      <button type="button" style="height: 52px; border-radius: 12px; border: 1px solid #0A0A0A; background: #FFFFFF; font: 600 16px Inter, sans-serif; color: #0A0A0A; cursor: pointer">Request a change</button>
+      <p style="margin: 0; font-size: 13px; color: #52525B">Bank changes need HR approval and wait 72 hours before your pay goes to the new account.</p>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{isQueries}}" hint-placeholder-val="{{false}}">
+    <div style="flex: 1 1 auto; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+      <article style="border: 1.5px solid #0A0A0A; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+        <span class="lbl">From Kola Adebayo · 28 Oct</span>
+        <h2 style="margin: 0; font: 700 20px 'Space Grotesk', sans-serif">Lateness on 23 October</h2>
+        <p style="margin: 0; font-size: 15px; line-height: 1.5">You clocked in at 06:41 for your 06:00 shift at Gate A. Please explain what happened.</p>
+        <span style="font-size: 14px; font-weight: 600">Reply by Mon 2 Nov</span>
+      </article>
+      <sc-if value="{{notReplied}}" hint-placeholder-val="{{true}}">
+        <label style="display: flex; flex-direction: column; gap: 6px; font: 500 14px Inter, sans-serif">Your reply
+          <textarea rows="5" style="padding: 10px; border: 1px solid #E4E4E7; border-radius: 8px; font: 400 16px Inter, sans-serif">The BRT was stopped at Mile 2 because of an accident. I called Kola at 05:50.</textarea>
+        </label>
+        <button type="button" onClick="{{reply}}" style="height: 56px; border-radius: 12px; border: 0; background: #0A0A0A; color: #FFFFFF; font: 700 18px 'Space Grotesk', sans-serif; cursor: pointer">Send reply</button>
+        <p style="margin: 0; font-size: 13px; color: #52525B">Your reply goes to your line manager and on your HR file. It saves on the phone if there is no network.</p>
+      </sc-if>
+      <sc-if value="{{replied}}" hint-placeholder-val="{{false}}">
+        <p role="status" style="margin: 0; padding: 14px 16px; background: #F4F4F5; border-radius: 12px; font-size: 15px; font-weight: 600">Reply saved on phone. It will send when the network returns.</p>
+      </sc-if>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { tab: 'profile', replied: false }; }
+  renderVals() {
+    const s = this.state;
+    const tabs = [['profile','Profile'],['queries', s.replied ? 'Queries' : 'Queries · 1']].map(([id, label]) => ({ label, sel: id === s.tab ? 'true' : 'false', pick: () => this.setState({ tab: id }),
+      style: 'flex: 1 1 0; height: 48px; border: 0; background: none; cursor: pointer; font: 600 15px Inter, sans-serif; margin-bottom: -1px; ' +
+        (id === s.tab ? 'color: #0A0A0A; border-bottom: 2px solid #0A0A0A' : 'color: #52525B; border-bottom: 2px solid transparent') }));
+    return { tabs, isProfile: s.tab === 'profile', isQueries: s.tab === 'queries', replied: s.replied, notReplied: !s.replied, reply: () => this.setState({ replied: true }) };
+  }
+}
+</script>
+</body>
+</html>

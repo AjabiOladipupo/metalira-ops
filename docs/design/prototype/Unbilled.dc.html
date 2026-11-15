@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unbilled work · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:#0A0A0A;text-decoration:none;font:500 14px Inter,sans-serif}
+.nav a:hover{background:#F4F4F5;color:#0A0A0A}
+.nav a.on{background:#F4F4F5;color:#6D4CFF}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:8px;font:600 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn:disabled{background:#E4E4E7;border-color:#E4E4E7;color:#52525B;cursor:not-allowed}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 14px;border-radius:8px;font:500 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 220px; box-sizing: border-box; padding: 20px 12px; border-right: 1px solid #E4E4E7; display: flex; flex-direction: column; gap: 16px">
+    <a href="Main.dc.html" aria-label="Metalira Ops home" style="display: flex; align-items: center; gap: 10px; padding: 4px 12px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif; letter-spacing: -0.01em">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <nav class="nav" aria-label="Main" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="Main.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>Home</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Workforce</div>
+      <a href="Roster.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Roster</a>
+      <a href="Attendance.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>Live attendance</a>
+      <a href="Timesheets.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>Timesheets</a>
+      <a href="People.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>People</a>
+      <a href="Team.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m16 11 2 2 4-4"></path></svg>My team</a>
+      <a href="Leave.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M9 16h6"></path></svg>Leave</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Payroll</div>
+      <a href="Payroll.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path></svg>Payroll run</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Business</div>
+      <a href="Projects.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path><path d="M8 10v4M12 10v2M16 10v6"></path></svg>Projects</a>
+      <a class="on" href="Unbilled.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6M16 13H8M16 17H8"></path></svg>Unbilled work</a>
+      <a href="Collections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>Collections</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Revenue</div>
+      <a href="Revenue.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"></path><path d="M16 7h6v6"></path></svg>Revenue</a>
+    </nav>
+  </aside>
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 32px; border-bottom: 1px solid #E4E4E7">
+      <span class="lbl">Completed, approved, not yet on an invoice · Sample data</span>
+      <span style="flex: 1 1 auto"></span>
+      <label style="display: flex"><span class="sr">Period</span><select class="btn2" style="appearance: auto"><option>Up to 31 October</option><option>Up to 15 October</option></select></label>
+    </header>
+    <main style="padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 20px; box-sizing: border-box; width: 100%">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif; letter-spacing: -0.015em">₦3,418,500 of work not yet billed</h1>
+        <p style="margin: 0; font-size: 15px; color: #52525B">Approved hours and finished jobs, priced at each contract's rate card. Pick clients to draft one invoice each.</p>
+      </div>
+      <sc-if value="{{generated}}" hint-placeholder-val="{{false}}">
+        <p role="status" style="margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border: 1px solid #0A0A0A; border-radius: 8px; font-size: 15px"><span class="dot f"></span><b>{{genText}}</b> Drafts stay editable until you post them. <a href="Collections.dc.html">Go to collections</a></p>
+      </sc-if>
+      <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+        <section aria-label="Clients" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+          <sc-for list="{{clients}}" as="c" hint-placeholder-count="3">
+            <div style="{{c.box}}">
+              <label style="display: flex; align-items: center; gap: 12px; padding: 16px; cursor: pointer; border-bottom: 1px solid #E4E4E7">
+                <input type="checkbox" checked="{{c.checked}}" onChange="{{c.toggle}}" style="width: 18px; height: 18px; margin: 0; accent-color: #0A0A0A">
+                <span style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px">
+                  <span style="font: 600 16px Inter, sans-serif">{{c.name}}</span>
+                  <span style="font-size: 13px; color: #52525B">{{c.meta}}</span>
+                </span>
+                <span style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px">
+                  <span style="font: 600 16px Inter, sans-serif; font-variant-numeric: tabular-nums">{{c.total}}</span>
+                  <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px"><span class="{{c.dot}}"></span>{{c.age}}</span>
+                </span>
+              </label>
+              <table style="width: 100%; border-collapse: collapse; font: 400 14px Inter, sans-serif">
+                <thead><tr><th class="sr">Work</th><th class="sr">Quantity</th><th class="sr">Amount</th></tr></thead>
+                <tbody>
+                  <sc-for list="{{c.lines}}" as="l" hint-placeholder-count="2">
+                    <tr>
+                      <td style="padding: 10px 16px 10px 46px; border-bottom: 1px solid #F4F4F5"><span style="display: flex; flex-direction: column"><span>{{l.what}}</span><span style="font-size: 12px; color: #52525B">{{l.wu}}</span></span></td>
+                      <td style="padding: 10px 16px; border-bottom: 1px solid #F4F4F5; color: #52525B; white-space: nowrap">{{l.qty}}</td>
+                      <td style="padding: 10px 16px; border-bottom: 1px solid #F4F4F5; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap">{{l.amt}}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </sc-for>
+          <p style="margin: 0; font-size: 13px; color: #52525B">Not included: 5 flagged timesheets worth ₦62,500 until they are approved. <a href="Timesheets.dc.html">Review them</a></p>
+        </section>
+
+        <aside aria-labelledby="sum" style="flex: 1 1 300px; border: 1px solid #E4E4E7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box">
+          <h2 id="sum" style="margin: 0; font: 500 20px 'Space Grotesk', sans-serif">Draft summary</h2>
+          <dl style="margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; font-size: 15px">
+            <dt>Invoices to create</dt><dd style="margin: 0; text-align: right; font-weight: 600">{{count}}</dd>
+            <dt>Subtotal</dt><dd style="margin: 0; text-align: right; font-variant-numeric: tabular-nums">{{sub}}</dd>
+            <dt>VAT 7.5%</dt><dd style="margin: 0; text-align: right; font-variant-numeric: tabular-nums">{{vat}}</dd>
+            <dt style="font-weight: 600; padding-top: 10px; border-top: 1px solid #E4E4E7">Total</dt><dd style="margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; padding-top: 10px; border-top: 1px solid #E4E4E7">{{total}}</dd>
+          </dl>
+          <button type="button" class="btn" disabled="{{none}}" onClick="{{generate}}">{{genLabel}}</button>
+          <p style="margin: 0; font-size: 13px; color: #52525B">Each invoice line links to its Work Units, so margin per site updates when the invoice is posted. Each client pays into their own dedicated account number.</p>
+        </aside>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { off: {}, generated: 0 }; }
+  renderVals() {
+    const ng = (n) => '₦' + Math.round(n).toLocaleString('en-NG');
+    const data = [
+      { id: 'g', name: 'Greenfield Estates', meta: 'Lekki Estate Gate B · guarding contract · monthly in arrears', age: '12 days old', old: true, lines: [
+        ['Day guard shift-posts, 16–31 Oct', 'WU-0981 to WU-1072', '92 × ₦12,500', 1150000],
+        ['Night guard shift-posts, 16–31 Oct', 'WU-0985 to WU-1070', '30 × ₦15,000', 450000]] },
+      { id: 'c', name: 'Coastline Logistics', meta: 'Apapa Warehouse 3 · extra cover requested by client', age: '4 days old', old: false, lines: [
+        ['Extra warehouse floor cover, 19–31 Oct', 'WU-1001 to WU-1040', '40 × ₦12,500', 500000],
+        ['Night overtime pass-through, 1.5×', 'WU-1038', '12 h × ₦1,875', 22500]] },
+      { id: 'h', name: 'Hubspace NG', meta: 'Yaba Tech Hub · cleaning jobs', age: '2 days old', old: false, lines: [
+        ['Deep clean, floors 1–3', 'WU-1060 to WU-1065', '6 jobs × ₦216,000', 1296000]] }
+    ];
+    const off = this.state.off;
+    let sub = 0, count = 0;
+    const clients = data.map(c => {
+      const t = c.lines.reduce((a, l) => a + l[3], 0); const on = !off[c.id];
+      if (on) { sub += t; count++; }
+      return { name: c.name, meta: c.meta, age: c.age, dot: c.old ? 'dot f' : 'dot', total: ng(t), checked: on,
+        box: 'border: 1px solid ' + (on ? '#0A0A0A' : '#E4E4E7') + '; border-radius: 12px; overflow: hidden; background: #FFFFFF',
+        toggle: () => this.setState({ off: Object.assign({}, off, { [c.id]: on }) }),
+        lines: c.lines.map(([what, wu, qty, amt]) => ({ what, wu, qty, amt: ng(amt) })) };
+    });
+    const vat = Math.round(sub * 0.075);
+    const g = this.state.generated;
+    return {
+      clients, count: String(count), sub: ng(sub), vat: ng(vat), total: ng(sub + vat), none: count === 0,
+      genLabel: count ? 'Draft ' + count + (count === 1 ? ' invoice' : ' invoices') : 'Pick a client',
+      generate: () => this.setState({ generated: count }),
+      generated: g > 0, genText: g + (g === 1 ? ' draft invoice created.' : ' draft invoices created.')
+    };
+  }
+}
+</script>
+</body>
+</html>

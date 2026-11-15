@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set up your business · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 18px;border-radius:8px;font:600 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 16px;border-radius:8px;font:500 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.fld{display:flex;flex-direction:column;gap:6px;font:500 13px Inter,sans-serif}
+.fld input,.fld select{height:44px;padding:0 12px;border:1px solid #E4E4E7;border-radius:8px;font:400 15px Inter,sans-serif;color:#0A0A0A;background:#FFFFFF;box-sizing:border-box;width:100%}
+.hint{font:400 12px Inter,sans-serif;color:#52525B}
+.tbl{width:100%;border-collapse:collapse;font:400 14px Inter,sans-serif;color:#0A0A0A}
+.tbl th{text-align:left;font-weight:600;padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 260px; box-sizing: border-box; padding: 24px 20px; background: #F4F4F5; display: flex; flex-direction: column; gap: 24px">
+    <a href="Landing.dc.html" aria-label="Back to Metalira Ops site" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <div style="display: flex; flex-direction: column; gap: 4px"><span class="lbl">Setup</span><span style="font: 700 22px 'Space Grotesk', sans-serif">{{doneCount}} of 5 done</span></div>
+    <ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px">
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+        <li><button type="button" onClick="{{s.go}}" aria-current="{{s.current}}" style="{{s.style}}"><span style="{{s.badge}}">{{s.mark}}</span>{{s.label}}</button></li>
+      </sc-for>
+    </ol>
+    <p style="margin: auto 0 0; font-size: 13px; color: #52525B">Everything here can be changed later in Settings.</p>
+  </aside>
+
+  <main style="flex: 999 1 640px; min-width: 0; box-sizing: border-box; padding: 40px 48px 56px; display: flex; flex-direction: column; gap: 24px; max-width: 1040px">
+
+    <sc-if value="{{is1}}" hint-placeholder-val="{{true}}">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span class="lbl">Step 1</span><h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif">Your plan</h1><p style="margin: 0; font-size: 15px; color: #52525B">You picked the plan with every feature. Pay nothing for 30 days; cancel any time.</p></div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px">
+        <sc-for list="{{plans}}" as="p" hint-placeholder-count="4">
+          <button type="button" onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" style="{{p.style}}"><span style="font: 700 18px 'Space Grotesk', sans-serif">{{p.name}}</span><span style="font-size: 13px; opacity: .85">{{p.price}}</span></button>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; padding: 20px; border: 1px solid #E4E4E7; border-radius: 12px">
+        <label class="fld" style="flex: 0 1 220px">Workers you expect each month<input type="number" value="{{workers}}" onChange="{{setWorkers}}" min="1"></label>
+        <div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 4px"><span style="font-size: 13px; color: #52525B">Estimated monthly bill</span><span style="font: 700 31px 'Space Grotesk', sans-serif">{{estimate}}</span><span style="font-size: 13px; color: #52525B">{{estimateNote}}</span></div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{is2}}" hint-placeholder-val="{{false}}">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span class="lbl">Step 2</span><h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif">Your business</h1><p style="margin: 0; font-size: 15px; color: #52525B">This goes on payslips, invoices and receipts.</p></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: center; padding: 20px; border: 1px dashed #A1A1AA; border-radius: 12px">
+        <sc-if value="{{hasLogo}}" hint-placeholder-val="{{false}}"><span aria-label="Your logo" style="width: 88px; height: 88px; border-radius: 12px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font: 700 28px 'Space Grotesk', sans-serif">AFS</span></sc-if>
+        <sc-if value="{{noLogo}}" hint-placeholder-val="{{true}}"><span aria-hidden="true" style="width: 88px; height: 88px; border-radius: 12px; background: #F4F4F5; display: flex; align-items: center; justify-content: center; color: #52525B"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"></path></svg></span></sc-if>
+        <div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 6px"><span style="font: 600 15px Inter, sans-serif">Business logo</span><span class="hint">PNG or SVG, square works best, under 1 MB.</span></div>
+        <button type="button" class="btn2" onClick="{{uploadLogo}}">{{logoLabel}}</button>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px">
+        <label class="fld">Registered business name<input value="Adebayo Facility Services Ltd"></label>
+        <label class="fld">Trading name<input value="Adebayo Facility Services"></label>
+        <label class="fld">CAC RC number<input value="RC 1234567"></label>
+        <label class="fld">Tax ID (TIN)<input value="12345678-0001"></label>
+        <label class="fld">Industry<select><option>Security and facility services</option><option>Cleaning</option><option>Staffing and outsourcing</option><option>Field sales and distribution</option><option>Logistics</option></select></label>
+        <label class="fld">Head office state<select><option>Lagos</option><option>FCT Abuja</option><option>Rivers</option><option>Oyo</option></select></label>
+        <label class="fld">Office address<input value="12 Admiralty Way, Lekki Phase 1"></label>
+        <label class="fld">Business phone<input value="0800 000 0000"></label>
+        <label class="fld">Pay day<select><option>Last working day of the month</option><option>25th of the month</option><option>Every Friday (weekly)</option></select></label>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{is3}}" hint-placeholder-val="{{false}}">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span class="lbl">Step 3</span><h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif">Invoices and getting paid</h1><p style="margin: 0; font-size: 15px; color: #52525B">Invoices go out from your email. Clients pay into accounts you own; Metalira never holds the money.</p></div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px">
+        <label class="fld">Invoice email<input type="email" value="billing@adebayofs.example"><span class="hint">Invoices are sent from this address, replies come here, and you get a copy of each one.</span></label>
+        <label class="fld">Invoice number starts at<input value="INV-0001"></label>
+        <label class="fld">Payment terms<select><option>30 days</option><option>14 days</option><option>On receipt</option></select></label>
+        <label class="fld">VAT<select><option>Registered · charge 7.5%</option><option>Not registered</option></select></label>
+      </div>
+      <h2 style="margin: 8px 0 0; font: 500 22px 'Space Grotesk', sans-serif">Where clients pay</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px">
+        <sc-for list="{{rails}}" as="r" hint-placeholder-count="3">
+          <div style="border: 1px solid #E4E4E7; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px">
+            <span style="font: 600 16px Inter, sans-serif">{{r.name}}</span>
+            <span style="font-size: 14px; color: #52525B; min-height: 40px">{{r.body}}</span>
+            <sc-if value="{{r.on}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px"><span class="dot f"></span>{{r.onText}}</span></sc-if>
+            <sc-if value="{{r.off}}" hint-placeholder-val="{{true}}"><button type="button" class="btn2" onClick="{{r.connect}}" style="align-self: flex-start">{{r.cta}}</button></sc-if>
+          </div>
+        </sc-for>
+      </div>
+      <label style="display: flex; align-items: center; gap: 10px; font-size: 15px"><input type="checkbox" checked="{{true}}" style="width: 18px; height: 18px; accent-color: #0A0A0A">Email a receipt to the client as soon as a payment is matched</label>
+    </sc-if>
+
+    <sc-if value="{{is4}}" hint-placeholder-val="{{false}}">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span class="lbl">Step 4</span><h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif">Clients and contracts</h1><p style="margin: 0; font-size: 15px; color: #52525B">The companies you service. Rates here price every invoice; the billing email is where those invoices go.</p></div>
+      <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+        <table class="tbl">
+          <thead><tr><th>Client</th><th>Billing email</th><th>Site</th><th>Project</th><th style="text-align: right">Rate</th></tr></thead>
+          <tbody>
+            <tr><td style="font-weight: 600">Coastline Logistics</td><td>accounts@coastline.example</td><td>Apapa Warehouse 3</td><td>Coastline guarding contract</td><td style="text-align: right">₦12,500 day · ₦15,000 night shift · overtime 1.5×</td></tr>
+            <tr><td style="font-weight: 600">Marina Holdings</td><td>ap@marinaholdings.example</td><td>VI Tower</td><td>VI Tower refit clean</td><td style="text-align: right">₦9,500 a cleaner shift</td></tr>
+            <tr><td style="font-weight: 600">Greenfield Estates</td><td>finance@greenfield.example</td><td>Lekki Estate Gate B</td><td>Greenfield guarding contract</td><td style="text-align: right">₦18,000 a supervisor shift</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display: flex; gap: 12px; flex-wrap: wrap"><button type="button" class="btn2">Add client</button><button type="button" class="btn2">Import clients from Excel</button></div>
+      <p style="margin: 0; font-size: 14px; color: #52525B">Client, project and site names in your employee file are matched to this list. New names become new clients you can finish later.</p>
+    </sc-if>
+
+    <sc-if value="{{is5}}" hint-placeholder-val="{{false}}">
+      <div style="display: flex; flex-direction: column; gap: 6px"><span class="lbl">Step 5</span><h1 style="margin: 0; font: 700 34px/1.1 'Space Grotesk', sans-serif">Bring in your employees</h1><p style="margin: 0; font-size: 15px; color: #52525B">One row per employee, with who they report to and which client and project they work on.</p></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px">
+        <div style="flex: 1 1 300px; border: 1px solid #E4E4E7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+          <span style="font: 600 16px Inter, sans-serif">1. Fill the template</span>
+          <span style="font-size: 14px; color: #52525B">32 columns: identity, job, department, line manager ID, client, project, site, shift, pay, bank, tax, pension and next of kin. The first 15 are enough to start; pay and bank columns are needed before the first payroll.</span>
+          <button type="button" class="btn2" style="align-self: flex-start">Download template (.csv)</button>
+        </div>
+        <div style="flex: 1 1 300px; border: 1.5px dashed #0A0A0A; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+          <span style="font: 600 16px Inter, sans-serif">2. Upload it</span>
+          <span style="font-size: 14px; color: #52525B">CSV or Excel. We check every row before anything is saved.</span>
+          <button type="button" class="btn" onClick="{{upload}}" style="align-self: flex-start">{{uploadLabel}}</button>
+        </div>
+      </div>
+
+      <sc-if value="{{uploaded}}" hint-placeholder-val="{{false}}">
+        <section aria-label="Import check" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px">
+          <div style="padding: 14px; background: #F4F4F5; border-radius: 12px"><div class="lbl">Rows</div><div style="font: 700 28px 'Space Grotesk', sans-serif">162</div></div>
+          <div style="padding: 14px; background: #F4F4F5; border-radius: 12px"><div class="lbl">Ready</div><div style="font: 700 28px 'Space Grotesk', sans-serif">{{ready}}</div></div>
+          <div style="padding: 14px; border: 1.5px solid #0A0A0A; border-radius: 12px"><div class="lbl" style="color: #0A0A0A">Need fixing</div><div style="font: 700 28px 'Space Grotesk', sans-serif">{{toFix}}</div></div>
+          <div style="padding: 14px; background: #F4F4F5; border-radius: 12px"><div class="lbl">Found</div><div style="font-size: 14px; line-height: 1.5">4 departments · 14 line managers · 3 clients · 4 projects · 5 sites</div></div>
+        </section>
+        <sc-if value="{{hasIssues}}" hint-placeholder-val="{{true}}">
+          <div style="border: 1px solid #E4E4E7; border-radius: 12px; overflow: hidden">
+            <sc-for list="{{issues}}" as="i" hint-placeholder-count="4">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #E4E4E7">
+                <span style="font: 600 14px Inter, sans-serif; flex: 0 0 70px">Row {{i.row}}</span>
+                <span style="flex: 1 1 300px; font-size: 14px">{{i.text}}</span>
+                <button type="button" class="btn2" onClick="{{i.fix}}" style="height: 36px">{{i.cta}}</button>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Employee</th><th>Job</th><th>Line manager</th><th>Client · project</th><th>Site</th><th>Pay</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight: 600">Kola Adebayo</td><td>Site supervisor</td><td>Emeka Nwankwo</td><td>Coastline Logistics · guarding</td><td>Apapa Warehouse 3</td><td>₦225,000 a month</td></tr>
+              <tr><td style="font-weight: 600">Musa Ibrahim</td><td>Security guard</td><td>Kola Adebayo</td><td>Coastline Logistics · guarding</td><td>Apapa Warehouse 3</td><td>₦120,000 a month</td></tr>
+              <tr><td style="font-weight: 600">Chiamaka Obi</td><td>Cleaner</td><td>Blessing Udo</td><td>Marina Holdings · refit clean</td><td>VI Tower</td><td>₦85,000 a month</td></tr>
+              <tr><td style="font-weight: 600">Tunde Bakare</td><td>Supervisor</td><td>Emeka Nwankwo</td><td>Greenfield Estates · guarding</td><td>Lekki Estate Gate B</td><td>₦210,000 a month</td></tr>
+              <tr><td style="font-weight: 600">Kunle Ade</td><td>Relief guard</td><td>Kola Adebayo</td><td>Coastline Logistics · guarding</td><td>Apapa Warehouse 3</td><td>₦8,000 a day</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <label style="display: flex; align-items: center; gap: 10px; font-size: 15px"><input type="checkbox" checked="{{true}}" style="width: 18px; height: 18px; accent-color: #0A0A0A">Text each employee a link to the worker app after import</label>
+      </sc-if>
+    </sc-if>
+
+    <sc-if value="{{is6}}" hint-placeholder-val="{{false}}">
+      <div style="display: flex; flex-direction: column; gap: 14px; max-width: 680px">
+        <span aria-hidden="true" style="width: 72px; height: 72px; border-radius: 16px; background: #0A0A0A; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font: 700 24px 'Space Grotesk', sans-serif">AFS</span>
+        <h1 style="margin: 0; font: 700 39px/1.1 'Space Grotesk', sans-serif">Adebayo Facility Services is set up</h1>
+        <p style="margin: 0; font-size: 17px; color: #52525B">{{imported}} employees imported and mapped to 14 line managers, 3 clients and 4 projects. Invoices go out from billing@adebayofs.example.</p>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px">
+          <a class="btn" href="Simulate.dc.html">Simulate October: payroll to paid invoice</a>
+          <a class="btn2" href="Main.dc.html">Go to the dashboard</a>
+          <a class="btn2" href="People.dc.html">Review employee mapping</a>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{notDone}}" hint-placeholder-val="{{true}}">
+      <div style="display: flex; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid #E4E4E7">
+        <button type="button" class="btn2" onClick="{{back}}">Back</button>
+        <button type="button" class="btn" onClick="{{next}}" disabled="{{nextDisabled}}">{{nextLabel}}</button>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { step: 1, plan: 3, workers: 162, logo: false, rails: { paystack: false, flutter: false, bank: false }, uploaded: false, fixed: {} }; }
+  renderVals() {
+    const s = this.state;
+    const ng = (n) => '₦' + Math.round(n).toLocaleString('en-NG');
+    const labels = ['Plan','Business details','Invoices and payments','Clients and contracts','Employees','Ready'];
+    const steps = labels.map((label, i) => {
+      const n = i + 1, cur = n === s.step, done = n < s.step;
+      return { label, mark: done ? '✓' : String(n), current: cur ? 'step' : 'false', go: () => this.setState({ step: n }),
+        style: 'display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 10px; border: 0; border-radius: 8px; cursor: pointer; text-align: left; font: 500 15px Inter, sans-serif; color: #0A0A0A; ' + (cur ? 'background: #FFFFFF; box-shadow: 0 0 0 1px #E4E4E7' : 'background: transparent'),
+        badge: 'width: 26px; height: 26px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font: 700 13px Space Grotesk, sans-serif; flex: none; ' + (done || cur ? 'background: #0A0A0A; color: #FFFFFF' : 'border: 1.5px solid #A1A1AA; color: #52525B') };
+    });
+    const planDefs = [['Starter','Free · up to 10 workers', () => 0],['Workforce','₦2,000 per worker', (w) => 2000 * w],['Business','₦50,000 a month', () => 50000],['Ops Suite','₦1,600 per worker + ₦40,000', (w) => 1600 * w + 40000]];
+    const plans = planDefs.map(([name, price], i) => ({ name, price, pressed: i === s.plan ? 'true' : 'false', pick: () => this.setState({ plan: i }),
+      style: 'display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 16px; border-radius: 12px; cursor: pointer; text-align: left; font-family: Inter, sans-serif; ' +
+        (i === s.plan ? 'background: #0A0A0A; color: #FFFFFF; border: 1px solid #0A0A0A' : 'background: #FFFFFF; color: #0A0A0A; border: 1px solid #E4E4E7') }));
+    const w = Math.max(1, +s.workers || 0);
+    const est = planDefs[s.plan][2](w);
+    const r = s.rails;
+    const setRail = (k) => () => this.setState({ rails: Object.assign({}, r, { [k]: true }) });
+    const rails = [
+      { name: 'Paystack', body: 'Each client gets its own account number. Transfers into it match their invoices automatically.', cta: 'Connect Paystack', onText: 'Connected · Wema Bank account numbers', k: 'paystack' },
+      { name: 'Flutterwave', body: 'Add a pay-online link to every invoice for cards, transfers and USSD.', cta: 'Connect Flutterwave', onText: 'Connected · payment links on', k: 'flutter' },
+      { name: 'Bank account', body: 'For clients who pay by plain transfer. Upload statements to match payments.', cta: 'Add bank account', onText: 'GTBank ••••4410 · ADEBAYO FACILITY SERVICES LTD', k: 'bank' }
+    ].map(x => ({ name: x.name, body: x.body, cta: x.cta, onText: x.onText, on: r[x.k], off: !r[x.k], connect: setRail(x.k) }));
+    const issueDefs = [
+      [23, 'Line manager ID MO-0090 is not in the file or in your account.', 'Set to Kola Adebayo'],
+      [57, 'Bank account number has 9 digits; NUBAN numbers have 10.', 'Mark for HR to fix'],
+      [88, 'Phone 0803 ••• 1120 is also on row 12. Each worker needs their own phone to clock in.', 'Use supervisor clock-in'],
+      [140, 'Client "Coastline Logistic" not found.', 'Match to Coastline Logistics']];
+    const issues = issueDefs.filter(([row]) => !s.fixed[row]).map(([row, text, cta]) => ({ row, text, cta, fix: () => this.setState({ fixed: Object.assign({}, s.fixed, { [row]: true }) }) }));
+    const toFix = issues.length;
+    const doneCount = Math.min(5, s.step - 1);
+    return {
+      steps, plans, doneCount, workers: s.workers,
+      setWorkers: (e) => this.setState({ workers: e.target.value }),
+      estimate: ng(est), estimateNote: s.plan === 3 ? w + ' active workers × ₦1,600 + ₦40,000 platform fee, before VAT' : 'Before VAT',
+      is1: s.step === 1, is2: s.step === 2, is3: s.step === 3, is4: s.step === 4, is5: s.step === 5, is6: s.step === 6, notDone: s.step < 6,
+      hasLogo: s.logo, noLogo: !s.logo, logoLabel: s.logo ? 'Replace logo' : 'Upload logo', uploadLogo: () => this.setState({ logo: true }),
+      rails,
+      uploaded: s.uploaded, uploadLabel: s.uploaded ? 'employees_oct.csv uploaded' : 'Upload employees_oct.csv', upload: () => this.setState({ uploaded: true }),
+      issues, toFix, hasIssues: toFix > 0, ready: 162 - toFix, imported: 162 - toFix,
+      back: () => this.setState({ step: Math.max(1, s.step - 1) }),
+      next: () => this.setState({ step: Math.min(6, s.step + 1) }),
+      nextDisabled: s.step === 5 && !s.uploaded,
+      nextLabel: s.step === 5 ? (s.uploaded ? 'Import ' + (162 - toFix) + ' employees' : 'Upload a file first') : 'Continue'
+    };
+  }
+}
+</script>
+</body>
+</html>

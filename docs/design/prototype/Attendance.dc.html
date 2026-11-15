@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Live attendance · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:#0A0A0A;text-decoration:none;font:500 14px Inter,sans-serif}
+.nav a:hover{background:#F4F4F5;color:#0A0A0A}
+.nav a.on{background:#F4F4F5;color:#6D4CFF}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.tbl{width:100%;border-collapse:collapse;font:400 14px Inter,sans-serif;color:#0A0A0A}
+.tbl th{text-align:left;font-weight:600;padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.tbl td{padding:12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.num{text-align:right !important;font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:8px;font:600 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;font:500 13px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 220px; box-sizing: border-box; padding: 20px 12px; border-right: 1px solid #E4E4E7; display: flex; flex-direction: column; gap: 16px">
+    <a href="Main.dc.html" aria-label="Metalira Ops home" style="display: flex; align-items: center; gap: 10px; padding: 4px 12px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif; letter-spacing: -0.01em">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <nav class="nav" aria-label="Main" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="Main.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>Home</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Workforce</div>
+      <a href="Roster.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Roster</a>
+      <a class="on" href="Attendance.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>Live attendance</a>
+      <a href="Timesheets.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>Timesheets</a>
+      <a href="People.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>People</a>
+      <a href="Team.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m16 11 2 2 4-4"></path></svg>My team</a>
+      <a href="Leave.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M9 16h6"></path></svg>Leave</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Payroll</div>
+      <a href="Payroll.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path></svg>Payroll run</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Business</div>
+      <a href="Projects.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path><path d="M8 10v4M12 10v2M16 10v6"></path></svg>Projects</a>
+      <a href="Unbilled.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6M16 13H8M16 17H8"></path></svg>Unbilled work</a>
+      <a href="Collections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>Collections</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Revenue</div>
+      <a href="Revenue.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"></path><path d="M16 7h6v6"></path></svg>Revenue</a>
+    </nav>
+  </aside>
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 32px; border-bottom: 1px solid #E4E4E7">
+      <span class="lbl">Live · updated 09:41 · Sample data</span>
+      <span style="flex: 1 1 auto"></span>
+      <label style="display: flex"><span class="sr">Site</span><select class="btn2" style="appearance: auto; height: 40px"><option>All sites</option><option>Apapa Warehouse 3</option><option>Lekki Estate Gate B</option><option>Ikeja City Mall</option><option>VI Tower</option><option>Yaba Tech Hub</option></select></label>
+    </header>
+    <main style="padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 24px; max-width: 1240px; box-sizing: border-box; width: 100%">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif; letter-spacing: -0.015em">118 on shift now</h1>
+        <p style="margin: 0; font-size: 15px; color: #52525B">5 sites · 3 punches waiting to sync from Apapa</p>
+      </div>
+      <div role="tablist" aria-label="Attendance status" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px">
+        <sc-for list="{{counters}}" as="c" hint-placeholder-count="6">
+          <button type="button" role="tab" aria-selected="{{c.sel}}" onClick="{{c.pick}}" style="{{c.style}}">
+            <span class="lbl" style="color: inherit">{{c.label}}</span>
+            <span style="font: 700 31px/1.1 'Space Grotesk', sans-serif">{{c.n}}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <section aria-labelledby="listh" style="display: flex; flex-direction: column; gap: 12px">
+        <h2 id="listh" style="margin: 0; font: 500 25px/1.2 'Space Grotesk', sans-serif; letter-spacing: -0.01em">{{listTitle}}</h2>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Worker</th><th>Site · post</th><th>Shift</th><th>Last punch</th><th>Status</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody>
+              <sc-for list="{{people}}" as="p" hint-placeholder-count="4">
+                <tr>
+                  <td style="font-weight: 600">{{p.name}}</td>
+                  <td>{{p.where}}</td>
+                  <td style="color: #52525B">{{p.shift}}</td>
+                  <td style="color: #52525B">{{p.punch}}</td>
+                  <td><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="{{p.dot}}"></span>{{p.status}}</span></td>
+                  <td style="text-align: right">
+                    <sc-if value="{{p.actions}}" hint-placeholder-val="{{true}}">
+                      <span style="display: inline-flex; gap: 8px">
+                        <a class="btn2" href="tel:+2348000000000">Call</a>
+                        <a class="btn2" href="https://wa.me/2348000000000">WhatsApp</a>
+                        <button type="button" class="btn2" onClick="{{p.replace}}" style="border-color: #0A0A0A">Send replacement</button>
+                      </span>
+                    </sc-if>
+                  </td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="bysite" style="display: flex; flex-direction: column; gap: 12px">
+        <h2 id="bysite" style="margin: 0; font: 500 25px/1.2 'Space Grotesk', sans-serif; letter-spacing: -0.01em">By site</h2>
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Site</th><th class="num">Required now</th><th class="num">Clocked in</th><th class="num">Late</th><th class="num">No-show</th><th>Last sync</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight: 600">Apapa Warehouse 3</td><td class="num">18</td><td class="num">14</td><td class="num">2</td><td class="num">2</td><td><span style="display: inline-flex; align-items: center; gap: 8px"><span class="dot"></span>3 punches waiting · 6 min</span></td></tr>
+              <tr><td style="font-weight: 600">Lekki Estate Gate B</td><td class="num">16</td><td class="num">14</td><td class="num">2</td><td class="num">0</td><td style="color: #52525B">1 min ago</td></tr>
+              <tr><td style="font-weight: 600">Ikeja City Mall</td><td class="num">34</td><td class="num">33</td><td class="num">1</td><td class="num">0</td><td style="color: #52525B">Just now</td></tr>
+              <tr><td style="font-weight: 600">VI Tower</td><td class="num">38</td><td class="num">38</td><td class="num">0</td><td class="num">0</td><td style="color: #52525B">2 min ago</td></tr>
+              <tr><td style="font-weight: 600">Yaba Tech Hub</td><td class="num">12</td><td class="num">12</td><td class="num">0</td><td class="num">0</td><td style="color: #52525B">Just now</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">Clocked in includes 6 workers on break. Punches made offline show here once the phone reconnects; their time is checked against the server clock.</p>
+      </section>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { filter: 'late', replaced: {} }; }
+  renderVals() {
+    const sel = this.state.filter;
+    const defs = [['onsite','On site',105],['break','On break',6],['late','Late',5],['noshow','No-show',2],['upcoming','Starting in 2 h',18],['out','Clocked out today',41]];
+    const counters = defs.map(([id,label,n]) => ({ label, n, sel: id === sel ? 'true' : 'false', pick: () => this.setState({ filter: id }),
+      style: 'display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px 16px; border-radius: 12px; cursor: pointer; text-align: left; font-family: Inter, sans-serif; ' +
+        (id === sel ? 'background: #0A0A0A; color: #FFFFFF; border: 1px solid #0A0A0A' : 'background: #FFFFFF; color: #0A0A0A; border: 1px solid #E4E4E7') }));
+    const lists = {
+      late: [['Daniel Okon','Apapa Warehouse 3 · Gate A','06:00–18:00','None','Late 22 min'],['Halima Bello','Apapa Warehouse 3 · Floor','07:00–19:00','None','Late 14 min'],['Chidi Eze','Lekki Estate · Gate B','08:00–20:00','None','Late 9 min'],['Rita Ojo','Lekki Estate · Patrol','08:00–20:00','None','Late 6 min'],['Ade Lawal','Ikeja City Mall · Car park','09:00–17:00','None','Late 4 min']],
+      noshow: [['Sule Musa','Apapa Warehouse 3 · Patrol','06:00–18:00','None','No-show'],['Bayo Kareem','Apapa Warehouse 3 · Gate A','06:00–18:00','Called in sick 05:40','No-show']],
+      onsite: [['Ngozi Eze','Apapa Warehouse 3 · Floor','07:00–19:00','06:52 · inside site','On site'],['Peter Ade','Lekki Estate · Gate B','06:00–18:00','05:56 · inside site','On site'],['Amaka Udo','VI Tower · Floor 12','06:00–14:00','05:58 · by supervisor','On site']],
+      break: [['Joy Effiong','Ikeja City Mall · Food court','07:00–15:00','09:30 break start','On break']],
+      upcoming: [['Yusuf Bello','Apapa Warehouse 3 · Gate A','11:00–23:00','—','Starts 11:00'],['Ifeoma Okafor','VI Tower · Lobby','11:00–19:00','—','Starts 11:00']],
+      out: [['Ibrahim Sani','Apapa Warehouse 3 · Gate A','18:00–06:00','06:04 · clock-out','Clocked out']]
+    };
+    const r = this.state.replaced;
+    const needsAction = sel === 'late' || sel === 'noshow';
+    const people = lists[sel].map(([name, where, shift, punch, status]) => ({
+      name, where, shift, punch,
+      status: r[name] ? 'Replacement sent' : status,
+      dot: (needsAction && !r[name]) ? 'dot f' : 'dot',
+      actions: needsAction && !r[name],
+      replace: () => this.setState({ replaced: Object.assign({}, r, { [name]: true }) })
+    }));
+    const titles = { late: 'Late now', noshow: 'No-shows', onsite: 'On site (showing 3 of 105)', break: 'On break (showing 1 of 6)', upcoming: 'Starting in the next 2 hours (showing 2 of 18)', out: 'Clocked out today (showing 1 of 41)' };
+    return { counters, people, listTitle: titles[sel] };
+  }
+}
+</script>
+</body>
+</html>

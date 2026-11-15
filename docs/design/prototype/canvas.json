@@ -1,0 +1,42 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-10-30T09:50:00Z"},
+  "title": "Metalira Ops Phase 1 prototype",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Landing.dc.html": {"x": 0, "y": -3300, "w": 1440, "h": 2600, "title": "Landing page and pricing", "expand": "fill", "is_interactive": true},
+    "Setup.dc.html": {"x": 1520, "y": -3300, "w": 1440, "h": 1200, "title": "Business setup and employee import", "expand": "fill", "is_interactive": true},
+    "Simulate.dc.html": {"x": 3040, "y": -3300, "w": 1440, "h": 1400, "title": "Month-end simulation · payroll to paid invoice", "expand": "fill", "is_interactive": true},
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 1040, "title": "M1 · Home dashboard", "expand": "fill", "is_interactive": true},
+    "Roster.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 1040, "title": "W4 · Roster", "expand": "fill", "is_interactive": true},
+    "Attendance.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 1040, "title": "W6 · Live attendance", "expand": "fill", "is_interactive": true},
+    "Timesheets.dc.html": {"x": 4560, "y": 0, "w": 1440, "h": 1040, "title": "W7 · Timesheet approvals", "expand": "fill", "is_interactive": true},
+    "Payroll.dc.html": {"x": 0, "y": 1300, "w": 1440, "h": 1040, "title": "P2 · Payroll run", "expand": "fill", "is_interactive": true},
+    "Unbilled.dc.html": {"x": 1520, "y": 1300, "w": 1440, "h": 1040, "title": "B4–B5 · Unbilled work to invoices", "expand": "fill", "is_interactive": true},
+    "Collections.dc.html": {"x": 3040, "y": 1300, "w": 1440, "h": 1040, "title": "B7 · Collections", "expand": "fill", "is_interactive": true},
+    "Revenue.dc.html": {"x": 4560, "y": 1300, "w": 1440, "h": 1040, "title": "R1–R2 · Revenue and site P&L", "expand": "fill", "is_interactive": true},
+    "People.dc.html": {"x": 0, "y": 2900, "w": 1440, "h": 1040, "title": "Employee mapping", "expand": "fill", "is_interactive": true},
+    "Team.dc.html": {"x": 1520, "y": 2900, "w": 1440, "h": 1040, "title": "Line manager · My team", "expand": "fill", "is_interactive": true},
+    "Leave.dc.html": {"x": 3040, "y": 2900, "w": 1440, "h": 1040, "title": "Leave management", "expand": "fill", "is_interactive": true},
+    "Projects.dc.html": {"x": 4560, "y": 2900, "w": 1440, "h": 1040, "title": "Projects · phases, KPIs, reviews", "expand": "fill", "is_interactive": true},
+    "SupHome.dc.html": {"x": 0, "y": 4500, "w": 390, "h": 844, "title": "S-1 · Supervisor home", "is_interactive": true, "radius": 32},
+    "SupCrew.dc.html": {"x": 470, "y": 4500, "w": 390, "h": 844, "title": "S-3 · Crew clock-in", "is_interactive": true, "radius": 32},
+    "WkHome.dc.html": {"x": 1180, "y": 4500, "w": 390, "h": 844, "title": "WK-1 · Worker home", "is_interactive": true, "radius": 32},
+    "WkClock.dc.html": {"x": 1650, "y": 4500, "w": 390, "h": 844, "title": "WK-2 · Clock-in flow", "is_interactive": true, "radius": 32},
+    "WkProfile.dc.html": {"x": 2120, "y": 4500, "w": 390, "h": 844, "title": "Worker · My profile and queries", "is_interactive": true, "radius": 32},
+    "WkLeave.dc.html": {"x": 2590, "y": 4500, "w": 390, "h": 844, "title": "Worker · Leave", "is_interactive": true, "radius": 32},
+    "WkPayslip.dc.html": {"x": 3060, "y": 4500, "w": 390, "h": 844, "title": "WK-7 · Payslip", "is_interactive": true, "radius": 32}
+  },
+  "order": ["Landing.dc.html", "Setup.dc.html", "Simulate.dc.html", "Main.dc.html", "Roster.dc.html", "Attendance.dc.html", "Timesheets.dc.html", "Payroll.dc.html", "Unbilled.dc.html", "Collections.dc.html", "Revenue.dc.html", "People.dc.html", "Team.dc.html", "Leave.dc.html", "Projects.dc.html", "SupHome.dc.html", "SupCrew.dc.html", "WkHome.dc.html", "WkClock.dc.html", "WkProfile.dc.html", "WkLeave.dc.html", "WkPayslip.dc.html"],
+  "notes": {
+    "t_onboard": {"x": 0, "y": -3600, "text": "Start here: sign up, set up, simulate a month", "kind": "title1", "maxW": 4480},
+    "t_manager": {"x": 0, "y": -300, "text": "Manager web app", "kind": "title1", "maxW": 6000},
+    "t_people": {"x": 0, "y": 2600, "text": "People, teams, leave and projects", "kind": "title1", "maxW": 6000},
+    "t_supervisor": {"x": 0, "y": 4200, "text": "Supervisor app", "kind": "title1", "maxW": 860},
+    "t_worker": {"x": 1180, "y": 4200, "text": "Worker app", "kind": "title1", "maxW": 2270}
+  },
+  "designSystems": [
+    {"title": "Metalira Ops", "namespace": "metalira-ops", "artifact": "https://claude.ai/code/artifact/55995e93-5417-4e9b-b96f-1bbb9ec6cbac", "version": "1793348787-b03b", "copiedAt": "2026-10-30T09:50:00Z"}
+  ]
+}

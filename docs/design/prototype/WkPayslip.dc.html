@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Payslip · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.ln{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #E4E4E7;font-size:15px}
+.ln span:last-child{font-variant-numeric:tabular-nums;white-space:nowrap}
+a:focus-visible,button:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF; overflow: hidden">
+  <div style="display: flex; align-items: center; gap: 8px; padding: 12px 8px 4px">
+    <a href="WkHome.dc.html" aria-label="Back" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #0A0A0A"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></a>
+    <span style="font: 700 20px 'Space Grotesk', sans-serif">Payslip</span>
+    <span style="flex: 1 1 auto"></span>
+    <button type="button" onClick="{{toggle}}" style="height: 40px; padding: 0 12px; margin-right: 8px; border: 1px solid #E4E4E7; border-radius: 8px; background: #FFFFFF; font: 500 14px Inter, sans-serif; color: #0A0A0A; cursor: pointer">{{monthLabel}}</button>
+  </div>
+  <div style="flex: 1 1 auto; overflow-y: auto; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 16px">
+    <section aria-label="Net pay" style="padding: 20px; border-radius: 12px; background: #0A0A0A; color: #FFFFFF; display: flex; flex-direction: column; gap: 6px">
+      <span style="font: 500 12px 'Space Grotesk', sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #A1A1AA">You received · {{month}}</span>
+      <span style="font: 700 44px/1.05 'Space Grotesk', sans-serif; font-variant-numeric: tabular-nums">{{net}}</span>
+      <span style="font-size: 14px; color: #D4D4D8">Paid to GTBank ••••7712 on {{paid}}</span>
+    </section>
+    <section aria-labelledby="earn">
+      <h2 id="earn" class="lbl" style="margin: 0 0 4px">What you earned</h2>
+      <div class="ln"><span>Basic</span><span>₦60,000</span></div>
+      <div class="ln"><span>Housing</span><span>₦36,000</span></div>
+      <div class="ln"><span>Transport</span><span>₦24,000</span></div>
+      <div class="ln" style="font-weight: 600; border-bottom: 0"><span>Gross pay</span><span>₦120,000</span></div>
+    </section>
+    <section aria-labelledby="ded">
+      <h2 id="ded" class="lbl" style="margin: 0 0 4px">Taken out</h2>
+      <div class="ln"><span>Income tax (PAYE)</span><span>−₦5,660</span></div>
+      <div class="ln"><span>Your pension, 8%</span><span>−₦9,600</span></div>
+      <div class="ln" style="font-weight: 600; border-bottom: 0"><span>Total taken out</span><span>−₦15,260</span></div>
+    </section>
+    <section aria-labelledby="emp" style="padding: 14px 16px; border-radius: 12px; background: #F4F4F5; display: flex; flex-direction: column; gap: 6px">
+      <h2 id="emp" class="lbl" style="margin: 0">Your employer also paid</h2>
+      <span style="display: flex; justify-content: space-between; font-size: 15px"><span>Pension, 10%</span><span>₦12,000</span></span>
+      <span style="font-size: 13px; color: #52525B">Your pension goes to Stanbic IBTC Pension · RSA PEN••••4421. Proof of payment is on file for October.</span>
+    </section>
+    <section aria-labelledby="ytd">
+      <h2 id="ytd" class="lbl" style="margin: 0 0 4px">This year so far</h2>
+      <div class="ln"><span>Gross pay</span><span>₦1,200,000</span></div>
+      <div class="ln"><span>Income tax</span><span>₦56,600</span></div>
+      <div class="ln" style="border-bottom: 0"><span>Your pension</span><span>₦96,000</span></div>
+    </section>
+    <p style="margin: 0; font-size: 13px; color: #52525B">Tax uses your rent declaration of ₦360,000 a year, which lowers your tax by about ₦900 a month.</p>
+  </div>
+  <div style="padding: 12px 16px 16px; border-top: 1px solid #E4E4E7; display: grid; grid-template-columns: 1fr 1fr; gap: 10px">
+    <button type="button" style="height: 52px; border-radius: 12px; border: 0; background: #0A0A0A; color: #FFFFFF; font: 600 16px Inter, sans-serif; cursor: pointer">Download PDF</button>
+    <button type="button" style="height: 52px; border-radius: 12px; border: 1px solid #0A0A0A; background: #FFFFFF; color: #0A0A0A; font: 600 16px Inter, sans-serif; cursor: pointer">Ask HR</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { oct: true }; }
+  renderVals() {
+    const oct = this.state.oct;
+    return { month: oct ? 'October 2026' : 'September 2026', paid: oct ? '31 Oct' : '30 Sep', net: '₦104,740',
+      monthLabel: oct ? 'September' : 'October', toggle: () => this.setState({ oct: !oct }) };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# next.js
+.next/
+out/
+next-env.d.ts
+
+# build and test output
+coverage/
+playwright-report/
+test-results/
+blob-report/
+*.tsbuildinfo
+
+# env files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# platform
+.vercel/
+supabase/.temp/
+supabase/.branches/
+.sentryclirc
+
+# raw design source files (illustrations are composed into public/illustrations/)
+Flat Assets/
+*.fig
+*.sketch
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.log

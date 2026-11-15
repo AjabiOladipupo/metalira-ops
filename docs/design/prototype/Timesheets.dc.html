@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Timesheet approvals · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:#0A0A0A;text-decoration:none;font:500 14px Inter,sans-serif}
+.nav a:hover{background:#F4F4F5;color:#0A0A0A}
+.nav a.on{background:#F4F4F5;color:#6D4CFF}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border-radius:8px;font:600 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 14px;border-radius:8px;font:500 14px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:4px;border:1px solid #0A0A0A;font:500 12px Inter,sans-serif;white-space:nowrap}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 220px; box-sizing: border-box; padding: 20px 12px; border-right: 1px solid #E4E4E7; display: flex; flex-direction: column; gap: 16px">
+    <a href="Main.dc.html" aria-label="Metalira Ops home" style="display: flex; align-items: center; gap: 10px; padding: 4px 12px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif; letter-spacing: -0.01em">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <nav class="nav" aria-label="Main" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="Main.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>Home</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Workforce</div>
+      <a href="Roster.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Roster</a>
+      <a href="Attendance.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>Live attendance</a>
+      <a class="on" href="Timesheets.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>Timesheets</a>
+      <a href="People.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>People</a>
+      <a href="Team.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m16 11 2 2 4-4"></path></svg>My team</a>
+      <a href="Leave.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M9 16h6"></path></svg>Leave</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Payroll</div>
+      <a href="Payroll.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path></svg>Payroll run</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Business</div>
+      <a href="Projects.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path><path d="M8 10v4M12 10v2M16 10v6"></path></svg>Projects</a>
+      <a href="Unbilled.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6M16 13H8M16 17H8"></path></svg>Unbilled work</a>
+      <a href="Collections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>Collections</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Revenue</div>
+      <a href="Revenue.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"></path><path d="M16 7h6v6"></path></svg>Revenue</a>
+    </nav>
+  </aside>
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 32px; border-bottom: 1px solid #E4E4E7">
+      <span class="lbl">Period 26 Oct – 1 Nov · Sample data</span>
+      <span style="flex: 1 1 auto"></span>
+      <button type="button" class="btn" onClick="{{approveClean}}">{{cleanLabel}}</button>
+    </header>
+    <main style="padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 20px; box-sizing: border-box; width: 100%">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif; letter-spacing: -0.015em">{{headline}}</h1>
+        <p style="margin: 0; font-size: 15px; color: #52525B">Clean timesheets match the roster, sit inside the site and stay under overtime. Flagged ones need a decision. Approved hours feed payroll and become billable Work Units.</p>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+        <section aria-label="Flagged timesheets" style="flex: 999 1 520px; min-width: 0; border: 1px solid #E4E4E7; border-radius: 12px; overflow: hidden">
+          <sc-for list="{{items}}" as="t" hint-placeholder-count="5">
+            <button type="button" onClick="{{t.pick}}" aria-pressed="{{t.pressed}}" style="{{t.style}}">
+              <span style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0">
+                <span style="font: 600 15px Inter, sans-serif">{{t.name}}</span>
+                <span style="font-size: 13px; color: #52525B">{{t.where}} · {{t.when}}</span>
+                <span style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px"><span class="chip">{{t.flag}}</span></span>
+              </span>
+              <span style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex: none">
+                <span style="font: 600 15px Inter, sans-serif; font-variant-numeric: tabular-nums">{{t.hours}}</span>
+                <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px"><span class="{{t.dot}}"></span>{{t.status}}</span>
+              </span>
+            </button>
+          </sc-for>
+        </section>
+
+        <section aria-labelledby="det" style="flex: 1 1 380px; border: 1px solid #E4E4E7; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px; box-sizing: border-box">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <span class="lbl">{{d.workUnit}}</span>
+            <h2 id="det" style="margin: 0; font: 500 25px/1.2 'Space Grotesk', sans-serif">{{d.name}}</h2>
+            <span style="font-size: 14px; color: #52525B">{{d.where}} · {{d.when}}</span>
+          </div>
+          <p style="margin: 0; padding: 12px; background: #F4F4F5; border-radius: 8px; font-size: 14px"><b>{{d.flag}}.</b> {{d.why}}</p>
+          <div style="display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap">
+            <div style="position: relative; width: 200px; height: 150px; border-radius: 8px; border: 1px solid #E4E4E7; background: #FFFFFF; overflow: hidden; flex: none" role="img" aria-label="{{d.mapLabel}}">
+              <div style="position: absolute; left: 30px; top: 25px; width: 100px; height: 100px; border-radius: 999px; border: 1.5px dashed #52525B; box-sizing: border-box"></div>
+              <div style="position: absolute; left: 76px; top: 71px; width: 8px; height: 8px; border-radius: 2px; background: #52525B"></div>
+              <div style="position: absolute; left: {{d.px}}; top: {{d.py}}; width: 14px; height: 14px; border-radius: 999px; background: #0A0A0A; border: 2px solid #FFFFFF; box-sizing: border-box"></div>
+              <span style="position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: #52525B">Site radius 150 m</span>
+            </div>
+            <div style="flex: 1 1 120px; min-height: 150px; border-radius: 8px; background: #F4F4F5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #52525B; font-size: 13px">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>
+              {{d.selfie}}
+            </div>
+          </div>
+          <dl style="margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 14px">
+            <dt style="color: #52525B">Clock in</dt><dd style="margin: 0">{{d.in}}</dd>
+            <dt style="color: #52525B">Clock out</dt><dd style="margin: 0">{{d.out}}</dd>
+            <dt style="color: #52525B">Distance</dt><dd style="margin: 0">{{d.dist}}</dd>
+            <dt style="color: #52525B">Device vs server time</dt><dd style="margin: 0">{{d.clock}}</dd>
+            <dt style="color: #52525B">Method</dt><dd style="margin: 0">{{d.method}}</dd>
+            <dt style="color: #52525B">Pay · bill rate</dt><dd style="margin: 0">{{d.rates}}</dd>
+          </dl>
+          <sc-if value="{{d.open}}" hint-placeholder-val="{{true}}">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px">
+              <button type="button" class="btn" onClick="{{approve}}" style="flex: 1 1 120px">Approve</button>
+              <button type="button" class="btn2" onClick="{{adjust}}" style="flex: 1 1 120px">Adjust hours</button>
+              <button type="button" class="btn2" onClick="{{reject}}" style="flex: 1 1 120px">Reject</button>
+            </div>
+            <p style="margin: 0; font-size: 13px; color: #52525B">Adjusting adds a correction with your reason. The original punches stay on record.</p>
+          </sc-if>
+          <sc-if value="{{d.done}}" hint-placeholder-val="{{false}}">
+            <p role="status" style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600"><span class="dot f"></span>{{d.status}} by you just now.</p>
+          </sc-if>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { sel: 0, decided: {}, clean: false }; }
+  renderVals() {
+    const data = [
+      { name: 'Halima Bello', where: 'Apapa Warehouse 3 · Floor', when: 'Thu 29 Oct', hours: '11.8 h', flag: 'Outside site', why: 'Clock-in was 620 m from the site with ±45 m accuracy. She sent it with the reason "Gate locked, waited at the junction".', in: '07:14 · selfie taken', out: '19:02 · inside site', dist: '620 m at clock-in, 18 m at clock-out', clock: 'Matched', method: 'Own phone', rates: '₦8,000 · ₦12,500 a shift', wu: 'WU-1042 · Floor day shift', px: '170px', py: '20px', selfie: 'Selfie matched' },
+      { name: 'Amaka Udo', where: 'VI Tower · Floor 12', when: 'Thu 29 Oct', hours: '8.1 h', flag: 'By supervisor', why: 'Tunde Bakare clocked in a crew of 12 on his phone. Amaka has no smartphone, so there is no selfie.', in: '05:58 · group photo', out: '14:03 · by supervisor', dist: '12 m (supervisor phone)', clock: 'Matched', method: 'Supervisor crew clock-in', rates: '₦6,000 · ₦9,500 a shift', wu: 'WU-1077 · Floor 12 cleaning', px: '84px', py: '64px', selfie: 'Group photo on file' },
+      { name: 'Ibrahim Sani', where: 'Apapa Warehouse 3 · Gate A', when: 'Wed 28 – Thu 29 Oct', hours: '12.1 h', flag: 'Overtime', why: 'This shift takes him to 52 hours this week, 12 over the threshold. The contract allows billing night overtime at 1.5×.', in: '18:00 · selfie taken', out: '06:04 · inside site', dist: '22 m', clock: 'Matched', method: 'Own phone', rates: '₦9,500 · ₦15,000 a shift', wu: 'WU-1038 · Gate A night', px: '90px', py: '60px', selfie: 'Selfie matched' },
+      { name: 'Chidi Eze', where: 'Lekki Estate · Gate B', when: 'Thu 29 Oct', hours: '11.9 h', flag: 'No clock-out', why: 'He did not clock out. The system closed the shift at the rostered end, 20:00.', in: '08:09 · selfie taken', out: 'Closed automatically 20:00', dist: '30 m', clock: 'Matched', method: 'Own phone', rates: '₦8,000 · ₦12,500 a shift', wu: 'WU-1051 · Gate B day', px: '98px', py: '50px', selfie: 'Selfie matched' },
+      { name: 'Rita Ojo', where: 'Lekki Estate · Patrol', when: 'Thu 29 Oct', hours: '12.1 h', flag: 'Clock drift', why: 'Her phone clock was 11 minutes behind. Times shown use the server clock, recorded when the phone last synced.', in: '07:55 (phone said 07:44)', out: '20:01', dist: '40 m', clock: '11 min behind, corrected', method: 'Offline, synced 20:20', rates: '₦8,000 · ₦12,500 a shift', wu: 'WU-1053 · Patrol day', px: '104px', py: '84px', selfie: 'Selfie matched' }
+    ];
+    const s = this.state; const dec = s.decided;
+    const items = data.map((t, i) => ({
+      name: t.name, where: t.where, when: t.when, hours: t.hours, flag: t.flag,
+      status: dec[i] || 'Needs decision', dot: dec[i] ? 'dot' : 'dot f', pressed: i === s.sel ? 'true' : 'false',
+      pick: () => this.setState({ sel: i }),
+      style: 'display: flex; gap: 16px; width: 100%; text-align: left; padding: 16px; border: 0; border-bottom: 1px solid #E4E4E7; cursor: pointer; font-family: Inter, sans-serif; color: #0A0A0A; ' +
+        (i === s.sel ? 'background: #F4F4F5; box-shadow: inset 0 0 0 1.5px #6D4CFF;' : 'background: #FFFFFF;')
+    }));
+    const t = data[s.sel];
+    const decide = (v) => () => {
+      const nd = Object.assign({}, dec, { [s.sel]: v });
+      const next = data.findIndex((_, i) => !nd[i]);
+      this.setState({ decided: nd, sel: next === -1 ? s.sel : next });
+    };
+    const open = Object.keys(dec).length;
+    const remaining = data.length - open + (s.clean ? 0 : 18);
+    return {
+      items,
+      d: { name: t.name, where: t.where, when: t.when, flag: t.flag, why: t.why, in: t.in, out: t.out, dist: t.dist, clock: t.clock, method: t.method, rates: t.rates, workUnit: t.wu, px: t.px, py: t.py, selfie: t.selfie,
+           mapLabel: 'Punch location relative to the site radius', open: !dec[s.sel], done: !!dec[s.sel], status: dec[s.sel] },
+      approve: decide('Approved'), adjust: decide('Adjusted'), reject: decide('Rejected'),
+      approveClean: () => this.setState({ clean: true }),
+      cleanLabel: s.clean ? '18 clean approved' : 'Approve 18 clean',
+      headline: remaining === 0 ? 'All timesheets decided' : remaining + ' timesheets to decide'
+    };
+  }
+}
+</script>
+</body>
+</html>

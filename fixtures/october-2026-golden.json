@@ -1,0 +1,20 @@
+{
+  "_note": "Golden test for Phase 5 and 6. Amounts in naira here for readability; tests must convert to kobo (x100) and compare exactly. Monthly gross; annual_rent is the declared annual rent. Pension base = gross for these workers (all pay is basic+housing+transport). Rules: docs/RULES_NIGERIA.md.",
+  "period": "2026-10",
+  "workers": [
+    { "name": "Musa Ibrahim",  "gross": 120000, "annual_rent": 360000, "paye": 5660,  "pension_employee": 9600,  "net": 104740, "employer_cost": 134400 },
+    { "name": "Ibrahim Sani",  "gross": 135000, "annual_rent": 0,      "paye": 8630,  "pension_employee": 10800, "net": 115570, "employer_cost": 151200 },
+    { "name": "Chiamaka Obi",  "gross": 85000,  "annual_rent": 240000, "paye": 1130,  "pension_employee": 6800,  "net": 77070,  "employer_cost": 95200 },
+    { "name": "Grace Edet",    "gross": 70000,  "annual_rent": 0,      "paye": 0,     "pension_employee": 5600,  "net": 64400,  "employer_cost": 78400 },
+    { "name": "Tunde Bakare",  "gross": 210000, "annual_rent": 600000, "paye": 17480, "pension_employee": 16800, "net": 175720, "employer_cost": 235200 },
+    { "name": "Funmi Adeyemi", "gross": 250000, "annual_rent": 900000, "paye": 22250, "pension_employee": 20000, "net": 207750, "employer_cost": 280000 }
+  ],
+  "totals": { "gross": 870000, "paye": 55150, "pension_employee": 69600, "net": 745250, "employer_cost": 974400 },
+  "employer_cost_formula": "gross + 10% employer pension + 1% NSITF + 1% ITF",
+  "statutory": { "pension_total": 156600, "nsitf": 8700, "itf": 8700 },
+  "invoices": [
+    { "number": "INV-0412", "client": "Coastline", "subtotal": 597500, "vat": 44812.50, "total": 642312.50 },
+    { "number": "INV-0413", "client": "Marina",    "subtotal": 418000, "vat": 31350,    "total": 449350 },
+    { "number": "INV-0414", "client": "Greenfield","subtotal": 396000, "vat": 29700,    "total": 425700 }
+  ]
+}

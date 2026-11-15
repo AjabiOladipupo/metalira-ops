@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(supabase db push --linked*)",
+      "Bash(git push --force*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -f package.json ] && pnpm -s typecheck && pnpm -s lint --quiet || true",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

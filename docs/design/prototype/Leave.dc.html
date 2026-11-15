@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leave · Metalira Ops</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#6D4CFF}a:hover{color:#5236D9}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:#0A0A0A;text-decoration:none;font:500 14px Inter,sans-serif}
+.nav a:hover{background:#F4F4F5;color:#0A0A0A}
+.nav a.on{background:#F4F4F5;color:#6D4CFF}
+.lbl{font:500 12px 'Space Grotesk',sans-serif;letter-spacing:.06em;text-transform:uppercase;color:#52525B}
+.tbl{width:100%;border-collapse:collapse;font:400 14px Inter,sans-serif;color:#0A0A0A}
+.tbl th{text-align:left;font-weight:600;padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.tbl td{padding:10px 12px;border-bottom:1px solid #E4E4E7;white-space:nowrap}
+.num{text-align:right !important;font-variant-numeric:tabular-nums}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;font:600 13px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #0A0A0A;background:#0A0A0A;color:#FFFFFF;box-sizing:border-box}
+.btn:hover{background:#27272A;color:#FFFFFF}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;font:500 13px Inter,sans-serif;text-decoration:none;cursor:pointer;border:1px solid #E4E4E7;background:#FFFFFF;color:#0A0A0A;box-sizing:border-box}
+.btn2:hover{background:#F4F4F5;color:#0A0A0A}
+.dot{display:inline-block;width:8px;height:8px;border-radius:999px;border:1.5px solid #0A0A0A;box-sizing:border-box;flex:none}
+.dot.f{background:#0A0A0A}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #6D4CFF;outline-offset:2px}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 100vh; font-family: Inter, sans-serif; color: #0A0A0A; background: #FFFFFF">
+  <aside style="flex: 1 1 220px; box-sizing: border-box; padding: 20px 12px; border-right: 1px solid #E4E4E7; display: flex; flex-direction: column; gap: 16px">
+    <a href="Main.dc.html" aria-label="Metalira Ops home" style="display: flex; align-items: center; gap: 10px; padding: 4px 12px; text-decoration: none; color: #0A0A0A">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="#0A0A0A" aria-hidden="true"><circle cx="5" cy="5" r="3"></circle><circle cx="14" cy="5" r="3"></circle><circle cx="23" cy="5" r="3"></circle><circle cx="5" cy="14" r="3"></circle><rect x="11" y="11" width="17" height="6" rx="3"></rect><circle cx="5" cy="23" r="3"></circle><circle cx="14" cy="23" r="3"></circle><circle cx="23" cy="23" r="3"></circle></svg>
+      <span style="font: 500 18px 'Space Grotesk', sans-serif; letter-spacing: -0.01em">Metalira <b style="font-weight: 700">Ops</b></span>
+    </a>
+    <nav class="nav" aria-label="Main" style="display: flex; flex-direction: column; gap: 2px">
+      <a href="Main.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V21h14V9.5"></path></svg>Home</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Workforce</div>
+      <a href="Roster.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>Roster</a>
+      <a href="Attendance.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>Live attendance</a>
+      <a href="Timesheets.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="m9 14 2 2 4-4"></path></svg>Timesheets</a>
+      <a href="People.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>People</a>
+      <a href="Team.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m16 11 2 2 4-4"></path></svg>My team</a>
+      <a class="on" href="Leave.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18M9 16h6"></path></svg>Leave</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Payroll</div>
+      <a href="Payroll.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2"></path><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"></path></svg>Payroll run</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Business</div>
+      <a href="Projects.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path><path d="M8 10v4M12 10v2M16 10v6"></path></svg>Projects</a>
+      <a href="Unbilled.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v5h6M16 13H8M16 17H8"></path></svg>Unbilled work</a>
+      <a href="Collections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>Collections</a>
+      <div class="lbl" style="padding: 14px 12px 6px">Revenue</div>
+      <a href="Revenue.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.5 8.5-5-5L2 17"></path><path d="M16 7h6v6"></path></svg>Revenue</a>
+    </nav>
+  </aside>
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 32px; border-bottom: 1px solid #E4E4E7">
+      <span class="lbl">Leave management · HR view · Sample data</span>
+    </header>
+    <main style="padding: 24px 32px 48px; display: flex; flex-direction: column; gap: 20px; max-width: 1240px; box-sizing: border-box; width: 100%">
+      <h1 style="margin: 0; font: 700 31px/1.15 'Space Grotesk', sans-serif; letter-spacing: -0.015em">Leave</h1>
+      <section aria-label="Leave today" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px">
+        <div style="padding: 14px 16px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 4px"><span class="lbl">On leave today</span><span style="font: 700 28px 'Space Grotesk', sans-serif">6</span></div>
+        <div style="padding: 14px 16px; border: 1.5px solid #0A0A0A; border-radius: 12px; display: flex; flex-direction: column; gap: 4px"><span class="lbl" style="color: #0A0A0A">Waiting for HR</span><span style="font: 700 28px 'Space Grotesk', sans-serif">{{pending}}</span></div>
+        <div style="padding: 14px 16px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 4px"><span class="lbl">Starting in 14 days</span><span style="font: 700 28px 'Space Grotesk', sans-serif">9</span></div>
+        <div style="padding: 14px 16px; background: #F4F4F5; border-radius: 12px; display: flex; flex-direction: column; gap: 4px"><span class="lbl">Absent without leave · Oct</span><span style="font: 700 28px 'Space Grotesk', sans-serif">2</span></div>
+      </section>
+
+      <div role="tablist" aria-label="Leave" style="display: flex; gap: 4px; border-bottom: 1px solid #E4E4E7">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+          <button type="button" role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}</button>
+        </sc-for>
+      </div>
+
+      <sc-if value="{{isReq}}" hint-placeholder-val="{{true}}">
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Employee</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>Line manager</th><th>HR</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody>
+              <sc-for list="{{reqs}}" as="r" hint-placeholder-count="5">
+                <tr>
+                  <td><span style="display: flex; flex-direction: column"><span style="font-weight: 600">{{r.name}}</span><span style="font-size: 12px; color: #52525B">{{r.dept}}</span></span></td>
+                  <td>{{r.type}}</td><td>{{r.dates}}</td><td class="num">{{r.days}}</td>
+                  <td><span style="display: inline-flex; align-items: center; gap: 8px"><span class="{{r.mDot}}"></span>{{r.mgr}}</span></td>
+                  <td><span style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600"><span class="{{r.hDot}}"></span>{{r.hr}}</span></td>
+                  <td style="text-align: right">
+                    <sc-if value="{{r.canAct}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; gap: 8px"><button type="button" class="btn" onClick="{{r.approve}}">Approve</button><button type="button" class="btn2" onClick="{{r.decline}}">Decline</button></span></sc-if>
+                  </td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">Requests go to the line manager first, then HR. Approved leave blocks the roster, pays at the policy rate and shows on the payslip.</p>
+      </sc-if>
+
+      <sc-if value="{{isCal}}" hint-placeholder-val="{{false}}">
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <div style="display: grid; grid-template-columns: 180px repeat(14, minmax(40px, 1fr)); min-width: 820px">
+            <div class="lbl" style="padding: 10px 12px; background: #F4F4F5; border-bottom: 1px solid #E4E4E7">November</div>
+            <sc-for list="{{days}}" as="d" hint-placeholder-count="14">
+              <div style="padding: 8px 4px; background: #F4F4F5; border-bottom: 1px solid #E4E4E7; text-align: center; font-size: 12px; display: flex; flex-direction: column"><span style="color: #52525B">{{d.w}}</span><span style="font-weight: 600">{{d.n}}</span></div>
+            </sc-for>
+            <sc-for list="{{cal}}" as="c" hint-placeholder-count="6">
+              <div style="padding: 10px 12px; border-bottom: 1px solid #E4E4E7; display: flex; flex-direction: column"><span style="font: 600 14px Inter, sans-serif">{{c.name}}</span><span style="font-size: 12px; color: #52525B">{{c.type}}</span></div>
+              <sc-for list="{{c.cells}}" as="x" hint-placeholder-count="14">
+                <div style="border-bottom: 1px solid #E4E4E7; padding: 8px 2px; display: flex; align-items: center"><span style="{{x}}"></span></div>
+              </sc-for>
+            </sc-for>
+          </div>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">Solid bars are approved leave; outlined bars are waiting for approval.</p>
+      </sc-if>
+
+      <sc-if value="{{isPol}}" hint-placeholder-val="{{false}}">
+        <div style="overflow-x: auto; border: 1px solid #E4E4E7; border-radius: 12px">
+          <table class="tbl">
+            <thead><tr><th>Leave type</th><th class="num">Days a year</th><th>Paid</th><th>Rules</th><th>Approvers</th></tr></thead>
+            <tbody>
+              <tr><td style="font-weight: 600">Annual</td><td class="num">15</td><td>Full pay</td><td>Builds up 1.25 days a month; carry over up to 5 days</td><td>Line manager, then HR</td></tr>
+              <tr><td style="font-weight: 600">Sick</td><td class="num">12</td><td>Full pay</td><td>Doctor's note after 2 days in a row</td><td>Line manager</td></tr>
+              <tr><td style="font-weight: 600">Casual</td><td class="num">3</td><td>Full pay</td><td>Request at least 24 hours ahead</td><td>Line manager</td></tr>
+              <tr><td style="font-weight: 600">Maternity</td><td class="num">84</td><td>Per policy</td><td>12 weeks; medical certificate required</td><td>HR</td></tr>
+              <tr><td style="font-weight: 600">Paternity</td><td class="num">10</td><td>Full pay</td><td>Within 2 months of birth</td><td>HR</td></tr>
+              <tr><td style="font-weight: 600">Unpaid</td><td class="num">—</td><td>No pay</td><td>Deducted pro rata in payroll</td><td>Line manager, then HR</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #52525B">These are your organisation's settings. Check them against the Labour Act and your employment contracts before going live.</p>
+      </sc-if>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(p){ super(p); this.state = { tab: 'req', hr: {} }; }
+  renderVals() {
+    const s = this.state;
+    const tabs = [['req','Requests'],['cal','Calendar'],['pol','Policies']].map(([id, label]) => ({ label, sel: id === s.tab ? 'true' : 'false', pick: () => this.setState({ tab: id }),
+      style: 'height: 44px; padding: 0 16px; border: 0; background: none; cursor: pointer; font: 600 14px Inter, sans-serif; margin-bottom: -1px; ' +
+        (id === s.tab ? 'color: #0A0A0A; border-bottom: 2px solid #0A0A0A' : 'color: #52525B; border-bottom: 2px solid transparent') }));
+    const data = [
+      ['Chiamaka Obi','Cleaning services','Annual','9 – 13 Nov',5,'Approved · Blessing Udo'],
+      ['Tunde Bakare','Facility management','Annual','12 – 15 Nov',4,'Approved · Emeka Nwankwo'],
+      ['Ngozi Eze','Security services','Casual','3 Nov',1,'Approved · Kola Adebayo'],
+      ['Grace Edet','Cleaning services','Sick','28 – 29 Oct',2,'Approved · Blessing Udo'],
+      ['Musa Danladi','Security services','Annual','4 – 6 Nov',3,'Waiting · Kola Adebayo']];
+    const reqs = data.map(([name, dept, type, dates, days, mgr], i) => {
+      const waitingMgr = mgr.indexOf('Waiting') === 0; const dec = s.hr[i];
+      return { name, dept, type, dates, days, mgr, mDot: waitingMgr ? 'dot' : 'dot f',
+        hr: dec || (waitingMgr ? 'After manager' : 'Waiting'), hDot: dec ? 'dot f' : 'dot', canAct: !waitingMgr && !dec,
+        approve: () => this.setState({ hr: Object.assign({}, s.hr, { [i]: 'Approved' }) }),
+        decline: () => this.setState({ hr: Object.assign({}, s.hr, { [i]: 'Declined' }) }) };
+    });
+    const pending = data.filter((d, i) => d[5].indexOf('Waiting') !== 0 && !s.hr[i]).length;
+    const wd = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const days = Array.from({ length: 14 }, (_, i) => ({ w: wd[i % 7], n: String(2 + i) }));
+    const bar = (on, pend) => 'display: block; width: 100%; height: 18px; border-radius: 4px; ' + (on ? (pend ? 'border: 1.5px solid #0A0A0A; box-sizing: border-box' : 'background: #0A0A0A') : '');
+    const span = (a, b, pend) => Array.from({ length: 14 }, (_, i) => bar(i + 2 >= a && i + 2 <= b, pend));
+    const cal = [
+      { name: 'Ngozi Eze', type: 'Casual', cells: span(3, 3, false) },
+      { name: 'Musa Danladi', type: 'Annual', cells: span(4, 6, true) },
+      { name: 'Chiamaka Obi', type: 'Annual', cells: span(9, 13, !s.hr[0]) },
+      { name: 'Tunde Bakare', type: 'Annual', cells: span(12, 15, !s.hr[1]) },
+      { name: 'Funmi Adeyemi', type: 'Annual', cells: span(10, 12, false) },
+      { name: 'Sadiq Musa', type: 'Paternity', cells: span(2, 11, false) }];
+    return { tabs, reqs, pending, days, cal, isReq: s.tab === 'req', isCal: s.tab === 'cal', isPol: s.tab === 'pol' };
+  }
+}
+</script>
+</body>
+</html>
