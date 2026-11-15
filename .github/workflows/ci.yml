@@ -23,7 +23,35 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
+      # Unit project only; the RLS suite needs Docker and runs in the rls job.
       - run: pnpm test
+
+  rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Pinned CLI from devDependencies. Only the services the RLS suite needs.
+      - name: Start local Supabase
+        run: pnpm exec supabase start -x studio,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor,realtime,storage-api
+      # Definition of done: migrations apply cleanly to a fresh database.
+      - name: Reset database
+        run: pnpm db:reset
+      - name: Check generated types match the migrations
+        run: |
+          pnpm db:types
+          git diff --exit-code -- src/types/db.ts
+      - name: RLS and isolation tests
+        run: pnpm test:rls
+      - name: Stop local Supabase
+        if: always()
+        run: pnpm exec supabase stop --no-backup
 
   e2e:
     runs-on: ubuntu-latest
