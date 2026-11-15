@@ -1,27 +1,184 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-/* Placeholder tokens from docs/DESIGN_SYSTEM.md. Slice 0.2 replaces this with the full theme. */
-:root {
+/* Dark mode is class-based: <html class="dark">. A `.light` or `.dark` wrapper also re-themes a subtree. */
+@custom-variant dark (&:is(.dark *));
+
+/* Tokens from docs/DESIGN_SYSTEM.md. Change values here only. */
+:root,
+.light {
   --bg: #ffffff;
+  --surface: #f4f4f5;
+  --line: #e4e4e7;
   --fg: #0a0a0a;
   --fg-muted: #52525b;
+  --signal: #6d4cff;
+  --action: var(--fg);
+  --on-action: var(--bg);
+
+  /* shadcn/ui keys mapped onto the tokens. No red: destructive uses fg. */
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--bg);
+  --card-foreground: var(--fg);
+  --popover: var(--bg);
+  --popover-foreground: var(--fg);
+  --primary: var(--action);
+  --primary-foreground: var(--on-action);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--fg);
+  --muted: var(--surface);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--surface);
+  --accent-foreground: var(--fg);
+  --destructive: var(--fg);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--signal);
+
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a0a0a;
-    --fg: #fafafa;
-    --fg-muted: #a1a1aa;
-  }
+.dark {
+  --bg: #0a0a0a;
+  --surface: #18181b;
+  --line: #27272a;
+  --fg: #fafafa;
+  --fg-muted: #a1a1aa;
+  --signal: #9b85ff;
+  --action: var(--fg);
+  --on-action: var(--bg);
+
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--bg);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--action);
+  --primary-foreground: var(--on-action);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--fg);
+  --muted: var(--surface);
+  --muted-foreground: var(--fg-muted);
+  --accent: var(--line);
+  --accent-foreground: var(--fg);
+  --destructive: var(--fg);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--signal);
+
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
   --color-fg: var(--fg);
   --color-fg-muted: var(--fg-muted);
+  --color-signal: var(--signal);
+  --color-action: var(--action);
+  --color-on-action: var(--on-action);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-display);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
 }
 
-body {
-  background: var(--bg);
-  color: var(--fg);
+/* Type scale (matches the prototype screens; see DESIGN_SYSTEM.md). */
+@utility type-label {
+  font-family: var(--font-display);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+@utility type-caption {
+  font-size: 13px;
+  line-height: 1.5;
+}
+@utility type-body {
+  font-size: 14px;
+  line-height: 1.5;
+}
+@utility type-body-lg {
+  font-size: 15px;
+  line-height: 1.5;
+}
+@utility type-h3 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 1.2;
+  font-weight: 500;
+}
+@utility type-h2 {
+  font-family: var(--font-display);
+  font-size: 25px;
+  line-height: 1.2;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+@utility type-h1 {
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+@utility type-kpi {
+  font-family: var(--font-display);
+  font-size: 31px;
+  line-height: 1.15;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-sm text-foreground;
+  }
+  a {
+    @apply text-signal;
+  }
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
