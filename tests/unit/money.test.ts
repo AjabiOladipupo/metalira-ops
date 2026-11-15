@@ -193,7 +193,7 @@ describe("allocateKobo", () => {
       const total = next(10n ** 12n) - 5n * 10n ** 11n;
       const count = Number(next(12n)) + 1;
       const weights = Array.from({ length: count }, () => next(1000n));
-      if (weights.every((w) => w === 0n)) weights[0] = 1n;
+      if (sumKobo(weights) === 0n) weights[0] = 1n;
       const parts = allocateKobo(total, weights);
       expect(parts).toHaveLength(count);
       expect(sumKobo(parts)).toBe(total);
