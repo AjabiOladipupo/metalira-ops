@@ -1,4 +1,6 @@
 /** Isolation registry for the identity module (slice 0.3). */
+import { randomBytes, randomUUID } from "node:crypto";
+
 import type { TableSpec } from "../helpers/registry";
 
 async function one(promise: PromiseLike<{ data: unknown; error: { message: string } | null }>) {
@@ -47,6 +49,35 @@ export const tables: TableSpec[] = [
       role: "owner",
     }),
     patch: { role: "worker" },
+  },
+  {
+    table: "membership_invites",
+    key: "id",
+    tenantColumn: "organisation_id",
+    tenantValue: (side) => side.orgId,
+    seed: async ({ admin, side }) => {
+      const { error } = await admin.from("membership_invites").insert({
+        organisation_id: side.orgId,
+        email: `invitee-${randomUUID()}@example.test`,
+        role: "hr",
+        token_hash: randomBytes(32).toString("hex"),
+        created_by: side.id,
+      });
+      if (error) throw new Error(error.message);
+    },
+    rowOf: async ({ admin, side }) => {
+      const row = await one(
+        admin.from("membership_invites").select("id").eq("organisation_id", side.orgId).limit(1),
+      );
+      return row.id as string;
+    },
+    attackInsert: ({ attacker, victim }) => ({
+      organisation_id: victim.orgId,
+      email: attacker.email.toLowerCase(),
+      role: "owner",
+      token_hash: randomBytes(32).toString("hex"),
+    }),
+    patch: { role: "owner" },
   },
   {
     table: "audit_log",

@@ -1,8 +1,8 @@
 -- Slice 0.3: tenancy core.
 --
 -- PostGIS, a locked-down `private` schema, the identity tables (organisations,
--- profiles, memberships, audit_log), the RLS helpers, the audit write path and
--- the organisation-creation RPC.
+-- profiles, memberships, membership_invites, audit_log), the RLS helpers, the
+-- audit write path, the organisation-creation RPC and the invite RPCs.
 --
 -- Ground rules applied here (CLAUDE.md and docs/PHASE_0.md "Decisions"):
 -- * Security-definer functions live only in schema `private` and pin
@@ -18,6 +18,8 @@
 -- ---------------------------------------------------------------------------
 
 create extension if not exists postgis with schema extensions;
+-- digest() and gen_random_bytes() for invite tokens.
+create extension if not exists pgcrypto with schema extensions;
 
 -- ---------------------------------------------------------------------------
 -- 2. Default privileges
@@ -111,7 +113,37 @@ create table public.memberships (
 create index memberships_user_id_idx on public.memberships (user_id);
 
 comment on table public.memberships is
-  'User x organisation x role. One role per user per organisation. Every organisation keeps at least one owner.';
+  'User x organisation x role. One role per user per organisation. Every organisation keeps at least one owner. Rows are added only by create_organisation, accept_membership_invite or server code with the secret key; signed-in users cannot insert directly.';
+
+-- An owner or admin invites someone by email. The invitee joins by calling
+-- public.accept_membership_invite with the token while signed in with that
+-- (confirmed) email address. Only the SHA-256 of the token is stored.
+create table public.membership_invites (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid not null references public.organisations (id) on delete cascade,
+  email text not null
+    constraint membership_invites_email_format check (
+      char_length(email) between 3 and 320
+      and email = lower(btrim(email))
+      and email ~ '^[^@[:space:]]+@[^@[:space:]]+$'
+    ),
+  role public.membership_role not null,
+  token_hash text not null
+    constraint membership_invites_token_hash_unique unique,
+  expires_at timestamptz not null default now() + interval '7 days',
+  accepted_at timestamptz,
+  accepted_by uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  created_by uuid default auth.uid() references auth.users (id) on delete set null
+);
+
+-- At most one pending invite per email per organisation.
+create unique index membership_invites_one_pending_idx
+  on public.membership_invites (organisation_id, email)
+  where accepted_at is null;
+
+comment on table public.membership_invites is
+  'Email invites to join an organisation. Created by public.create_membership_invite, accepted by public.accept_membership_invite. token_hash is SHA-256 (hex) of the token.';
 
 create table public.audit_log (
   id uuid primary key default gen_random_uuid(),
@@ -167,9 +199,11 @@ as $$
   )
 $$;
 
--- True when user `uid` belongs to an organisation the caller also belongs to.
--- Keeps the profiles policy from recursing through memberships RLS.
-create function private.shares_org_with(uid uuid)
+-- True when user `uid` belongs to an organisation in which the caller holds a
+-- manager role (owner, admin, hr, finance, ops_manager, line_manager). Workers
+-- and client approvers never see other people. Keeps the profiles policy from
+-- recursing through memberships RLS.
+create function private.manages_member(uid uuid)
 returns boolean
 language sql
 stable
@@ -178,9 +212,11 @@ set search_path = ''
 as $$
   select exists (
     select 1
-    from public.memberships m
-    where m.user_id = uid
-      and m.organisation_id in (select private.user_org_ids())
+    from public.memberships target
+    join public.memberships me on me.organisation_id = target.organisation_id
+    where target.user_id = uid
+      and me.user_id = (select auth.uid())
+      and me.role in ('owner', 'admin', 'hr', 'finance', 'ops_manager', 'line_manager')
   )
 $$;
 
@@ -394,6 +430,9 @@ $$;
 
 -- Writes an app-level audit event (for example 'pii.reveal'). The actor is
 -- always the caller and the time is always now(); neither can be supplied.
+-- Only manager roles may call it: workers and client approvers cannot plant
+-- events in the log owners and admins read. Before and after are capped at
+-- 16 KB each.
 create function private.log_audit_impl(
   p_organisation_id uuid,
   p_action text,
@@ -416,13 +455,12 @@ begin
   if uid is null then
     raise exception 'sign in to write to the audit log' using errcode = '42501';
   end if;
-  if p_organisation_id is null or not exists (
-    select 1
-    from public.memberships m
-    where m.organisation_id = p_organisation_id
-      and m.user_id = uid
+  if p_organisation_id is null or not private.has_role(
+    p_organisation_id,
+    array['owner', 'admin', 'hr', 'finance', 'ops_manager', 'line_manager']
   ) then
-    raise exception 'not a member of this organisation' using errcode = '42501';
+    raise exception 'only managers in this organisation can write to the audit log'
+      using errcode = '42501';
   end if;
   if p_action is null
     or char_length(p_action) > 100
@@ -438,9 +476,9 @@ begin
   if p_reason is not null and char_length(p_reason) > 1000 then
     raise exception 'audit reason must be 1000 characters or fewer' using errcode = '22023';
   end if;
-  if octet_length(coalesce(p_before::text, '')) > 65536
-    or octet_length(coalesce(p_after::text, '')) > 65536 then
-    raise exception 'audit before and after must be 64 KB or smaller each' using errcode = '22023';
+  if octet_length(coalesce(p_before::text, '')) > 16384
+    or octet_length(coalesce(p_after::text, '')) > 16384 then
+    raise exception 'audit before and after must be 16 KB or smaller each' using errcode = '22023';
   end if;
 
   insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after, reason)
@@ -458,6 +496,176 @@ begin
 
   return new_id;
 end;
+$$;
+
+-- Creates (or replaces) the pending invite for `p_email` and returns the raw
+-- token, which exists nowhere else: the caller's server code emails the link.
+-- Owners and admins invite; only owners invite owners.
+create function private.create_membership_invite_impl(
+  p_organisation_id uuid,
+  p_email text,
+  p_role public.membership_role
+)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  v_email text := lower(btrim(p_email));
+  v_token text;
+begin
+  if uid is null then
+    raise exception 'sign in to invite people' using errcode = '42501';
+  end if;
+  if p_organisation_id is null
+    or not private.has_role(p_organisation_id, array['owner', 'admin']) then
+    raise exception 'only owners and admins can invite people' using errcode = '42501';
+  end if;
+  if p_role is null then
+    raise exception 'choose a role for the invite' using errcode = '22023';
+  end if;
+  if p_role = 'owner' and not private.has_role(p_organisation_id, array['owner']) then
+    raise exception 'only owners can invite owners' using errcode = '42501';
+  end if;
+  if v_email is null
+    or char_length(v_email) not between 3 and 320
+    or v_email !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
+    raise exception 'enter a valid email address' using errcode = '22023';
+  end if;
+  if exists (
+    select 1
+    from public.memberships m
+    join auth.users u on u.id = m.user_id
+    where m.organisation_id = p_organisation_id
+      and lower(u.email) = v_email
+  ) then
+    raise exception 'this person is already a member' using errcode = '23505';
+  end if;
+
+  delete from public.membership_invites i
+  where i.organisation_id = p_organisation_id
+    and i.email = v_email
+    and i.accepted_at is null;
+
+  v_token := encode(extensions.gen_random_bytes(32), 'hex');
+
+  insert into public.membership_invites (organisation_id, email, role, token_hash, created_by)
+  values (
+    p_organisation_id,
+    v_email,
+    p_role,
+    encode(extensions.digest(v_token, 'sha256'), 'hex'),
+    uid
+  );
+
+  return v_token;
+end;
+$$;
+
+-- Joins the caller to the invite's organisation. The invite must be pending,
+-- unexpired, addressed to the caller's confirmed email, and its inviter must
+-- still be allowed to grant that role. Single use.
+create function private.accept_membership_invite_impl(p_token text)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  inv public.membership_invites%rowtype;
+  v_email text;
+  v_confirmed_at timestamptz;
+begin
+  if uid is null then
+    raise exception 'sign in to accept the invite' using errcode = '42501';
+  end if;
+  if p_token is null or p_token !~ '^[0-9a-f]{64}$' then
+    raise exception 'this invite link is not valid' using errcode = '22023';
+  end if;
+
+  select *
+  into inv
+  from public.membership_invites i
+  where i.token_hash = encode(extensions.digest(p_token, 'sha256'), 'hex')
+  for update;
+
+  if not found then
+    raise exception 'this invite link is not valid' using errcode = '22023';
+  end if;
+  if inv.accepted_at is not null then
+    raise exception 'this invite has already been used' using errcode = '22023';
+  end if;
+  if inv.expires_at <= now() then
+    raise exception 'this invite has expired' using errcode = '22023';
+  end if;
+
+  select lower(u.email), u.email_confirmed_at
+  into v_email, v_confirmed_at
+  from auth.users u
+  where u.id = uid;
+
+  if v_email is distinct from inv.email or v_confirmed_at is null then
+    raise exception 'this invite is for a different email address' using errcode = '42501';
+  end if;
+
+  if inv.created_by is null or not exists (
+    select 1
+    from public.memberships m
+    where m.organisation_id = inv.organisation_id
+      and m.user_id = inv.created_by
+      and (m.role = 'owner' or (m.role = 'admin' and inv.role <> 'owner'))
+  ) then
+    raise exception 'this invite is no longer valid' using errcode = '42501';
+  end if;
+
+  if exists (
+    select 1
+    from public.memberships m
+    where m.organisation_id = inv.organisation_id
+      and m.user_id = uid
+  ) then
+    raise exception 'you are already a member of this organisation' using errcode = '23505';
+  end if;
+
+  insert into public.memberships (organisation_id, user_id, role, created_by)
+  values (inv.organisation_id, uid, inv.role, inv.created_by);
+
+  update public.membership_invites i
+  set accepted_at = now(),
+      accepted_by = uid
+  where i.id = inv.id;
+
+  return inv.organisation_id;
+end;
+$$;
+
+create function public.create_membership_invite(
+  p_organisation_id uuid,
+  p_email text,
+  p_role public.membership_role
+)
+returns text
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.create_membership_invite_impl(p_organisation_id, p_email, p_role)
+$$;
+
+create function public.accept_membership_invite(p_token text)
+returns uuid
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.accept_membership_invite_impl(p_token)
 $$;
 
 create function public.create_organisation(p_name text)
@@ -508,6 +716,10 @@ create trigger memberships_audit
   after insert or update or delete on public.memberships
   for each row execute function private.audit_row_change();
 
+create trigger membership_invites_audit
+  after insert or update or delete on public.membership_invites
+  for each row execute function private.audit_row_change();
+
 create trigger memberships_keep_owner
   after update or delete on public.memberships
   for each row execute function private.memberships_keep_owner();
@@ -531,6 +743,7 @@ create trigger on_auth_user_created
 alter table public.organisations enable row level security;
 alter table public.profiles enable row level security;
 alter table public.memberships enable row level security;
+alter table public.membership_invites enable row level security;
 alter table public.audit_log enable row level security;
 
 -- organisations: members read; owner and admin update. No insert policy
@@ -544,28 +757,30 @@ create policy organisations_update on public.organisations
   using (private.has_role(id, array['owner', 'admin']))
   with check (private.has_role(id, array['owner', 'admin']));
 
--- profiles: own row, plus people who share an organisation. Own row only for
--- update. Rows are created by trigger and removed by cascade.
+-- profiles: own row, plus members of organisations where the caller is a
+-- manager. Own row only for update. Rows are created by trigger and removed by
+-- cascade.
 create policy profiles_select on public.profiles
   for select to authenticated
-  using (user_id = (select auth.uid()) or private.shares_org_with(user_id));
+  using (user_id = (select auth.uid()) or private.manages_member(user_id));
 
 create policy profiles_update on public.profiles
   for update to authenticated
   using (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
--- memberships: members read; owner and admin manage every role except owner;
--- only owners manage owner rows.
+-- memberships: everyone reads their own rows; managers read their
+-- organisation's rows. Owner and admin change and remove every role except
+-- owner; only owners manage owner rows. No insert policy or grant: rows come
+-- from create_organisation and accept_membership_invite (or server code).
 create policy memberships_select on public.memberships
   for select to authenticated
-  using (organisation_id in (select private.user_org_ids()));
-
-create policy memberships_insert on public.memberships
-  for insert to authenticated
-  with check (
-    private.has_role(organisation_id, array['owner', 'admin'])
-    and (role <> 'owner' or private.has_role(organisation_id, array['owner']))
+  using (
+    user_id = (select auth.uid())
+    or private.has_role(
+      organisation_id,
+      array['owner', 'admin', 'hr', 'finance', 'ops_manager', 'line_manager']
+    )
   );
 
 create policy memberships_update on public.memberships
@@ -583,6 +798,21 @@ create policy memberships_delete on public.memberships
   for delete to authenticated
   using (
     private.has_role(organisation_id, array['owner', 'admin'])
+    and (role <> 'owner' or private.has_role(organisation_id, array['owner']))
+  );
+
+-- membership_invites: owner and admin read and revoke (delete) pending
+-- invites; only owners revoke owner invites. No insert or update policy:
+-- create_membership_invite and accept_membership_invite only.
+create policy membership_invites_select on public.membership_invites
+  for select to authenticated
+  using (private.has_role(organisation_id, array['owner', 'admin']));
+
+create policy membership_invites_delete on public.membership_invites
+  for delete to authenticated
+  using (
+    accepted_at is null
+    and private.has_role(organisation_id, array['owner', 'admin'])
     and (role <> 'owner' or private.has_role(organisation_id, array['owner']))
   );
 
@@ -617,8 +847,10 @@ grant update (full_name) on table public.profiles to authenticated;
 
 revoke all on table public.memberships from anon, authenticated;
 grant select, delete on table public.memberships to authenticated;
-grant insert (organisation_id, user_id, role, worker_id) on table public.memberships to authenticated;
 grant update (role, worker_id) on table public.memberships to authenticated;
+
+revoke all on table public.membership_invites from anon, authenticated;
+grant select, delete on table public.membership_invites to authenticated;
 
 -- audit_log: no role may update, delete or truncate. Server code using the
 -- secret key may insert (system events with no signed-in actor).
@@ -632,8 +864,10 @@ grant select, insert on table public.audit_log to service_role;
 
 revoke all on function private.user_org_ids() from public, anon;
 revoke all on function private.has_role(uuid, text[]) from public, anon;
-revoke all on function private.shares_org_with(uuid) from public, anon;
+revoke all on function private.manages_member(uuid) from public, anon;
 revoke all on function private.create_organisation_impl(text) from public, anon;
+revoke all on function private.create_membership_invite_impl(uuid, text, public.membership_role) from public, anon;
+revoke all on function private.accept_membership_invite_impl(text) from public, anon;
 revoke all on function private.log_audit_impl(uuid, text, text, uuid, jsonb, jsonb, text) from public, anon;
 revoke all on function private.set_updated_at() from public, anon, authenticated;
 revoke all on function private.audit_redact(jsonb) from public, anon, authenticated;
@@ -644,11 +878,17 @@ revoke all on function private.handle_new_user() from public, anon, authenticate
 
 grant execute on function private.user_org_ids() to authenticated, service_role;
 grant execute on function private.has_role(uuid, text[]) to authenticated, service_role;
-grant execute on function private.shares_org_with(uuid) to authenticated, service_role;
+grant execute on function private.manages_member(uuid) to authenticated, service_role;
 grant execute on function private.create_organisation_impl(text) to authenticated;
+grant execute on function private.create_membership_invite_impl(uuid, text, public.membership_role) to authenticated;
+grant execute on function private.accept_membership_invite_impl(text) to authenticated;
 grant execute on function private.log_audit_impl(uuid, text, text, uuid, jsonb, jsonb, text) to authenticated;
 
 revoke all on function public.create_organisation(text) from public, anon;
 revoke all on function public.log_audit(uuid, text, text, uuid, jsonb, jsonb, text) from public, anon;
+revoke all on function public.create_membership_invite(uuid, text, public.membership_role) from public, anon;
+revoke all on function public.accept_membership_invite(text) from public, anon;
 grant execute on function public.create_organisation(text) to authenticated;
+grant execute on function public.create_membership_invite(uuid, text, public.membership_role) to authenticated;
+grant execute on function public.accept_membership_invite(text) to authenticated;
 grant execute on function public.log_audit(uuid, text, text, uuid, jsonb, jsonb, text) to authenticated;

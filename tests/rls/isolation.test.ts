@@ -243,6 +243,64 @@ describe.each(TABLES)("$table", (spec) => {
   });
 });
 
+describe("cross-tenant membership attacks", () => {
+  it.each([
+    {
+      label: "A pulls B into A's organisation",
+      attackerKey: "a" as const,
+      victimKey: "b" as const,
+    },
+    {
+      label: "B pulls A into B's organisation",
+      attackerKey: "b" as const,
+      victimKey: "a" as const,
+    },
+  ])("$label: a direct insert is rejected", async ({ attackerKey, victimKey }) => {
+    const attacker = user(attackerKey);
+    const victim = user(victimKey);
+    const before = await countRows("memberships");
+    const { error } = await attacker.client
+      .from("memberships")
+      .insert({ organisation_id: attacker.orgId, user_id: victim.id, role: "admin" });
+    expect(error?.code).toBe(PERMISSION_DENIED);
+    expect(await countRows("memberships")).toBe(before);
+    const { data } = await admin
+      .from("memberships")
+      .select("id")
+      .eq("organisation_id", attacker.orgId)
+      .eq("user_id", victim.id);
+    expect(data).toEqual([]);
+  });
+
+  it("an owner cannot create invites for another organisation", async () => {
+    const { data, error } = await user("a").client.rpc("create_membership_invite", {
+      p_organisation_id: user("b").orgId,
+      p_email: user("a").email,
+      p_role: "owner",
+    });
+    expect(error?.code).toBe(PERMISSION_DENIED);
+    expect(data).toBeNull();
+  });
+
+  it("an invite for the victim's email cannot be accepted by the attacker", async () => {
+    const a = user("a");
+    const b = user("b");
+    const { data: token, error } = await a.client.rpc("create_membership_invite", {
+      p_organisation_id: a.orgId,
+      p_email: b.email,
+      p_role: "admin",
+    });
+    expect(error).toBeNull();
+    const accept = await a.client.rpc("accept_membership_invite", { p_token: token! });
+    expect(accept.error?.code).toBe(PERMISSION_DENIED);
+    const { data } = await admin
+      .from("memberships")
+      .select("user_id")
+      .eq("organisation_id", a.orgId);
+    expect(data).toEqual([{ user_id: a.id }]);
+  });
+});
+
 describe("anonymous RPC", () => {
   it("cannot create an organisation", async () => {
     const { data, error } = await anonClient().rpc("create_organisation", { p_name: "Anon Ltd" });
@@ -257,6 +315,19 @@ describe("anonymous RPC", () => {
       p_entity: "organisations",
     });
     expect(error).not.toBeNull();
+  });
+
+  it("cannot create or accept invites", async () => {
+    const create = await anonClient().rpc("create_membership_invite", {
+      p_organisation_id: user("a").orgId,
+      p_email: "anon@example.test",
+      p_role: "owner",
+    });
+    expect(create.error).not.toBeNull();
+    const accept = await anonClient().rpc("accept_membership_invite", {
+      p_token: "0".repeat(64),
+    });
+    expect(accept.error).not.toBeNull();
   });
 });
 
@@ -473,30 +544,96 @@ describe("audit_row_change trigger strips secret columns", () => {
 
 describe("roles inside one organisation (has_role)", () => {
   let worker: TestUser;
+  let approver: TestUser;
+  let lineManager: TestUser;
   let outsider: TestUser;
 
   beforeAll(async () => {
     worker = await createTestUser("c-worker");
+    approver = await createTestUser("c-approver");
+    lineManager = await createTestUser("c-line-manager");
     outsider = await createTestUser("d-outsider");
-    const { error } = await admin
-      .from("memberships")
-      .insert({ organisation_id: user("a").orgId, user_id: worker.id, role: "worker" });
+    const { error } = await admin.from("memberships").insert([
+      { organisation_id: user("a").orgId, user_id: worker.id, role: "worker" },
+      { organisation_id: user("a").orgId, user_id: approver.id, role: "client_approver" },
+      { organisation_id: user("a").orgId, user_id: lineManager.id, role: "line_manager" },
+    ]);
     expect(error).toBeNull();
   });
 
-  it("a worker can read their organisation and co-members' profiles", async () => {
-    const org = await worker.client.from("organisations").select("id").eq("id", user("a").orgId);
+  it.each([
+    { label: "a worker", who: () => worker },
+    { label: "a client approver", who: () => approver },
+  ])("$label sees only their own membership and profile", async ({ who }) => {
+    const me = who();
+    const org = await me.client.from("organisations").select("id").eq("id", user("a").orgId);
     expect(org.data).toHaveLength(1);
-    const profile = await worker.client
+
+    const memberships = await me.client.from("memberships").select("user_id");
+    expect(memberships.error).toBeNull();
+    expect(memberships.data).toEqual([{ user_id: me.id }]);
+
+    const profiles = await me.client.from("profiles").select("user_id");
+    expect(profiles.error).toBeNull();
+    expect(profiles.data).toEqual([{ user_id: me.id }]);
+  });
+
+  it.each([
+    { label: "a worker", who: () => worker },
+    { label: "a client approver", who: () => approver },
+  ])("$label cannot write to the audit log or invite people", async ({ who }) => {
+    const me = who();
+    const before = await countRows("audit_log");
+    const event = await me.client.rpc("log_audit", {
+      p_organisation_id: user("a").orgId,
+      p_action: "payroll.release_approved",
+      p_entity: "organisations",
+    });
+    expect(event.error?.code).toBe(PERMISSION_DENIED);
+    expect(await countRows("audit_log")).toBe(before);
+
+    const invite = await me.client.rpc("create_membership_invite", {
+      p_organisation_id: user("a").orgId,
+      p_email: outsider.email,
+      p_role: "worker",
+    });
+    expect(invite.error?.code).toBe(PERMISSION_DENIED);
+  });
+
+  it("a manager sees co-members' memberships and profiles, but no one outside", async () => {
+    const memberships = await lineManager.client.from("memberships").select("user_id");
+    expect(memberships.error).toBeNull();
+    const ids = (memberships.data ?? []).map((row) => row.user_id);
+    expect(ids).toEqual(expect.arrayContaining([user("a").id, worker.id, approver.id]));
+    expect(ids).not.toContain(user("b").id);
+
+    const profile = await lineManager.client
       .from("profiles")
       .select("user_id")
-      .eq("user_id", user("a").id);
+      .eq("user_id", worker.id);
     expect(profile.data).toHaveLength(1);
-    const notShared = await worker.client
+    const notShared = await lineManager.client
       .from("profiles")
       .select("user_id")
       .eq("user_id", outsider.id);
     expect(notShared.data).toEqual([]);
+
+    const event = await lineManager.client.rpc("log_audit", {
+      p_organisation_id: user("a").orgId,
+      p_action: "test.manager_event",
+      p_entity: "organisations",
+    });
+    expect(event.error).toBeNull();
+  });
+
+  it("log_audit rejects before or after larger than 16 KB", async () => {
+    const { error } = await user("a").client.rpc("log_audit", {
+      p_organisation_id: user("a").orgId,
+      p_action: "test.too_big",
+      p_entity: "organisations",
+      p_after: { blob: "x".repeat(17_000) },
+    });
+    expect(error?.code).toBe("22023");
   });
 
   it("a worker cannot update the organisation", async () => {

@@ -113,7 +113,8 @@ export interface TestUser {
 /** Creates a confirmed user with a random email and returns a signed-in client. */
 export async function createTestUser(label: string, fullName?: string): Promise<TestUser> {
   const email = `rls-${label}-${randomUUID()}@example.test`;
-  const password = randomBytes(18).toString("base64url");
+  // The "a1" suffix guarantees the letters_digits password rule in config.toml.
+  const password = `${randomBytes(18).toString("base64url")}a1`;
 
   const { data, error } = await adminClient().auth.admin.createUser({
     email,
