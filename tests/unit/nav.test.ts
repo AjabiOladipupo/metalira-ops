@@ -163,6 +163,27 @@ describe("nav by role", () => {
     expect(canAccessHref("owner", "/app/setup-elsewhere")).toBe(false);
   });
 
+  it("lets only owner, admin and hr open the People pages that change data", () => {
+    const id = "b0000000-0000-4000-8000-000000000002";
+    for (const path of ["/app/people/new", `/app/people/${id}/edit`, "/app/settings/departments"]) {
+      for (const role of ["owner", "admin", "hr"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(true);
+      }
+      for (const role of ["finance", "ops_manager", "line_manager", "worker"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(false);
+      }
+    }
+    // Viewing a profile follows People itself: ops_manager reads; line managers and finance don't.
+    expect(canAccessHref("ops_manager", `/app/people/${id}`)).toBe(true);
+    expect(canAccessHref("line_manager", `/app/people/${id}`)).toBe(false);
+    expect(canAccessHref("finance", `/app/people/${id}`)).toBe(false);
+    // Anything below the edit page is gated like the edit page.
+    expect(canAccessHref("ops_manager", `/app/people/${id}/edit/more`)).toBe(false);
+    // A segment that only starts like an extra page is not one.
+    expect(canAccessHref("ops_manager", "/app/settings/departments-old")).toBe(false);
+    expect(canAccessHref("ops_manager", "/app/people/new-hires")).toBe(true);
+  });
+
   it("opens worker invites to owner, admin and hr only (slice 1.9)", () => {
     for (const role of ["owner", "admin", "hr"] as const) {
       expect(canAccessHref(role, "/app/people/invites"), role).toBe(true);
