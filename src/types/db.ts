@@ -345,6 +345,32 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"worker_change_requests": {
+                  Row: {
+                    "created_at": string,"details": string,"id": string,"organisation_id": string,"requested_by": string,"resolution_note": string | null,"resolved_at": string | null,"resolved_by": string | null,"status": Database["public"]['Enums']["worker_change_request_status"],"topic": Database["public"]['Enums']["worker_change_topic"],"updated_at": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"details": string,"id"?: string,"organisation_id": string,"requested_by"?: string,"resolution_note"?: string | null,"resolved_at"?: string | null,"resolved_by"?: string | null,"status"?: Database["public"]['Enums']["worker_change_request_status"],"topic": Database["public"]['Enums']["worker_change_topic"],"updated_at"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"details"?: string,"id"?: string,"organisation_id"?: string,"requested_by"?: string,"resolution_note"?: string | null,"resolved_at"?: string | null,"resolved_by"?: string | null,"status"?: Database["public"]['Enums']["worker_change_request_status"],"topic"?: Database["public"]['Enums']["worker_change_topic"],"updated_at"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "worker_change_requests_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "worker_change_requests_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"worker_credentials": {
                   Row: {
                     "auth_user_id": string,"created_at": string,"failed_attempts": number,"id": string,"last_sign_in_at": string | null,"locked_until": string | null,"organisation_id": string,"pin_set_at": string,"privacy_notice_accepted_at": string,"updated_at": string,"worker_id": string
@@ -498,6 +524,11 @@ isOneToOne: false
 "log_audit":
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
                            },
+"my_line_manager":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "has_line_manager": boolean,"name": string
+            }[]
+                           },
 "save_import_check":
 { Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            },
@@ -529,7 +560,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_status": "active"|"ended"
+            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -645,7 +676,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_status": ["active", "ended"]
+            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
           }
         }
 } as const
