@@ -105,8 +105,8 @@ export async function revealPii(input: RevealPiiInput): Promise<string | null> {
   if (!membership || !canSeePii(membership.role, field)) throw new PiiAccessError(field);
 
   const supabase = await createServerSupabase();
-  // `workers` and `bank_detail_changes` arrive in slices 1.3 and 1.7; until their types are
-  // generated the read goes through an untyped view of the same client (same session, same RLS).
+  // The table name comes from PII_COLUMNS, and `bank_detail_changes` arrives in slice 1.7, so
+  // the read goes through an untyped view of the same client (same session, same RLS).
   const { data, error } = await (supabase as unknown as SupabaseClient)
     .from(entity)
     .select(column)
