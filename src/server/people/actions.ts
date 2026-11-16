@@ -8,6 +8,7 @@ import { z } from "zod";
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { formatDate } from "@/lib/dates";
 import { PII_FIELDS } from "@/lib/mask";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { PiiKeyError } from "@/server/crypto/pii";
 import type { CompanyFormState as PeopleFormState } from "@/server/identity/company-form-state";
 import { MutationError } from "@/server/identity/mutate";
@@ -16,7 +17,9 @@ import { getSession } from "@/server/identity/session";
 
 import { notifyApproversOfNewWorkerBankDetails } from "./bank-change-notices";
 import { createDepartment, updateDepartment } from "./departments";
-import { echoableValues, workerFormErrors, workerFormInput } from "./form-input";
+import { echoableValues, mappingFormInput, workerFormErrors, workerFormInput } from "./form-input";
+import { saveMapping } from "./mapping";
+import { notifyLineManager, shouldNotifyLineManager } from "./mapping-notify";
 import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "./pii-access";
 import { addPayRate, cancelPayRate, createWorker, endEmployment, updateWorker } from "./workers";
 
@@ -239,4 +242,40 @@ export async function updateDepartmentAction(
   }
   refreshDepartments();
   return { ok: true, status: 200, message: "Saved" };
+}
+
+// ---------------------------------------------------------------------------
+// Mapping (slice 1.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * "Save mapping": department and line manager change at once; site and project changes apply
+ * from the next shift, with the old rows kept and closed the day before. The line manager is
+ * told by email after the response.
+ */
+export async function saveMappingAction(
+  _prev: PeopleFormState,
+  formData: FormData,
+): Promise<PeopleFormState> {
+  let saved: Awaited<ReturnType<typeof saveMapping>>;
+  try {
+    saved = await saveMapping(mappingFormInput(formData));
+  } catch (error) {
+    return refusal(error, undefined, workerFormErrors);
+  }
+
+  if (shouldNotifyLineManager(saved)) {
+    const supabase = await createServerSupabase();
+    after(() => notifyLineManager(supabase, saved));
+  }
+  refreshPeople();
+
+  if (!saved.changed) return { ok: true, status: 200, message: "No changes to save." };
+  return {
+    ok: true,
+    status: 200,
+    message: saved.assignmentsChanged
+      ? `Saved. Site and project changes apply from ${formatDate(saved.effectiveFrom)}.`
+      : "Saved",
+  };
 }

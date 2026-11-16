@@ -58,3 +58,24 @@ export function echoableValues(fields: Record<string, string>): Record<string, s
   }
   return out;
 }
+
+/**
+ * Input for `saveMapping` from the mapping panel: the single line-manager select becomes the
+ * two columns (as in the worker form), and the project checkboxes, which share one name,
+ * become a list.
+ */
+export function mappingFormInput(formData: FormData): Record<string, unknown> {
+  const text = (name: string) => {
+    const value = formData.get(name);
+    return typeof value === "string" ? value : "";
+  };
+  return {
+    workerId: text("workerId"),
+    departmentId: text("departmentId"),
+    ...decodeLineManager(text("lineManager")),
+    siteId: text("siteId"),
+    projectIds: formData
+      .getAll("projectIds")
+      .filter((value): value is string => typeof value === "string" && value.trim() !== ""),
+  };
+}

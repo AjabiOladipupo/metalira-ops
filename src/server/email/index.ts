@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { z } from "zod";
 import { emailAppUrl } from "./config";
 import { sendEmail, type SendEmailResult } from "./send";
+import { MappingChangedEmail, mappingChangedSubject } from "./templates/mapping-changed";
 import { TestEmail, testEmailSubject } from "./templates/test-email";
 import { WelcomeOwnerEmail, welcomeOwnerSubject } from "./templates/welcome-owner";
 import { WorkerInviteEmail, workerInviteSubject } from "./templates/worker-invite";
@@ -52,6 +53,51 @@ export async function sendWelcomeOwnerEmail(
     react: createElement(WelcomeOwnerEmail, { ownerName, organisationName, appUrl: emailAppUrl() }),
     tags: [{ name: "type", value: "welcome_owner" }],
     idempotencyKey: `welcome-owner/${organisationId}`,
+  });
+}
+
+const mappingChangedSchema = z.object({
+  to: z.email(),
+  managerName: emailSafeName.nullable(),
+  workerName: emailSafeName,
+  staffId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[^\p{Cc}<>]*$/u),
+  organisationName: emailSafeName,
+  reportsToYou: z.boolean(),
+  // Built from names the database already holds as plain text (departments, sites, projects).
+  changes: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(1000)
+        .regex(/^[^\p{Cc}<>]*$/u),
+    )
+    .max(10),
+  appliesFrom: z.string().max(40).nullable(),
+});
+
+export type MappingChangedEmailInput = z.input<typeof mappingChangedSchema>;
+
+/**
+ * Tells a worker's line manager that the worker now reports to them, or that their department,
+ * site or projects changed (slice 1.6). The address comes from the database (the line manager's
+ * worker record or confirmed sign-in address), never from form input.
+ */
+export async function sendMappingChangedEmail(
+  input: MappingChangedEmailInput,
+): Promise<SendEmailResult> {
+  const { to, ...props } = mappingChangedSchema.parse(input);
+  return sendEmail({
+    to,
+    subject: mappingChangedSubject(props.workerName, props.reportsToYou),
+    react: createElement(MappingChangedEmail, { ...props, appUrl: emailAppUrl() }),
+    tags: [{ name: "type", value: "mapping_changed" }],
   });
 }
 

@@ -131,7 +131,11 @@ interface AssignmentRow {
   effective_to: string | null;
 }
 
-/** Assignments in force on `today` (the current mapping), for one worker or everyone. */
+/**
+ * The mapping as it stands: assignments that have not ended by the end of `today`, for one
+ * worker or everyone. That includes rows saved for the next shift (slice 1.6 starts site and
+ * project changes tomorrow), so a change shows, and counts toward Mapped, as soon as it is saved.
+ */
 async function loadCurrentAssignments(
   supabase: Client,
   organisationId: string,
@@ -143,8 +147,7 @@ async function loadCurrentAssignments(
       .from("worker_assignments")
       .select("worker_id, client_id, site_id, project_id, effective_from, effective_to")
       .eq("organisation_id", organisationId)
-      .lte("effective_from", today)
-      .or(`effective_to.is.null,effective_to.gte.${today}`);
+      .or(`effective_to.is.null,effective_to.gt.${today}`);
     if (workerId) query = query.eq("worker_id", workerId);
     return query.order("id").range(from, to);
   });
@@ -168,8 +171,14 @@ export interface PeopleRow {
   departmentId: string | null;
   departmentName: string | null;
   lineManagerName: string | null;
+  /** The line-manager choice as the forms encode it (`w:<id>`, `m:<id>`, or empty). */
+  lineManager: string;
+  siteIds: string[];
   siteNames: string[];
+  projectIds: string[];
   projectNames: string[];
+  /** The first day of site or project changes saved for later (the next shift), if any. */
+  changesFrom: string | null;
   mapped: boolean;
 }
 
@@ -192,6 +201,8 @@ export interface PeopleDirectory {
   /** Active employees with no department, before filters. */
   noDepartmentCount: number;
   departments: DepartmentSummary[];
+  /** The active employee asked for by `selectedId`, whatever the filters, or null. */
+  selected: PeopleRow | null;
 }
 
 interface WorkerListRow {
@@ -217,7 +228,7 @@ export async function loadPeopleDirectory(
   supabase: Client,
   organisationId: string,
   today: string,
-  filters: { query?: string; departmentId?: string } = {},
+  filters: { query?: string; departmentId?: string; selectedId?: string } = {},
 ): Promise<PeopleDirectory> {
   const [workers, departments, sites, projects, assignments, managers] = await Promise.all([
     readAll<WorkerListRow>("employees", (from, to) =>
@@ -262,6 +273,8 @@ export async function loadPeopleDirectory(
   const all: PeopleRow[] = active.map((w) => {
     const current = byWorker.get(w.id) ?? [];
     const siteIds = unique(current.map((a) => a.site_id));
+    const projectIds = unique(current.map((a) => a.project_id));
+    const later = current.map((a) => a.effective_from).filter((from) => from > today);
     const lineManagerName = w.line_manager_worker_id
       ? (workerName.get(w.line_manager_worker_id) ?? null)
       : w.line_manager_membership_id
@@ -277,10 +290,18 @@ export async function loadPeopleDirectory(
       departmentId: w.department_id,
       departmentName: w.department_id ? (departmentName.get(w.department_id) ?? null) : null,
       lineManagerName,
+      lineManager: encodeLineManager(
+        w.line_manager_worker_id
+          ? { kind: "worker", id: w.line_manager_worker_id }
+          : w.line_manager_membership_id
+            ? { kind: "membership", id: w.line_manager_membership_id }
+            : null,
+      ),
+      siteIds,
       siteNames: siteIds.map((id) => sites.get(id) ?? "Site").sort(),
-      projectNames: unique(current.map((a) => a.project_id))
-        .map((id) => projects.get(id) ?? "Project")
-        .sort(),
+      projectIds,
+      projectNames: projectIds.map((id) => projects.get(id) ?? "Project").sort(),
+      changesFrom: later.sort()[0] ?? null,
       mapped: isMapped({
         departmentId: w.department_id,
         hasLineManager: Boolean(w.line_manager_worker_id || w.line_manager_membership_id),
@@ -321,6 +342,49 @@ export async function loadPeopleDirectory(
         count: counts.get(d.id) ?? 0,
       }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    selected: filters.selectedId ? (all.find((r) => r.id === filters.selectedId) ?? null) : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mapping choices (slice 1.6)
+// ---------------------------------------------------------------------------
+
+export interface MappingTargets {
+  /** Sites, labelled "Site · Client". */
+  sites: Option[];
+  /** Projects, labelled "Project · Client". */
+  projects: Option[];
+}
+
+/** Every site and project in the organisation, by name, with their client for context. */
+export async function loadMappingTargets(
+  supabase: Client,
+  organisationId: string,
+): Promise<MappingTargets> {
+  const read = (table: "sites" | "projects") =>
+    readAll<{ id: string; name: string; client_id: string }>(table, (from, to) =>
+      supabase
+        .from(table)
+        .select("id, name, client_id")
+        .eq("organisation_id", organisationId)
+        .order("id")
+        .range(from, to),
+    );
+  const [clients, sites, projects] = await Promise.all([
+    loadNames(supabase, "clients", organisationId),
+    read("sites"),
+    read("projects"),
+  ]);
+  const toOption = (row: { id: string; name: string; client_id: string }): Option => {
+    const client = clients.get(row.client_id);
+    return { value: row.id, label: client ? `${row.name} · ${client}` : row.name };
+  };
+  const byLabel = (a: Option, b: Option) =>
+    a.label.localeCompare(b.label, "en", { sensitivity: "base" });
+  return {
+    sites: sites.map(toOption).sort(byLabel),
+    projects: projects.map(toOption).sort(byLabel),
   };
 }
 
