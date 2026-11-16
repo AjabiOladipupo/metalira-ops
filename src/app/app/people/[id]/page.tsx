@@ -29,6 +29,7 @@ import {
   type BankChangeView,
   type BankChangeViewer,
 } from "@/server/people/bank-changes";
+import { loadChangeRequests, type ChangeRequestView } from "@/server/people/change-requests";
 import type { PayRateVersion } from "@/server/people/pay-rates";
 import { loadWorkerProfile, type WorkerProfile } from "@/server/people/people-data";
 import { peoplePageContext } from "@/server/people/page-context";
@@ -38,6 +39,7 @@ import { RouteGate } from "../../_shell/slots";
 import { BankChangeCard } from "../_components/bank-change-card";
 import { BankChangeRequestForm } from "../_components/bank-change-forms";
 import { CancelPayButton } from "../_components/cancel-pay-button";
+import { ChangeRequestCard } from "../_components/change-request-card";
 import { DetailList, NotSet, Section } from "../_components/display";
 import { EndEmploymentForm } from "../_components/end-employment-form";
 import { PayChangeForm } from "../_components/pay-change-form";
@@ -143,12 +145,15 @@ function Profile({
   ctx,
   bankChanges,
   viewer,
+  changeRequests,
 }: {
   worker: WorkerProfile;
   ctx: Awaited<ReturnType<typeof peoplePageContext>>;
   /** This worker's bank-detail changes, newest first (empty for roles that can't see them). */
   bankChanges: BankChangeView[];
   viewer: BankChangeViewer;
+  /** Changes the employee asked for from the worker app (empty for roles that can't see them). */
+  changeRequests: ChangeRequestView[];
 }) {
   const { today, canEdit, role } = ctx;
   const active = worker.status === "active";
@@ -216,6 +221,18 @@ function Profile({
           {worker.supervisorClockIn ? <Status tone="pending">Supervisor clock-in</Status> : null}
         </div>
       </div>
+
+      {changeRequests.length > 0 ? (
+        <Section
+          id="change-requests"
+          title="Requests from the employee"
+          description="Sent from the worker app. Change the record yourself, then mark the request done or decline it."
+        >
+          {changeRequests.map((request) => (
+            <ChangeRequestCard key={request.id} request={request} canResolve={canEdit} />
+          ))}
+        </Section>
+      ) : null}
 
       <Section id="job" title="Job and mapping">
         <DetailList
@@ -415,7 +432,7 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   after(() => sendAppliedBankChangeNotices(ctx.organisationId));
   const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today);
   if (!worker) notFound();
-  const [bankChanges, viewer] = await Promise.all([
+  const [bankChanges, viewer, changeRequests] = await Promise.all([
     canViewBankChanges(ctx.role)
       ? loadBankChanges(ctx.supabase, ctx.organisationId, { workerId: id, limit: 5 })
       : Promise.resolve([]),
@@ -426,8 +443,19 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
       ctx.role,
       canSeePii(ctx.role, "bank_account"),
     ),
+    ctx.canEdit
+      ? loadChangeRequests(ctx.supabase, ctx.organisationId, id)
+      : Promise.resolve([]),
   ]);
-  return <Profile worker={worker} ctx={ctx} bankChanges={bankChanges} viewer={viewer} />;
+  return (
+    <Profile
+      worker={worker}
+      ctx={ctx}
+      bankChanges={bankChanges}
+      viewer={viewer}
+      changeRequests={changeRequests}
+    />
+  );
 }
 
 export default function Page({ params }: PageProps<"/app/people/[id]">) {

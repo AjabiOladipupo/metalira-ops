@@ -516,12 +516,23 @@ export interface WorkerProfile {
 const PROFILE_COLUMNS =
   "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in" as const;
 
+export interface WorkerProfileOptions {
+  /**
+   * Who is reading. "manager" (the People screens) reads the line manager from the directory
+   * and the pay history. "self" is the worker's own session in the worker app (slice 1.10): RLS
+   * lets it read only its own row, so the line manager's name comes from public.my_line_manager
+   * and no pay history is read (the Me screen shows none).
+   */
+  viewer?: "manager" | "self";
+}
+
 /** One worker as the People screens show them, or null when RLS hides them or none exists. */
 export async function loadWorkerProfile(
   supabase: Client,
   organisationId: string,
   workerId: string,
   today: string,
+  { viewer = "manager" }: WorkerProfileOptions = {},
 ): Promise<WorkerProfile | null> {
   const { data: w, error } = await supabase
     .from("workers")
@@ -542,11 +553,15 @@ export async function loadWorkerProfile(
           .maybeSingle()
           .then(({ data }) => data?.name ?? null)
       : Promise.resolve(null),
-    lineManagerLabel(supabase, organisationId, w),
+    viewer === "self"
+      ? ownLineManagerName(supabase, organisationId)
+      : lineManagerLabel(supabase, organisationId, w),
     loadCurrentAssignments(supabase, organisationId, today, workerId),
     loadNames(supabase, "sites", organisationId),
     loadNames(supabase, "projects", organisationId),
-    listPayRates(supabase, organisationId, workerId),
+    viewer === "self"
+      ? Promise.resolve([])
+      : listPayRates(supabase, organisationId, workerId),
   ]);
 
   const siteIds = unique(assignments.map((a) => a.site_id));
@@ -599,6 +614,20 @@ export async function loadWorkerProfile(
     }),
     payRates,
   };
+}
+
+/**
+ * The signed-in worker's own line manager by name (public.my_line_manager), or null when none
+ * is set. A manager-app line manager with no profile name comes back as null too; the screen
+ * still knows one is set from the worker row.
+ */
+async function ownLineManagerName(supabase: Client, organisationId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc("my_line_manager", {
+    p_organisation_id: organisationId,
+  });
+  if (error) throw new Error(`Could not read the line manager: ${error.code}`);
+  const row = data?.[0];
+  return row?.has_line_manager ? (row.name ?? null) : null;
 }
 
 async function lineManagerLabel(
