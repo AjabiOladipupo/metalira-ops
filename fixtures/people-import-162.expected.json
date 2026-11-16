@@ -1,0 +1,130 @@
+{
+  "description": "Expected result of validating people-import-162.csv (and the .xlsx copy) against an empty account: no existing workers, managers, departments, clients, projects or sites. Written by hand from the Setup board (docs/design/prototype/Setup.dc.html) and docs/PHASE_1.md slice 1.4; not generated.",
+  "rowNumbering": "Spreadsheet rows: the header is row 1, the 162 employees are rows 2 to 163.",
+  "summary": {
+    "rows": 162,
+    "ready": 158,
+    "needFixing": 4,
+    "held": 3,
+    "importable": 159,
+    "needsPayDetails": 3,
+    "generatedStaffIds": 2,
+    "supervisorClockIn": 1,
+    "found": {
+      "departments": 4,
+      "lineManagers": 14,
+      "clients": 3,
+      "projects": 4,
+      "sites": 5
+    },
+    "foundLine": "4 departments · 14 line managers · 3 clients · 4 projects · 5 sites"
+  },
+  "attention": [
+    {
+      "row": 23,
+      "status": "held",
+      "problems": [
+        {
+          "code": "line_manager_unknown",
+          "column": "line_manager_employee_id",
+          "message": "Line manager ID MO-0090 is not in the file or in your account.",
+          "fix": {
+            "label": "Set to Kola Adebayo",
+            "patch": { "line_manager_employee_id": "AFS-0003" }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "row": 57,
+      "status": "held",
+      "problems": [
+        {
+          "code": "bank_account_invalid",
+          "column": "bank_account_number",
+          "message": "Bank account number has 9 digits; NUBAN numbers have 10.",
+          "fix": {
+            "label": "Mark for HR to fix",
+            "patch": { "bank_account_number": "" }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "row": 88,
+      "status": "warning",
+      "problems": [],
+      "warnings": [
+        {
+          "code": "duplicate_phone",
+          "column": "phone",
+          "message": "Phone 0803 ••• 1120 is also on row 12. Each worker needs their own phone to clock in.",
+          "attention": true,
+          "appliedFix": "Use supervisor clock-in"
+        }
+      ]
+    },
+    {
+      "row": 140,
+      "status": "held",
+      "problems": [
+        {
+          "code": "client_not_found",
+          "column": "client_company",
+          "message": "Client \"Coastline Logistic\" not found.",
+          "fix": {
+            "label": "Match to Coastline Logistics",
+            "patch": { "client_company": "Coastline Logistics" }
+          }
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "otherWarnings": [
+    {
+      "row": 102,
+      "code": "needs_pay_details",
+      "message": "Needs pay details before payroll: bank details are blank."
+    },
+    {
+      "row": 122,
+      "code": "needs_pay_details",
+      "message": "Needs pay details before payroll: basic pay is blank."
+    },
+    {
+      "row": 132,
+      "code": "needs_pay_details",
+      "message": "Needs pay details before payroll: pay is blank; bank details are blank."
+    },
+    {
+      "row": 152,
+      "code": "staff_id_generated",
+      "message": "Staff ID was blank. It will be AFS-0163."
+    },
+    {
+      "row": 162,
+      "code": "staff_id_generated",
+      "message": "Staff ID was blank. It will be AFS-0164."
+    }
+  ],
+  "newNames": {
+    "departments": ["Head office", "Security services", "Cleaning services", "Facility management"],
+    "clients": ["Coastline Logistics", "Greenfield Estates", "Marina Holdings"],
+    "projects": [
+      { "client": "Coastline Logistics", "name": "Coastline guarding contract" },
+      { "client": "Greenfield Estates", "name": "Greenfield guarding contract" },
+      { "client": "Marina Holdings", "name": "VI Tower refit clean" },
+      { "client": "Greenfield Estates", "name": "Greenfield facility upkeep" }
+    ],
+    "sites": [
+      { "client": "Coastline Logistics", "name": "Apapa Warehouse 3" },
+      { "client": "Greenfield Estates", "name": "Lekki Estate Gate B" },
+      { "client": "Marina Holdings", "name": "VI Tower" },
+      { "client": "Coastline Logistics", "name": "Ikeja Depot" },
+      { "client": "Greenfield Estates", "name": "Lekki Estate Clubhouse" }
+    ]
+  }
+}
