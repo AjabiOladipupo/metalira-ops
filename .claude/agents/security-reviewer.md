@@ -15,5 +15,5 @@ Check:
 6. Storage buckets are private; files are served by signed URLs scoped to the organisation.
 7. NIN, BVN, bank account numbers and RSA PIN are encrypted and masked for unauthorised roles; never logged or sent to Sentry.
 8. Worker PIN sign-in is rate-limited with lockout; PINs are hashed.
-9. Payment webhooks verify Flutterwave's signature against the secret hash (raw body, constant-time compare), re-verify the transaction with Flutterwave's verify endpoint (status, amount, currency, `tx_ref`) before giving value, and reject replays (unique transaction id).
+9. Monnify webhooks (Metalira's subscription billing only) verify `monnify-signature` (HMAC-SHA512 of the raw body with the secret key, constant-time compare), accept only Monnify's published IP as set by the platform (`x-real-ip` / `ipAddress()`, never `x-forwarded-for` or the `clientIp()` helper), re-fetch the transaction from Monnify, attribute it only by our own reference on the re-fetched transaction (never webhook body fields), give value only on a fully paid status with paid amount and currency equal to the invoice, never log the raw body or parsed event, and reject replays (unique `transactionReference`). No customer money or customer payment-provider credentials pass through the app (rule 6).
 10. No secrets, keys or personal data committed, printed or written to logs.

@@ -1,83 +1,74 @@
 /**
- * Payment provider interface. Provider-neutral types only; adapters live next to this file and
- * callers (src/server/billing, src/server/payroll) use `getPaymentProvider()` from ./index.
+ * Payment provider interface for **Metalira's own subscription billing only**. Provider-neutral
+ * types; the adapter lives next to this file and callers use `getPaymentProvider()` from ./index.
+ *
+ * Who this is for (owner decision, 16 Nov 2026):
+ * - Customer companies connect only their own bank account. Their clients pay invoices by bank
+ *   transfer into it, collections are matched from imported bank statements, and payroll is a
+ *   bank file the company uploads to its own bank. No customer money ever goes through this
+ *   provider (rule 6).
+ * - This provider collects the fees organisations pay Metalira for their subscription. The
+ *   credentials are Metalira's own, loaded from server env under `src/server/` only (rule 2).
  *
  * Rules this interface encodes:
  * - Money is integer kobo (`Kobo`, a bigint) plus a currency. Never a JS number (rule 1).
- * - Credentials are always the organisation's own (rule 6, no custody of funds). An adapter never
- *   reads provider keys from `process.env`; the caller loads them for the organisation.
- * - A webhook is a hint, never proof of payment (rule 7). Value is given only after
- *   `verifyWebhook()` passes on the raw body, `verifyTransaction()` re-fetches the transaction,
- *   and its status, amount, currency and txRef all match what we expect. Each transaction id is
- *   processed exactly once (unique index plus an idempotent handler, Phase 6).
  *
- * Phase 6 webhook route contract (read before building it):
- * - Find the organisation from the request URL, never from the body. Use an unguessable,
- *   per-organisation token in the path (for example `/api/webhooks/payments/[orgWebhookToken]`),
- *   looked up server-side. Anything in the body (tx_ref prefix, meta, customer) is unverified
- *   until `verifyWebhook()` passes, so reading the organisation from it would let a sender pick
- *   whose secret is checked.
- * - After `verifyTransaction()`, require that its txRef belongs to an invoice or payment link in
- *   that same organisation, and that amount and currency match that document.
- * - Value-giving idempotency is a unique index on (organisation_id, provider, transaction_id) on
- *   the payments table, keyed on `VerifiedTransaction.transactionId`. Never key it on
- *   `WebhookEvent.deliveryKey`: one transaction can arrive under more than one event name.
- * - Never log `WebhookEvent`, `VerifiedTransaction` or a raw body, and never attach them to
- *   Sentry. Store only `auditPayload`, which the adapter has already reduced to an allow-list of
- *   non-personal fields (rule 9).
- *
- * Open question for the owner (docs/PHASE_0.md Decisions names `FLUTTERWAVE_WEBHOOK_SECRET_HASH`):
- * this interface uses each organisation's own secret hash (rule 6). Until the owner records an
- * answer, treat the env var as being for Metalira's own subscription billing or a sandbox only,
- * never for tenant webhooks.
+ * Phase 9 webhook route contract (read before building it, rule 7):
+ * 1. Source IP: pass only the platform-set client IP (`ipAddress()` from `@vercel/functions` or
+ *    `x-real-ip`) to `isTrustedWebhookSource()`. Never `x-forwarded-for`, and never reuse
+ *    `clientIp()` from src/server/identity (it falls back to `x-forwarded-for`). Fail closed when
+ *    not running on Vercel unless a test flag is set explicitly.
+ * 2. `verifyWebhook()` on the raw body exactly as received. A webhook is a hint, never proof.
+ * 3. Re-fetch with `verifyTransaction()` by the event's `transactionId`, and require the returned
+ *    `transactionId` to equal it.
+ * 4. Attribution: find the organisation and subscription invoice ONLY from our own reference on
+ *    the re-fetched transaction (`txRef` for checkout, `accountReference` for a dedicated
+ *    account), looked up server-side. Never from webhook body fields (customer email,
+ *    description, payer account): the payer chooses those.
+ * 5. Give value only when `status` is `successful` (Monnify `PAID` only) and `paidAmountKobo`
+ *    and `currency` equal that invoice exactly. Overpaid, partly paid, reversed or any other
+ *    status goes to manual review, never to automatic value.
+ * 6. Exactly once: a unique index on (provider, transaction_id) keyed on
+ *    `VerifiedTransaction.transactionId`, plus an idempotent handler. Never key it on
+ *    `WebhookEvent.deliveryKey`.
+ * 7. Never log `WebhookEvent`, `VerifiedTransaction` or a raw body, and never attach them to
+ *    Sentry. Store only `auditPayload`, already reduced to non-personal fields (rule 9).
  */
 import type { Currency, Kobo } from "@/lib/money";
 
-/** One organisation's provider credentials. Loaded per organisation, never from env. */
+/** Metalira's own provider credentials. Loaded server-side from env, never sent to a client. */
 export interface ProviderCredentials {
-  publicKey: string;
+  apiKey: string;
+  /** Also the key the provider signs webhooks with. */
   secretKey: string;
-  encryptionKey: string;
-  /** Shared secret the provider uses to sign or tag webhooks for this organisation. */
-  webhookSecretHash: string;
+  /** Merchant contract the collections settle under. */
+  contractCode: string;
 }
 
-/**
- * How a provider proves a webhook came from it. Chosen per organisation (or per provider API
- * version) and always passed explicitly: there is no default.
- *
- * - `hmac-sha256`: an HMAC-SHA256 of the raw body keyed with the secret hash. Preferred, because
- *   it binds the signature to this exact body.
- * - `static-hash`: the provider echoes the secret hash in a header. It does not cover the body,
- *   so a leaked or replayed hash passes for any body. Acceptable only because value is never
- *   given on a webhook alone (see `verifyTransaction()`).
- */
-export type WebhookScheme = "hmac-sha256" | "static-hash";
-
-/** Options for building one organisation's provider. */
+/** Options for building the provider. */
 export interface PaymentProviderOptions {
-  webhookScheme: WebhookScheme;
+  /** Sandbox or live API host. The adapter defaults to sandbox, so live is always explicit. */
+  baseUrl?: string;
+  /** Injected fetch for the network methods (tests). */
+  fetch?: typeof fetch;
 }
 
 /**
- * Provider payload reduced to an allow-list of non-personal fields (ids, reference, status,
- * amounts, currency, timestamps). Safe to store in `audit_log` or a payments table. Customer,
- * card and bank account objects are dropped by construction.
+ * Provider payload reduced to an allow-list of non-personal fields (references, status, amounts,
+ * currency, timestamps). Safe to store in `audit_log` or a payments table. Customer, card and
+ * bank account objects are dropped by construction.
  */
 export type ProviderAuditPayload = Readonly<Record<string, string | number | boolean | null>>;
 
+/** A dedicated account number one subscribing organisation pays its Metalira fees into. */
 export interface CreateVirtualAccountInput {
   orgId: string;
-  clientId: string;
   /** Our unique reference for this account (idempotency key on the provider side). */
   reference: string;
   email: string;
   accountName: string;
-  /** Required by some providers for permanent accounts. Encrypted at rest (rule 9). */
+  /** Some providers require one for a dedicated account. Encrypted at rest (rule 9). */
   bvn?: string;
-  permanent: boolean;
-  /** Fixed expected amount, for a one-off (temporary) account. */
-  amountKobo?: Kobo;
   currency: Currency;
 }
 
@@ -85,24 +76,22 @@ export interface VirtualAccount {
   accountNumber: string;
   bankName: string;
   providerRef: string;
-  /** ISO 8601 timestamp; absent for permanent accounts. */
-  expiresAt?: string;
 }
 
 export interface PaymentLinkCustomer {
   email: string;
   name: string;
-  phone?: string;
 }
 
+/** Hosted checkout for a subscription invoice. */
 export interface CreatePaymentLinkInput {
+  /** Our reference for this payment, unique per attempt. */
   txRef: string;
   amountKobo: Kobo;
   currency: Currency;
   customer: PaymentLinkCustomer;
   redirectUrl: string;
   description: string;
-  meta?: Record<string, string>;
 }
 
 export interface PaymentLink {
@@ -110,57 +99,41 @@ export interface PaymentLink {
   txRef: string;
 }
 
+/** Look a transaction up by the provider's reference or by ours. */
 export type VerifyTransactionInput = { transactionId: string } | { txRef: string };
 
-export type TransactionStatus = "successful" | "failed" | "pending";
+/**
+ * `successful` means paid in full and nothing else (Monnify `PAID`). `needs_review` covers
+ * overpaid, partly paid and reversed payments: never automatic value.
+ */
+export type TransactionStatus = "successful" | "needs_review" | "failed" | "pending";
 
 export interface VerifiedTransaction {
+  /** The provider's own reference for the transaction. The money idempotency key. */
   transactionId: string;
+  /** Our reference for a hosted-checkout payment, as sent when the payment was set up. */
   txRef: string;
+  /** Our reference for the dedicated account the payment arrived in, when it came that way. */
+  accountReference?: string;
   status: TransactionStatus;
   /** Amount the invoice or link asked for. */
   amountKobo: Kobo;
-  /** Amount actually charged to the payer (may include fees borne by the payer). */
-  chargedAmountKobo: Kobo;
+  /** Amount the payer actually paid. */
+  paidAmountKobo: Kobo;
   currency: Currency;
   /** ISO 8601 timestamp. */
   paidAt?: string;
   /**
    * Redacted provider response for the audit trail (allow-listed fields only). Never used for
-   * decisions. The full response is never exposed: it carries customer email, phone and card or
-   * account fragments (rule 9).
+   * decisions. The full response carries customer and account details (rule 9).
    */
   auditPayload: ProviderAuditPayload;
-}
-
-export interface TransferItem {
-  /** Our unique reference per payee line (idempotency). */
-  reference: string;
-  bankCode: string;
-  accountNumber: string;
-  amountKobo: Kobo;
-  currency: Currency;
-  narration: string;
-  beneficiaryName: string;
-}
-
-export interface CreateBulkTransferInput {
-  reference: string;
-  title: string;
-  items: readonly TransferItem[];
-}
-
-export type BulkTransferStatus = "queued" | "processing" | "completed" | "failed";
-
-export interface BulkTransfer {
-  providerBatchId: string;
-  status: BulkTransferStatus;
 }
 
 export type WebhookVerification =
   { ok: true } | { ok: false; reason: "missing_header" | "mismatch" | "not_configured" };
 
-export type WebhookEventType = "charge.completed" | "transfer.completed" | "unknown";
+export type WebhookEventType = "payment.completed" | "unknown";
 
 /**
  * Parsed webhook payload. Deliberately carries no amount or status: the handler must re-fetch
@@ -168,13 +141,12 @@ export type WebhookEventType = "charge.completed" | "transfer.completed" | "unkn
  */
 export interface WebhookEvent {
   /**
-   * Event type plus the provider's object id. For logging and for dropping repeat deliveries of
-   * the same webhook only. It is NOT the money idempotency key: that is a unique index on
-   * (organisation_id, provider, transactionId) taken from `verifyTransaction()`.
+   * Event type plus the provider's transaction reference. For logging and for dropping repeat
+   * deliveries only; NOT the money idempotency key (that is `VerifiedTransaction.transactionId`).
    */
   deliveryKey: string;
   type: WebhookEventType;
-  /** Provider transaction id. Pass it to `verifyTransaction()`; trust nothing else in the body. */
+  /** Provider transaction reference. Pass it to `verifyTransaction()`; trust nothing else. */
   transactionId: string;
   txRef?: string;
   /** Redacted payload (allow-listed fields only), safe to store. Never log the raw body. */
@@ -182,24 +154,27 @@ export interface WebhookEvent {
 }
 
 export interface PaymentProvider {
-  /** Provider key, stored alongside provider references (e.g. on payout batches). */
+  /** Provider key, stored alongside provider references. */
   readonly name: string;
   createVirtualAccount(input: CreateVirtualAccountInput): Promise<VirtualAccount>;
   createPaymentLink(input: CreatePaymentLinkInput): Promise<PaymentLink>;
   verifyTransaction(input: VerifyTransactionInput): Promise<VerifiedTransaction>;
-  createBulkTransfer(input: CreateBulkTransferInput): Promise<BulkTransfer>;
-  getBulkTransfer(providerBatchId: string): Promise<BulkTransfer>;
   /**
-   * Checks the webhook signature against this organisation's secret with this organisation's
-   * `WebhookScheme`, in constant time, using the raw request body exactly as received (before
-   * any JSON parsing). Passing it never gives value on its own (rule 7).
+   * True only when `ip` is one of the provider's published webhook source addresses. The caller
+   * passes the client IP as resolved by the platform (on Vercel, `x-real-ip`), never a value it
+   * parsed out of a client-controlled list.
+   */
+  isTrustedWebhookSource(ip: string | null): boolean;
+  /**
+   * Checks the webhook signature with the secret key, in constant time, using the raw request
+   * body exactly as received (before any JSON parsing). Passing it never gives value on its own.
    */
   verifyWebhook(rawBody: string, headers: Headers): WebhookVerification;
   /** Parses the raw body into a `WebhookEvent`. Throws `InvalidWebhookPayloadError`. */
   parseWebhookEvent(rawBody: string): WebhookEvent;
 }
 
-/** Thrown by adapter methods that are not built yet (network calls arrive in Phases 2 and 6). */
+/** Thrown by adapter methods that are not built yet (network calls arrive in Phase 9). */
 export class ProviderNotImplementedError extends Error {
   constructor(method: string) {
     super(`${method} is not implemented yet`);

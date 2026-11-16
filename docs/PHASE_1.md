@@ -18,7 +18,7 @@ Rules that apply to every slice here:
 - `/app/setup` wizard following the Setup board: steps Plan, Business details, Invoices and payments, Clients and contracts, Employees, Ready. Left rail "Setup N of 5 done"; "Everything here can be changed later in Settings."
 - Plan step records the chosen plan and expected workers only. No prices, estimates or worker limits are shown until pricing is final (Phase 0 decision); no charging (Metalira billing is Phase 9).
 - Business step: logo upload to a private Storage bucket `org-assets/{organisation_id}/logo.*` (PNG or SVG, under 1 MB, served by signed URL), registered name, trading name, RC number, TIN, industry, head office state, address, phone. Pay settings: monthly only. `pay_cycle_start_day` (1–28, default 20) and `pay_day` (1–31, default 25) already exist on `organisations`; the step edits them. "Last working day" and weekly pay from the board are not offered until payroll rules cover them.
-- Invoices step: invoice email, first invoice number, payment terms, VAT registered. "Where clients pay" shows Flutterwave and bank transfer only (Paystack from the board is dropped) as "Connect in Phase 2" placeholders; no provider names in UI code outside the allowed folders (render from a server-provided list).
+- Invoices step: invoice email, first invoice number, payment terms, VAT registered. "Where clients pay" shows the company's own bank account only, as a "Connect in Phase 2" placeholder (no payment provider; see BUILD_PLAN.md "Payments model"); no provider names in UI code outside the allowed folders (render from a server-provided list).
 - Clients step is a placeholder that links forward (clients arrive in Phase 2); Employees step hosts the import from 1.8 once it lands, and until then links to `/app/people`.
 - Owner/admin only. `/app/settings/company` reuses the same forms. After sign-up, an owner with no `setup_completed_at` is sent to `/app/setup`.
 - Zod schemas in `src/server/identity/company.ts`; RC number and TIN format checks only.
@@ -137,9 +137,9 @@ Rules that apply to every slice here:
 6. PIN: 6 digits; 5 wrong tries lock the account for 15 minutes.
 7. Unmasked personal data: owner and hr see all; finance sees bank account numbers only; everyone else sees masked values. Every reveal is audited.
 8. NIN shows "On file" or "Missing" (11-digit format check), never "Verified".
-9. Bank changes: two-person approval, then a 72-hour hold before payouts use the new account.
+9. Bank changes: two-person approval, then a 72-hour hold before a payroll bank file includes the new account.
 10. Pay day: monthly only, configurable cycle start day (1–28) and pay day (1–31).
-11. Paystack dropped; Flutterwave and bank transfer only.
+11. Paystack dropped; Flutterwave and bank transfer only. Superseded 16 Nov 2026: the company's own bank account only.
 12. Plans: record the chosen plan and headcount; no prices or limits shown until pricing is final.
 13. Import accepts CSV and Excel (.xlsx).
 14. Rows missing pay or bank details import with a "needs pay details before payroll" flag.

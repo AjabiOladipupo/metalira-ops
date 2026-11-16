@@ -8,7 +8,7 @@
 4. **Supabase:** create a project named `metalira-ops` in the London (eu-west-2) region on the free plan. Keep the database password in your password manager.
 5. **Vercel:** import the GitHub repo as a new project (Hobby while building).
 6. **Resend:** add and verify a sending domain (e.g. `mail.yourdomain`) with the SPF and DKIM records it gives you.
-7. **Flutterwave:** from the dashboard (test mode), note the public key, secret key, encryption key and set a webhook secret hash. Needed from Phase 2. Never paste these into a chat; they go into `.env.local` and Vercel environment variables only.
+7. **Monnify** (Metalira's own subscription billing only): from the dashboard (sandbox), note the API key, secret key and contract code. Needed from Phase 9. Customers connect only their own bank account, so there are no customer payment-provider keys. Never paste these into a chat; they go into `.env.local` and Vercel environment variables only.
 8. **Sentry:** create a free Next.js project and note the DSN.
 9. **Optional:** add the Supabase MCP server to Claude Code so it can read your project's schema and logs. Give it read-only access to start.
 

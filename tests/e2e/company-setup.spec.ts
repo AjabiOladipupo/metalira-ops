@@ -96,9 +96,10 @@ test("a new owner completes company setup and every save is audited", async ({ p
   await page.getByRole("textbox", { name: "Tax ID (TIN)" }).fill("12345678-0001");
   await cont(page).click();
 
-  // 3. Invoices and payments: rails come from the server list, as Phase 2 placeholders.
+  // 3. Invoices and payments: the company's own bank account only, a Phase 2 placeholder.
   await expectStep(page, "invoices", "Invoices and getting paid", 2);
-  await expect(page.getByText("Connect in Phase 2")).toHaveCount(2);
+  await expect(page.getByText("Connect in Phase 2")).toHaveCount(1);
+  await expect(page.getByText("Bank account", { exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Invoice email" }).fill(`billing-${suffix}@example.test`);
   await page.getByRole("combobox", { name: "Payment terms" }).selectOption({ label: "14 days" });
   await cont(page).click();

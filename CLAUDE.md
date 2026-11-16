@@ -3,7 +3,7 @@
 Workforce and business operations SaaS for Nigerian service companies (security, cleaning, facility management, staffing, field sales). Two tools that share one record:
 
 - **Workforce Ops**: people, mapping, rosters, PWA clock-in, timesheets, leave, payroll.
-- **Business Ops**: clients, sites, contracts, rate cards, projects, invoices, Flutterwave collections, costs.
+- **Business Ops**: clients, sites, contracts, rate cards, projects, invoices, bank-statement collections, costs.
 - **Revenue Layer**: joins both on the Work Unit to show labour margin, contribution margin and true margin.
 
 Owner: Meta Lira Technology LTD. Product docs live in `docs/`. Read `docs/PRODUCT.md` and the current phase file before planning any work. Screens, brand and logos live in `docs/design/` (prototype screens in `docs/design/prototype/*.dc.html`, brand book and logos in `docs/design/brand/`); match their layouts.
@@ -14,7 +14,7 @@ Owner: Meta Lira Technology LTD. Product docs live in `docs/`. Read `docs/PRODUC
 - Supabase: Postgres + PostGIS, Auth, Storage, pg_cron. Migrations in `supabase/migrations`. The project uses Supabase's new keys: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` replaces the anon key and `SUPABASE_SECRET_KEY` replaces the service-role key. Where the docs say anon or service role, read publishable or secret.
 - Tailwind CSS + shadcn/ui, styled per `docs/DESIGN_SYSTEM.md`.
 - Resend + React Email for every outbound message. @react-pdf/renderer for invoices, receipts, payslips.
-- Flutterwave for collections (virtual accounts, hosted checkout / payment links) and payouts (bulk transfers), behind `src/lib/payments/provider.ts`. No provider names outside `src/lib/payments/` and `src/server/billing/`.
+- Customers connect only their own business bank account: clients pay invoices by transfer into it (matched from uploaded bank statements) and payroll is a bank file the customer uploads to their own bank. Monnify is used only for Metalira's own subscription billing (Phase 9), behind `src/lib/payments/provider.ts`. No provider names outside `src/lib/payments/` and `src/server/billing/`.
 - PWA: Serwist service worker + Dexie (IndexedDB) offline punch queue.
 - Tests: Vitest (unit, money, RLS), Playwright (key flows). Sentry for errors.
 - Package manager: pnpm.
@@ -26,8 +26,8 @@ Owner: Meta Lira Technology LTD. Product docs live in `docs/`. Read `docs/PRODUC
 3. **Versioned rates**: pay rates, rate cards and tax rule sets are dated versions (`effective_from`, `effective_to`). Never update a past version; insert a new one.
 4. **Append-only records**: punches, audit log and ledger entries are insert-only. Corrections are new rows with a reason and actor.
 5. **Posted documents** (invoices, payslips, payments, receipts) are never edited. Reverse or credit them.
-6. **No custody of funds**: Metalira never holds customer money. Payouts run from the customer's own bank or Flutterwave balance using the customer's own Flutterwave credentials.
-7. **Payment webhooks**: verify Flutterwave's signature header against the secret hash with a constant-time compare on the raw body (confirm the exact header and scheme in Flutterwave's current docs when Phase 6 starts), then re-fetch the transaction from Flutterwave's verify endpoint and check status, amount, currency and `tx_ref` before giving value. Process each transaction id exactly once (unique index + idempotent handler).
+6. **No custody of funds**: Metalira never holds or moves customer money. Customers connect only their own bank account; clients pay into it by transfer, and payroll is a bank file the customer uploads to their own bank. No customer payment-provider credentials are stored. Payroll bank files hold account numbers, so they follow rule 9 (private bucket, signed URL scoped to the organisation, never logged).
+7. **Monnify webhooks** (Metalira's subscription billing): verify `monnify-signature` (HMAC-SHA512 of the raw body with the secret key, constant-time compare), accept only from Monnify's published IP as set by the platform (`x-real-ip` / `ipAddress()`, never `x-forwarded-for`), then re-fetch the transaction from Monnify. Find the organisation and invoice only from our own reference on the re-fetched transaction, never from webhook body fields, and give value only when the status is fully paid and the paid amount and currency equal that invoice. Never log the raw body or parsed event. Monnify credentials are server-only env under `src/server/`. Process each `transactionReference` exactly once (unique index + idempotent handler). Confirm the scheme and IP list in Monnify's current docs when Phase 9 starts.
 8. **Notifications** are email via Resend or an in-app inbox item. No SMS, no WhatsApp.
 9. **Personal data** (NIN, BVN, bank account numbers, RSA PIN) is encrypted at the column level and masked in the UI except for authorised roles. Selfies and location are collected only with recorded consent.
 10. **Two-person rule**: payroll release and bank-detail changes need a second approver.

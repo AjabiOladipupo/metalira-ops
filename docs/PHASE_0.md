@@ -8,7 +8,7 @@ Goal: an empty but production-shaped app. Every later phase plugs into this with
 - Next.js App Router + TypeScript strict, pnpm, ESLint, Prettier, path alias `@/`.
 - Vitest and Playwright installed with one passing sample test each.
 - GitHub Actions: on every PR run `pnpm install --frozen-lockfile`, `typecheck`, `lint`, `test`.
-- `.env.example` listing every variable (Supabase URL/anon/service, Resend key, Flutterwave public key/secret key/encryption key/webhook secret hash/base URL, Sentry DSN, APP_URL).
+- `.env.example` listing every variable (Supabase URL/anon/service, Resend key, Monnify API key/secret key/contract code/base URL (Metalira's own subscription billing; Flutterwave until 16 Nov 2026), Sentry DSN, APP_URL).
 
 **Accept:** CI is green on an empty PR.
 
@@ -42,7 +42,7 @@ Goal: an empty but production-shaped app. Every later phase plugs into this with
 - Resend: sending domain verified (SPF, DKIM); `src/server/email/send.ts` with a React Email base layout in the design system; test email to the owner on sign-up.
 - Sentry for client and server; source maps uploaded on build.
 - Money utilities: `src/lib/money.ts` (kobo integers, `formatNaira`, `allocateKobo` for splits that always sum exactly) with tests.
-- Payment provider interface `src/lib/payments/provider.ts` (types only) and a Flutterwave adapter stub.
+- Payment provider interface `src/lib/payments/provider.ts` (types only) and a Monnify adapter stub (replaced the Flutterwave stub on 16 Nov 2026).
 
 **Accept:** a PR shows a working preview link; sign-up sends a branded email; a thrown test error appears in Sentry; money tests pass.
 
@@ -58,7 +58,7 @@ Approved together with the parallel build plan. Agents build to these; change th
 - Column grants: revoke the table-level privilege first, then grant specific columns (a column-level revoke alone does nothing in Postgres).
 - Local Postgres major version 17 (match the hosted project; confirm in Dashboard → Settings → Infrastructure).
 - Hosted migrations: applied by the Supabase GitHub integration on merge to `main` (owner switches it on). Agents never run `db push --linked`.
-- App URL variable: `NEXT_PUBLIC_APP_URL`. Webhook secret: `FLUTTERWAVE_WEBHOOK_SECRET_HASH`.
+- App URL variable: `NEXT_PUBLIC_APP_URL`. Webhook secret: none. Monnify signs webhooks with `MONNIFY_SECRET_KEY` (changed 16 Nov 2026).
 - With `cacheComponents: true`, do not export `runtime` from routes; proxy (`src/proxy.ts`, Next 16's renamed middleware) runs on Node only, so no Sentry edge config.
 
 **Roles and access**

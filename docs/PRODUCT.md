@@ -19,18 +19,18 @@ Nigerian SMEs with 10–500 shift-based workers: security and guarding, cleaning
 
 ## Modules and what they produce (15)
 
-1. **Company setup**: plan, business details, logo, invoice email, Flutterwave connection, bank account, pay cycle settings.
+1. **Company setup**: plan, business details, logo, invoice email, the company's own business bank account (where clients pay; no payment provider to connect), pay cycle settings.
 2. **People and mapping**: employee records; each mapped to department, line manager, site, client and projects. CSV import from `fixtures/employee_import_template.csv`.
-3. **Clients and contracts**: client → contacts → sites (geofence) → contract (type, SLA) → rate card (dated) → headcount → activation. Activation creates posts and roster requirements, a Flutterwave virtual account and a welcome email.
+3. **Clients and contracts**: client → contacts → sites (geofence) → contract (type, SLA) → rate card (dated) → headcount → activation. Activation creates posts and roster requirements and a welcome email.
 4. **Rosters**: shifts against required headcount; uncovered-shift tray; publish emails workers.
 5. **Attendance (PWA)**: offline punch queue; location checked against site geofence on the server; selfie; supervisor crew clock-in; flags instead of blocks.
 6. **Timesheets**: built from punches; exceptions (outside site, no clock-out, overtime, clock drift, supervisor punch); line-manager approval creates billable Work Units.
 7. **Leave**: types, balances, two-step approval (line manager, then HR), roster blocking.
 8. **Queries**: line manager raises, worker replies, both kept on the HR file.
-9. **Payroll**: pay cycle 20th of the previous month to 19th of the current month, paid on the 25th (organisation setting); dated statutory rules; gross-to-net with an explanation per worker; proration for mid-cycle joiners; overtime; anomalies; two-person approval; payslips; bank file or Flutterwave bulk transfer; statutory schedules with receipt upload. Daily workers are paid outside statutory deductions. See `docs/RULES_NIGERIA.md`.
+9. **Payroll**: pay cycle 20th of the previous month to 19th of the current month, paid on the 25th (organisation setting); dated statutory rules; gross-to-net with an explanation per worker; proration for mid-cycle joiners; overtime; anomalies; two-person approval; payslips; bank file the company uploads to its own bank; statutory schedules with receipt upload. Daily workers are paid outside statutory deductions. See `docs/RULES_NIGERIA.md`.
 10. **Projects**: phases, sub-jobs with owners and deadlines, KPIs, phase review call with approval that bills the milestone.
-11. **Invoicing**: unbilled Work Units → draft invoices at contract rates, 7.5% VAT, email to billing contacts, Flutterwave virtual account and checkout link.
-12. **Collections**: Flutterwave webhook → match to invoice (exact, reference, amount net of WHT, partial) → receipt email; ageing; reminders.
+11. **Invoicing**: unbilled Work Units → draft invoices at contract rates, 7.5% VAT, email to billing contacts, showing the company's own bank account and asking the client to use the invoice number as the transfer narration.
+12. **Collections**: bank statement upload (CSV/XLSX) → match each credit to an invoice (exact, reference, amount net of WHT, partial) → receipt email; ageing; reminders.
 13. **Costs**: one-off, recurring, spread over months, per worker; sector categories; tagged to Work Unit / site / contract / client / project / overhead; rebillable flag.
 14. **Materials store**: tools and consumables (cleaning chemicals, bin liners, uniforms, fuel, spare parts) bought in bulk into a store, issued to sites or workers, returned, counted and written off. Each issue becomes a cost on that site at weighted-average cost; rebillable items flow to the next invoice; low-stock emails.
 15. **Revenue Layer**: labour margin, contribution margin (after logged costs and materials issued), true margin (after overhead) by site, client, contract, project, month.
