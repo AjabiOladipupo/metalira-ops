@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isWorkerAppMetadata } from "@/lib/auth/routes";
 import type { Database } from "@/types/db";
 
 import { getSupabasePublicEnv, type SupabasePublicEnv } from "./env";
@@ -10,6 +11,8 @@ export interface SessionUpdate {
   response: NextResponse;
   /** The signed-in user's id, or null. Verified from the JWT, never from an unchecked cookie. */
   userId: string | null;
+  /** True when the session is a worker's phone login (app_metadata, set only by the server). */
+  isWorker: boolean;
 }
 
 function publicEnvOrNull(): SupabasePublicEnv | null {
@@ -33,7 +36,7 @@ function publicEnvOrNull(): SupabasePublicEnv | null {
 export async function updateSession(request: NextRequest): Promise<SessionUpdate> {
   let response = NextResponse.next({ request });
   const env = publicEnvOrNull();
-  if (!env) return { response, userId: null };
+  if (!env) return { response, userId: null, isWorker: false };
 
   const supabase = createServerClient<Database>(env.url, env.publishableKey, {
     cookies: {
@@ -53,8 +56,14 @@ export async function updateSession(request: NextRequest): Promise<SessionUpdate
 
   // Nothing may run between creating the client and getClaims(): the refresh happens here.
   const { data, error } = await supabase.auth.getClaims();
-  const sub = !error && data?.claims ? data.claims.sub : null;
-  return { response, userId: typeof sub === "string" && sub ? sub : null };
+  const claims = !error && data?.claims ? data.claims : null;
+  const sub = claims?.sub;
+  const userId = typeof sub === "string" && sub ? sub : null;
+  return {
+    response,
+    userId,
+    isWorker: userId !== null && isWorkerAppMetadata(claims?.app_metadata),
+  };
 }
 
 /** A redirect that keeps any auth cookies `from` refreshed during this request. */

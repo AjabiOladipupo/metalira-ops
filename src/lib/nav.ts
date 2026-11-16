@@ -210,6 +210,8 @@ export function navForRole(role: Role): NavGroup[] {
 export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
+  // Worker invites and PIN resets (slice 1.9): the roles that may create invites.
+  { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
 ];
 
 function extraPage(pathname: string) {

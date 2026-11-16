@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 
 import { last4 } from "@/lib/mask";
 
@@ -132,6 +132,31 @@ function keyFor(version: number): Buffer {
 /** Fails fast with `PiiKeyError` when the key is missing or malformed. Call from a health check. */
 export function assertPiiKeyConfigured(): void {
   keyFor(PII_KEY_VERSION);
+}
+
+const SUBKEY_PURPOSE = /^[a-z][a-z0-9-]{0,62}$/;
+const subkeys = new Map<string, { raw: Buffer; key: Buffer }>();
+
+/**
+ * A 32-byte key for another server-side secret (for example the PIN pepper in
+ * src/server/identity/pin.ts), derived from personal data key `version` with HKDF-SHA256 and
+ * the purpose as `info`. Different purposes give unrelated keys, and none reveals the key it
+ * came from. Old versions keep deriving the same subkey after a rotation, so values stamped
+ * with their version keep verifying.
+ */
+export function derivePiiSubkey(purpose: string, version: number = PII_KEY_VERSION): Buffer {
+  if (!SUBKEY_PURPOSE.test(purpose)) {
+    throw new TypeError("derivePiiSubkey needs a lower-case purpose name.");
+  }
+  const raw = keyFor(version);
+  const id = `${version}:${purpose}`;
+  const hit = subkeys.get(id);
+  if (hit && hit.raw.equals(raw)) return hit.key;
+  const key = Buffer.from(
+    hkdfSync("sha256", raw, Buffer.alloc(0), `metalira-ops/${purpose}`, KEY_BYTES),
+  );
+  subkeys.set(id, { raw, key });
+  return key;
 }
 
 /**
