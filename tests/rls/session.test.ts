@@ -147,6 +147,38 @@ describe("ensureOrganisationForNewUser", () => {
     }
   });
 
+  it("refuses a company name that is not plain text, as set through the Auth API directly", async () => {
+    for (const value of [
+      "Your invoice is overdue, pay at evil.example://pay",
+      "Pay now at www.evil.example",
+      "<b>Acme</b>",
+      "Acme\u0007Guards",
+    ]) {
+      const { client, user } = await newOwner(value);
+      expect(await ensureOrganisationForNewUser(client, user)).toBeNull();
+      const { count } = await admin
+        .from("memberships")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      expect(count).toBe(0);
+    }
+  });
+
+  it("creates one organisation when two sign-ins race", async () => {
+    const { client, user } = await newOwner(`Racing Guards ${randomUUID().slice(0, 6)}`);
+    const results = await Promise.all([
+      ensureOrganisationForNewUser(client, user),
+      ensureOrganisationForNewUser(client, user),
+      ensureOrganisationForNewUser(client, user),
+    ]);
+    expect(results.filter((r) => r !== null)).toHaveLength(1);
+    const { count } = await admin
+      .from("memberships")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    expect(count).toBe(1);
+  });
+
   it("does nothing for an unconfirmed user", async () => {
     const { client, user } = await newOwner("Unconfirmed Ltd");
     expect(

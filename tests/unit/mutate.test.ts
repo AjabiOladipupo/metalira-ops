@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { redactForAudit } from "@/server/identity/audit";
+import { isAuditSecretKey, redactForAudit } from "@/server/identity/audit";
 import { MutationError, runMutation, type MutationContext } from "@/server/identity/mutate";
 import type { Database } from "@/types/db";
 
@@ -164,4 +164,43 @@ describe("redactForAudit", () => {
       }),
     ).toEqual({ a: 1, b: [{ ok: true }], c: { nested: { value: null } } });
   });
+
+  it("drops plain-text personal data keys at any depth, in any spelling", () => {
+    const personal = {
+      nin: "12345678901",
+      bvn: "22222222222",
+      rsa_pin: "PEN100000000001",
+      account_number: "0123456789",
+      bankAccount: "0123456789",
+      nuban: "0123456789",
+      pin: "1234",
+      "rsa-pin": "PEN100000000002",
+      account_no: "0123456789",
+      otp: "123456",
+      apiKey: "k",
+    };
+    expect(
+      redactForAudit({
+        ...personal,
+        name: "Ada",
+        list: [{ ...personal, kept: true }],
+        deep: { deeper: { ...personal, worker_id: "w1" } },
+      }),
+    ).toEqual({ name: "Ada", list: [{ kept: true }], deep: { deeper: { worker_id: "w1" } } });
+  });
+
+  it("keeps ordinary keys that only contain a secret word inside another word", () => {
+    expect(
+      redactForAudit({ shipping: 1, spinner: 2, running_total: 3, tokens_used: 4, pay_day: 25 }),
+    ).toEqual({ shipping: 1, spinner: 2, running_total: 3, tokens_used: 4, pay_day: 25 });
+  });
+});
+
+describe("isAuditSecretKey", () => {
+  it.each(["nin", "NIN", "bvn", "rsa_pin", "rsaPin", "account_number", "accountNumber", "nin_enc"])(
+    "treats %s as secret",
+    (key) => {
+      expect(isAuditSecretKey(key)).toBe(true);
+    },
+  );
 });

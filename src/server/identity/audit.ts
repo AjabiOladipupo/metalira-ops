@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { normaliseKey } from "@/lib/observability/scrub";
 import type { Database, Json } from "@/types/db";
 
 /**
@@ -34,8 +35,26 @@ export const auditEventSchema = z.object({
 
 export type AuditEvent = z.input<typeof auditEventSchema>;
 
-/** Keys never written to the log from app code, at any depth (rule 9). */
-const SECRET_KEY = /(_enc$|^pin$|^pin_hash$|^token$|^token_hash$|password|secret)/i;
+/** Anywhere in the normalised key: credentials and column-encrypted personal data. */
+const SECRET_ANYWHERE = /(_enc$|password|secret)/;
+
+/**
+ * Whole `_`-separated parts of the normalised key: personal data in plain text (NIN, BVN, RSA
+ * PIN, bank account numbers) and credentials. A decrypted value passed in for `pii.reveal`
+ * must never reach the log.
+ */
+const SECRET_PART =
+  /(^|_)(nin|bvn|pin|pin_hash|rsa_pin|passwd|passcode|token|token_hash|api_key|apikey|account_number|account_no|bank_account|nuban|otp)(_|$)/;
+
+/**
+ * True when a key is never written to the log, at any depth (rule 9). The key is normalised
+ * as for Sentry (`rsaPin` and `rsa-pin` become `rsa_pin`). The database applies the same list
+ * (private.audit_secret_key); keep the two in step.
+ */
+export function isAuditSecretKey(key: string): boolean {
+  const k = normaliseKey(key);
+  return SECRET_ANYWHERE.test(k) || SECRET_PART.test(k);
+}
 
 /** Copy of `value` with secret keys removed. The database redacts too; this is belt and braces. */
 export function redactForAudit(value: unknown): Json | undefined {
@@ -48,7 +67,7 @@ export function redactForAudit(value: unknown): Json | undefined {
   if (Array.isArray(value)) return value.map((item) => redactForAudit(item) ?? null);
   const out: Record<string, Json> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (SECRET_KEY.test(key)) continue;
+    if (isAuditSecretKey(key)) continue;
     const redacted = redactForAudit(item);
     if (redacted !== undefined) out[key] = redacted;
   }

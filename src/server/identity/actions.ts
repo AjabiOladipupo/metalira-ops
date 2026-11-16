@@ -62,13 +62,16 @@ async function finishOwnerSignUp(
   try {
     created = await ensureOrganisationForNewUser(supabase, user);
   } catch (error) {
-    console.error("Could not create the organisation after sign-in", error);
+    // Name and message only: the raw error carries PostgREST details and hints, which can
+    // echo the submitted company name into the logs.
+    console.error(
+      "identity.first_organisation_failed:",
+      error instanceof Error ? `${error.name}: ${error.message}` : "unknown error",
+    );
   }
   if (created) {
     const org = created;
-    const fullName =
-      typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-    after(() => sendOwnerWelcome(user, org, fullName));
+    after(() => sendOwnerWelcome(user, org, user.user_metadata?.full_name));
   }
 }
 
@@ -113,6 +116,10 @@ export async function sendMagicLink(_prev: FormState, formData: FormData): Promi
 
   const supabase = await createServerSupabase();
   const next = safeNextPath(parsed.data.next);
+  // The magic-link template (supabase/templates/magic_link.html) links to the Site URL's
+  // /auth/confirm and passes this redirect URL along as `redirect_to`; only the `next` path in
+  // it is used (emailLinkNextPath). Without the template, Supabase's default PKCE link lands
+  // on /auth/callback with the same `next`.
   const { error } = await supabase.auth.signInWithOtp({
     email: parsed.data.email,
     options: {

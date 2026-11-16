@@ -42,6 +42,26 @@ export function safeNextPath(
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+/**
+ * Where an emailed auth link lands the user. The link carries `next` itself (sign-up
+ * confirmation, PKCE callback), or `redirect_to`: the magic-link template passes Supabase's
+ * `{{ .RedirectTo }}` through, which is the `emailRedirectTo` the app asked for
+ * (`…/auth/callback?next=…`) or, when that was not on the project's allow list, the Site URL.
+ * Only the path in its `next` is used, never its origin, and it goes through safeNextPath.
+ */
+export function emailLinkNextPath(params: URLSearchParams): string {
+  const next = params.get("next");
+  if (next !== null) return safeNextPath(next);
+
+  const redirectTo = params.get("redirect_to");
+  if (!redirectTo || redirectTo.length > 1024) return APP_HOME_PATH;
+  try {
+    return safeNextPath(new URL(redirectTo).searchParams.get("next"));
+  } catch {
+    return APP_HOME_PATH;
+  }
+}
+
 export type ProxyDecision = { type: "next" } | { type: "redirect"; location: string };
 
 /**

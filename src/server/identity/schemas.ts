@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { organisationNameSchema } from "./organisations";
+import { companyNameSchema, fullNameSchema } from "./names";
 
 /** Form input for the identity actions. Messages are shown under the field as written. */
 
@@ -37,31 +37,9 @@ export const signInPasswordSchema = z.object({
 
 export const magicLinkSchema = z.object({ email, next });
 
-/**
- * Names end up in emails sent from Metalira's domain, so they must be plain text: no control
- * characters, no angle brackets and nothing a mail client would turn into a link.
- */
-function plainName(schema: z.ZodString, label: string) {
-  return schema
-    .regex(/^[^\p{Cc}<>]*$/u, `${label} must be plain text, without < or >`)
-    .refine((value) => !/:\/\/|www\./i.test(value), `${label} can't contain a web address`);
-}
-
 export const signUpSchema = z.object({
-  fullName: plainName(
-    z
-      .string()
-      .trim()
-      .min(2, "Enter your full name")
-      .max(120, "Full name must be 120 characters or fewer"),
-    "Full name",
-  ),
-  companyName: plainName(
-    organisationNameSchema
-      .min(2, "Enter your company name")
-      .max(160, "Company name must be 160 characters or fewer"),
-    "Company name",
-  ),
+  fullName: fullNameSchema,
+  companyName: companyNameSchema,
   email,
   password: newPassword,
 });

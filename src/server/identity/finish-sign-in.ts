@@ -2,7 +2,7 @@ import "server-only";
 
 import { after, NextResponse, type NextRequest } from "next/server";
 
-import { SIGN_IN_PATH, safeNextPath } from "@/lib/auth/routes";
+import { SIGN_IN_PATH, emailLinkNextPath } from "@/lib/auth/routes";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 import { ensureOrganisationForNewUser } from "./sign-up";
@@ -13,7 +13,8 @@ type Supabase = Awaited<ReturnType<typeof createServerSupabase>>;
 /**
  * Shared end of /auth/callback and /auth/confirm: `establish` turns the link's code or token
  * into a session (setting the auth cookies), then the owner's pending organisation is created
- * and the user lands on `next`. Any failure goes back to sign-in with a generic message.
+ * and the user lands on `next` (see emailLinkNextPath). Any failure goes back to sign-in with a
+ * generic message.
  */
 export async function finishEmailLink(
   request: NextRequest,
@@ -39,14 +40,12 @@ export async function finishEmailLink(
   try {
     const created = await ensureOrganisationForNewUser(supabase, user);
     if (created) {
-      const fullName =
-        typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-      after(() => sendOwnerWelcome(user, created, fullName));
+      after(() => sendOwnerWelcome(user, created, user.user_metadata?.full_name));
     }
   } catch {
     // Signed in but the organisation could not be created: the app shows the no-access page,
     // and the next password sign-in tries again.
   }
 
-  return NextResponse.redirect(new URL(safeNextPath(url.searchParams.get("next")), url));
+  return NextResponse.redirect(new URL(emailLinkNextPath(url.searchParams), url));
 }

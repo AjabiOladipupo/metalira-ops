@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { proxyDecision, safeNextPath } from "@/lib/auth/routes";
+import { emailLinkNextPath, proxyDecision, safeNextPath } from "@/lib/auth/routes";
 
 describe("safeNextPath", () => {
   it("keeps paths inside the manager app, with query and hash", () => {
@@ -29,6 +29,47 @@ describe("safeNextPath", () => {
 
   it("uses the given fallback", () => {
     expect(safeNextPath("https://evil.example", "/app/payroll")).toBe("/app/payroll");
+  });
+});
+
+describe("emailLinkNextPath", () => {
+  const params = (query: string) => new URLSearchParams(query);
+
+  it("uses the link's own next when it has one", () => {
+    expect(emailLinkNextPath(params("token_hash=t&type=email&next=/app"))).toBe("/app");
+    expect(emailLinkNextPath(params("next=%2Fapp%2Fpayroll"))).toBe("/app/payroll");
+    expect(emailLinkNextPath(params("next=https://evil.example/app"))).toBe("/app");
+  });
+
+  it("takes next from the magic link's redirect_to, escaped or not, ignoring its origin", () => {
+    const redirect = "http://localhost:3350/auth/callback?next=%2Fapp%2Fpayroll";
+    expect(emailLinkNextPath(params(`redirect_to=${encodeURIComponent(redirect)}`))).toBe(
+      "/app/payroll",
+    );
+    expect(emailLinkNextPath(params(`type=magiclink&redirect_to=${redirect}`))).toBe(
+      "/app/payroll",
+    );
+    expect(
+      emailLinkNextPath(
+        params(`redirect_to=${encodeURIComponent("https://evil.example/x?next=/app/people")}`),
+      ),
+    ).toBe("/app/people");
+  });
+
+  it.each([
+    ["no redirect", ""],
+    ["Site URL fallback", "redirect_to=https%3A%2F%2Fops.example"],
+    ["not a URL", "redirect_to=%2Fapp%2Fpayroll"],
+    [
+      "unsafe next inside",
+      `redirect_to=${encodeURIComponent("https://ops.example/?next=//evil.example")}`,
+    ],
+    [
+      "too long",
+      `redirect_to=${encodeURIComponent(`https://ops.example/?next=/app/${"a".repeat(1100)}`)}`,
+    ],
+  ])("falls back to /app: %s", (_label, query) => {
+    expect(emailLinkNextPath(params(query))).toBe("/app");
   });
 });
 

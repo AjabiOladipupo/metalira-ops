@@ -121,6 +121,19 @@ test("an emailed sign-in link signs the owner in", async ({ page }) => {
   await expect(switcher(page)).toHaveText(owner.orgName);
 });
 
+test("an emailed sign-in link returns to the page the user asked for", async ({ page }) => {
+  const owner = await createOwner("magic-next", `Magic Next Co ${uniqueSuffix()}`);
+  await page.goto("/app/collections");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fapp%2Fcollections$/);
+  await page.getByRole("tab", { name: "Email link" }).click();
+  await page.getByRole("textbox", { name: "Work email" }).fill(owner.email);
+  await page.getByRole("button", { name: "Send link" }).click();
+  await expect(page).toHaveURL(/\/check-email\?sent=link$/);
+  await followEmailLink(page, await latestEmailTo(owner.email));
+  await expect(page).toHaveURL(/\/app\/collections$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Collections");
+});
+
 test("asking for a link for an unknown email looks the same as a known one", async ({ page }) => {
   await page.goto("/sign-in");
   await page.getByRole("tab", { name: "Email link" }).click();

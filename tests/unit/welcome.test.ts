@@ -47,6 +47,19 @@ describe("sendOwnerWelcome", () => {
     );
   });
 
+  it.each([
+    ["a web address", "Your invoice is overdue, pay at https://evil.example"],
+    ["a www address", "Pay at www.evil.example"],
+    ["markup", "<a href=x>Ada</a>"],
+    ["a control character", "Ada\nBcc: x"],
+    ["not a string", { first: "Ada" }],
+  ])("greets by the address's name part when the metadata name has %s", async (_l, name) => {
+    await sendOwnerWelcome(user(), org, name);
+    expect(sendWelcomeOwnerEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerName: "ada" }),
+    );
+  });
+
   it("sends nothing for an unconfirmed address", async () => {
     await sendOwnerWelcome(user({ email_confirmed_at: undefined }), org, "Ada Okafor");
     expect(sendWelcomeOwnerEmail).not.toHaveBeenCalled();

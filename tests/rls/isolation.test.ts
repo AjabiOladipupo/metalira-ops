@@ -495,6 +495,31 @@ describe("audit_log is append-only for every role", () => {
     expect(row!.before).toEqual({ name: "Ada", nested: { kept: 1 } });
     expect(row!.after).toEqual({ list: [{ ok: true }] });
   });
+
+  it("log_audit strips plain-text personal data keys at any depth", async () => {
+    const a = user("a");
+    const personal = {
+      nin: "12345678901",
+      bvn: "22222222222",
+      rsa_pin: "PEN100000000001",
+      rsaPin: "PEN100000000002",
+      account_number: "0123456789",
+      bankAccount: "0123456789",
+      nuban: "0123456789",
+      pin: "1234",
+    };
+    const { data: id, error } = await a.client.rpc("log_audit", {
+      p_organisation_id: a.orgId,
+      p_action: "pii.reveal",
+      p_entity: "workers",
+      p_before: { ...personal, name: "Ada", nested: { deeper: [{ ...personal, kept: 1 }] } },
+      p_after: { shipping: 1, running_total: 2, tokens_used: 3 },
+    });
+    expect(error).toBeNull();
+    const [row] = await readRow("audit_log", "id", id!);
+    expect(row!.before).toEqual({ name: "Ada", nested: { deeper: [{ kept: 1 }] } });
+    expect(row!.after).toEqual({ shipping: 1, running_total: 2, tokens_used: 3 });
+  });
 });
 
 describe("audit_row_change trigger strips secret columns", () => {
