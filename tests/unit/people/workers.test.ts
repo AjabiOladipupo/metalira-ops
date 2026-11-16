@@ -7,6 +7,7 @@ import { decryptPii } from "@/server/crypto/pii";
 import { MutationError, runMutation, type MutationContext } from "@/server/identity/mutate";
 import {
   addPayRateSpec,
+  cancelPayRateSpec,
   createWorkerSpec,
   endEmploymentSpec,
   updateWorkerSpec,
@@ -312,6 +313,16 @@ describe("updateWorker", () => {
     });
   });
 
+  it("refuses a staff ID change and writes nothing", async () => {
+    const fake = fakeSupabase();
+    const error = await runMutation(context(fake.client), updateWorkerSpec, {
+      workerId: WORKER,
+      staffId: "AFS-0042-OLD",
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "invalid" });
+    expect(fake.updates).toEqual([]);
+  });
+
   it("refuses bank details: those changes need a second approver", async () => {
     const fake = fakeSupabase();
     const error = await runMutation(context(fake.client), updateWorkerSpec, {
@@ -360,6 +371,7 @@ describe("addPayRate", () => {
     });
     expect(result).toEqual({ id: "rate-id" });
     expect(fake.rpc).toHaveBeenCalledWith("add_pay_rate", {
+      p_organisation_id: ORG,
       p_worker_id: WORKER,
       p_rate: {
         pay_type: "daily",
@@ -389,6 +401,37 @@ describe("addPayRate", () => {
   });
 });
 
+describe("cancelPayRate", () => {
+  const RATE = "c0000000-0000-4000-8000-000000000004";
+
+  it("cancels in the active organisation only", async () => {
+    const fake = fakeSupabase({ rpc: () => ({ data: null, error: null }) });
+    expect(await runMutation(context(fake.client), cancelPayRateSpec, { payRateId: RATE })).toEqual(
+      { id: RATE },
+    );
+    expect(fake.rpc).toHaveBeenCalledWith("cancel_pay_rate", {
+      p_organisation_id: ORG,
+      p_pay_rate_id: RATE,
+    });
+  });
+
+  it("shows the database's refusal of a version in force", async () => {
+    const message = "This pay rate is already in force and can't be removed.";
+    const fake = fakeSupabase({ rpc: () => ({ data: null, error: { code: "MLPR1", message } }) });
+    await expect(
+      runMutation(context(fake.client), cancelPayRateSpec, { payRateId: RATE }),
+    ).rejects.toMatchObject({ code: "invalid", fieldErrors: { payRateId: message } });
+  });
+
+  it("refuses finance before touching anything", async () => {
+    const fake = fakeSupabase();
+    await expect(
+      runMutation(context(fake.client, "finance"), cancelPayRateSpec, { payRateId: RATE }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+});
+
 describe("endEmployment", () => {
   it("ends employment in one call and audits the reason", async () => {
     const fake = fakeSupabase({
@@ -400,6 +443,7 @@ describe("endEmployment", () => {
       reason: "Resigned",
     });
     expect(fake.rpc).toHaveBeenNthCalledWith(1, "end_employment", {
+      p_organisation_id: ORG,
       p_worker_id: WORKER,
       p_end_date: "2026-10-31",
     });

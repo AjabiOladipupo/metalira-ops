@@ -315,7 +315,10 @@ isOneToOne: false
 { Args: { "p_token": string }; Returns: string
                            },
 "add_pay_rate":
-{ Args: { "p_rate": Json,"p_worker_id": string }; Returns: string
+{ Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
+                           },
+"cancel_pay_rate":
+{ Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
                            },
 "create_first_organisation":
 { Args: { "p_name": string }; Returns: string
@@ -330,7 +333,7 @@ isOneToOne: false
 { Args: { "p_pay_rate"?: Json,"p_worker": Json }; Returns: string
                            },
 "end_employment":
-{ Args: { "p_end_date": string,"p_worker_id": string }; Returns: undefined
+{ Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_id": string }; Returns: undefined
                            },
 "log_audit":
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string

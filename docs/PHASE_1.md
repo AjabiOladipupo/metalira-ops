@@ -80,6 +80,8 @@ Rules that apply to every slice here:
 - Workers can raise the same request from their phone (wired in 1.10).
 - Unit and RLS tests: requester cannot approve own request, a worker cannot approve anything, rejected requests leave `workers` unchanged.
 
+- Bank details on a new worker (recorded from the 1.3 review): one HR user could otherwise add a worker with their own account number and pay it without a second person seeing it. In 1.7, bank details entered when a worker is added one at a time (or by any import after setup) are held as a pending `bank_detail_changes` request and the worker keeps `needs_pay_details` until a second approver confirms; `create_worker` stops writing `workers.bank_*` directly for those paths. Staff IDs already can't be changed or reused (1.3), so a new row can't take over an existing worker's ID. **Owner to confirm:** whether the first bulk import at onboarding may stay single-approver.
+
 **Accept:** a change by user A stays pending until user B approves, then applies 72 hours later and appears masked on the worker; A approving their own request is refused by the database, not just the UI; security-reviewer has no high findings.
 
 ### 1.8 Import flow (CSV and Excel)
@@ -111,6 +113,11 @@ Rules that apply to every slice here:
 - All reads use the worker's own session (publishable key + RLS), never the secret key.
 
 **Accept:** a signed-in worker sees their own profile with masked values at 390px, raises a bank change that appears in HR approvals, and cannot load any other worker's data.
+
+## Open questions for the owner
+
+- Backdated pay changes (from the 1.3 review): 1.3 refuses a new pay version that starts before today once the worker has a rate, so a raise effective from the start of the current pay cycle (20th to 19th) can't be recorded after that day, even though the cycle's payroll hasn't run. Should arrears or backdated raises be allowed back to the start of the earliest unposted pay period (wired up when payroll lands)? Versions already in force stay unchangeable either way.
+- Staff ID typos (from the 1.3 review): a staff ID can't be changed once saved, so a mistyped ID is fixed by ending that record and adding the worker again. Confirm, or ask for an audited correction flow with a second approver.
 
 ## Phase 1 done when
 - `fixtures/people-import-162.csv` imports with its 4 bad rows held back and each one explained, in CI (Playwright) and on the Vercel preview.

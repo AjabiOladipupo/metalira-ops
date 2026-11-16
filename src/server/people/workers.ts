@@ -11,6 +11,7 @@ import type { Database, Json } from "@/types/db";
 
 import {
   addPayRateSchema,
+  cancelPayRateSchema,
   createWorkerSchema,
   endEmploymentSchema,
   toPayRateRecord,
@@ -23,7 +24,9 @@ import { nextStaffId } from "./staff-id";
  * role check, the Zod parse, then the write with the signed-in user's own client so RLS and the
  * database's own rules apply (row audit triggers, pay-rate versioning, line-manager loops).
  * Writes that touch several rows run in one SQL function: `create_worker`, `add_pay_rate`,
- * `end_employment`.
+ * `cancel_pay_rate`, `end_employment`. Each is given the active organisation and touches only
+ * its rows, so a user with a role in two companies can't reach the other one's workers (and the
+ * app-level audit event can't land in the wrong company's log).
  *
  * Personal data is encrypted here, for the worker's row id, before it leaves the server
  * (src/server/crypto/pii.ts). Plaintext is never logged or audited: the database records which
@@ -233,7 +236,6 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
     const ctx = (column: string) => piiContext(organisationId, id, column);
     const patch: WorkerUpdate = {};
 
-    if (data.staffId !== undefined) patch.staff_id = data.staffId;
     if (data.firstName !== undefined) patch.first_name = data.firstName;
     if (data.lastName !== undefined) patch.last_name = data.lastName;
     if (data.phone !== undefined) patch.phone = data.phone;
@@ -290,7 +292,7 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
   },
 };
 
-/** Changes a worker's details. Bank details and pay have their own flows. */
+/** Changes a worker's details. Bank details and pay have their own flows; the staff ID is fixed. */
 export function updateWorker(input: unknown): Promise<UpdatedWorker> {
   return mutate(updateWorkerSpec, input);
 }
@@ -302,8 +304,9 @@ export function updateWorker(input: unknown): Promise<UpdatedWorker> {
 export const addPayRateSpec: MutationSpec<typeof addPayRateSchema, { id: string }> = {
   schema: addPayRateSchema,
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, data }) => {
+  run: async ({ supabase, organisationId, data }) => {
     const { data: id, error } = await supabase.rpc("add_pay_rate", {
+      p_organisation_id: organisationId,
       p_worker_id: data.workerId,
       p_rate: { ...toPayRateRecord(data.payType, data, data.effectiveFrom) },
     });
@@ -321,14 +324,41 @@ export function addPayRate(input: unknown): Promise<{ id: string }> {
 }
 
 // ---------------------------------------------------------------------------
+// cancelPayRate
+// ---------------------------------------------------------------------------
+
+export const cancelPayRateSpec: MutationSpec<typeof cancelPayRateSchema, { id: string }> = {
+  schema: cancelPayRateSchema,
+  roles: PEOPLE_EDITORS,
+  run: async ({ supabase, organisationId, data }) => {
+    const { error } = await supabase.rpc("cancel_pay_rate", {
+      p_organisation_id: organisationId,
+      p_pay_rate_id: data.payRateId,
+    });
+    if (error) fromDbError(error, { effectiveFrom: "payRateId" });
+    return { id: data.payRateId };
+  },
+};
+
+/**
+ * Cancels a scheduled pay version (one that has not started) and reopens the version before
+ * it. A version in force, or one with a later version after it, is refused by the database.
+ * To move a scheduled version, cancel it and add it again from the new date.
+ */
+export function cancelPayRate(input: unknown): Promise<{ id: string }> {
+  return mutate(cancelPayRateSpec, input);
+}
+
+// ---------------------------------------------------------------------------
 // endEmployment
 // ---------------------------------------------------------------------------
 
 export const endEmploymentSpec: MutationSpec<typeof endEmploymentSchema, { id: string }> = {
   schema: endEmploymentSchema,
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, data }) => {
+  run: async ({ supabase, organisationId, data }) => {
     const { error } = await supabase.rpc("end_employment", {
+      p_organisation_id: organisationId,
       p_worker_id: data.workerId,
       p_end_date: data.endDate,
     });

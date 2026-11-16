@@ -263,6 +263,13 @@ export const addPayRateSchema = z
 
 export type AddPayRateInput = z.input<typeof addPayRateSchema>;
 
+/** Cancels a scheduled pay version (one that has not started yet). */
+export const cancelPayRateSchema = z.object({
+  payRateId: z.uuid("Choose a pay rate"),
+});
+
+export type CancelPayRateInput = z.input<typeof cancelPayRateSchema>;
+
 // ---------------------------------------------------------------------------
 // Workers
 // ---------------------------------------------------------------------------
@@ -354,6 +361,7 @@ export type CreateWorkerData = z.output<typeof createWorkerSchema>;
 
 const BANK_CHANGE_MESSAGE =
   "Bank details change through a bank-detail request, which a second person approves";
+const STAFF_ID_FIXED_MESSAGE = "A staff ID can't change once it is saved";
 
 /** A field this schema refuses whenever it has a value. */
 function notHere(message: string) {
@@ -362,13 +370,13 @@ function notHere(message: string) {
 
 /**
  * Editable worker fields. Bank details are not here: changing them needs a second approver
- * (slice 1.7, CLAUDE.md rule 10). Employment ends through `endEmployment`, pay through
- * `addPayRate`.
+ * (slice 1.7, CLAUDE.md rule 10). Nor is the staff ID: it is fixed once saved, so it can never
+ * be freed and given to a new row with someone else's bank account (the database has no update
+ * grant on it either). Employment ends through `endEmployment`, pay through `addPayRate`.
  */
 export const updateWorkerSchema = z
   .object({
     workerId: z.uuid("Choose an employee"),
-    staffId: staffIdSchema.optional(),
     firstName: text("First name").optional(),
     lastName: text("Last name").optional(),
     phone: clearable(nigerianMobileSchema),
@@ -392,6 +400,7 @@ export const updateWorkerSchema = z
     nextOfKinPhone: clearable(note("Next of kin phone")),
     supervisorClockIn: formBoolean.optional(),
     // Refused rather than silently dropped, so a form that offers them finds out at once.
+    staffId: notHere(STAFF_ID_FIXED_MESSAGE),
     bankName: notHere(BANK_CHANGE_MESSAGE),
     accountName: notHere(BANK_CHANGE_MESSAGE),
     bankAccountNumber: notHere(BANK_CHANGE_MESSAGE),

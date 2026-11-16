@@ -227,6 +227,11 @@ describe("updateWorkerSchema", () => {
     });
     expect(updateWorkerSchema.safeParse({ workerId: WORKER, bankName: "" }).success).toBe(true);
   });
+
+  it("refuses a staff ID change: an ID is fixed once saved", () => {
+    const result = updateWorkerSchema.safeParse({ workerId: WORKER, staffId: "AFS-0042-OLD" });
+    expect(issues(result)).toEqual({ staffId: "A staff ID can't change once it is saved" });
+  });
 });
 
 describe("pay rate records", () => {

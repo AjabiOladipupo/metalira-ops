@@ -117,6 +117,14 @@ async function versions(workerId: string) {
   return rows;
 }
 
+function addRate(workerId: string, rate: Record<string, Json>, by: Client = people.hr.client) {
+  return by.rpc("add_pay_rate", {
+    p_organisation_id: owner.orgId,
+    p_worker_id: workerId,
+    p_rate: rate,
+  });
+}
+
 const bank = {
   bank_name: "GTBank",
   account_name: "Ada Worker",
@@ -198,6 +206,7 @@ describe("pay-rate versioning", () => {
   it("inserts a new version and closes the old one the day before", async () => {
     const workerId = await mustCreateWorker({}, monthly("2025-01-06"));
     const { error } = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_rate: monthly(IN_30, "12000000"),
     });
@@ -213,12 +222,14 @@ describe("pay-rate versioning", () => {
     expect(
       (
         await people.hr.client.rpc("add_pay_rate", {
+          p_organisation_id: owner.orgId,
           p_worker_id: workerId,
           p_rate: monthly(IN_30),
         })
       ).error,
     ).toBeNull();
     const { error } = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_rate: monthly(IN_30),
     });
@@ -229,6 +240,7 @@ describe("pay-rate versioning", () => {
   it("refuses a backdated change once a version exists (past versions are never rewritten)", async () => {
     const workerId = await mustCreateWorker({}, monthly("2025-01-06"));
     const { error } = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_rate: monthly(YESTERDAY),
     });
@@ -241,6 +253,7 @@ describe("pay-rate versioning", () => {
   it("allows a change from today: the old version ends yesterday", async () => {
     const workerId = await mustCreateWorker({}, monthly("2025-01-06"));
     const { error } = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_rate: monthly(TODAY, "11000000"),
     });
@@ -272,11 +285,17 @@ describe("pay-rate versioning", () => {
       const { error } = await client.from("pay_rates").update({ basic_kobo: 1 }).eq("id", row!.id);
       expect(error?.code).toBe("MLPR1");
     }
+    // Signed-in users can't move a version at all; the table owner meets the guard.
     const moved = await people.hr.client
       .from("pay_rates")
       .update({ effective_from: "2025-02-01" })
       .eq("id", row!.id);
-    expect(moved.error?.code).toBe("MLPR1");
+    expect(moved.error?.code).toBe(PERMISSION_DENIED);
+    await expect(
+      db.query("update public.pay_rates set effective_from = '2025-02-01' where id = $1", [
+        row!.id,
+      ]),
+    ).rejects.toThrow(/already in force/);
     expect(await versions(workerId)).toEqual([expect.objectContaining({ basic: "10500050" })]);
   });
 
@@ -298,20 +317,96 @@ describe("pay-rate versioning", () => {
     ]);
   });
 
-  it("lets a scheduled version change, but not into the past", async () => {
+  it("lets a scheduled version's amounts change, never its dates (no gap)", async () => {
     const workerId = await mustCreateWorker({}, monthly("2025-01-06"));
-    await people.hr.client.rpc("add_pay_rate", { p_worker_id: workerId, p_rate: monthly(IN_30) });
-    const scheduled = (await versions(workerId))[1]!;
+    await addRate(workerId, monthly(IN_30));
+    const [current, scheduled] = await versions(workerId);
     const edit = await people.hr.client
       .from("pay_rates")
       .update({ basic_kobo: 13_000_000 })
-      .eq("id", scheduled.id);
+      .eq("id", scheduled!.id);
     expect(edit.error).toBeNull();
-    const past = await people.hr.client
+
+    // Moving the scheduled version later would leave IN_30..IN_59 with no rate.
+    const later = await people.hr.client
       .from("pay_rates")
-      .update({ effective_from: YESTERDAY })
-      .eq("id", scheduled.id);
-    expect(past.error?.code).toBe("MLPR2");
+      .update({ effective_from: IN_60 })
+      .eq("id", scheduled!.id);
+    expect(later.error?.code).toBe(PERMISSION_DENIED);
+    await expect(
+      db.query("update public.pay_rates set effective_from = $2 where id = $1", [
+        scheduled!.id,
+        IN_60,
+      ]),
+    ).rejects.toThrow(/can't move/);
+    // The end of the version in force is pinned to the day before the next one starts.
+    const shortened = await people.hr.client
+      .from("pay_rates")
+      .update({ effective_to: TODAY })
+      .eq("id", current!.id);
+    expect(shortened.error?.code).toBe("MLPR1");
+
+    expect((await versions(workerId)).map((row) => [row.effective_from, row.effective_to])).toEqual(
+      [
+        ["2025-01-06", lagosDate(29)],
+        [IN_30, null],
+      ],
+    );
+  });
+
+  it("cancels a scheduled version and reopens the one before it", async () => {
+    const workerId = await mustCreateWorker(bank, monthly("2025-01-06"));
+    await addRate(workerId, monthly(IN_30, "12000000"));
+    await addRate(workerId, monthly(IN_60, "13000000"));
+    const [current, middle, latest] = await versions(workerId);
+
+    // Only the latest version can go, and never one in force.
+    const notLatest = await people.hr.client.rpc("cancel_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_pay_rate_id: middle!.id,
+    });
+    expect(notLatest.error?.code).toBe("MLPR1");
+
+    const cancelled = await people.hr.client.rpc("cancel_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_pay_rate_id: latest!.id,
+    });
+    expect(cancelled.error).toBeNull();
+    expect((await versions(workerId)).map((row) => [row.effective_from, row.effective_to])).toEqual(
+      [
+        ["2025-01-06", lagosDate(29)],
+        [IN_30, null],
+      ],
+    );
+
+    // A direct delete by hr reopens the previous version the same way.
+    const deleted = await people.hr.client.from("pay_rates").delete().eq("id", middle!.id);
+    expect(deleted.error).toBeNull();
+    expect(await versions(workerId)).toEqual([
+      expect.objectContaining({ id: current!.id, effective_to: null }),
+    ]);
+
+    const inForce = await people.hr.client.rpc("cancel_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_pay_rate_id: current!.id,
+    });
+    expect(inForce.error?.code).toBe("MLPR1");
+
+    // The fix for a wrong date: cancel, then add again from the right one.
+    expect((await addRate(workerId, monthly(IN_60))).error).toBeNull();
+    expect((await versions(workerId)).map((row) => [row.effective_from, row.effective_to])).toEqual(
+      [
+        ["2025-01-06", lagosDate(59)],
+        [IN_60, null],
+      ],
+    );
+
+    const finance = await people.finance.client.rpc("cancel_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_pay_rate_id: (await versions(workerId))[1]!.id,
+    });
+    expect(finance.error).not.toBeNull();
+    expect(await versions(workerId)).toHaveLength(2);
   });
 
   it("blocks the table owner from rewriting or deleting a version in force", async () => {
@@ -328,11 +423,13 @@ describe("pay-rate versioning", () => {
   it("refuses fractional kobo, amounts for the wrong pay type and deletes", async () => {
     const workerId = await mustCreateWorker();
     const fraction = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_rate: monthly("2025-01-06", "1000.5"),
     });
     expect(fraction.error?.code).toBe("22P02");
     const mixed = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_rate: { ...monthly("2025-01-06"), daily_rate_kobo: "800000" },
     });
@@ -341,13 +438,24 @@ describe("pay-rate versioning", () => {
 
     const paid = await mustCreateWorker({}, monthly("2025-01-06"));
     const del = await owner.client.from("pay_rates").delete().eq("worker_id", paid);
-    expect(del.error?.code).toBe(PERMISSION_DENIED);
+    expect(del.error?.code).toBe("MLPR1");
     expect(await versions(paid)).toHaveLength(1);
   });
 
-  it("refuses a pay rate before the start date", async () => {
+  it("refuses a pay rate before the start date, however it is written", async () => {
     const { error } = await createWorker({ start_date: "2025-03-01" }, monthly("2025-01-06"));
     expect(error?.code).toBe("22023");
+
+    const workerId = await mustCreateWorker({ start_date: "2025-03-01" });
+    const direct = await people.hr.client.from("pay_rates").insert({
+      organisation_id: owner.orgId,
+      worker_id: workerId,
+      pay_type: "daily",
+      daily_rate_kobo: 800_000,
+      effective_from: "2025-01-06",
+    });
+    expect(direct.error?.code).toBe("22023");
+    expect(await versions(workerId)).toEqual([]);
   });
 });
 
@@ -384,6 +492,7 @@ describe("workers", () => {
     expect(flag).toEqual({ [noPay]: true, [noBank]: true, [complete]: false });
 
     const later = await people.hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
       p_worker_id: noPay,
       p_rate: { pay_type: "daily", daily_rate_kobo: "800000", effective_from: "2025-01-06" },
     });
@@ -394,6 +503,57 @@ describe("workers", () => {
       .eq("id", noPay)
       .single();
     expect(after?.needs_pay_details).toBe(false);
+  });
+
+  it("flags a worker with no pay rate in force, even when one is scheduled", async () => {
+    // Started already, but the only rate starts next month.
+    const futureOnly = await mustCreateWorker(bank, monthly(IN_30));
+    // Starts next month with pay from the start date: nothing is missing.
+    const starter = await mustCreateWorker({ ...bank, start_date: IN_30 }, monthly(IN_30));
+    // Every rate has closed.
+    const closed = await mustCreateWorker(bank, monthly("2025-01-06"));
+    const [row] = await versions(closed);
+    expect(
+      (
+        await people.hr.client
+          .from("pay_rates")
+          .update({ effective_to: YESTERDAY })
+          .eq("id", row!.id)
+      ).error,
+    ).toBeNull();
+
+    const { data } = await admin
+      .from("workers")
+      .select("id, needs_pay_details")
+      .in("id", [futureOnly, starter, closed]);
+    const flag = Object.fromEntries((data ?? []).map((r) => [r.id, r.needs_pay_details]));
+    expect(flag).toEqual({ [futureOnly]: true, [starter]: false, [closed]: true });
+  });
+
+  it("never lets a staff ID change, so an ID can't be freed for a new row", async () => {
+    const workerId = await mustCreateWorker(
+      { ...bank, staff_id: "AFS-0042" },
+      monthly("2025-01-06"),
+    );
+    for (const client of [people.hr.client, owner.client]) {
+      const { error } = await client
+        .from("workers")
+        .update({ staff_id: "AFS-0042-OLD" })
+        .eq("id", workerId);
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    // Ending employment does not free the ID either.
+    expect(
+      (
+        await people.hr.client.rpc("end_employment", {
+          p_organisation_id: owner.orgId,
+          p_worker_id: workerId,
+          p_end_date: TODAY,
+        })
+      ).error,
+    ).toBeNull();
+    const reused = await createWorker({ ...bank, staff_id: "afs-0042" });
+    expect(reused.error?.code).toBe("23505");
   });
 
   it("does not let signed-in users write bank details after creation, or the pay flag", async () => {
@@ -517,6 +677,7 @@ describe("workers", () => {
     expect(assignment.data?.client_id).toBe(clientId);
 
     const { error } = await people.hr.client.rpc("end_employment", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_end_date: "2026-10-31",
     });
@@ -534,6 +695,7 @@ describe("workers", () => {
     expect(rows).toEqual([{ effective_to: "2026-10-31" }]);
 
     const again = await people.hr.client.rpc("end_employment", {
+      p_organisation_id: owner.orgId,
       p_worker_id: workerId,
       p_end_date: "2026-11-30",
     });
@@ -619,11 +781,104 @@ describe("who sees and changes people", () => {
         .select();
       expect(update.data).toEqual([]);
       const rate = await reader.client.rpc("add_pay_rate", {
+        p_organisation_id: owner.orgId,
         p_worker_id: reportee,
         p_rate: monthly(IN_60),
       });
       expect(rate.error).not.toBeNull();
     }
+  });
+
+  it("no signed-in user can link a login to a worker record", async () => {
+    const workerId = await mustCreateWorker({}, monthly("2025-01-06"));
+    const financeMembership = await admin
+      .from("memberships")
+      .select("id")
+      .eq("organisation_id", owner.orgId)
+      .eq("user_id", people.finance.id)
+      .single();
+    for (const client of [people.admin.client, owner.client]) {
+      const { error } = await client
+        .from("memberships")
+        .update({ worker_id: workerId })
+        .eq("id", financeMembership.data!.id);
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    const { data } = await admin
+      .from("memberships")
+      .select("worker_id")
+      .eq("id", financeMembership.data!.id)
+      .single();
+    expect(data?.worker_id).toBeNull();
+  });
+
+  it("hr in two companies can't reach the other company's workers from this one", async () => {
+    const twoHats = await createTestUser("p-two-companies");
+    await addMember(twoHats, "hr");
+    const elsewhere = await admin
+      .from("memberships")
+      .insert({ organisation_id: other.orgId, user_id: twoHats.id, role: "hr" });
+    expect(elsewhere.error).toBeNull();
+
+    const otherWorker = randomUUID();
+    const created = await other.client.rpc("create_worker", {
+      p_worker: {
+        id: otherWorker,
+        organisation_id: other.orgId,
+        staff_id: "OTH-0001",
+        first_name: "Bola",
+        last_name: "Other",
+        employment_type: "permanent",
+        start_date: "2025-01-06",
+      },
+      p_pay_rate: monthly("2025-01-06"),
+    });
+    expect(created.error).toBeNull();
+    const [otherRate] = await versions(otherWorker);
+
+    const auditBefore = await db.query<{ n: string }>(
+      "select count(*)::text as n from public.audit_log where organisation_id = $1",
+      [owner.orgId],
+    );
+    const client = twoHats.client;
+    const rate = await client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_worker_id: otherWorker,
+      p_rate: monthly(IN_30),
+    });
+    expect(rate.error?.code).toBe("P0002");
+    const ended = await client.rpc("end_employment", {
+      p_organisation_id: owner.orgId,
+      p_worker_id: otherWorker,
+      p_end_date: TODAY,
+    });
+    expect(ended.error?.code).toBe("P0002");
+    const cancelled = await client.rpc("cancel_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_pay_rate_id: otherRate!.id,
+    });
+    expect(cancelled.error?.code).toBe("P0002");
+
+    const { data: worker } = await admin
+      .from("workers")
+      .select("status")
+      .eq("id", otherWorker)
+      .single();
+    expect(worker?.status).toBe("active");
+    expect(await versions(otherWorker)).toHaveLength(1);
+    const auditAfter = await db.query<{ n: string }>(
+      "select count(*)::text as n from public.audit_log where organisation_id = $1",
+      [owner.orgId],
+    );
+    expect(auditAfter.rows[0]!.n).toBe(auditBefore.rows[0]!.n);
+
+    // Working in the right company, the same user can.
+    const right = await client.rpc("add_pay_rate", {
+      p_organisation_id: other.orgId,
+      p_worker_id: otherWorker,
+      p_rate: monthly(IN_30),
+    });
+    expect(right.error).toBeNull();
   });
 
   it("an admin can add workers", async () => {

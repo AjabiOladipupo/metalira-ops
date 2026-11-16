@@ -14,15 +14,24 @@
 --   number is exact.
 -- * Pay rates are dated versions. A version in force (effective_from on or before today in the
 --   organisation's timezone) is never updated except to close it; a correction is a new
---   version. Enforced by trigger, not only by the server.
+--   version. A scheduled (future) version may have its amounts changed or be cancelled, never
+--   moved: cancelling reopens the version before it, so versions never leave a gap. Enforced
+--   by trigger, not only by the server.
 -- * Bank details (bank_name, account_name, bank_account_enc, bank_account_last4) are written
 --   when a worker is created and are not updatable by signed-in users: changes go through the
---   two-person approval of slice 1.7 (CLAUDE.md rule 10).
+--   two-person approval of slice 1.7 (CLAUDE.md rule 10). staff_id never changes after insert
+--   either, and the unique index covers ended workers too, so an ID can't be freed and handed
+--   to a new row carrying someone else's identity and a different bank account.
+-- * memberships.worker_id (a worker's own login) is not updatable by signed-in users: the RLS
+--   helpers below read it to decide who may see a worker's row and pay. Slice 1.9 sets it in
+--   the invite-acceptance function.
 -- * Personal data (NIN, bank account number, RSA PIN) is stored encrypted by the server
 --   (src/server/crypto/pii.ts) in `_enc` bytea columns. The row audit trigger drops those
---   columns and the `_last4` siblings; a separate trigger records which fields were added,
---   changed or removed, never the values.
--- * Workers, pay rates and assignments are never deleted: employment ends, versions close.
+--   columns and the `_last4` siblings (private.audit_secret_key, 20261116090000, matches the
+--   `_enc` suffix and the whole parts `bank_account` and `rsa_pin`); a separate trigger records
+--   which fields were added, changed or removed, never the values.
+-- * Workers and assignments are never deleted: employment ends, rows close. Pay versions in
+--   force are never deleted; only a scheduled version can be cancelled.
 
 -- ---------------------------------------------------------------------------
 -- 1. Extensions and types
@@ -165,7 +174,8 @@ create table public.workers (
   organisation_id uuid not null references public.organisations (id),
 
   -- Identity and job. staff_id is the company's own ID (owner decision 2); the server
-  -- generates the next one in the company's pattern only when it is left blank.
+  -- generates the next one in the company's pattern only when it is left blank. Fixed once
+  -- saved (no update grant).
   staff_id text not null
     constraint workers_staff_id_text check (
       staff_id = btrim(staff_id)
@@ -275,8 +285,8 @@ create table public.workers (
       and next_of_kin_phone !~ '[\x01-\x1f\x7f-\x9f<>]'
     ),
 
-  -- Flags. needs_pay_details is maintained by trigger (bank details or a pay rate missing);
-  -- payroll refuses to pay these workers. supervisor_clock_in is set when the worker shares a
+  -- Flags. needs_pay_details is maintained by trigger (bank details missing, or no pay rate
+  -- in force on the later of today and the start date); payroll refuses to pay these workers. supervisor_clock_in is set when the worker shares a
   -- phone number with another worker (owner decision 15).
   needs_pay_details boolean not null default true,
   supervisor_clock_in boolean not null default false,
@@ -307,7 +317,8 @@ create table public.workers (
   constraint workers_rsa_pin_last4_needs_value check (rsa_pin_last4 is null or rsa_pin_enc is not null)
 );
 
--- Staff IDs are unique per organisation, ignoring case (EMP-0001 and emp-0001 are one ID).
+-- Staff IDs are unique per organisation, ignoring case (EMP-0001 and emp-0001 are one ID),
+-- across ended workers too: an ID is never reused.
 create unique index workers_staff_id_key on public.workers (organisation_id, lower(staff_id));
 create index workers_department_idx on public.workers (organisation_id, department_id);
 create index workers_line_manager_worker_idx on public.workers (line_manager_worker_id);
@@ -317,7 +328,7 @@ create index workers_phone_idx on public.workers (organisation_id, phone);
 comment on table public.workers is
   'People on the payroll. Personal data in *_enc columns is AES-256-GCM ciphertext written by src/server/crypto/pii.ts. Never deleted: end employment instead.';
 comment on column public.workers.needs_pay_details is
-  'Maintained by trigger: true while bank details or a pay rate are missing. Payroll refuses to pay these workers.';
+  'Maintained by trigger at each write: true while bank details are missing or no pay rate is in force on the later of today and the start date. Payroll refuses to pay these workers, and still resolves the rate as of each pay date rather than trusting this flag.';
 comment on column public.workers.supervisor_clock_in is
   'True when the worker shares a phone with another worker: a supervisor clocks them in.';
 
@@ -331,6 +342,12 @@ alter table public.memberships
     references public.workers (organisation_id, id);
 create unique index memberships_worker_id_key on public.memberships (worker_id)
   where worker_id is not null;
+
+-- From here on memberships.worker_id decides who reads a worker's row, pay and reportees
+-- (private.my_worker_ids, private.is_line_manager_for). An admin linking any user to any
+-- worker would hand them that worker's pay, so signed-in users can no longer write it; slice
+-- 1.9's invite acceptance sets it in a security-definer function.
+revoke update (worker_id) on table public.memberships from authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. Pay rates (dated versions) and worker assignments (the mapping)
@@ -482,18 +499,30 @@ begin
     end if;
   end if;
 
+  -- A snapshot at write time: payroll still resolves the rate as of each pay date. The rate
+  -- must be in force on the later of today and the start date, so a worker whose only rate
+  -- starts next month, or whose rates have all closed, is flagged.
   new.needs_pay_details := new.bank_name is null
     or new.account_name is null
     or new.bank_account_enc is null
-    or not exists (select 1 from public.pay_rates p where p.worker_id = new.id);
+    or not exists (
+      select 1
+      from public.pay_rates p
+      where p.worker_id = new.id
+        and p.effective_from <= greatest(private.org_today(new.organisation_id), new.start_date)
+        and (
+          p.effective_to is null
+          or p.effective_to >= greatest(private.org_today(new.organisation_id), new.start_date)
+        )
+    );
 
   return new;
 end;
 $$;
 
--- AFTER INSERT/UPDATE on workers. The row audit drops *_enc and *_last4 columns, so a change
--- to personal data alone would leave no trace; this records which fields were added, changed
--- or removed, never the values (CLAUDE.md rule 9).
+-- AFTER INSERT/UPDATE on workers. The row audit drops *_enc and *_last4 columns
+-- (private.audit_secret_key), so a change to personal data alone would leave no trace; this
+-- records which fields were added, changed or removed, never the values (CLAUDE.md rule 9).
 create function private.workers_audit_personal_data()
 returns trigger
 language plpgsql
@@ -545,7 +574,10 @@ begin
 end;
 $$;
 
--- BEFORE INSERT/UPDATE/DELETE on pay_rates: versions in force are history.
+-- BEFORE INSERT/UPDATE/DELETE on pay_rates: versions in force are history, and the boundary
+-- between two versions only moves through add_pay_rate (closes the previous version) and
+-- cancelling the latest scheduled version (pay_rates_reopen_previous reopens it), so the
+-- versions of a worker never leave a gap.
 create function private.pay_rates_guard()
 returns trigger
 language plpgsql
@@ -553,8 +585,15 @@ set search_path = ''
 as $$
 declare
   v_today date := private.org_today(coalesce(new.organisation_id, old.organisation_id));
+  v_start date;
 begin
   if tg_op = 'INSERT' then
+    -- Read as the caller: a worker of another organisation is invisible here and the insert
+    -- is then refused by RLS, so nothing leaks.
+    select w.start_date into v_start from public.workers w where w.id = new.worker_id;
+    if new.effective_from < v_start then
+      raise exception 'A pay rate can''t start before the employee''s start date.' using errcode = '22023';
+    end if;
     if new.effective_from < v_today
       and exists (select 1 from public.pay_rates p where p.worker_id = new.worker_id) then
       raise exception 'A new pay rate can''t start in the past once the worker has one. Start it today or later.'
@@ -567,12 +606,29 @@ begin
     if old.effective_from <= v_today then
       raise exception 'This pay rate is already in force and can''t be removed.' using errcode = 'MLPR1';
     end if;
+    if exists (
+      select 1 from public.pay_rates p
+      where p.worker_id = old.worker_id and p.effective_from > old.effective_from
+    ) then
+      raise exception 'A later pay rate is scheduled after this one. Cancel that one first.'
+        using errcode = 'MLPR1';
+    end if;
     return old;
   end if;
 
   if new.worker_id is distinct from old.worker_id
     or new.organisation_id is distinct from old.organisation_id then
     raise exception 'A pay rate can''t move to another worker.' using errcode = 'MLPR1';
+  end if;
+
+  -- The end of a version followed by another is pinned to the day before the next one starts.
+  if new.effective_to is distinct from old.effective_to
+    and exists (
+      select 1 from public.pay_rates p
+      where p.worker_id = old.worker_id and p.effective_from > old.effective_from
+    ) then
+    raise exception 'A later pay rate follows this one, so its end date can''t change. Cancel the later one first.'
+      using errcode = 'MLPR1';
   end if;
 
   if old.effective_from <= v_today then
@@ -597,11 +653,40 @@ begin
           using errcode = 'MLPR1';
       end if;
     end if;
-  elsif new.effective_from < v_today then
-    raise exception 'A scheduled pay rate can''t be moved into the past.' using errcode = 'MLPR2';
+  elsif new.effective_from is distinct from old.effective_from then
+    -- Moving a scheduled version would open a gap after the version before it (or overlap
+    -- it). Signed-in users have no grant on effective_from; this holds for server code too.
+    if exists (select 1 from public.pay_rates p where p.worker_id = old.worker_id and p.id <> old.id) then
+      raise exception 'A scheduled pay rate can''t move. Cancel it and add it again from the new date.'
+        using errcode = 'MLPR1';
+    end if;
+    if new.effective_from < v_today then
+      raise exception 'A scheduled pay rate can''t be moved into the past.' using errcode = 'MLPR2';
+    end if;
+    select w.start_date into v_start from public.workers w where w.id = new.worker_id;
+    if new.effective_from < v_start then
+      raise exception 'A pay rate can''t start before the employee''s start date.' using errcode = '22023';
+    end if;
   end if;
 
   return new;
+end;
+$$;
+
+-- AFTER DELETE on pay_rates: cancelling a scheduled version (the guard allows only the latest
+-- one) reopens the version before it to where the cancelled one ended, so no gap is left.
+-- Runs as the caller: the update is checked by RLS, the column grant and the guard.
+create function private.pay_rates_reopen_previous()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  update public.pay_rates p
+  set effective_to = old.effective_to
+  where p.worker_id = old.worker_id
+    and p.effective_to = old.effective_from - 1;
+  return null;
 end;
 $$;
 
@@ -690,6 +775,8 @@ create trigger pay_rates_guard before insert or update or delete on public.pay_r
   for each row execute function private.pay_rates_guard();
 create trigger pay_rates_refresh_worker after insert or update or delete on public.pay_rates
   for each row execute function private.pay_rates_refresh_worker();
+create trigger pay_rates_reopen_previous after delete on public.pay_rates
+  for each row execute function private.pay_rates_reopen_previous();
 create trigger worker_assignments_before_write before insert or update on public.worker_assignments
   for each row execute function private.worker_assignments_before_write();
 
@@ -871,7 +958,8 @@ create policy workers_update on public.workers for update to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'hr']))
   with check (private.has_role(organisation_id, array['owner', 'admin', 'hr']));
 
--- pay_rates: no delete policy. Line managers do not see pay.
+-- pay_rates: line managers do not see pay. Delete cancels a scheduled version only (the guard
+-- refuses a version in force or one with a later version after it).
 create policy pay_rates_select on public.pay_rates for select to authenticated
   using (
     private.has_role(organisation_id, array['owner', 'admin', 'hr', 'finance', 'ops_manager'])
@@ -882,6 +970,8 @@ create policy pay_rates_insert on public.pay_rates for insert to authenticated
 create policy pay_rates_update on public.pay_rates for update to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'hr']))
   with check (private.has_role(organisation_id, array['owner', 'admin', 'hr']));
+create policy pay_rates_delete on public.pay_rates for delete to authenticated
+  using (private.has_role(organisation_id, array['owner', 'admin', 'hr']));
 
 -- worker_assignments: no delete policy (rows close instead).
 create policy worker_assignments_select on public.worker_assignments for select to authenticated
@@ -931,23 +1021,25 @@ grant insert (
   tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo,
   currency, next_of_kin_name, next_of_kin_phone, supervisor_clock_in
 ) on table public.workers to authenticated;
--- No bank columns: bank-detail changes need a second approver (slice 1.7).
+-- No bank columns: bank-detail changes need a second approver (slice 1.7). No staff_id: an ID
+-- is fixed once saved, so it can't be freed for a new row with someone else's bank account.
 grant update (
-  staff_id, first_name, last_name, phone, email, job_title, department_id,
+  first_name, last_name, phone, email, job_title, department_id,
   line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date,
   status, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in,
   annual_rent_declared_kobo, next_of_kin_name, next_of_kin_phone, supervisor_clock_in
 ) on table public.workers to authenticated;
 
 revoke all on table public.pay_rates from anon, authenticated;
-grant select on table public.pay_rates to authenticated;
+grant select, delete on table public.pay_rates to authenticated;
 grant insert (
   id, organisation_id, worker_id, pay_type, basic_kobo, housing_kobo, transport_kobo,
   other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, currency, effective_from, effective_to
 ) on table public.pay_rates to authenticated;
+-- No effective_from: a scheduled version is cancelled and added again rather than moved.
 grant update (
   pay_type, basic_kobo, housing_kobo, transport_kobo, other_allowances_kobo, daily_rate_kobo,
-  hourly_rate_kobo, effective_from, effective_to
+  hourly_rate_kobo, effective_to
 ) on table public.pay_rates to authenticated;
 
 revoke all on table public.worker_assignments from anon, authenticated;
@@ -960,12 +1052,16 @@ grant update (effective_to) on table public.worker_assignments to authenticated;
 -- ---------------------------------------------------------------------------
 -- 11. Multi-row writes (security invoker: RLS and column grants apply to the caller)
 -- ---------------------------------------------------------------------------
+-- Each takes the organisation the caller is working in and only touches rows of it, so a user
+-- who is hr in two companies can't act on the other one's workers from this one (the server
+-- records its own audit event against the active organisation).
 
 -- Adds a pay version from p_rate->>'effective_from' and closes the version before it the day
 -- before. Amounts arrive as JSON strings of whole kobo and are cast straight to bigint, so a
 -- fraction or a float is refused. Keys: pay_type, basic_kobo, housing_kobo, transport_kobo,
--- other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, effective_from.
-create function public.add_pay_rate(p_worker_id uuid, p_rate jsonb)
+-- other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, effective_from. The start-date
+-- rule is checked by private.pay_rates_guard on the insert.
+create function public.add_pay_rate(p_organisation_id uuid, p_worker_id uuid, p_rate jsonb)
 returns uuid
 language plpgsql
 volatile
@@ -973,8 +1069,6 @@ security invoker
 set search_path = ''
 as $$
 declare
-  v_org uuid;
-  v_start date;
   v_from date := (p_rate ->> 'effective_from')::date;
   v_id uuid;
 begin
@@ -983,24 +1077,22 @@ begin
   end if;
 
   -- Locks the worker row: pay changes for one worker happen one at a time.
-  select w.organisation_id, w.start_date into v_org, v_start
+  perform 1
   from public.workers w
   where w.id = p_worker_id
+    and w.organisation_id = p_organisation_id
   for update;
-  if v_org is null then
+  if not found then
     raise exception 'That employee wasn''t found.' using errcode = 'P0002';
   end if;
 
-  if v_from < v_start then
-    raise exception 'A pay rate can''t start before the employee''s start date.' using errcode = '22023';
-  end if;
   if exists (
     select 1 from public.pay_rates p where p.worker_id = p_worker_id and p.effective_from >= v_from
   ) then
-    raise exception 'A pay rate from this date or later already exists. Change that version instead.'
+    raise exception 'A pay rate from this date or later already exists. Cancel that version first, or change its amounts.'
       using errcode = 'MLPR3';
   end if;
-  if v_from < private.org_today(v_org)
+  if v_from < private.org_today(p_organisation_id)
     and exists (select 1 from public.pay_rates p where p.worker_id = p_worker_id) then
     raise exception 'A new pay rate can''t start in the past once the worker has one. Start it today or later.'
       using errcode = 'MLPR2';
@@ -1016,7 +1108,7 @@ begin
     other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, effective_from
   )
   values (
-    v_org,
+    p_organisation_id,
     p_worker_id,
     (p_rate ->> 'pay_type')::public.pay_type,
     (p_rate ->> 'basic_kobo')::bigint,
@@ -1033,6 +1125,41 @@ begin
 end;
 $$;
 
+-- Cancels a scheduled pay version (one that has not started) and reopens the version before
+-- it, so a raise entered by mistake can be taken back. The guard refuses a version in force
+-- or one with a later version after it; private.pay_rates_reopen_previous does the reopening.
+create function public.cancel_pay_rate(p_organisation_id uuid, p_pay_rate_id uuid)
+returns void
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+as $$
+declare
+  v_worker uuid;
+  v_deleted uuid;
+begin
+  select p.worker_id into v_worker
+  from public.pay_rates p
+  where p.id = p_pay_rate_id
+    and p.organisation_id = p_organisation_id;
+  if v_worker is null then
+    raise exception 'That pay rate wasn''t found.' using errcode = 'P0002';
+  end if;
+
+  -- Locks the worker row, as add_pay_rate does.
+  perform 1 from public.workers w where w.id = v_worker for update;
+
+  delete from public.pay_rates p
+  where p.id = p_pay_rate_id
+    and p.organisation_id = p_organisation_id
+  returning p.id into v_deleted;
+  if v_deleted is null then
+    raise exception 'That pay rate wasn''t found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
 -- Creates a worker and, optionally, their first pay rate in one transaction. p_worker carries
 -- the workers columns by name (id included: personal data is encrypted for that row id before
 -- the insert); bytea values are `\x` hex strings and bigint values are strings. Columns not
@@ -1046,6 +1173,7 @@ set search_path = ''
 as $$
 declare
   v_id uuid;
+  v_org uuid;
 begin
   insert into public.workers (
     id, organisation_id, staff_id, first_name, last_name, phone, email, job_title,
@@ -1062,10 +1190,10 @@ begin
     r.rsa_pin_last4, coalesce(r.nhf_opt_in, false), r.annual_rent_declared_kobo,
     r.next_of_kin_name, r.next_of_kin_phone, coalesce(r.supervisor_clock_in, false)
   from jsonb_populate_record(null::public.workers, p_worker) as r
-  returning id into v_id;
+  returning id, organisation_id into v_id, v_org;
 
   if p_pay_rate is not null then
-    perform public.add_pay_rate(v_id, p_pay_rate);
+    perform public.add_pay_rate(v_org, v_id, p_pay_rate);
   end if;
 
   return v_id;
@@ -1074,7 +1202,7 @@ $$;
 
 -- Ends a worker's employment on p_end_date and closes their open assignments on that date.
 -- Pay rates are left as they are: payroll stops at the end date.
-create function public.end_employment(p_worker_id uuid, p_end_date date)
+create function public.end_employment(p_organisation_id uuid, p_worker_id uuid, p_end_date date)
 returns void
 language plpgsql
 volatile
@@ -1092,6 +1220,7 @@ begin
   set end_date = p_end_date,
       status = 'ended'
   where w.id = p_worker_id
+    and w.organisation_id = p_organisation_id
     and w.status = 'active'
   returning w.id into v_id;
   if v_id is null then
@@ -1101,6 +1230,7 @@ begin
   update public.worker_assignments a
   set effective_to = p_end_date
   where a.worker_id = p_worker_id
+    and a.organisation_id = p_organisation_id
     and a.effective_from <= p_end_date
     and (a.effective_to is null or a.effective_to > p_end_date);
 end;
@@ -1120,6 +1250,7 @@ revoke all on function private.workers_before_write() from public, anon, authent
 revoke all on function private.workers_audit_personal_data() from public, anon, authenticated;
 revoke all on function private.pay_rates_guard() from public, anon, authenticated;
 revoke all on function private.pay_rates_refresh_worker() from public, anon, authenticated;
+revoke all on function private.pay_rates_reopen_previous() from public, anon, authenticated;
 revoke all on function private.worker_assignments_before_write() from public, anon, authenticated;
 
 grant execute on function private.org_today(uuid) to authenticated, service_role;
@@ -1129,9 +1260,11 @@ grant execute on function private.is_reportee(uuid) to authenticated, service_ro
 grant execute on function private.my_department_ids() to authenticated, service_role;
 grant execute on function private.my_assignment_target_ids() to authenticated, service_role;
 
-revoke all on function public.add_pay_rate(uuid, jsonb) from public, anon;
+revoke all on function public.add_pay_rate(uuid, uuid, jsonb) from public, anon;
+revoke all on function public.cancel_pay_rate(uuid, uuid) from public, anon;
 revoke all on function public.create_worker(jsonb, jsonb) from public, anon;
-revoke all on function public.end_employment(uuid, date) from public, anon;
-grant execute on function public.add_pay_rate(uuid, jsonb) to authenticated, service_role;
+revoke all on function public.end_employment(uuid, uuid, date) from public, anon;
+grant execute on function public.add_pay_rate(uuid, uuid, jsonb) to authenticated, service_role;
+grant execute on function public.cancel_pay_rate(uuid, uuid) to authenticated, service_role;
 grant execute on function public.create_worker(jsonb, jsonb) to authenticated, service_role;
-grant execute on function public.end_employment(uuid, date) to authenticated, service_role;
+grant execute on function public.end_employment(uuid, uuid, date) to authenticated, service_role;
