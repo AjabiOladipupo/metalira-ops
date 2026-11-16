@@ -120,11 +120,11 @@ test("a bank change needs a second approver and applies 72 hours later", async (
   await form.getByLabel("Reason", { exact: true }).fill("Moved to GTBank, letter on file");
   await expectNoHorizontalScroll(hrPage);
   await form.getByRole("button", { name: "Send for approval" }).click();
-  await expect(hrPage.getByText(/^Sent for approval\./)).toBeVisible({ timeout: 15_000 });
 
-  await hrPage.reload();
+  // The page refreshes with the request in place of the form.
   const card = hrPage.getByRole("article", { name: `Bank change for ${name}` });
-  await expect(card).toContainText("Waiting for approval");
+  await expect(card).toContainText("Waiting for approval", { timeout: 15_000 });
+  await expect(hrPage.getByRole("form", { name: "Change bank details" })).toHaveCount(0);
   await expect(card.getByTestId("bank-change-account")).toHaveText("••••9153");
   await expect(card).toContainText("You raised this request, so someone else approves it.");
   await expect(card.getByRole("button", { name: "Approve" })).toHaveCount(0);
@@ -157,16 +157,15 @@ test("a bank change needs a second approver and applies 72 hours later", async (
   });
   await expectNoHorizontalScroll(financePage);
   await pending.getByRole("button", { name: "Approve" }).click();
-  await expect(
-    financePage.getByText(/^Approved\. Payouts use the account ending 9153 from/),
-  ).toBeVisible({
-    timeout: 15_000,
-  });
 
-  // During the hold the worker keeps the old account.
-  await financePage.reload();
-  const onHold = financePage.getByRole("article", { name: `Bank change for ${name}` });
-  await expect(onHold).toContainText("Approved, on hold");
+  // The request moves to "On hold"; during the hold the worker keeps the old account.
+  const onHold = financePage
+    .getByRole("region", { name: /On hold/ })
+    .getByRole("article", { name: `Bank change for ${name}` });
+  await expect(onHold).toContainText("Approved, on hold", { timeout: 15_000 });
+  await expect(financePage.getByRole("heading", { level: 1 })).toHaveText(
+    "No bank changes waiting",
+  );
   await expect(onHold.getByTestId("bank-change-hold")).toContainText("Approved by Femi Adeyemi");
   await expect(onHold.getByRole("button", { name: "Stop this change" })).toBeVisible();
   await hrPage.goto(`/app/people/${workerId}`);

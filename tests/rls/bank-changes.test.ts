@@ -546,6 +546,7 @@ describe("the 72-hour hold", () => {
     const approval = audit!.find(
       (row) =>
         row.action === "bank_detail_changes.update" &&
+        (row.before as { status?: string } | null)?.status === "pending" &&
         (row.after as { status?: string } | null)?.status === "approved",
     );
     expect(approval?.actor_id).toBe(people.finance.id);
