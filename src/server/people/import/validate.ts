@@ -765,8 +765,8 @@ function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {
     changed = false;
     for (const draft of drafts) {
       const ref = draft.lineManager;
-      if (ref?.kind !== "row" || draft.problems.some((p) => p.code === "line_manager_held"))
-        continue;
+      // One line-manager problem per row is enough (a loop already explains itself).
+      if (ref?.kind !== "row" || draft.badColumns.has("line_manager_employee_id")) continue;
       const target = rowsById.get(ref.staffId.toLowerCase());
       if (target && target !== draft && isHeld(target)) {
         addProblem(

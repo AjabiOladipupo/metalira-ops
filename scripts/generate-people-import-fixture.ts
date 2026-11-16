@@ -8,6 +8,10 @@
  * date cell, phones and account numbers as text (so leading zeros survive). The expected result,
  * fixtures/people-import-162.expected.json, is written by hand from the Setup board and is not
  * generated, so the unit tests check the validator against it rather than against itself.
+ *
+ * The CSV is byte-for-byte deterministic (a unit test checks it). The .xlsx cells are too, but
+ * the zip writer stamps the current time on each entry, so its bytes change on every run: only
+ * commit a new .xlsx when the data changes.
  */
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
