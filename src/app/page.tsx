@@ -17,12 +17,15 @@ export default function Home() {
       </div>
       <div className="flex flex-wrap justify-center gap-3">
         <Button asChild>
-          <Link href="/app">Open the app</Link>
+          <Link href="/sign-up">Create an account</Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href="/design-system">Design system</Link>
+          <Link href="/sign-in">Sign in</Link>
         </Button>
       </div>
+      <Link href="/design-system" className="text-sm">
+        Design system
+      </Link>
     </main>
   );
 }

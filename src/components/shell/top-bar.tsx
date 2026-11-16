@@ -1,20 +1,11 @@
 "use client";
 
-import { Bell, ChevronDown, LogOut, Menu, Search, User } from "lucide-react";
+import { Bell, Menu, Search } from "lucide-react";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { useState } from "react";
 
 import { LogoMark } from "@/components/logo";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -25,13 +16,21 @@ import {
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 import { PlanCard } from "./app-sidebar";
-import { NavLinks } from "./nav-links";
 
 /**
- * Company switcher, site filter, search, notifications and user menu.
- * Placeholders until sign-in (slice 0.4) provides real organisations and sites.
+ * Company switcher, site filter, search, notifications and user menu. The session-dependent
+ * parts (`menuNav`, `orgSwitcher`, `userMenu`) are server-rendered slots that stream in behind
+ * their own Suspense boundaries, so the bar itself stays in the static shell.
  */
-export function TopBar() {
+export function TopBar({
+  menuNav,
+  orgSwitcher,
+  userMenu,
+}: {
+  menuNav: React.ReactNode;
+  orgSwitcher: React.ReactNode;
+  userMenu: React.ReactNode;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -42,11 +41,17 @@ export function TopBar() {
             <Menu strokeWidth={1.75} className="size-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-72 gap-4 overflow-y-auto px-3 py-5">
+        <SheetContent
+          side="left"
+          className="w-72 gap-4 overflow-y-auto px-3 py-5"
+          // Close after following any link in the menu (the links are a server-rendered slot).
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest("a")) setMenuOpen(false);
+          }}
+        >
           <SheetTitle className="sr-only">Menu</SheetTitle>
           <Link
             href="/app"
-            onClick={() => setMenuOpen(false)}
             aria-label="Metalira Ops home"
             className="flex items-center gap-2.5 px-3 py-1 text-foreground no-underline"
           >
@@ -55,27 +60,12 @@ export function TopBar() {
               Metalira <b className="font-bold">Ops</b>
             </span>
           </Link>
-          <Suspense fallback={null}>
-            <NavLinks onNavigate={() => setMenuOpen(false)} />
-          </Suspense>
+          {menuNav}
           <PlanCard />
         </SheetContent>
       </Sheet>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" className="max-w-[50vw] min-w-0 sm:max-w-none">
-            <span className="truncate">Your company</span>
-            <ChevronDown strokeWidth={1.75} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-60">
-          <DropdownMenuLabel>Companies</DropdownMenuLabel>
-          <DropdownMenuItem disabled>Your company</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled>Companies appear after sign-in</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {orgSwitcher}
 
       <div className="hidden md:block">
         <Select defaultValue="all">
@@ -102,32 +92,13 @@ export function TopBar() {
         <Button variant="outline" size="icon" aria-label="Notifications">
           <Bell strokeWidth={1.75} className="size-[18px]" />
         </Button>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Account menu"
-              className="flex size-9 items-center justify-center rounded-full bg-action text-on-action"
-            >
-              <User strokeWidth={1.75} className="size-[18px]" aria-hidden />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-auto min-w-64">
-            <DropdownMenuLabel>Not signed in</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <div className="px-2 py-1.5">
-              <span className="mb-2 block type-label text-fg-muted">Theme</span>
-              <ThemeToggle />
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled>
-              <LogOut strokeWidth={1.75} />
-              Sign out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {userMenu}
       </div>
     </header>
   );
+}
+
+/** Same footprint as the company switcher, while the session loads. */
+export function OrgSwitcherSkeleton() {
+  return <span aria-hidden className="h-10 w-40 max-w-[50vw] rounded-md border border-line" />;
 }
