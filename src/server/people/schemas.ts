@@ -425,3 +425,24 @@ export const endEmploymentSchema = z.object({
 });
 
 export type EndEmploymentInput = z.input<typeof endEmploymentSchema>;
+
+// ---------------------------------------------------------------------------
+// Departments (slice 1.5)
+// ---------------------------------------------------------------------------
+
+export const createDepartmentSchema = z.object({
+  name: text("Department name"),
+  /** The worker who heads the department. Optional. */
+  headWorkerId: optional(z.uuid("Choose a department head")),
+});
+
+export type CreateDepartmentInput = z.input<typeof createDepartmentSchema>;
+
+/** Renames a department and sets (or clears, when blank) its head. */
+export const updateDepartmentSchema = z.object({
+  departmentId: z.uuid("Choose a department"),
+  name: text("Department name"),
+  headWorkerId: optional(z.uuid("Choose a department head")),
+});
+
+export type UpdateDepartmentInput = z.input<typeof updateDepartmentSchema>;
