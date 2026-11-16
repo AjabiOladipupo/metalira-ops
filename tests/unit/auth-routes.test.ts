@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { emailLinkNextPath, proxyDecision, safeNextPath } from "@/lib/auth/routes";
+import {
+  emailLinkNextPath,
+  isWorkerAppMetadata,
+  proxyDecision,
+  safeNextPath,
+} from "@/lib/auth/routes";
 
 describe("safeNextPath", () => {
   it("keeps paths inside the manager app, with query and hash", () => {
@@ -113,5 +118,53 @@ describe("proxyDecision", () => {
     ["/application", false],
   ])("lets %s through (signed in: %s)", (path, hasUser) => {
     expect(proxyDecision(path, "", hasUser)).toEqual({ type: "next" });
+  });
+});
+
+describe("proxyDecision for the worker app (slice 1.9)", () => {
+  it("sends signed-out visitors of worker pages to the worker sign-in", () => {
+    for (const path of ["/m", "/m/clock", "/m/me"]) {
+      expect(proxyDecision(path, "", false)).toEqual({ type: "redirect", location: "/m/sign-in" });
+    }
+  });
+
+  it("lets anyone open the worker sign-in and invite links", () => {
+    expect(proxyDecision("/m/sign-in", "", false)).toEqual({ type: "next" });
+    expect(proxyDecision(`/m/invite/${"a".repeat(64)}`, "", false)).toEqual({ type: "next" });
+    expect(proxyDecision(`/m/invite/${"a".repeat(64)}`, "", true, true)).toEqual({ type: "next" });
+  });
+
+  it("sends a worker session away from the manager app and its sign-in pages", () => {
+    for (const path of ["/app", "/app/people", "/sign-in", "/sign-up"]) {
+      expect(proxyDecision(path, "", true, true)).toEqual({ type: "redirect", location: "/m" });
+    }
+  });
+
+  it("skips the worker sign-in for a worker who is signed in", () => {
+    expect(proxyDecision("/m/sign-in", "", true, true)).toEqual({
+      type: "redirect",
+      location: "/m",
+    });
+    expect(proxyDecision("/m", "", true, true)).toEqual({ type: "next" });
+  });
+
+  it("leaves a manager session on worker pages to the page's own check", () => {
+    expect(proxyDecision("/m", "", true, false)).toEqual({ type: "next" });
+    expect(proxyDecision("/m/sign-in", "", true, false)).toEqual({ type: "next" });
+  });
+
+  it("does not treat lookalike paths as the worker app", () => {
+    expect(proxyDecision("/media", "", false)).toEqual({ type: "next" });
+    expect(proxyDecision("/m-sign-in", "", false)).toEqual({ type: "next" });
+  });
+});
+
+describe("isWorkerAppMetadata", () => {
+  it("is true only for the server-set worker mark", () => {
+    expect(isWorkerAppMetadata({ login: "worker", provider: "email" })).toBe(true);
+    expect(isWorkerAppMetadata({ login: "manager" })).toBe(false);
+    expect(isWorkerAppMetadata({})).toBe(false);
+    expect(isWorkerAppMetadata(null)).toBe(false);
+    expect(isWorkerAppMetadata("worker")).toBe(false);
   });
 });
