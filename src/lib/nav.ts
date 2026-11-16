@@ -217,6 +217,8 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },
+  // Worker invites and PIN resets (slice 1.9): the roles that may create invites.
+  { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
 ];
 
 function segments(path: string): string[] {

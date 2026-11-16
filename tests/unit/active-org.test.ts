@@ -74,7 +74,7 @@ describe("appAccess", () => {
   });
 
   it("sends worker-only users to the worker app", () => {
-    expect(appAccess(true, null, [gamma], "/app")).toEqual({ type: "redirect", to: "/m/sign-in" });
+    expect(appAccess(true, null, [gamma], "/app")).toEqual({ type: "redirect", to: "/m" });
   });
 
   it("sends client approvers, and users with no organisation, to the no-access page", () => {

@@ -319,6 +319,58 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"worker_credentials": {
+                  Row: {
+                    "auth_user_id": string,"created_at": string,"failed_attempts": number,"id": string,"last_sign_in_at": string | null,"locked_until": string | null,"organisation_id": string,"pin_set_at": string,"privacy_notice_accepted_at": string,"updated_at": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "auth_user_id": string,"created_at"?: string,"failed_attempts"?: number,"id"?: string,"last_sign_in_at"?: string | null,"locked_until"?: string | null,"organisation_id": string,"pin_set_at"?: string,"privacy_notice_accepted_at": string,"updated_at"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "auth_user_id"?: string,"created_at"?: string,"failed_attempts"?: number,"id"?: string,"last_sign_in_at"?: string | null,"locked_until"?: string | null,"organisation_id"?: string,"pin_set_at"?: string,"privacy_notice_accepted_at"?: string,"updated_at"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "worker_credentials_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "worker_credentials_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"worker_invites": {
+                  Row: {
+                    "created_at": string,"created_by": string | null,"expires_at": string,"id": string,"organisation_id": string,"revoked_at": string | null,"sent_via": string,"token_hash": string,"used_at": string | null,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"created_by"?: string | null,"expires_at"?: string,"id"?: string,"organisation_id": string,"revoked_at"?: string | null,"sent_via": string,"token_hash": string,"used_at"?: string | null,"worker_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string | null,"expires_at"?: string,"id"?: string,"organisation_id"?: string,"revoked_at"?: string | null,"sent_via"?: string,"token_hash"?: string,"used_at"?: string | null,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "worker_invites_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "worker_invites_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"workers": {
                   Row: {
                     "account_name": string | null,"annual_rent_declared_kobo": number | null,"bank_account_enc": string | null,"bank_account_last4": string | null,"bank_name": string | null,"created_at": string,"created_by": string | null,"currency": string,"department_id": string | null,"email": string | null,"employment_type": Database["public"]['Enums']["employment_type"],"end_date": string | null,"first_name": string,"id": string,"job_title": string | null,"last_name": string,"line_manager_membership_id": string | null,"line_manager_worker_id": string | null,"needs_pay_details": boolean,"next_of_kin_name": string | null,"next_of_kin_phone": string | null,"nhf_opt_in": boolean,"nin_enc": string | null,"organisation_id": string,"pfa_name": string | null,"phone": string | null,"rsa_pin_enc": string | null,"rsa_pin_last4": string | null,"staff_id": string,"start_date": string,"status": Database["public"]['Enums']["worker_status"],"supervisor_clock_in": boolean,"tax_state": string | null,"tin": string | null,"updated_at": string
@@ -366,6 +418,11 @@ isOneToOne: false
             "accept_membership_invite":
 { Args: { "p_token": string }; Returns: string
                            },
+"accept_worker_invite":
+{ Args: { "p_auth_user_id": string,"p_pin_hash": string,"p_token": string }; Returns: {
+              "organisation_id": string,"pin_reset": boolean,"worker_id": string
+            }[]
+                           },
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
@@ -396,6 +453,11 @@ isOneToOne: false
 "create_worker":
 { Args: { "p_pay_rate"?: Json,"p_worker": Json }; Returns: string
                            },
+"create_worker_invites":
+{ Args: { "p_organisation_id": string,"p_sent_via": string,"p_worker_ids": (string)[] }; Returns: {
+              "invite_expires_at": string,"invite_id": string,"invite_worker_id": string,"token": string
+            }[]
+                           },
 "end_employment":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_id": string }; Returns: undefined
                            },
@@ -409,6 +471,19 @@ isOneToOne: false
                            },
 "save_import_check":
 { Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
+                           },
+"worker_invite_lookup":
+{ Args: { "p_token": string }; Returns: {
+              "auth_user_id": string,"company_code": string,"first_name": string,"invite_id": string,"last_name": string,"organisation_id": string,"organisation_name": string,"staff_id": string,"state": string,"worker_id": string
+            }[]
+                           },
+"worker_sign_in_begin":
+{ Args: { "p_company_code": string,"p_ip_key": string,"p_staff_id": string }; Returns: {
+              "auth_user_id": string,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
+            }[]
+                           },
+"worker_sign_in_finish":
+{ Args: { "p_ip_key": string,"p_ok": boolean,"p_worker_id": string }; Returns: string
                            }
           }
           Enums: {
