@@ -23,6 +23,8 @@ describe("isSensitiveKey", () => {
     "account_number",
     "accountNumber",
     "bank_account",
+    "bank_account_number",
+    "bankAccountNumber",
     "nin_enc",
     "bank_account_number_enc",
     "Authorization",

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { Kobo } from "@/lib/money";
+import { formatNaira, type Kobo } from "@/lib/money";
 import { plainText } from "@/server/identity/names";
 
 import {
@@ -14,7 +14,8 @@ import {
 } from "./columns";
 import { IMPORT_LIMITS } from "./limits";
 import { nameKey, resolveNames, type NameResolution } from "./names";
-import { generateStaffIds } from "./staff-id";
+import { guardPersonalData } from "./sensitive";
+import { generateStaffIds, normaliseStaffId, staffIdKey } from "./staff-id";
 import type {
   EmploymentType,
   FileProblem,
@@ -28,6 +29,7 @@ import type {
   LineManagerRef,
   NormalisedPayRate,
   NormalisedRow,
+  NormalisedWorker,
   ResolvedName,
   RowResult,
   RowStatus,
@@ -44,7 +46,10 @@ import {
   parseImportNaira,
   parseNigerianMobile,
   parsePayType,
+  parseRsaPin,
+  parseTin,
   parseYesNo,
+  type DigitsCheck,
 } from "./values";
 
 /** One employee row of the file, cells keyed by template column. */
@@ -54,6 +59,8 @@ export interface ImportRecord {
   values: Record<ColumnKey, string>;
   /** Non-blank cells to the right of the last header column. */
   extraValues?: number;
+  /** .xlsx only: columns whose cell in this row was a number cell. */
+  numericColumns?: readonly ColumnKey[];
 }
 
 const REQUIRED_VALUES = [
@@ -83,6 +90,13 @@ const TEXT_COLUMNS = [
   "next_of_kin_name",
 ] as const satisfies readonly ColumnKey[];
 
+/**
+ * Characters that make a spreadsheet app run a cell as a formula. Tab and carriage return are
+ * already refused by `plainText` (control characters); staff IDs must start with a letter or
+ * digit. Every CSV export escapes them as well (`formatCsv`).
+ */
+const FORMULA_START = /^[=+\-@]/;
+
 const AMOUNT_COLUMNS = [
   ...PAY_AMOUNT_COLUMNS,
   "annual_rent_declared",
@@ -108,10 +122,16 @@ interface Draft {
   warnings: ImportWarning[];
   /** Columns that already have a problem, so later checks don't pile on. */
   badColumns: Set<ColumnKey>;
+  /** Normalised staff ID; null while blank (generated later) or when invalid (held). */
   staffId: string | null;
   staffIdGenerated: boolean;
+  /** Line manager cell after the format check: a staff ID or a manager's email. */
+  lineManagerCell: { kind: "staff"; staffId: string } | { kind: "email"; email: string } | null;
   phone: string | null;
   email: string | null;
+  rsaPin: string | null;
+  tin: string | null;
+  nextOfKinPhone: string | null;
   employmentType: EmploymentType | null;
   startDate: string | null;
   amounts: Partial<Record<AmountColumn, Kobo>>;
@@ -183,6 +203,14 @@ function checkCells(draft: Draft): void {
         key,
         `${parsed.error.issues[0]?.message ?? `${COLUMN_LABELS[key]} must be plain text`}.`,
       );
+    } else if (FORMULA_START.test(v[key])) {
+      // A spreadsheet app would run it as a formula when this value is exported to CSV.
+      addProblem(
+        draft,
+        "not_plain_text",
+        key,
+        `${COLUMN_LABELS[key]} can't start with =, +, - or @. Remove the symbol at the start.`,
+      );
     }
   }
   for (const key of REQUIRED_VALUES) {
@@ -190,9 +218,56 @@ function checkCells(draft: Draft): void {
   }
 }
 
+const STAFF_ID_RULE =
+  "can only use letters, digits, dots, underscores, slashes and dashes, must start with a letter or digit, and can be at most 40 characters";
+
+const LEADING_ZERO_HINT = "Format the column as Text and type the number again, or upload as CSV.";
+
+/** A number cell one digit short: Excel dropped a leading zero. */
+function lostLeadingZero(
+  draft: Draft,
+  key: ColumnKey,
+  check: DigitsCheck,
+  length: number,
+): boolean {
+  return (
+    !check.ok &&
+    check.reason === "wrong_length" &&
+    check.digits === length - 1 &&
+    (draft.record.numericColumns?.includes(key) ?? false)
+  );
+}
+
 function checkIdentity(draft: Draft): void {
   const { v } = draft;
-  draft.staffId = v.employee_id === "" ? null : v.employee_id;
+  if (v.employee_id !== "" && !draft.badColumns.has("employee_id")) {
+    draft.staffId = normaliseStaffId(v.employee_id);
+    if (draft.staffId === null) {
+      addProblem(draft, "staff_id_invalid", "employee_id", `Staff ID ${STAFF_ID_RULE}.`, {
+        label: "Generate a new staff ID",
+        patch: { employee_id: "" },
+      });
+    }
+  }
+
+  const manager = v.line_manager_employee_id;
+  if (manager !== "" && !draft.badColumns.has("line_manager_employee_id")) {
+    if (manager.includes("@")) {
+      const email = parseImportEmail(manager);
+      if (email.ok) draft.lineManagerCell = { kind: "email", email: email.value };
+    } else {
+      const staffId = normaliseStaffId(manager);
+      if (staffId) draft.lineManagerCell = { kind: "staff", staffId };
+    }
+    if (!draft.lineManagerCell) {
+      draft.lineManagerProblem = addProblem(
+        draft,
+        "staff_id_invalid",
+        "line_manager_employee_id",
+        "Line manager is not a staff ID or an email address. Use the manager's staff ID, or the email they sign in with.",
+      );
+    }
+  }
 
   if (v.phone !== "" && !draft.badColumns.has("phone")) {
     const phone = parseNigerianMobile(v.phone);
@@ -254,10 +329,55 @@ function checkIdentity(draft: Draft): void {
         draft,
         "nin_invalid",
         "nin",
-        nin.reason === "wrong_length"
-          ? `NIN has ${plural(nin.digits, "digit", "digits")}; NINs have 11.`
-          : "NIN must be 11 digits, with no letters or symbols.",
+        lostLeadingZero(draft, "nin", nin, 11)
+          ? `Excel dropped the leading zero from this NIN. ${LEADING_ZERO_HINT}`
+          : nin.reason === "wrong_length"
+            ? `NIN has ${plural(nin.digits, "digit", "digits")}; NINs have 11.`
+            : "NIN must be 11 digits, with no letters or symbols.",
         { label: "Leave NIN blank for now", patch: { nin: "" } },
+      );
+    }
+  }
+
+  // RSA PIN, TIN and next-of-kin phone: shape checks only, and never echoed in a message.
+  if (v.rsa_pin !== "" && !draft.badColumns.has("rsa_pin")) {
+    const pin = parseRsaPin(v.rsa_pin);
+    if (pin.ok) draft.rsaPin = pin.value;
+    else {
+      addProblem(
+        draft,
+        "rsa_pin_invalid",
+        "rsa_pin",
+        "RSA PIN must be PEN followed by 12 digits.",
+        { label: "Leave RSA PIN blank for now", patch: { rsa_pin: "" } },
+      );
+    }
+  }
+
+  if (v.tin !== "" && !draft.badColumns.has("tin")) {
+    const tin = parseTin(v.tin);
+    if (tin.ok) draft.tin = tin.value;
+    else {
+      addProblem(
+        draft,
+        "tin_invalid",
+        "tin",
+        "TIN can only hold digits and dashes, for example 12345678-0001.",
+        { label: "Leave TIN blank for now", patch: { tin: "" } },
+      );
+    }
+  }
+
+  if (v.next_of_kin_phone !== "" && !draft.badColumns.has("next_of_kin_phone")) {
+    const phone = parseNigerianMobile(v.next_of_kin_phone);
+    if (phone.ok) draft.nextOfKinPhone = phone.value;
+    else {
+      addProblem(
+        draft,
+        "next_of_kin_phone_invalid",
+        "next_of_kin_phone",
+        "Next of kin phone is not a Nigerian mobile number. Use 11 digits starting 070, 080, 081, 090 or 091.",
+        { label: "Leave next of kin phone blank", patch: { next_of_kin_phone: "" } },
       );
     }
   }
@@ -282,7 +402,15 @@ function checkPay(draft: Draft, present: ReadonlySet<ColumnKey>): void {
     if (v[key] === "" || draft.badColumns.has(key)) continue;
     const amount = parseImportNaira(v[key]);
     if (amount.ok) draft.amounts[key] = amount.value;
-    else {
+    else if (amount.reason === "too_large") {
+      amountsValid = false;
+      addProblem(
+        draft,
+        "amount_too_large",
+        key,
+        `${COLUMN_LABELS[key]} ${v[key]} is more than we accept for one employee (${formatNaira(IMPORT_LIMITS.maxAmountKobo, { whole: true })}). Check the amount.`,
+      );
+    } else {
       amountsValid = false;
       addProblem(
         draft,
@@ -328,6 +456,9 @@ function checkPay(draft: Draft, present: ReadonlySet<ColumnKey>): void {
           : `Pay type "${v.pay_type}" is not Monthly or Daily.`,
       );
     } else if (payType.value === "monthly") {
+      const allowancesFilled = MONTHLY_PAY_COLUMNS.some(
+        (key) => key !== "basic_monthly" && filled(key),
+      );
       if (dailyFilled) {
         addProblem(
           draft,
@@ -336,13 +467,39 @@ function checkPay(draft: Draft, present: ReadonlySet<ColumnKey>): void {
           "Pay type is Monthly but a daily rate is filled. Clear the daily rate or change pay type to Daily.",
           { label: "Clear the daily rate", patch: { daily_rate: "" } },
         );
-      } else if (!filled("basic_monthly")) {
-        if (amountsValid) {
+      } else if (!amountsValid) {
+        // The amount problems already explain the row.
+      } else if (v.basic_monthly === "") {
+        if (allowancesFilled) {
+          // Don't drop the allowances HR typed without saying so.
+          addProblem(
+            draft,
+            "pay_basic_missing",
+            "basic_monthly",
+            "Basic is blank but allowances are filled. Fill basic or clear the allowances.",
+            {
+              label: "Clear the allowances",
+              patch: { housing_monthly: "", transport_monthly: "", other_allowances_monthly: "" },
+            },
+          );
+        } else {
           draft.payReasons.push(
             payColumnsMissing ? "pay columns are not in the file" : "basic pay is blank",
           );
         }
-      } else if (amountsValid && draft.startDate) {
+      } else if (!filled("basic_monthly")) {
+        addProblem(
+          draft,
+          "pay_amount_zero",
+          "basic_monthly",
+          allowancesFilled
+            ? "Basic monthly can't be 0 for Monthly pay. Fill the basic amount."
+            : "Basic monthly can't be 0 for Monthly pay. Fill the basic amount, or leave it blank to add pay after import.",
+          allowancesFilled
+            ? null
+            : { label: "Leave basic pay blank for now", patch: { basic_monthly: "" } },
+        );
+      } else if (draft.startDate) {
         draft.payRate = {
           payType: "monthly",
           basicKobo: draft.amounts.basic_monthly ?? 0n,
@@ -370,13 +527,21 @@ function checkPay(draft: Draft, present: ReadonlySet<ColumnKey>): void {
           },
         },
       );
+    } else if (!amountsValid) {
+      // The amount problems already explain the row.
+    } else if (v.daily_rate === "") {
+      draft.payReasons.push(
+        payColumnsMissing ? "pay columns are not in the file" : "daily rate is blank",
+      );
     } else if (!dailyFilled) {
-      if (amountsValid) {
-        draft.payReasons.push(
-          payColumnsMissing ? "pay columns are not in the file" : "daily rate is blank",
-        );
-      }
-    } else if (amountsValid && draft.startDate) {
+      addProblem(
+        draft,
+        "pay_amount_zero",
+        "daily_rate",
+        "Daily rate can't be 0 for Daily pay. Fill the daily rate, or leave it blank to add pay after import.",
+        { label: "Leave daily rate blank for now", patch: { daily_rate: "" } },
+      );
+    } else if (draft.startDate) {
       draft.payRate = {
         payType: "daily",
         basicKobo: 0n,
@@ -400,9 +565,12 @@ function checkBank(draft: Draft, present: ReadonlySet<ColumnKey>): void {
         draft,
         "bank_account_invalid",
         "bank_account_number",
-        nuban.reason === "wrong_length"
-          ? `Bank account number has ${plural(nuban.digits, "digit", "digits")}; NUBAN numbers have 10.`
-          : "Bank account number must be 10 digits, with no letters or symbols.",
+        // Never zero-pad: a real 9-digit typo would become someone else's account.
+        lostLeadingZero(draft, "bank_account_number", nuban, 10)
+          ? `Excel dropped the leading zero from this account number. ${LEADING_ZERO_HINT}`
+          : nuban.reason === "wrong_length"
+            ? `Bank account number has ${plural(nuban.digits, "digit", "digits")}; NUBAN numbers have 10.`
+            : "Bank account number must be 10 digits, with no letters or symbols.",
         { label: "Mark for HR to fix", patch: { bank_account_number: "" } },
       );
       return;
@@ -423,11 +591,11 @@ function checkBank(draft: Draft, present: ReadonlySet<ColumnKey>): void {
 // ---------------------------------------------------------------------------------------------
 
 function checkStaffIds(drafts: Draft[], ctx: ImportContext): void {
-  const existing = new Map(ctx.existingWorkers.map((w) => [w.staffId.trim().toLowerCase(), w]));
+  const existing = new Map(ctx.existingWorkers.map((w) => [staffIdKey(w.staffId), w]));
   const firstRow = new Map<string, Draft>();
   for (const draft of drafts) {
     if (!draft.staffId) continue;
-    const key = draft.staffId.toLowerCase();
+    const key = staffIdKey(draft.staffId);
     const worker = existing.get(key);
     const first = firstRow.get(key);
     const fix: SuggestedFix = { label: "Generate a new staff ID", patch: { employee_id: "" } };
@@ -451,7 +619,8 @@ function checkStaffIds(drafts: Draft[], ctx: ImportContext): void {
     if (!first) firstRow.set(key, draft);
   }
 
-  const blanks = drafts.filter((draft) => draft.staffId === null);
+  // Only blank cells get a generated ID; an invalid one is held with its own problem.
+  const blanks = drafts.filter((draft) => draft.v.employee_id === "");
   if (blanks.length === 0) return;
   const taken = [
     ...ctx.existingWorkers.map((w) => w.staffId),
@@ -643,20 +812,19 @@ function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {
   const rowsById = new Map<string, Draft>();
   for (const draft of drafts) {
     if (draft.staffId && !draft.staffIdGenerated) {
-      const key = draft.staffId.toLowerCase();
+      const key = staffIdKey(draft.staffId);
       if (!rowsById.has(key)) rowsById.set(key, draft);
     }
   }
-  const workersById = new Map(ctx.existingWorkers.map((w) => [w.staffId.trim().toLowerCase(), w]));
+  const workersById = new Map(ctx.existingWorkers.map((w) => [staffIdKey(w.staffId), w]));
   const managersByEmail = new Map(ctx.managers.map((m) => [m.email.trim().toLowerCase(), m]));
 
   // Pass 2 of the two-pass resolve: every staff ID in the file is known now.
   for (const draft of drafts) {
-    const raw = draft.v.line_manager_employee_id;
-    if (raw === "" || draft.badColumns.has("line_manager_employee_id")) continue;
-    const key = raw.toLowerCase();
-    if (raw.includes("@")) {
-      const manager = managersByEmail.get(key);
+    const cell = draft.lineManagerCell;
+    if (!cell || draft.badColumns.has("line_manager_employee_id")) continue;
+    if (cell.kind === "email") {
+      const manager = managersByEmail.get(cell.email);
       if (manager) {
         draft.lineManager = {
           kind: "membership",
@@ -669,12 +837,13 @@ function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {
           draft,
           "line_manager_unknown",
           "line_manager_employee_id",
-          `Line manager ${raw} is not a user in your account.`,
+          `Line manager ${cell.email} is not a user in your account.`,
         );
       }
       continue;
     }
-    if (draft.staffId && key === draft.staffId.toLowerCase()) {
+    const key = staffIdKey(cell.staffId);
+    if (draft.staffId && key === staffIdKey(draft.staffId)) {
       draft.lineManagerProblem = addProblem(
         draft,
         "line_manager_self",
@@ -704,7 +873,7 @@ function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {
         draft,
         "line_manager_unknown",
         "line_manager_employee_id",
-        `Line manager ID ${raw} is not in the file or in your account.`,
+        `Line manager ID ${cell.staffId} is not in the file or in your account.`,
       );
     }
   }
@@ -714,16 +883,15 @@ function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {
   const managerOf = new Map<string, string>();
   const display = new Map<string, string>();
   for (const worker of ctx.existingWorkers) {
-    const key = worker.staffId.trim().toLowerCase();
+    const key = staffIdKey(worker.staffId);
     display.set(key, worker.staffId);
-    if (worker.lineManagerStaffId)
-      managerOf.set(key, worker.lineManagerStaffId.trim().toLowerCase());
+    if (worker.lineManagerStaffId) managerOf.set(key, staffIdKey(worker.lineManagerStaffId));
   }
   for (const [key, draft] of rowsById) {
     display.set(key, draft.staffId ?? key);
     const ref = draft.lineManager;
     if (ref && (ref.kind === "row" || ref.kind === "worker"))
-      managerOf.set(key, ref.staffId.toLowerCase());
+      managerOf.set(key, staffIdKey(ref.staffId));
     else managerOf.delete(key);
   }
   const inLoop = new Map<string, string[]>();
@@ -767,7 +935,7 @@ function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {
       const ref = draft.lineManager;
       // One line-manager problem per row is enough (a loop already explains itself).
       if (ref?.kind !== "row" || draft.badColumns.has("line_manager_employee_id")) continue;
-      const target = rowsById.get(ref.staffId.toLowerCase());
+      const target = rowsById.get(staffIdKey(ref.staffId));
       if (target && target !== draft && isHeld(target)) {
         addProblem(
           draft,
@@ -787,7 +955,7 @@ function lineManagerPatchValue(ref: LineManagerRef): string {
 
 function lineManagerKey(ref: LineManagerRef): string {
   if (ref.kind === "membership") return `m:${ref.membershipId}`;
-  return `s:${ref.staffId.toLowerCase()}`;
+  return `s:${staffIdKey(ref.staffId)}`;
 }
 
 /** "Set to Kola Adebayo": the line manager most used by importable rows at the same site and department. */
@@ -810,10 +978,7 @@ function suggestLineManagers(drafts: Draft[]): void {
       const counts = new Map<string, { ref: LineManagerRef; count: number }>();
       for (const other of candidates) {
         if (other === draft || !other.lineManager || scopeOf(other) !== scope) continue;
-        if (
-          draft.staffId &&
-          lineManagerKey(other.lineManager) === `s:${draft.staffId.toLowerCase()}`
-        )
+        if (draft.staffId && lineManagerKey(other.lineManager) === `s:${staffIdKey(draft.staffId)}`)
           continue;
         const key = lineManagerKey(other.lineManager);
         const entry = counts.get(key);
@@ -850,42 +1015,36 @@ function normalise(draft: Draft): NormalisedRow | null {
     return null;
   }
   const orNull = (value: string) => (value === "" ? null : value);
-  const nextOfKinPhone =
-    v.next_of_kin_phone === "" ? null : parseNigerianMobile(v.next_of_kin_phone);
+  const worker: NormalisedWorker = {
+    staffId: draft.staffId,
+    staffIdGenerated: draft.staffIdGenerated,
+    firstName: v.first_name,
+    lastName: v.last_name,
+    phone: draft.phone,
+    email: draft.email,
+    jobTitle: v.job_title,
+    employmentType: draft.employmentType,
+    startDate: draft.startDate,
+    shiftPattern: orNull(v.shift_pattern),
+    bankName: orNull(v.bank_name),
+    accountName: orNull(v.account_name),
+    bankAccountNumber:
+      v.bank_account_number === "" ? null : v.bank_account_number.replace(/[\s-]/g, ""),
+    nin: v.nin === "" ? null : v.nin.replace(/[\s-]/g, ""),
+    tin: draft.tin,
+    taxState: orNull(v.tax_state),
+    pfaName: orNull(v.pfa_name),
+    rsaPin: draft.rsaPin,
+    nhfOptIn: draft.nhfOptIn,
+    annualRentDeclaredKobo: draft.amounts.annual_rent_declared ?? null,
+    currency: "NGN",
+    nextOfKinName: orNull(v.next_of_kin_name),
+    nextOfKinPhone: draft.nextOfKinPhone,
+    needsPayDetails: draft.payReasons.length > 0,
+    supervisorClockIn: draft.supervisorClockIn,
+  };
   return {
-    worker: {
-      staffId: draft.staffId,
-      staffIdGenerated: draft.staffIdGenerated,
-      firstName: v.first_name,
-      lastName: v.last_name,
-      phone: draft.phone,
-      email: draft.email,
-      jobTitle: v.job_title,
-      employmentType: draft.employmentType,
-      startDate: draft.startDate,
-      shiftPattern: orNull(v.shift_pattern),
-      bankName: orNull(v.bank_name),
-      accountName: orNull(v.account_name),
-      bankAccountNumber:
-        v.bank_account_number === "" ? null : v.bank_account_number.replace(/[\s-]/g, ""),
-      nin: v.nin === "" ? null : v.nin.replace(/[\s-]/g, ""),
-      tin: orNull(v.tin),
-      taxState: orNull(v.tax_state),
-      pfaName: orNull(v.pfa_name),
-      rsaPin: v.rsa_pin === "" ? null : v.rsa_pin.replace(/\s/g, "").toUpperCase(),
-      nhfOptIn: draft.nhfOptIn,
-      annualRentDeclaredKobo: draft.amounts.annual_rent_declared ?? null,
-      currency: "NGN",
-      nextOfKinName: orNull(v.next_of_kin_name),
-      nextOfKinPhone:
-        nextOfKinPhone === null
-          ? null
-          : nextOfKinPhone.ok
-            ? nextOfKinPhone.value
-            : v.next_of_kin_phone,
-      needsPayDetails: draft.payReasons.length > 0,
-      supervisorClockIn: draft.supervisorClockIn,
-    },
+    worker: guardPersonalData(worker, ["nin", "rsaPin"], ["bankAccountNumber"]),
     department: draft.department,
     lineManager: draft.lineManager,
     payRate: draft.payRate,
@@ -980,8 +1139,12 @@ export function validateImportRecords(
       badColumns: new Set(),
       staffId: null,
       staffIdGenerated: false,
+      lineManagerCell: null,
       phone: null,
       email: null,
+      rsaPin: null,
+      tin: null,
+      nextOfKinPhone: null,
       employmentType: null,
       startDate: null,
       amounts: {},
@@ -1028,7 +1191,7 @@ export function validateImportRecords(
         : "ready";
     return {
       rowNumber: draft.record.rowNumber,
-      raw: draft.v,
+      raw: guardPersonalData(draft.v, ["nin", "rsa_pin"], ["bank_account_number"]),
       status,
       problems: draft.problems,
       warnings: draft.warnings,
@@ -1052,11 +1215,15 @@ export function validateImportRecords(
   };
 }
 
-/** Validates a whole sheet: the first non-blank row is the header. */
+/**
+ * Validates a whole sheet: the first non-blank row is the header. `numeric` (from the .xlsx
+ * reader) marks number cells, so a NUBAN or NIN that lost its leading zero gets a clear message.
+ */
 export function validateImportTable(
   table: readonly (readonly string[])[],
   contextInput: ImportContextInput,
   format: ImportFormat | null = null,
+  options: { numeric?: readonly (readonly boolean[])[] } = {},
 ): ImportResult {
   const isBlank = (row: readonly string[]) => row.every((cell) => cell.trim() === "");
   const headerIndex = table.findIndex((row) => !isBlank(row));
@@ -1099,7 +1266,14 @@ export function validateImportTable(
       if (column !== undefined) values[key] = row[column] ?? "";
     }
     const extraValues = row.slice(header.length).filter((cell) => cell.trim() !== "").length;
-    records.push({ rowNumber: index + 1, values, extraValues });
+    const numericRow = options.numeric?.[index];
+    const numericColumns = numericRow
+      ? TEMPLATE_COLUMNS.filter((key) => {
+          const column = map.indexOf[key];
+          return column !== undefined && numericRow[column] === true;
+        })
+      : undefined;
+    records.push({ rowNumber: index + 1, values, extraValues, numericColumns });
   }
   if (records.length === 0) {
     problems.push({ code: "file_empty", message: "The file has a header but no employee rows." });

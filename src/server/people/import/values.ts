@@ -1,5 +1,6 @@
 import { parseNairaToKobo, type Kobo } from "@/lib/money";
 
+import { IMPORT_LIMITS } from "./limits";
 import type { EmploymentType } from "./types";
 
 /**
@@ -17,10 +18,19 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false };
  */
 const IMPORT_NAIRA = /^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{1,2})?$/;
 
-export function parseImportNaira(raw: string): Parsed<Kobo> {
+export type NairaCheck =
+  { ok: true; value: Kobo } | { ok: false; reason: "not_amount" | "too_large" };
+
+/**
+ * Parses a naira cell to kobo and refuses anything above `IMPORT_LIMITS.maxAmountKobo`
+ * (₦1,000,000,000): well inside Postgres `bigint`, and it catches a typo with extra zeros.
+ */
+export function parseImportNaira(raw: string): NairaCheck {
   const value = raw.trim();
-  if (!IMPORT_NAIRA.test(value)) return { ok: false };
-  return { ok: true, value: parseNairaToKobo(value) };
+  if (!IMPORT_NAIRA.test(value)) return { ok: false, reason: "not_amount" };
+  const kobo = parseNairaToKobo(value);
+  if (kobo > IMPORT_LIMITS.maxAmountKobo) return { ok: false, reason: "too_large" };
+  return { ok: true, value: kobo };
 }
 
 const MOBILE = /^0(?:70|80|81|90|91)\d{8}$/;
@@ -69,6 +79,25 @@ export function checkNuban(raw: string): DigitsCheck {
 /** NIN: exactly 11 digits (format check only, owner decision 8). */
 export function checkNin(raw: string): DigitsCheck {
   return checkDigits(raw, 11);
+}
+
+const RSA_PIN = /^PEN\d{12}$/;
+
+/** RSA PIN: `PEN` and 12 digits, spaces ignored, any case (`pen 1000 0000 0001`). */
+export function parseRsaPin(raw: string): Parsed<string> {
+  const value = raw.replace(/\s/g, "").toUpperCase();
+  return RSA_PIN.test(value) ? { ok: true, value } : { ok: false };
+}
+
+const TIN = /^\d+(?:-\d+)*$/;
+
+/**
+ * TIN: digits, optionally in dash-separated groups (`12345678-0001`), spaces ignored. A shape
+ * check only: the number itself is not verified.
+ */
+export function parseTin(raw: string): Parsed<string> {
+  const value = raw.replace(/\s/g, "");
+  return TIN.test(value) && value.length <= 20 ? { ok: true, value } : { ok: false };
 }
 
 const EMPLOYMENT_TYPES: Record<string, EmploymentType> = {

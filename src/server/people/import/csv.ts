@@ -79,3 +79,25 @@ export function decodeCsvBytes(bytes: Uint8Array): string {
     return new TextDecoder("windows-1252").decode(bytes);
   }
 }
+
+/** Characters that make a spreadsheet app treat a cell as a formula. */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
+/**
+ * One CSV cell for a file people will open in Excel. A value starting with `=`, `+`, `-`, `@`,
+ * tab or carriage return is prefixed with `'` so it shows as text and never runs as a formula
+ * (CSV formula injection); then the cell is quoted if it holds a quote, comma or line break.
+ */
+export function csvCell(value: string): string {
+  const safe = FORMULA_START.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+}
+
+/**
+ * Writes rows as CSV (CRLF line endings, UTF-8 byte order mark so Excel reads accents), with
+ * every cell escaped by `csvCell`. Every CSV download built from imported or typed values goes
+ * through this, starting with "Download problems (.csv)" in slice 1.8.
+ */
+export function formatCsv(rows: readonly (readonly string[])[]): string {
+  return `﻿${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+}

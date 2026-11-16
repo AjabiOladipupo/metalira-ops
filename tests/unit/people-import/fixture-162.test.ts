@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { inspect } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -128,5 +129,34 @@ describe("fixtures/people-import-162", () => {
       .filter((r) => r.normalised?.worker.staffIdGenerated)
       .map((r) => r.normalised?.worker.staffId);
     expect(ids).toEqual(["AFS-0163", "AFS-0164"]);
+  });
+});
+
+describe("personal data in the result", () => {
+  const personal = buildPeopleImport162().flatMap((r) =>
+    [r.nin, r.bank_account_number, r.rsa_pin].filter((value) => value !== ""),
+  );
+
+  it("never shows NIN, bank account number or RSA PIN when serialised or logged", async () => {
+    const result = await validate("people-import-162.csv");
+    expect(personal.length).toBeGreaterThan(300);
+    const json = JSON.stringify(result, (_key, value: unknown) =>
+      typeof value === "bigint" ? value.toString() : value,
+    );
+    const logged = inspect(result, { depth: null });
+    for (const text of [json, logged]) {
+      for (const value of personal) expect(text).not.toContain(value);
+      expect(text).not.toMatch(/PEN\d{12}/);
+    }
+    expect(json).toContain('"bankAccountNumber":"•••• ');
+    expect(json).toContain('"nin":"••••"');
+  });
+
+  it("keeps the real values for code that reads the fields to encrypt them", async () => {
+    const result = await validate("people-import-162.csv");
+    const row2 = result.rows.find((r) => r.rowNumber === 2);
+    expect(row2?.normalised?.worker.bankAccountNumber).toMatch(/^\d{10}$/);
+    expect(row2?.raw.rsa_pin).toMatch(/^PEN\d{12}$/);
+    expect(Object.keys(row2?.normalised?.worker ?? {})).not.toContain("toJSON");
   });
 });

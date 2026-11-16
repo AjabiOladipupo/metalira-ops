@@ -11,7 +11,13 @@ export interface ImportFile {
 }
 
 export type ReadFileResult =
-  | { ok: true; format: ImportFormat; rows: string[][] }
+  | {
+      ok: true;
+      format: ImportFormat;
+      rows: string[][];
+      /** .xlsx only: which cells were number cells (same shape as `rows`). */
+      numeric?: boolean[][];
+    }
   | { ok: false; format: ImportFormat | null; problem: FileProblem };
 
 const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04] as const;
@@ -73,7 +79,7 @@ export async function readImportFile(file: ImportFile): Promise<ReadFileResult> 
               },
       };
     }
-    return { ok: true, format: "xlsx", rows: result.rows };
+    return { ok: true, format: "xlsx", rows: result.rows, numeric: result.numeric };
   }
 
   if (startsWith(file.bytes, OLE_MAGIC) || name.endsWith(".xls") || name.endsWith(".xlsx")) {

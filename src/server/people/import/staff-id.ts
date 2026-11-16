@@ -7,6 +7,28 @@
  * highest number in that shape. With no IDs anywhere, the default is `EMP-0001`.
  */
 
+/**
+ * A staff ID is the worker's sign-in identifier (company code + staff ID + PIN, owner decision
+ * 4) and appears in emails and on printed invite sheets, so it is a strict ASCII token: a letter
+ * or digit, then up to 39 letters, digits, dots, underscores, slashes or dashes. No spaces,
+ * `@`, `<`, `://`, control characters or formula characters at the start.
+ */
+const STAFF_ID = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$/;
+
+/**
+ * NFKC-normalises a staff ID (fullwidth `ＡＦＳ-００４２` becomes `AFS-0042`) and checks it.
+ * Returns the normalised ID, or null when it isn't an acceptable staff ID.
+ */
+export function normaliseStaffId(raw: string): string | null {
+  const value = raw.normalize("NFKC").trim();
+  return STAFF_ID.test(value) ? value : null;
+}
+
+/** Comparison key for staff IDs: the same normalisation, ignoring case. */
+export function staffIdKey(id: string): string {
+  return id.normalize("NFKC").trim().toLowerCase();
+}
+
 const NUMBERED_ID = /^(.*?)(\d+)$/;
 
 interface Pattern {
@@ -49,14 +71,14 @@ export function generateStaffIds(
     }
   }
 
-  const taken = new Set(takenIds.map((id) => id.trim().toUpperCase()));
+  const taken = new Set(takenIds.map(staffIdKey));
   const out: string[] = [];
   let next = best.max + 1n;
   while (out.length < count) {
     const candidate = `${best.prefix}${next.toString().padStart(best.width, "0")}`;
-    if (!taken.has(candidate.toUpperCase())) {
+    if (!taken.has(staffIdKey(candidate))) {
       out.push(candidate);
-      taken.add(candidate.toUpperCase());
+      taken.add(staffIdKey(candidate));
     }
     next += 1n;
   }

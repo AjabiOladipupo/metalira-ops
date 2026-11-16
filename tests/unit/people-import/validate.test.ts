@@ -701,3 +701,244 @@ describe("context", () => {
     ).toThrow();
   });
 });
+
+describe("staff ID format", () => {
+  it.each([
+    ["<a href=x>"],
+    ["https://evil.example/x"],
+    ["AFS\u00070042"],
+    ["kola@example.com"],
+    ["=HYPERLINK(1)"],
+    ["AFS 0042"],
+    ["АFS-0042"], // Cyrillic capital A
+  ])("holds staff ID %j with a fix, without echoing it", (id) => {
+    const result = check(rows({ employee_id: id }));
+    const r = row(result, 2);
+    expect(r.status).toBe("held");
+    expect(r.problems).toEqual([
+      {
+        code: "staff_id_invalid",
+        column: "employee_id",
+        message:
+          "Staff ID can only use letters, digits, dots, underscores, slashes and dashes, must start with a letter or digit, and can be at most 40 characters.",
+        fix: { label: "Generate a new staff ID", patch: { employee_id: "" } },
+      },
+    ]);
+    // An invalid ID is held, not silently replaced by a generated one.
+    expect(r.warnings.map((w) => w.code)).not.toContain("staff_id_generated");
+  });
+
+  it("folds fullwidth lookalikes to ASCII, so they collide with the real ID", () => {
+    const result = check(rows({ employee_id: "AFS-0042" }, { employee_id: "ＡＦＳ-００４２" }));
+    expect(row(result, 3).problems[0]).toMatchObject({
+      code: "staff_id_duplicate_in_file",
+      message: "Staff ID AFS-0042 is also on row 2. Each employee needs their own staff ID.",
+    });
+
+    const existing = check(rows({ employee_id: "ＡＦＳ-０１００" }), {
+      existingWorkers: [
+        {
+          id: "w100",
+          staffId: "AFS-0100",
+          firstName: "Emeka",
+          lastName: "Nwankwo",
+          phone: null,
+          lineManagerStaffId: null,
+        },
+      ],
+    });
+    expect(codes(row(existing, 2))).toEqual(["staff_id_exists"]);
+  });
+
+  it("holds a line manager that is neither a staff ID nor an email, without echoing it", () => {
+    const result = check(
+      rows(
+        {},
+        { line_manager_employee_id: "AFS-0001" },
+        { line_manager_employee_id: "<b>boss</b>" },
+        { line_manager_employee_id: "=cmd|' /C calc'!A0" },
+        { line_manager_employee_id: "not an@email" },
+      ),
+    );
+    for (const rowNumber of [4, 5, 6]) {
+      expect(row(result, rowNumber).problems[0]).toMatchObject({
+        code: "staff_id_invalid",
+        column: "line_manager_employee_id",
+        message:
+          "Line manager is not a staff ID or an email address. Use the manager's staff ID, or the email they sign in with.",
+        // The usual manager at the same site is offered.
+        fix: { label: "Set to Kola Adebayo", patch: { line_manager_employee_id: "AFS-0001" } },
+      });
+    }
+  });
+
+  it("resolves a fullwidth line manager ID to the row it matches", () => {
+    const result = check(rows({}, { line_manager_employee_id: "ａｆｓ-０００１" }));
+    expect(row(result, 3).normalised?.lineManager).toMatchObject({
+      kind: "row",
+      staffId: "AFS-0001",
+    });
+  });
+});
+
+describe("formula characters", () => {
+  it.each(["=cmd|' /C calc'!A0", "+1 Kola", "-Kola", "@SUM(A1)"])(
+    "holds text starting with a formula character: %j",
+    (value) => {
+      const result = check(rows({ first_name: value, site: value }));
+      expect(row(result, 2).problems.map((p) => [p.column, p.message])).toEqual([
+        ["first_name", "First name can't start with =, +, - or @. Remove the symbol at the start."],
+        ["site", "Site can't start with =, +, - or @. Remove the symbol at the start."],
+      ]);
+    },
+  );
+
+  it("still allows those characters inside a value", () => {
+    const result = check(rows({ job_title: "Guard - night", shift_pattern: "Day 06:00-18:00" }));
+    expect(row(result, 2).status).toBe("ready");
+  });
+});
+
+describe("RSA PIN, TIN and next of kin phone", () => {
+  it("holds badly shaped values with a fix, never echoing them", () => {
+    const result = check(
+      rows({ rsa_pin: "PEN12345" }, { tin: "=1+1" }, { next_of_kin_phone: "12345" }),
+    );
+    expect(row(result, 2).problems).toEqual([
+      {
+        code: "rsa_pin_invalid",
+        column: "rsa_pin",
+        message: "RSA PIN must be PEN followed by 12 digits.",
+        fix: { label: "Leave RSA PIN blank for now", patch: { rsa_pin: "" } },
+      },
+    ]);
+    expect(row(result, 3).problems).toEqual([
+      {
+        code: "tin_invalid",
+        column: "tin",
+        message: "TIN can only hold digits and dashes, for example 12345678-0001.",
+        fix: { label: "Leave TIN blank for now", patch: { tin: "" } },
+      },
+    ]);
+    expect(row(result, 4).problems[0]).toMatchObject({
+      code: "next_of_kin_phone_invalid",
+      fix: { label: "Leave next of kin phone blank", patch: { next_of_kin_phone: "" } },
+    });
+    for (const r of result.rows) {
+      for (const p of r.problems) expect(p.message).not.toMatch(/PEN12345|=1\+1|12345\b/);
+    }
+  });
+
+  it("normalises TIN spacing", () => {
+    const result = check(rows({ tin: " 20000001 - 0001 " }));
+    expect(row(result, 2).normalised?.worker.tin).toBe("20000001-0001");
+  });
+});
+
+describe("pay amounts: cap, zero and blanks", () => {
+  it("accepts ₦1,000,000,000 and refuses anything above it (CSV)", () => {
+    const result = check(
+      rows(
+        { basic_monthly: "1,000,000,000" },
+        { basic_monthly: "1000000000.01" },
+        { basic_monthly: "99999999999999999999999" },
+        { annual_rent_declared: "100000000000000000" },
+      ),
+    );
+    expect(row(result, 2).status).toBe("ready");
+    expect(row(result, 2).normalised?.payRate?.basicKobo).toBe(100_000_000_000n);
+    expect(row(result, 3).problems).toEqual([
+      {
+        code: "amount_too_large",
+        column: "basic_monthly",
+        message:
+          "Basic monthly 1000000000.01 is more than we accept for one employee (₦1,000,000,000). Check the amount.",
+        fix: null,
+      },
+    ]);
+    expect(codes(row(result, 4))).toEqual(["amount_too_large"]);
+    expect(codes(row(result, 5))).toEqual(["amount_too_large"]);
+    expect(row(result, 5).problems[0]?.column).toBe("annual_rent_declared");
+  });
+
+  it("holds a monthly row whose basic is 0, saying 0 rather than blank", () => {
+    const result = check(
+      rows(
+        {
+          basic_monthly: "0",
+          housing_monthly: "",
+          transport_monthly: "",
+          other_allowances_monthly: "",
+        },
+        { basic_monthly: "0.00" },
+      ),
+    );
+    expect(row(result, 2).problems).toEqual([
+      {
+        code: "pay_amount_zero",
+        column: "basic_monthly",
+        message:
+          "Basic monthly can't be 0 for Monthly pay. Fill the basic amount, or leave it blank to add pay after import.",
+        fix: { label: "Leave basic pay blank for now", patch: { basic_monthly: "" } },
+      },
+    ]);
+    // With allowances filled, clearing basic would only drop them: no one-click fix.
+    expect(row(result, 3).problems).toEqual([
+      {
+        code: "pay_amount_zero",
+        column: "basic_monthly",
+        message: "Basic monthly can't be 0 for Monthly pay. Fill the basic amount.",
+        fix: null,
+      },
+    ]);
+  });
+
+  it("holds a daily row whose daily rate is 0", () => {
+    const result = check(
+      rows({
+        pay_type: "Daily",
+        basic_monthly: "",
+        housing_monthly: "",
+        transport_monthly: "",
+        other_allowances_monthly: "",
+        daily_rate: "0",
+      }),
+    );
+    expect(row(result, 2).problems[0]).toMatchObject({
+      code: "pay_amount_zero",
+      column: "daily_rate",
+      fix: { label: "Leave daily rate blank for now", patch: { daily_rate: "" } },
+    });
+  });
+
+  it("does not drop allowances silently when basic is blank", () => {
+    const result = check(rows({ basic_monthly: "" }));
+    expect(row(result, 2).status).toBe("held");
+    expect(row(result, 2).problems).toEqual([
+      {
+        code: "pay_basic_missing",
+        column: "basic_monthly",
+        message: "Basic is blank but allowances are filled. Fill basic or clear the allowances.",
+        fix: {
+          label: "Clear the allowances",
+          patch: { housing_monthly: "", transport_monthly: "", other_allowances_monthly: "" },
+        },
+      },
+    ]);
+  });
+
+  it("still treats zero allowances as nothing filled", () => {
+    const result = check(
+      rows({
+        basic_monthly: "",
+        housing_monthly: "0",
+        transport_monthly: "0",
+        other_allowances_monthly: "",
+      }),
+    );
+    expect(row(result, 2).status).toBe("ready");
+    expect(row(result, 2).warnings[0]?.message).toBe(
+      "Needs pay details before payroll: basic pay is blank.",
+    );
+  });
+});

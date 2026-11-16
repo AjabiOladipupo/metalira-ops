@@ -5,8 +5,14 @@ import { deflateRawSync } from "node:zlib";
 import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
-import { TEMPLATE_COLUMNS, mapHeader, normaliseHeaderName } from "@/server/people/import/columns";
-import { decodeCsvBytes, parseCsv } from "@/server/people/import/csv";
+import { validatePeopleImport, type ImportResult } from "@/server/people/import";
+import {
+  TEMPLATE_COLUMNS,
+  mapHeader,
+  normaliseHeaderName,
+  type ColumnKey,
+} from "@/server/people/import/columns";
+import { csvCell, decodeCsvBytes, formatCsv, parseCsv } from "@/server/people/import/csv";
 import { readImportFile } from "@/server/people/import/read-file";
 import { checkZipArchive } from "@/server/people/import/zip-guard";
 
@@ -95,6 +101,11 @@ describe("readImportFile", () => {
         ["basic_monthly", "start_date", "phone"],
         ["105000.5", "2024-03-01", "08031234567"],
         ["123456789012345", "", ""],
+      ],
+      numeric: [
+        [false, false, false],
+        [true, false, false],
+        [true, false, false],
       ],
     });
   });
@@ -229,5 +240,124 @@ describe("checkZipArchive (zip-bomb guard)", () => {
     const bomb = zipWith("xl/worksheets/sheet1.xml", new Uint8Array(60 * 1024 * 1024));
     const result = await readImportFile({ name: "bomb.xlsx", bytes: bomb });
     expect(!result.ok && result.problem.code).toBe("file_too_large");
+  });
+});
+
+describe("formatCsv (downloads people open in Excel)", () => {
+  it.each([
+    ["=cmd|' /C calc'!A0", "'=cmd|' /C calc'!A0"],
+    ["+2348031234567", "'+2348031234567"],
+    ["-5000", "'-5000"],
+    ["@SUM(A1)", "'@SUM(A1)"],
+    ["\tTab", "'\tTab"],
+    ["Kola", "Kola"],
+  ])("escapes a leading formula character in %j", (value, cell) => {
+    expect(csvCell(value)).toBe(cell);
+  });
+
+  it("quotes commas, quotes and line breaks after escaping", () => {
+    expect(csvCell('=HYPERLINK("x","y")')).toBe(`"'=HYPERLINK(""x"",""y"")"`);
+    expect(csvCell("Apapa, Lagos")).toBe('"Apapa, Lagos"');
+    expect(csvCell("\rline")).toBe(`"'\rline"`);
+  });
+
+  it("writes a byte order mark and CRLF rows that read back as text", () => {
+    const csv = formatCsv([
+      ["row", "problem"],
+      ["23", "=1+1"],
+    ]);
+    expect(csv).toBe("\uFEFFrow,problem\r\n23,'=1+1\r\n");
+    expect(parseCsv(csv)).toEqual({
+      ok: true,
+      rows: [
+        ["row", "problem"],
+        ["23", "'=1+1"],
+      ],
+    });
+  });
+});
+
+/** A one-employee .xlsx in template layout. Cells default to text; overrides set the type. */
+async function employeeXlsx(overrides: Partial<Record<ColumnKey, XlsxCell>>) {
+  const base: Partial<Record<ColumnKey, string>> = {
+    employee_id: "AFS-0001",
+    first_name: "Kola",
+    last_name: "Adebayo",
+    phone: "08031110001",
+    job_title: "Site supervisor",
+    department: "Security services",
+    employment_type: "Permanent",
+    start_date: "2023-05-02",
+    pay_type: "Monthly",
+    basic_monthly: "105000",
+    bank_name: "GTBank",
+    bank_account_number: "0123456789",
+    account_name: "Kola Adebayo",
+    nin: "01234567890",
+  };
+  const header: XlsxCell[] = TEMPLATE_COLUMNS.map((key) => ({ value: key, type: String }));
+  const row: XlsxCell[] = TEMPLATE_COLUMNS.map((key) => {
+    if (key in overrides) return overrides[key] ?? null;
+    const value = base[key];
+    return value ? { value, type: String } : null;
+  });
+  return xlsxBytes([header, row]);
+}
+
+async function validateXlsx(overrides: Partial<Record<ColumnKey, XlsxCell>>) {
+  const bytes = await employeeXlsx(overrides);
+  const result: ImportResult = await validatePeopleImport({ name: "staff.xlsx", bytes }, {});
+  if (!result.ok) throw new Error(JSON.stringify(result.problems));
+  const row = result.rows[0];
+  if (!row) throw new Error("no row");
+  return row;
+}
+
+describe("Excel number cells", () => {
+  it("explains a NUBAN that lost its leading zero in a number cell, without padding it", async () => {
+    const row = await validateXlsx({ bank_account_number: { value: 123456789, type: Number } });
+    expect(row.status).toBe("held");
+    expect(row.problems).toEqual([
+      {
+        code: "bank_account_invalid",
+        column: "bank_account_number",
+        message:
+          "Excel dropped the leading zero from this account number. Format the column as Text and type the number again, or upload as CSV.",
+        fix: { label: "Mark for HR to fix", patch: { bank_account_number: "" } },
+      },
+    ]);
+  });
+
+  it("keeps the plain message for a 9-digit account number typed as text", async () => {
+    const row = await validateXlsx({ bank_account_number: { value: "123456789", type: String } });
+    expect(row.problems[0]?.message).toBe(
+      "Bank account number has 9 digits; NUBAN numbers have 10.",
+    );
+  });
+
+  it("explains a NIN that lost its leading zero in a number cell", async () => {
+    const row = await validateXlsx({ nin: { value: 1234567890, type: Number } });
+    expect(row.problems[0]).toMatchObject({
+      code: "nin_invalid",
+      message:
+        "Excel dropped the leading zero from this NIN. Format the column as Text and type the number again, or upload as CSV.",
+      fix: { label: "Leave NIN blank for now" },
+    });
+  });
+
+  it("accepts a full-length account number in a number cell", async () => {
+    const row = await validateXlsx({ bank_account_number: { value: 2012345678, type: Number } });
+    expect(row.status).toBe("ready");
+    expect(row.normalised?.worker.bankAccountNumber).toBe("2012345678");
+  });
+
+  it("accepts amounts up to the ₦1,000,000,000 cap and refuses one kobo more", async () => {
+    const atCap = await validateXlsx({ basic_monthly: { value: 1000000000, type: Number } });
+    expect(atCap.status).toBe("ready");
+    expect(atCap.normalised?.payRate?.basicKobo).toBe(100_000_000_000n);
+
+    const over = await validateXlsx({ basic_monthly: { value: 1000000000.01, type: Number } });
+    expect(over.status).toBe("held");
+    expect(over.problems.map((p) => p.code)).toEqual(["amount_too_large"]);
   });
 });
