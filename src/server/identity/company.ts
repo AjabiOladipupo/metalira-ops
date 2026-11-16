@@ -169,12 +169,14 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /**
  * Things an SVG logo never needs and a hostile one would use: scripts, event handlers, embedded
- * documents, entity declarations, and references to anything outside the file. The logo is
- * served from Storage and shown in <img>, where scripts do not run, but a signed URL opened
- * directly would render the SVG as a document, so such files are refused outright.
+ * documents, entity declarations, animations that rewrite links, and references to anything
+ * outside the file. This is a first line only: an owner or admin can write to the bucket
+ * directly, skipping it, so the real guard is how the logo is served (shown in <img>, where
+ * scripts do not run, and signed as a download, see LOGO_SIGNED_URL_OPTIONS).
  */
 const SVG_FORBIDDEN = [
   /<script/i,
+  /<(animate|set)\b[^>]*\battributename\s*=\s*["']?\s*(xlink:)?href/i,
   /<foreignobject/i,
   /<(iframe|embed|object|audio|video|link|meta)\b/i,
   /<!(doctype|entity)/i,
@@ -210,7 +212,9 @@ export function checkLogo(bytes: Uint8Array): LogoCheck {
   if (!/^<svg[\s>]/i.test(start)) {
     return { ok: false, message: "Upload a PNG or SVG file." };
   }
-  if (SVG_FORBIDDEN.some((pattern) => pattern.test(text))) {
+  // Scan the text with character references decoded too, so "&#106;avascript:" is caught.
+  const decoded = decodeCharacterReferences(text);
+  if (SVG_FORBIDDEN.some((pattern) => pattern.test(text) || pattern.test(decoded))) {
     return {
       ok: false,
       message:
@@ -219,6 +223,28 @@ export function checkLogo(bytes: Uint8Array): LogoCheck {
   }
   return { ok: true, ext: "svg", contentType: "image/svg+xml" };
 }
+
+/** Decodes numeric (&#106; &#x6a;) and the five XML named character references. */
+function decodeCharacterReferences(text: string): string {
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);?/gi, (match, ref: string) => {
+    const lower = ref.toLowerCase();
+    const code = lower.startsWith("#x")
+      ? Number.parseInt(lower.slice(2), 16)
+      : lower.startsWith("#")
+        ? Number.parseInt(lower.slice(1), 10)
+        : null;
+    if (code === null) return named[lower] ?? match;
+    return code <= 0x10ffff ? String.fromCodePoint(code) : match;
+  });
+}
+
+/**
+ * Options for every logo signed URL: Storage then serves the file as an attachment, so a signed
+ * URL opened directly downloads the file instead of rendering it as a page on the Storage
+ * domain. <img> ignores the attachment header and shows the logo as usual.
+ */
+export const LOGO_SIGNED_URL_OPTIONS = { download: true } as const;
 
 /** Storage object name for an organisation's logo. The bucket's policies accept only these. */
 export function logoObjectPath(organisationId: string, ext: "png" | "svg"): string {

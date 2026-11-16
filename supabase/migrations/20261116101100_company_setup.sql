@@ -10,6 +10,10 @@
 -- 3. Private Storage bucket `org-assets` for the company logo at {organisation_id}/logo.png or
 --    {organisation_id}/logo.svg, under 1 MB. Members of the organisation read it (the app serves
 --    it by signed URL); owners and admins write it. Nothing else may be stored in the bucket yet.
+--    The app signs logo URLs with the download option, so Storage serves the file as an
+--    attachment: an SVG written straight to the bucket (skipping the app's checks) still never
+--    renders as a page when its URL is opened directly. In <img>, where the logo is shown,
+--    scripts do not run.
 
 -- ---------------------------------------------------------------------------
 -- 1. Columns
@@ -145,7 +149,9 @@ alter table public.organisations
 
 revoke all on function private.generate_company_code() from public, anon, authenticated;
 revoke all on function private.organisations_set_company_code() from public, anon, authenticated;
-grant execute on function private.generate_company_code() to authenticated, service_role;
+-- Only the insert trigger (fired inside the security-definer public.create_organisation) and the
+-- backfill above call this, so no signed-in role needs it.
+grant execute on function private.generate_company_code() to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 3. Plan and setup completion RPCs (definer impl in private, invoker wrapper in public)

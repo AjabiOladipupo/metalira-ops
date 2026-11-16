@@ -5,7 +5,7 @@ import { cache } from "react";
 import { resumeSetupSlug, setupStepHref } from "@/lib/company";
 import { createServerSupabase } from "@/lib/supabase/server";
 
-import { ORG_ASSETS_BUCKET } from "./company";
+import { LOGO_SIGNED_URL_OPTIONS, ORG_ASSETS_BUCKET } from "./company";
 import { getSession } from "./session";
 
 /** What the setup wizard, company settings and the shell read about the active company. */
@@ -90,6 +90,7 @@ const LOGO_URL_SECONDS = 60 * 60;
  * A short-lived signed URL for the active company's logo, or null when it has none. Signed as
  * the signed-in user, so the bucket's policies decide: only members of the organisation get one.
  * A failure (for example Storage being down) shows no logo rather than breaking the page.
+ * Signed as a download (see LOGO_SIGNED_URL_OPTIONS), so the URL opened directly never renders.
  */
 export const getActiveCompanyLogoUrl = cache(async (): Promise<string | null> => {
   const company = await getActiveCompany();
@@ -98,7 +99,7 @@ export const getActiveCompanyLogoUrl = cache(async (): Promise<string | null> =>
   const supabase = await createServerSupabase();
   const { data, error } = await supabase.storage
     .from(ORG_ASSETS_BUCKET)
-    .createSignedUrl(company.logoPath, LOGO_URL_SECONDS);
+    .createSignedUrl(company.logoPath, LOGO_URL_SECONDS, LOGO_SIGNED_URL_OPTIONS);
   if (error || !data?.signedUrl) return null;
   return data.signedUrl;
 });

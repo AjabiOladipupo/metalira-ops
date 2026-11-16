@@ -223,6 +223,13 @@ describe("checkLogo", () => {
     expect(checkLogo(utf8(svg))).toEqual({ ok: true, ext: "svg", contentType: "image/svg+xml" });
   });
 
+  it("accepts an SVG with ordinary character references and a harmless animation", () => {
+    const svg =
+      '<svg viewBox="0 0 10 10"><text>A&#160;&amp;&#x20;B</text>' +
+      '<circle r="2"><animate attributeName="r" values="2;3;2" dur="2s" /></circle></svg>';
+    expect(checkLogo(utf8(svg)).ok).toBe(true);
+  });
+
   it.each([
     ["a script", '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
     ["an event handler", '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>'],
@@ -233,6 +240,17 @@ describe("checkLogo", () => {
     ["an entity declaration", '<!DOCTYPE svg [<!ENTITY x "y">]><svg>&x;</svg>'],
     ["a CSS import", "<svg><style>@import 'https://evil.example/a.css';</style></svg>"],
     ["an external CSS url", "<svg><style>a{fill:url(https://evil.example/x)}</style></svg>"],
+    [
+      "an animation that rewrites a link",
+      '<svg><a><animate attributeName="href" values="#a" /><text>x</text></a></svg>',
+    ],
+    ["a set that rewrites a link", '<svg><a><set attributeName="xlink:href" to="#a" /></a></svg>'],
+    [
+      "an entity-encoded javascript: link",
+      '<svg><a href="#a"><animate values="&#106;avascript:alert(1)" /></a></svg>',
+    ],
+    ["a hex-encoded javascript: link", "<svg><a><text>&#x6A;avascript&#x3a;x</text></a></svg>"],
+    ["an encoded script tag", "<svg><text>&lt;script&gt;</text></svg>"],
   ])("refuses an SVG with %s", (_label, svg) => {
     const result = checkLogo(utf8(svg));
     expect(result.ok).toBe(false);
