@@ -11,6 +11,13 @@ const adminClientImport = {
   message: "The secret-key client is server-only: import it only from src/server/.",
 };
 
+// Personal data crypto (CLAUDE.md rule 9) holds the decryption key: server-only, and
+// imported only from src/server/. Pages call helpers such as src/server/people/pii-access.ts.
+const piiCryptoImport = {
+  group: ["@/server/crypto", "@/server/crypto/*", "**/server/crypto", "**/server/crypto/*"],
+  message: "Personal data crypto is server-only: import it only from src/server/.",
+};
+
 // Shared UI and isomorphic helpers must never pull in server modules.
 const serverModuleImport = {
   group: ["@/server/*", "**/server/*"],
@@ -25,7 +32,7 @@ export default defineConfig([
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/server/**"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [adminClientImport] }],
+      "no-restricted-imports": ["error", { patterns: [adminClientImport, piiCryptoImport] }],
     },
   },
   {
