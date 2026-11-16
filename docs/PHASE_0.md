@@ -83,3 +83,9 @@ Approved together with the parallel build plan. Agents build to these; change th
 - Isolation test passes in CI.
 - Every PR gets a Vercel preview.
 - `/design-system` page reviewed and approved.
+
+## Sign-off (owner, 16 Nov 2026)
+
+- `/design-system` reviewed and approved by the owner at 390px and 1440px, light and dark.
+- Supabase GitHub integration switched on; hosted migrations apply on merge to `main`.
+- Resend: `metaliratech.com` verified (SPF, DKIM). Sender is `Metalira Ops <dipo@metaliratech.com>` (`EMAIL_FROM` in Vercel Preview and Production).

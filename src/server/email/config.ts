@@ -1,8 +1,8 @@
 /** Production app URL, used when NEXT_PUBLIC_APP_URL is not set. */
 export const PRODUCTION_APP_URL = "https://ops.metaliratech.com";
 
-/** Default sender until EMAIL_FROM is set. The domain must be verified in Resend. */
-export const DEFAULT_EMAIL_FROM = "Metalira Ops <no-reply@ops.metaliratech.com>";
+/** Default sender until EMAIL_FROM is set. metaliratech.com is verified in Resend (16 Nov 2026). */
+export const DEFAULT_EMAIL_FROM = "Metalira Ops <dipo@metaliratech.com>";
 
 /**
  * Absolute base URL for links and images in emails. Emails are read outside the app,
