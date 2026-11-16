@@ -22,7 +22,7 @@ Goal: an empty but production-shaped app. Every later phase plugs into this with
 
 ### 0.3 Supabase project and tenancy core
 - `supabase init`, local stack, PostGIS extension enabled in the first migration.
-- Tables: `organisations`, `profiles` (1:1 with auth.users), `memberships` (user × organisation × role), `audit_log` (append-only).
+- Tables: `organisations`, `profiles` (1:1 with auth.users), `memberships` (user × organisation × role), `membership_invites` (email invites, accepted only by the invited, confirmed email), `audit_log` (append-only).
 - Schema `private` with `private.user_org_ids()` (security definer, stable) returning the caller's organisation ids, and `private.has_role(org uuid, roles text[])`.
 - RLS enabled on every table; policies use those functions. App connects with the anon key + user JWT; service role only in `src/server/`.
 - Generated types in `src/types/db.ts`.

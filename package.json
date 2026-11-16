@@ -10,9 +10,15 @@
     "typecheck": "next typegen && tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test": "vitest run --project unit",
+    "test:rls": "vitest run --project rls",
+    "test:watch": "vitest --project unit",
+    "test:e2e": "playwright test",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:status": "supabase status",
+    "db:types": "supabase gen types typescript --local --schema public > src/types/db.ts"
   },
   "dependencies": {
     "@react-email/components": "^1.0.12",

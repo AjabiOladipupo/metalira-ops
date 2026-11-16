@@ -7,7 +7,8 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 | --- | --- | --- |
 | organisations | name, legal_name, rc_number, logo_path, invoice_email, plan, timezone (Africa/Lagos), pay_cycle_start_day (20), pay_day (25), work_days_per_week (5), standard_shift_minutes (480), hourly_rate_divisor_days (20) | Tenant root. Pay settings default to the values shown; see RULES_NIGERIA.md "Pay policy" |
 | profiles | user_id → auth.users, full_name | One per login |
-| memberships | user_id, organisation_id, role, worker_id null | Role enum: owner, admin, hr, finance, ops_manager, line_manager, worker, client_approver |
+| memberships | user_id, organisation_id, role, worker_id null | Role enum: owner, admin, hr, finance, ops_manager, line_manager, worker, client_approver. No direct insert by signed-in users: rows come from `create_organisation`, `accept_membership_invite` or server code. Workers and client approvers read only their own row |
+| membership_invites | organisation_id, email, role, token_hash, expires_at, accepted_at, accepted_by | Created by `create_membership_invite` (owner/admin; only owners invite owners), accepted by the invitee's confirmed email via `accept_membership_invite`. Single use, 7-day expiry |
 | audit_log | actor_id, action, entity, entity_id, before jsonb, after jsonb, at | Insert-only |
 
 ## People (Phase 1)

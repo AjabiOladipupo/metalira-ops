@@ -8,3 +8,4 @@ fixtures/
 .claude/
 supabase/.temp/
 *.md
+src/types/db.ts
