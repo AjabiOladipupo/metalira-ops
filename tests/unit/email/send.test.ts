@@ -122,7 +122,7 @@ describe("sendEmail with an API key", () => {
     expect(resend.send).toHaveBeenCalledTimes(1);
     const [payload, options] = resend.send.mock.calls[0] ?? [];
     expect(payload).toMatchObject({
-      from: "Metalira Ops <no-reply@ops.metaliratech.com>",
+      from: "Metalira Ops <dipo@metaliratech.com>",
       to: "ada@example.com",
       subject: "Test email from Metalira Ops",
       tags: [{ name: "type", value: "test" }],
