@@ -19,7 +19,7 @@ export default defineConfig({
         test: {
           // Docker-free: runs in the CI "check" job with `pnpm test`.
           name: "unit",
-          include: ["tests/unit/**/*.test.ts", "src/**/*.test.ts"],
+          include: ["tests/unit/**/*.test.ts", "tests/unit/**/*.test.tsx", "src/**/*.test.ts"],
         },
       },
       {
