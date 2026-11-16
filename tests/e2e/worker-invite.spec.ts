@@ -182,14 +182,15 @@ test("invite link → set PIN → sign out → sign in with company code, staff 
   await w.goto(invitePath);
   await expect(formAlert(w)).toContainText("This invite has already been used");
 
-  // Sign out, then sign in with company code, staff ID and PIN (any case).
-  await w.goto("/m");
+  // Sign out (on Me), then sign in with company code, staff ID and PIN (any case).
+  await w.goto("/m/me");
   await w.getByRole("button", { name: "Sign out" }).click();
   await expect(w).toHaveURL(/\/m\/sign-in$/);
   await signInAsWorker(w, s.companyCode.toLowerCase(), s.worker.staffId.toLowerCase(), PIN);
   await expect(w).toHaveURL(/\/m$/, { timeout: 15_000 });
   await expect(w.getByRole("heading", { level: 1 })).toHaveText("Hello, Musa");
 
+  await w.goto("/m/me");
   await w.getByRole("button", { name: "Sign out" }).click();
   await expect(w).toHaveURL(/\/m\/sign-in$/);
 
