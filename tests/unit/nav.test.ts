@@ -163,6 +163,19 @@ describe("nav by role", () => {
     expect(canAccessHref("owner", "/app/setup-elsewhere")).toBe(false);
   });
 
+  it("opens the people import to owner, admin and hr only", () => {
+    for (const path of ["/app/people/import", "/app/people/import/template"]) {
+      for (const role of ["owner", "admin", "hr"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(true);
+      }
+      for (const role of ["finance", "ops_manager", "line_manager", "worker"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(false);
+      }
+    }
+    // The People list itself stays open to ops managers.
+    expect(canAccessHref("ops_manager", "/app/people")).toBe(true);
+  });
+
   it("refuses paths that sit under no nav item", () => {
     expect(canAccessHref("owner", "/app/secret-admin")).toBe(false);
     expect(canAccessHref("owner", "/design-system")).toBe(false);

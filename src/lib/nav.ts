@@ -204,12 +204,14 @@ export function navForRole(role: Role): NavGroup[] {
 }
 
 /**
- * Pages that are not sidebar items but need their own roles: the setup wizard, and settings
- * sections narrower than Settings itself. The longest matching prefix wins over NAV.
+ * Pages that are not sidebar items but need their own roles: the setup wizard, settings
+ * sections narrower than Settings itself, and the people import. The longest matching prefix wins over NAV.
  */
 export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
+  // Slice 1.8: importing employees writes workers, pay and bank details.
+  { href: "/app/people/import", roles: ["owner", "admin", "hr"] },
 ];
 
 function extraPage(pathname: string) {
