@@ -119,14 +119,14 @@ isOneToOne: false
                   ]
                 },"organisations": {
                   Row: {
-                    "created_at": string,"created_by": string | null,"hourly_rate_divisor_days": number,"id": string,"invoice_email": string | null,"legal_name": string | null,"logo_path": string | null,"name": string,"pay_cycle_start_day": number,"pay_day": number,"plan": string,"rc_number": string | null,"standard_shift_minutes": number,"timezone": string,"updated_at": string,"work_days_per_week": number
+                    "address": string | null,"auto_email_receipts": boolean,"company_code": string,"created_at": string,"created_by": string | null,"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"legal_name": string | null,"logo_path": string | null,"name": string,"pay_cycle_start_day": number,"pay_day": number,"payment_terms_days": number,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"created_by"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"invoice_email"?: string | null,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"pay_cycle_start_day"?: number,"pay_day"?: number,"plan"?: string,"rc_number"?: string | null,"standard_shift_minutes"?: number,"timezone"?: string,"updated_at"?: string,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"company_code": string,"created_at"?: string,"created_by"?: string | null,"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Update: {
-                    "created_at"?: string,"created_by"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"invoice_email"?: string | null,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"pay_cycle_start_day"?: number,"pay_day"?: number,"plan"?: string,"rc_number"?: string | null,"standard_shift_minutes"?: number,"timezone"?: string,"updated_at"?: string,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Relationships: [
                     
@@ -319,6 +319,12 @@ isOneToOne: false
                            },
 "cancel_pay_rate":
 { Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
+                           },
+"choose_company_plan":
+{ Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
+                           },
+"complete_company_setup":
+{ Args: { "p_organisation_id": string }; Returns: string
                            },
 "create_first_organisation":
 { Args: { "p_name": string }; Returns: string

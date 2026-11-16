@@ -148,6 +148,21 @@ describe("nav by role", () => {
     expect(canAccessHref("client_approver", "/app")).toBe(false);
   });
 
+  it("opens the setup wizard and company settings to owner and admin only", () => {
+    for (const path of ["/app/setup", "/app/setup/business", "/app/settings/company"]) {
+      expect(canAccessHref("owner", path)).toBe(true);
+      expect(canAccessHref("admin", path)).toBe(true);
+      for (const role of ["hr", "finance", "ops_manager", "line_manager", "worker"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(false);
+      }
+    }
+    // Settings itself stays open to hr and finance.
+    expect(canAccessHref("hr", "/app/settings")).toBe(true);
+    expect(canAccessHref("finance", "/app/settings")).toBe(true);
+    // A prefix that only looks like an extra page is not one.
+    expect(canAccessHref("owner", "/app/setup-elsewhere")).toBe(false);
+  });
+
   it("refuses paths that sit under no nav item", () => {
     expect(canAccessHref("owner", "/app/secret-admin")).toBe(false);
     expect(canAccessHref("owner", "/design-system")).toBe(false);

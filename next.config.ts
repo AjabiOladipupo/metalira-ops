@@ -5,6 +5,13 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  experimental: {
+    serverActions: {
+      // Company logos may be up to 1 MB (slice 1.1); multipart adds a little on top. The logo
+      // action checks the size itself before reading the file.
+      bodySizeLimit: "2mb",
+    },
+  },
   turbopack: {
     // Sentry injects debug IDs itself after compile and rewrites the source maps to match.
     // Turbopack's native debug IDs would be a second, earlier snippet that Sentry's step

@@ -174,7 +174,7 @@ export const NAV: NavGroup[] = [
         roles: ["owner", "admin", "hr", "finance"],
         icon: "settings",
         description: "Company details, pay cycle, users and connections.",
-        empty: "Company details and users arrive with company setup.",
+        empty: "Users and connections arrive in a later phase.",
       },
     ],
   },
@@ -204,11 +204,28 @@ export function navForRole(role: Role): NavGroup[] {
 }
 
 /**
- * True when `role` may open `pathname` (a nav item's page or a page below it). Paths that sit
- * under no nav item are refused, and Home covers only /app itself, so a new page must be added
- * to NAV (with its roles) before anyone can reach it.
+ * Pages that are not sidebar items but need their own roles: the setup wizard, and settings
+ * sections narrower than Settings itself. The longest matching prefix wins over NAV.
+ */
+export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
+  { href: "/app/setup", roles: ["owner", "admin"] },
+  { href: "/app/settings/company", roles: ["owner", "admin"] },
+];
+
+function extraPage(pathname: string) {
+  return EXTRA_PAGES.filter((p) => pathname === p.href || pathname.startsWith(`${p.href}/`)).sort(
+    (a, b) => b.href.length - a.href.length,
+  )[0];
+}
+
+/**
+ * True when `role` may open `pathname` (a nav item's page or a page below it, or an extra page).
+ * Paths that sit under no nav item are refused, and Home covers only /app itself, so a new page
+ * must be added to NAV or EXTRA_PAGES (with its roles) before anyone can reach it.
  */
 export function canAccessHref(role: Role, pathname: string): boolean {
+  const extra = extraPage(pathname);
+  if (extra) return extra.roles.includes(role);
   const href = activeNavHref(pathname);
   if (!href || (href === "/app" && pathname !== "/app")) return false;
   return findNavItem(href).roles.includes(role);
