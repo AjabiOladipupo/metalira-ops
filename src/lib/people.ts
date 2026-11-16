@@ -153,3 +153,21 @@ export function matchesPeopleSearch(
     person.staffId.toLowerCase().includes(q)
   );
 }
+
+// ---------------------------------------------------------------------------
+// Change requests from the worker app (slice 1.10)
+// ---------------------------------------------------------------------------
+
+export type WorkerChangeTopic = Database["public"]["Enums"]["worker_change_topic"];
+
+/** What a worker asked to change, as the manager app names it. */
+export const CHANGE_TOPIC_LABELS: Record<WorkerChangeTopic, string> = {
+  name: "Name",
+  phone: "Phone number",
+  email: "Email address",
+  next_of_kin: "Next of kin",
+  nin: "NIN",
+  tax_pension: "Tax or pension",
+  work: "Work details",
+  other: "Something else",
+};

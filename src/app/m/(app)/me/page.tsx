@@ -1,0 +1,272 @@
+import { ChevronLeft } from "lucide-react";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { Suspense } from "react";
+
+import { Status, type StatusTone } from "@/components/status";
+import { Button } from "@/components/ui/button";
+import { formatDate, formatDateTime, lagosToday } from "@/lib/dates";
+import { maskAccount } from "@/lib/mask";
+import { workerMessages } from "@/lib/messages/worker";
+import { initials } from "@/lib/people";
+import { myProfileSections, type ProfileSection } from "@/lib/worker-profile";
+import type { WorkerChangeRequestStatus } from "@/lib/worker-requests";
+import { signOutWorker } from "@/server/identity/worker-actions";
+import { requireWorkerSession } from "@/server/identity/worker-session";
+import type { BankChangeStatus } from "@/server/people/bank-changes";
+import { loadMyProfile, type MyBankChange, type MyChangeRequest } from "@/server/people/my-profile";
+
+export const metadata: Metadata = { title: "Me" };
+
+const copy = workerMessages.me;
+const topics = workerMessages.change.topics;
+
+/** The Lagos calendar day of a moment, as "14 Nov 2026". */
+const sentDate = (at: string) => formatDate(lagosToday(new Date(at)));
+
+function Rows({ section }: { section: ProfileSection }) {
+  return (
+    <section aria-labelledby={`me-${section.id}`} className="flex flex-col">
+      <h2 id={`me-${section.id}`} className="m-0 mb-0.5 type-label text-fg-muted">
+        {section.title}
+      </h2>
+      <dl className="m-0">
+        {section.rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex justify-between gap-3 border-b border-line py-2.5 text-[15px]"
+          >
+            <dt className="shrink-0 text-fg-muted">{row.label}</dt>
+            <dd
+              className={
+                row.value
+                  ? "m-0 min-w-0 text-right font-medium break-words"
+                  : "m-0 text-right text-fg-muted"
+              }
+              data-testid={row.testId}
+            >
+              {row.value ?? copy.notSet}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+const BANK_TONE: Record<BankChangeStatus, StatusTone | null> = {
+  pending: "pending",
+  approved: "partial",
+  applied: "done",
+  rejected: null,
+  cancelled: null,
+};
+
+function bankStatusText(change: MyBankChange): string {
+  if (change.status === "approved") {
+    return copy.bankStatus.approved(
+      change.appliesAfter ? formatDateTime(change.appliesAfter) : sentDate(change.createdAt),
+    );
+  }
+  return copy.bankStatus[change.status];
+}
+
+const REQUEST_TONE: Record<WorkerChangeRequestStatus, StatusTone | null> = {
+  open: "pending",
+  done: "done",
+  declined: null,
+};
+
+function StatusLine({ tone, text }: { tone: StatusTone | null; text: string }) {
+  return tone ? (
+    <Status tone={tone} className="whitespace-normal">
+      {text}
+    </Status>
+  ) : (
+    <span className="text-sm text-fg-muted">{text}</span>
+  );
+}
+
+function Requests({
+  bankChanges,
+  requests,
+}: {
+  bankChanges: MyBankChange[];
+  requests: MyChangeRequest[];
+}) {
+  if (bankChanges.length === 0 && requests.length === 0) return null;
+  return (
+    <section aria-labelledby="me-requests" className="flex flex-col gap-2">
+      <h2 id="me-requests" className="m-0 type-label text-fg-muted">
+        {copy.requests}
+      </h2>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        {bankChanges.map((change) => (
+          <li
+            key={change.id}
+            data-testid="my-bank-change"
+            data-status={change.status}
+            className="flex flex-col gap-1 rounded-xl border border-line px-4 py-3"
+          >
+            <span className="text-[15px] font-medium break-words">
+              {copy.bankRequest(change.bankName, maskAccount(change.last4))}
+            </span>
+            <StatusLine tone={BANK_TONE[change.status]} text={bankStatusText(change)} />
+            <span className="text-xs text-fg-muted">{copy.sentOn(sentDate(change.createdAt))}</span>
+          </li>
+        ))}
+        {requests.map((request) => (
+          <li
+            key={request.id}
+            data-testid="my-change-request"
+            data-status={request.status}
+            className="flex flex-col gap-1 rounded-xl border border-line px-4 py-3"
+          >
+            <span className="text-[15px] font-medium">{topics[request.topic]}</span>
+            <span className="text-sm break-words whitespace-pre-line">{request.details}</span>
+            <StatusLine
+              tone={REQUEST_TONE[request.status]}
+              text={copy.requestStatus[request.status]}
+            />
+            {request.resolutionNote ? (
+              <span className="text-sm break-words text-fg-muted">
+                {copy.hrNote(request.resolutionNote)}
+              </span>
+            ) : null}
+            <span className="text-xs text-fg-muted">
+              {copy.sentOn(sentDate(request.createdAt))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+async function MeContent() {
+  const session = await requireWorkerSession();
+  const me = await loadMyProfile(session);
+  if (!me) {
+    return <p className="m-0 px-4 text-[15px] text-fg-muted">{workerMessages.home.unlinked}</p>;
+  }
+  const { profile } = me;
+  const sections = myProfileSections({
+    departmentName: profile.departmentName,
+    lineManager: { isSet: me.hasLineManager, name: profile.lineManagerName },
+    siteNames: profile.siteNames,
+    projectNames: profile.projectNames,
+    startDate: profile.startDate,
+    employmentType: profile.employmentType,
+    bankName: profile.bankName,
+    bankAccountLast4: profile.bankAccountLast4,
+    pfaName: profile.pfaName,
+    rsaPinOnFile: profile.rsaPinOnFile,
+    rsaPinLast4: profile.rsaPinLast4,
+    taxState: profile.taxState,
+    annualRentDeclared: profile.annualRentDeclared,
+    ninOnFile: profile.ninOnFile,
+    phone: profile.phone,
+    nextOfKinName: profile.nextOfKinName,
+    nextOfKinPhone: profile.nextOfKinPhone,
+  });
+
+  return (
+    <>
+      <div className="flex items-center gap-3.5 px-4 pt-2 pb-3">
+        <span
+          aria-hidden="true"
+          className="flex size-14 shrink-0 items-center justify-center rounded-full bg-foreground text-lg font-semibold text-background"
+        >
+          {initials(profile)}
+        </span>
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="font-display text-[22px] leading-tight font-bold break-words">
+            {profile.name}
+          </span>
+          <span className="text-sm text-fg-muted">
+            {copy.jobLine(profile.jobTitle, profile.staffId)}
+          </span>
+        </span>
+      </div>
+
+      <div role="tablist" aria-label={copy.tabs} className="flex border-b border-line px-4">
+        <button
+          type="button"
+          role="tab"
+          aria-selected="true"
+          aria-controls="me-profile-panel"
+          id="me-profile-tab"
+          className="-mb-px h-12 flex-1 border-b-2 border-foreground bg-transparent text-[15px] font-semibold text-foreground"
+        >
+          {copy.profileTab}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected="false"
+          disabled
+          title={copy.queriesSoon}
+          aria-describedby="me-queries-soon"
+          className="-mb-px h-12 flex-1 cursor-not-allowed border-b-2 border-transparent bg-transparent text-[15px] font-semibold text-fg-muted opacity-60"
+        >
+          {copy.queriesTab}
+        </button>
+        <span id="me-queries-soon" className="sr-only">
+          {copy.queriesSoon}
+        </span>
+      </div>
+
+      <div
+        role="tabpanel"
+        id="me-profile-panel"
+        aria-labelledby="me-profile-tab"
+        className="flex flex-col gap-[18px] px-4 pt-3 pb-4"
+      >
+        {sections.map((section) => (
+          <Rows key={section.id} section={section} />
+        ))}
+        <Requests bankChanges={me.bankChanges} requests={me.requests} />
+        <Button asChild variant="outline" className="h-[52px] rounded-xl text-base">
+          <Link href="/m/me/change">{copy.requestChange}</Link>
+        </Button>
+        <p className="m-0 text-[13px] text-fg-muted">{copy.bankNote}</p>
+        <form action={signOutWorker} className="pt-2">
+          <Button type="submit" variant="ghost" className="h-11 w-full rounded-lg">
+            {copy.signOut}
+          </Button>
+        </form>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Me, from the WkProfile board (slice 1.10): work, pay and pension, identity and contact, all
+ * read with the worker's own session and shown masked. Queries open in Phase 4.
+ */
+export default function MePage() {
+  return (
+    <main className="flex flex-1 flex-col">
+      <div className="flex items-center gap-2 px-2 pt-3 pb-1">
+        <Link
+          href="/m"
+          aria-label={copy.back}
+          className="flex size-11 items-center justify-center text-foreground"
+        >
+          <ChevronLeft strokeWidth={1.75} className="size-[22px]" aria-hidden />
+        </Link>
+        <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
+      </div>
+      <Suspense
+        fallback={
+          <div aria-hidden className="flex flex-col gap-3 px-4 pt-2">
+            <span className="h-14 w-56 rounded bg-surface" />
+            <span className="h-64 w-full rounded bg-surface" />
+          </div>
+        }
+      >
+        <MeContent />
+      </Suspense>
+    </main>
+  );
+}

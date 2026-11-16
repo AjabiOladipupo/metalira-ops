@@ -1,0 +1,117 @@
+import { Banknote, CalendarDays, ChevronRight, CircleHelp, Plane } from "lucide-react";
+import type { Metadata } from "next";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { Suspense } from "react";
+
+import { LogoMark } from "@/components/logo";
+import { Button } from "@/components/ui/button";
+import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
+import { workerMessages } from "@/lib/messages/worker";
+import { initials } from "@/lib/people";
+import { signOutWorker } from "@/server/identity/worker-actions";
+import { lookupWorkerSession } from "@/server/identity/worker-session";
+
+export const metadata: Metadata = { title: "Home" };
+
+const copy = workerMessages.home;
+
+const TILES = [
+  { href: "/m/shifts", label: copy.tiles.shifts, Icon: CalendarDays },
+  { href: "/m/leave", label: copy.tiles.leave, Icon: Plane },
+  { href: "/m/payslips", label: copy.tiles.payslips, Icon: Banknote },
+  { href: "/m/help", label: copy.tiles.help, Icon: CircleHelp },
+] as const;
+
+/** "Hello, Musa" and the avatar that opens Me, or the explanation for an unlinked login. */
+async function Header() {
+  const lookup = await lookupWorkerSession();
+  if (lookup.type === "signed_out") redirect(WORKER_SIGN_IN_PATH);
+  if (lookup.type === "not_worker") redirect(APP_HOME_PATH);
+  if (lookup.type === "unlinked") {
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="m-0 font-display text-[25px] leading-tight font-bold">
+            {copy.unlinkedTitle}
+          </h1>
+          <p className="m-0 text-[15px] text-fg-muted">{copy.unlinked}</p>
+        </div>
+        <form action={signOutWorker}>
+          <Button type="submit" variant="outline" className="h-11 rounded-lg">
+            {copy.signOut}
+          </Button>
+        </form>
+      </div>
+    );
+  }
+  const worker = lookup.session;
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="flex min-w-0 items-center gap-2">
+        <LogoMark size={24} />
+        <h1 className="m-0 truncate font-display text-xl font-bold">
+          {copy.hello(worker.firstName)}
+        </h1>
+      </span>
+      <Link
+        href="/m/me"
+        aria-label={copy.myProfile}
+        className="flex size-11 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background no-underline hover:text-background"
+      >
+        {initials(worker)}
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * Worker home, from the WkHome board (slice 1.10): greeting, today's shift ("No shift today"
+ * until rosters exist), shortcut tiles, and the location line. The board's language picker is
+ * hidden: English only for now (owner decision 16).
+ */
+export default function WorkerHomePage() {
+  return (
+    <main className="flex flex-1 flex-col gap-3 px-4 pt-4 pb-4">
+      <Suspense
+        fallback={
+          <div aria-hidden className="flex h-11 items-center justify-between">
+            <span className="h-6 w-40 rounded bg-surface" />
+            <span className="size-11 rounded-full bg-surface" />
+          </div>
+        }
+      >
+        <Header />
+      </Suspense>
+
+      <section
+        aria-labelledby="shift-today"
+        className="flex flex-col gap-1.5 rounded-xl border border-line px-4 py-3.5"
+      >
+        <h2 id="shift-today" className="m-0 type-label text-fg-muted">
+          {copy.shiftLabel}
+        </h2>
+        <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
+        <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
+      </section>
+
+      <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
+        {TILES.map(({ href, label, Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            className="flex h-[104px] flex-col justify-between rounded-xl bg-surface p-4 text-[17px] font-semibold text-foreground no-underline hover:bg-line hover:text-foreground"
+          >
+            <span className="flex items-start justify-between">
+              <Icon strokeWidth={1.75} className="size-[26px]" aria-hidden />
+              <ChevronRight strokeWidth={1.75} className="size-4 text-fg-muted" aria-hidden />
+            </span>
+            {label}
+          </Link>
+        ))}
+      </nav>
+
+      <p className="m-0 mt-auto pt-4 text-center text-[13px] text-fg-muted">{copy.location}</p>
+    </main>
+  );
+}
