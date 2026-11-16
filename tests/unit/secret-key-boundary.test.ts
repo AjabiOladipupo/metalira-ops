@@ -4,46 +4,15 @@
  * repo outside src/server/ and tests/ (the RLS suite is a deliberate,
  * test-only exception) for the variable name or an import of the admin client.
  */
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-const ROOT = process.cwd();
-const SOURCE = /\.(?:[cm]?[jt]sx?)$/;
-// Skipped anywhere in the tree.
-const SKIP_ANYWHERE = new Set(["node_modules", ".next", ".git", ".vercel"]);
-// Skipped at the repo root only. tests/ is the deliberate exception.
-const SKIP_AT_ROOT = new Set([
-  "coverage",
-  "playwright-report",
-  "test-results",
-  "docs",
-  "fixtures",
-  "supabase",
-  "tests",
-]);
+import { isClientModule, isServerFile, sourceFiles } from "./helpers/source-files";
+
 // Files allowed to name the forbidden patterns: the ESLint rule that bans them.
 const ALLOWED = new Set(["eslint.config.mjs"]);
 const FORBIDDEN = [/SUPABASE_SECRET_KEY/, /server\/supabase\/admin/, /SUPABASE_SERVICE_ROLE/];
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const skip = SKIP_ANYWHERE.has(entry.name) || (dir === ROOT && SKIP_AT_ROOT.has(entry.name));
-      if (!skip) walk(full, out);
-    } else if (SOURCE.test(entry.name)) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-const rel = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
-const files = walk(ROOT).map((file) => ({ file: rel(file), text: readFileSync(file, "utf8") }));
-const isServer = (file: string) => file.startsWith("src/server/");
-const isClient = (text: string) => /^\s*["']use client["']/m.test(text);
+const files = sourceFiles();
 
 describe("secret key boundary", () => {
   it("scans the app source", () => {
@@ -53,7 +22,7 @@ describe("secret key boundary", () => {
 
   it("keeps the secret key and admin client inside src/server/", () => {
     const offenders = files
-      .filter(({ file }) => !isServer(file) && !ALLOWED.has(file))
+      .filter(({ file }) => !isServerFile(file) && !ALLOWED.has(file))
       .filter(({ text }) => FORBIDDEN.some((pattern) => pattern.test(text)))
       .map(({ file }) => file);
     expect(offenders).toEqual([]);
@@ -61,7 +30,7 @@ describe("secret key boundary", () => {
 
   it("never marks a src/server/ file as a client module", () => {
     const offenders = files
-      .filter(({ file, text }) => isServer(file) && isClient(text))
+      .filter(({ file, text }) => isServerFile(file) && isClientModule(text))
       .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });
