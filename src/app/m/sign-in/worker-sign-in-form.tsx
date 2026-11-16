@@ -1,60 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useActionState } from "react";
 
-import { Field } from "@/components/form";
-import { Button } from "@/components/ui/button";
+import { Field, FormAlert, SubmitButton } from "@/components/form";
+import { workerMessages } from "@/lib/messages/worker";
+import { signInWorker } from "@/server/identity/worker-actions";
 
-/** Design only: submitting shows a note and makes no network call. */
+const copy = workerMessages.signIn;
+
+/** After setting a PIN where the session could not be opened, the invite sends the worker here. */
+function PinSetNote() {
+  const pinSet = useSearchParams().get("pin") === "set";
+  return pinSet ? (
+    <p role="status" className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]">
+      {copy.pinSet}
+    </p>
+  ) : null;
+}
+
+/** Company code, staff ID and 6-digit PIN. Errors never say which of the three was wrong. */
 export function WorkerSignInForm() {
-  const [tried, setTried] = useState(false);
+  const [state, action] = useActionState(signInWorker, null);
   return (
-    <form
-      className="flex flex-col gap-4"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        setTried(true);
-      }}
-    >
+    <form action={action} className="flex flex-col gap-4" noValidate>
+      <Suspense fallback={null}>
+        <PinSetNote />
+      </Suspense>
       <Field
-        label="Company code"
+        label={copy.companyCode}
         name="companyCode"
         inputSize="lg"
         autoComplete="organization"
         autoCapitalize="characters"
         spellCheck={false}
-        placeholder="For example ADEBAYO"
+        placeholder={copy.companyCodePlaceholder}
+        required
+        maxLength={64}
+        defaultValue={state?.values?.companyCode}
+        error={state?.fieldErrors?.companyCode}
       />
       <Field
-        label="Staff ID"
+        label={copy.staffId}
         name="staffId"
         inputSize="lg"
         autoComplete="username"
         autoCapitalize="characters"
         spellCheck={false}
-        placeholder="For example MO-0114"
+        placeholder={copy.staffIdPlaceholder}
+        required
+        maxLength={64}
+        defaultValue={state?.values?.staffId}
+        error={state?.fieldErrors?.staffId}
       />
       <Field
-        label="PIN"
+        label={copy.pin}
         name="pin"
         inputSize="lg"
         type="password"
         inputMode="numeric"
         pattern="[0-9]*"
-        minLength={4}
+        minLength={6}
         maxLength={6}
-        autoComplete="off"
-        hint="4 to 6 digits."
+        autoComplete="current-password"
+        required
+        hint={copy.pinHint}
+        error={state?.fieldErrors?.pin}
       />
-      <Button type="submit" className="h-[52px] w-full rounded-xl text-base">
-        Sign in
-      </Button>
-      {tried ? (
-        <p role="status" className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]">
-          Phone sign-in arrives with worker invites. Your company will send you a code.
-        </p>
-      ) : null}
+      <FormAlert message={state?.formError} />
+      <SubmitButton size="lg" pendingLabel={copy.pending}>
+        {copy.submit}
+      </SubmitButton>
     </form>
   );
 }
