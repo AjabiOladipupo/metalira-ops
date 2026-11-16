@@ -15,9 +15,10 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 | Table | Key columns | Notes |
 | --- | --- | --- |
 | departments | name, head_worker_id | |
-| workers | staff_id (unique per org), names, phone, email null, job_title, department_id, line_manager_id → workers, employment_type (permanent, contract, casual, daily), start_date, end_date null, status, bank_name, bank_account_enc, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, nhf_opt_in, annual_rent_declared_kobo, next_of_kin | Encrypted columns end in `_enc` |
-| pay_rates | worker_id, pay_type (monthly, daily, hourly), basic, housing, transport, other_allowances, daily_rate, effective_from, effective_to | Dated versions |
-| worker_assignments | worker_id, client_id, project_id, site_id, from, to | The "mapping" |
+| workers | staff_id (unique per org, ignoring case), first_name, last_name, phone (local 11-digit mobile), email null, job_title, department_id, line_manager_worker_id → workers or line_manager_membership_id → memberships (never both), employment_type (permanent, contract, casual, daily), start_date, end_date null, status (active, ended), bank_name, account_name, bank_account_enc, bank_account_last4, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo, currency, next_of_kin_name, next_of_kin_phone, needs_pay_details (trigger-maintained), supervisor_clock_in | Encrypted columns end in `_enc`. Bank columns change only through approved bank-detail requests (1.7). Never deleted |
+| pay_rates | worker_id, pay_type (monthly, daily, hourly), basic_kobo, housing_kobo, transport_kobo, other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, currency, effective_from, effective_to | Dated versions, no overlaps. A version in force is never updated except to close it |
+| worker_assignments | worker_id, client_id, site_id, project_id, effective_from, effective_to | The "mapping". Rows close rather than change |
+| clients / sites / projects (Phase 1 subset) | name; client_id, name; client_id, name | Name-only in Phase 1 so mapping works; Phase 2 and 8 add the columns below |
 | import_batches / import_rows | file_path, status; row_number, raw jsonb, errors jsonb | CSV import with held-back rows |
 
 ## Clients and contracts (Phase 2)
