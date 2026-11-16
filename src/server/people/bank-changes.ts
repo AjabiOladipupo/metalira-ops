@@ -18,7 +18,7 @@ import { PEOPLE_EDITORS } from "./workers";
 /**
  * Bank-detail changes (slice 1.7, CLAUDE.md rule 10, owner decision 9). A request changes
  * nothing on its own: a second person approves it, and 72 hours after approval the database
- * copies it onto the worker (public.bank_detail_changes, migration 20261116200000). Every rule
+ * copies it onto the worker (public.bank_detail_changes, migration 20261116214500). Every rule
  * that matters is enforced there, for every client; the checks here only give a clearer message
  * sooner.
  *

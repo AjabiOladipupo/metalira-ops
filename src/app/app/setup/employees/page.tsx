@@ -5,10 +5,23 @@ import { EmployeesStep } from "../_components/steps";
 
 export const metadata: Metadata = { title: "Set up: Employees" };
 
-export default function Page() {
+async function Step({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const { batch } = await searchParams;
+  return <EmployeesStep batchId={typeof batch === "string" ? batch : undefined} />;
+}
+
+export default function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   return (
     <RouteGate href="/app/setup/employees">
-      <EmployeesStep />
+      <Step searchParams={searchParams} />
     </RouteGate>
   );
 }

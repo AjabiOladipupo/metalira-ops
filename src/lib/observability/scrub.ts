@@ -53,6 +53,14 @@ const RSA_PIN = /PEN\d{12}(?!\d)/gi;
  */
 const LONG_DIGITS = /(?<!\d)(?:\+?234\d{10}|\d{10,})(?!\d)/g;
 
+/**
+ * Runs of 64 or more hex characters: raw invite tokens (`/m/invite/<64 hex>`, slice 1.9), token
+ * hashes and other key material. The token sits in the URL path, so stripping query strings is not
+ * enough. Trace ids (32) and span ids (16) are shorter and stay. A run glued to other hex (such as
+ * `%22<token>` in an encoded header) is redacted whole.
+ */
+const HEX_SECRET = /(?<![0-9a-f])[0-9a-f]{64,}(?![0-9a-f])/gi;
+
 /** Email addresses in free text. */
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
@@ -78,16 +86,21 @@ export function isSensitiveKey(key: string): boolean {
 
 export function scrubText(text: string): string {
   return text
+    .replace(HEX_SECRET, FILTERED)
     .replace(URL_QUERY, `$1?${FILTERED}`)
     .replace(RSA_PIN, FILTERED)
     .replace(LONG_DIGITS, FILTERED)
     .replace(EMAIL, FILTERED);
 }
 
-/** Strips the query string, which can carry tokens (password reset, invite links) and filters. */
+/**
+ * Redacts tokens in the path (invite links: `/m/invite/<token>`) and strips the query string, which
+ * can carry tokens (password reset links) and filters.
+ */
 export function scrubUrl(url: string): string {
-  const q = url.indexOf("?");
-  return q === -1 ? url : `${url.slice(0, q)}?${FILTERED}`;
+  const path = url.replace(HEX_SECRET, FILTERED);
+  const q = path.indexOf("?");
+  return q === -1 ? path : `${path.slice(0, q)}?${FILTERED}`;
 }
 
 /**
@@ -122,10 +135,17 @@ function isSensitiveHeader(name: string): boolean {
   );
 }
 
+/** Headers whose value is a URL of the page the request came from, which can hold an invite token. */
+const URL_HEADERS = new Set(["referer", "referrer", "next-url"]);
+
 function scrubHeaders(headers: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
-    out[name] = isSensitiveHeader(name) ? FILTERED : value;
+    const lower = name.toLowerCase();
+    if (isSensitiveHeader(name)) out[name] = FILTERED;
+    else if (URL_HEADERS.has(lower) && typeof value === "string") out[name] = scrubUrl(value);
+    // Other headers (such as Next's encoded router state) can still carry the path's token.
+    else out[name] = typeof value === "string" ? value.replace(HEX_SECRET, FILTERED) : value;
   }
   return out;
 }

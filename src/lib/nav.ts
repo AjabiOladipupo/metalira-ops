@@ -205,9 +205,9 @@ export function navForRole(role: Role): NavGroup[] {
 
 /**
  * Pages that are not sidebar items but need their own roles: the setup wizard, settings
- * sections narrower than Settings itself, and the People pages that change data. A segment
- * written `[name]` matches any one segment (`/app/people/[id]/edit`). The most specific match
- * (most segments) wins over NAV.
+ * sections narrower than Settings itself, and the People pages that change data (the people
+ * import included). A segment written `[name]` matches any one segment
+ * (`/app/people/[id]/edit`). The most specific match (most segments) wins over NAV.
  */
 export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
@@ -215,6 +215,10 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },
   { href: "/app/people/new", roles: ["owner", "admin", "hr"] },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
+  // Slice 1.8: importing employees writes workers, pay and bank details.
+  { href: "/app/people/import", roles: ["owner", "admin", "hr"] },
+  // Worker invites and PIN resets (slice 1.9): the roles that may create invites.
+  { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
   // Bank-detail approvals (slice 1.7): finance approves too, without the People list.
   { href: "/app/people/approvals", roles: ["owner", "admin", "hr", "finance"] },
 ];

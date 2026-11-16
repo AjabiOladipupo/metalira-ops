@@ -8,14 +8,42 @@ export const SIGN_UP_PATH = "/sign-up";
 export const CHECK_EMAIL_PATH = "/check-email";
 export const NO_ACCESS_PATH = "/no-access";
 export const APP_HOME_PATH = "/app";
-/** Where a worker-only user goes. Phase 1 (worker sign-in) turns /m into the worker app. */
-export const WORKER_HOME_PATH = "/m/sign-in";
+/** The worker app (phone PWA). Workers sign in with company code, staff ID and PIN. */
+export const WORKER_HOME_PATH = "/m";
+export const WORKER_SIGN_IN_PATH = "/m/sign-in";
+/** Invite links: /m/invite/<token>. */
+export const WORKER_INVITE_PATH = "/m/invite";
+
+/**
+ * A worker's login is a Supabase Auth user marked in `app_metadata` (which only the server's
+ * secret key can write), so the proxy can tell a worker session from a manager's without a
+ * database read. Roles are still checked next to the data and by RLS.
+ */
+export const WORKER_LOGIN_MARK = { key: "login", value: "worker" } as const;
+
+/** True when a JWT's `app_metadata` claim marks a worker login. */
+export function isWorkerAppMetadata(appMetadata: unknown): boolean {
+  return (
+    typeof appMetadata === "object" &&
+    appMetadata !== null &&
+    (appMetadata as Record<string, unknown>)[WORKER_LOGIN_MARK.key] === WORKER_LOGIN_MARK.value
+  );
+}
 
 /** Pages for signed-out managers. A signed-in visitor is sent on to the app instead. */
 const SIGNED_OUT_ONLY = new Set([SIGN_IN_PATH, SIGN_UP_PATH]);
 
 function isProtected(pathname: string): boolean {
   return pathname === APP_HOME_PATH || pathname.startsWith(`${APP_HOME_PATH}/`);
+}
+
+function isWorkerApp(pathname: string): boolean {
+  return pathname === WORKER_HOME_PATH || pathname.startsWith(`${WORKER_HOME_PATH}/`);
+}
+
+/** Worker pages anyone may open: sign-in and invite links. */
+function isWorkerPublic(pathname: string): boolean {
+  return pathname === WORKER_SIGN_IN_PATH || pathname.startsWith(`${WORKER_INVITE_PATH}/`);
 }
 
 /**
@@ -66,10 +94,32 @@ export type ProxyDecision = { type: "next" } | { type: "redirect"; location: str
 
 /**
  * The optimistic check the proxy makes on every matched request. It only knows whether the
- * request carries a valid session; roles and organisations are checked again next to the data
- * (src/server/identity/session.ts) and by row-level security.
+ * request carries a valid session and whether that session is a worker login; roles and
+ * organisations are checked again next to the data (src/server/identity/session.ts,
+ * worker-session.ts) and by row-level security.
+ *
+ * - Manager app (/app): signed out goes to /sign-in; a worker session goes to the worker app.
+ * - Worker app (/m): signed out goes to /m/sign-in, except sign-in and invite links; a worker
+ *   who is already signed in skips /m/sign-in.
  */
-export function proxyDecision(pathname: string, search: string, hasUser: boolean): ProxyDecision {
+export function proxyDecision(
+  pathname: string,
+  search: string,
+  hasUser: boolean,
+  isWorker = false,
+): ProxyDecision {
+  if (isWorkerApp(pathname)) {
+    if (!hasUser && !isWorkerPublic(pathname)) {
+      return { type: "redirect", location: WORKER_SIGN_IN_PATH };
+    }
+    if (hasUser && isWorker && pathname === WORKER_SIGN_IN_PATH) {
+      return { type: "redirect", location: WORKER_HOME_PATH };
+    }
+    return { type: "next" };
+  }
+  if (hasUser && isWorker && (isProtected(pathname) || SIGNED_OUT_ONLY.has(pathname))) {
+    return { type: "redirect", location: WORKER_HOME_PATH };
+  }
   if (!hasUser && isProtected(pathname)) {
     const next = `${pathname}${search}`;
     const location =

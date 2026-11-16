@@ -182,3 +182,32 @@
     cursor: pointer;
   }
 }
+
+/*
+ * Printed worker invite sheet (/app/people/invites, slice 1.9): when the sheet is on screen,
+ * printing shows only the sheet, light, without the app shell, and keeps each card whole.
+ */
+@media print {
+  body:has(.invite-sheet) * {
+    visibility: hidden;
+  }
+  body:has(.invite-sheet) .invite-sheet,
+  body:has(.invite-sheet) .invite-sheet * {
+    visibility: visible;
+    color: #0a0a0a;
+  }
+  body:has(.invite-sheet) .invite-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    border: 0;
+    background: #ffffff;
+  }
+  .invite-sheet [data-print-hide] {
+    display: none;
+  }
+  .invite-card {
+    break-inside: avoid;
+  }
+}
