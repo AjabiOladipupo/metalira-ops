@@ -57,6 +57,10 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The people import encrypts personal data (slice 1.8). A fixed dummy key for the
+      # throwaway CI database only: 32 zero bytes, never a real key.
+      PII_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
