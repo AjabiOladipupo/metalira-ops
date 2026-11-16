@@ -49,6 +49,60 @@ export function Field({ label, hint, error, inputSize = "md", className, ...inpu
   );
 }
 
+type SelectFieldProps = Omit<React.ComponentProps<"select">, "id" | "children"> & {
+  label: string;
+  hint?: string;
+  error?: string;
+  options: readonly { value: string; label: string }[];
+  /** Shown first with an empty value, for a choice not made yet. */
+  placeholder?: string;
+};
+
+/** A native select laid out like Field: label above, select, then hint or error below. */
+export function SelectField({
+  label,
+  hint,
+  error,
+  options,
+  placeholder,
+  className,
+  ...select
+}: SelectFieldProps) {
+  const id = useId();
+  const noteId = `${id}-note`;
+  const note = error ?? hint;
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <label htmlFor={id} className="text-[13px] font-medium">
+        {label}
+      </label>
+      <select
+        id={id}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={note ? noteId : undefined}
+        className="h-11 w-full min-w-0 rounded-lg border border-line bg-background px-3 text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-foreground"
+        {...select}
+      >
+        {placeholder !== undefined ? <option value="">{placeholder}</option> : null}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {note ? (
+        <p
+          id={noteId}
+          className={cn("m-0 text-xs", error ? "font-medium text-foreground" : "text-fg-muted")}
+        >
+          {error}
+          {!error && hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** A form-level message: one sentence, fg text on surface, never red. */
 export function FormAlert({ message, className }: { message?: string; className?: string }) {
   if (!message) return null;

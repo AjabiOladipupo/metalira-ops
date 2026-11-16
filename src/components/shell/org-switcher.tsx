@@ -25,14 +25,31 @@ export interface OrgOption {
  * With one company it is a plain label; with more, choosing one calls the server action, which
  * re-checks the membership before setting the httpOnly cookie.
  */
+/** The active company's logo, from a short-lived signed URL (private Storage). */
+function CompanyLogo({ src }: { src: string }) {
+  return (
+    // next/image would cache the signed URL past its expiry.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      data-testid="company-logo"
+      className="size-6 shrink-0 rounded object-contain"
+    />
+  );
+}
+
 export function OrgSwitcher({
   options,
   activeId,
   switchAction,
+  logoUrl = null,
 }: {
   options: OrgOption[];
   activeId: string;
   switchAction: (formData: FormData) => Promise<void>;
+  /** Signed URL of the active company's logo, or null when it has none. */
+  logoUrl?: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const active = options.find((o) => o.id === activeId) ?? options[0];
@@ -40,11 +57,11 @@ export function OrgSwitcher({
 
   if (options.length === 1) {
     return (
-      <span
-        data-testid="org-switcher"
-        className="inline-flex h-10 max-w-[50vw] min-w-0 items-center rounded-md border border-line px-4 text-sm font-medium sm:max-w-none"
-      >
-        <span className="truncate">{active.name}</span>
+      <span className="inline-flex h-10 max-w-[50vw] min-w-0 items-center gap-2 rounded-md border border-line px-3 text-sm font-medium sm:max-w-none">
+        {logoUrl ? <CompanyLogo src={logoUrl} /> : null}
+        <span data-testid="org-switcher" className="truncate">
+          {active.name}
+        </span>
       </span>
     );
   }
@@ -66,6 +83,7 @@ export function OrgSwitcher({
           disabled={pending}
           className="max-w-[50vw] min-w-0 sm:max-w-none"
         >
+          {logoUrl ? <CompanyLogo src={logoUrl} /> : null}
           <span className="truncate">{active.name}</span>
           <ChevronDown strokeWidth={1.75} />
         </Button>
