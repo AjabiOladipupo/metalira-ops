@@ -958,32 +958,61 @@ function lineManagerKey(ref: LineManagerRef): string {
   return `s:${staffIdKey(ref.staffId)}`;
 }
 
-/** "Set to Kola Adebayo": the line manager most used by importable rows at the same site and department. */
-function suggestLineManagers(drafts: Draft[]): void {
-  const candidates = drafts.filter((d) => !isHeld(d) && d.lineManager);
-  const scopes: ((d: Draft) => string | null)[] = [
-    (d) =>
-      d.site && d.department
-        ? `${resolvedKey(d.site)}|${d.clientScope}|${resolvedKey(d.department)}`
-        : null,
-    (d) => (d.site ? `${resolvedKey(d.site)}|${d.clientScope}` : null),
-    (d) => (d.department ? resolvedKey(d.department) : null),
+/**
+ * "Set to Kola Adebayo": the line manager most used at the same site and department, by rows
+ * that import and by workers already in the account (so a row held back from an earlier
+ * import still gets its suggestion once the others are in).
+ */
+function suggestLineManagers(drafts: Draft[], ctx: ImportContext): void {
+  type Candidate = { draft: Draft | null; ref: LineManagerRef; scopes: (string | null)[] };
+  const scopesOf = (d: Draft): (string | null)[] => [
+    d.site && d.department
+      ? `${resolvedKey(d.site)}|${d.clientScope}|${resolvedKey(d.department)}`
+      : null,
+    d.site ? `${resolvedKey(d.site)}|${d.clientScope}` : null,
+    d.department ? resolvedKey(d.department) : null,
   ];
+  const candidates: Candidate[] = [];
+  for (const d of drafts) {
+    if (!isHeld(d) && d.lineManager) {
+      candidates.push({ draft: d, ref: d.lineManager, scopes: scopesOf(d) });
+    }
+  }
+  const workersByStaffId = new Map(ctx.existingWorkers.map((w) => [staffIdKey(w.staffId), w]));
+  for (const worker of ctx.existingWorkers) {
+    const manager = worker.lineManagerStaffId
+      ? workersByStaffId.get(staffIdKey(worker.lineManagerStaffId))
+      : undefined;
+    if (!manager) continue;
+    const site =
+      worker.siteId && worker.clientId ? `id:${worker.siteId}|id:${worker.clientId}` : null;
+    const department = worker.departmentId ? `id:${worker.departmentId}` : null;
+    candidates.push({
+      draft: null,
+      ref: {
+        kind: "worker",
+        workerId: manager.id,
+        staffId: manager.staffId,
+        name: `${manager.firstName} ${manager.lastName}`.trim(),
+      },
+      scopes: [site && department ? `${site}|${department}` : null, site, department],
+    });
+  }
+
   for (const draft of drafts) {
     const problem = draft.lineManagerProblem;
     if (!problem) continue;
-    for (const scopeOf of scopes) {
-      const scope = scopeOf(draft);
+    const own = scopesOf(draft);
+    for (const [level, scope] of own.entries()) {
       if (scope === null) continue;
       const counts = new Map<string, { ref: LineManagerRef; count: number }>();
       for (const other of candidates) {
-        if (other === draft || !other.lineManager || scopeOf(other) !== scope) continue;
-        if (draft.staffId && lineManagerKey(other.lineManager) === `s:${staffIdKey(draft.staffId)}`)
-          continue;
-        const key = lineManagerKey(other.lineManager);
+        if (other.draft === draft || other.scopes[level] !== scope) continue;
+        const key = lineManagerKey(other.ref);
+        if (draft.staffId && key === `s:${staffIdKey(draft.staffId)}`) continue;
         const entry = counts.get(key);
         if (entry) entry.count += 1;
-        else counts.set(key, { ref: other.lineManager, count: 1 });
+        else counts.set(key, { ref: other.ref, count: 1 });
       }
       let best: { ref: LineManagerRef; count: number } | null = null;
       for (const entry of counts.values()) if (!best || entry.count > best.count) best = entry;
@@ -1176,7 +1205,7 @@ export function validateImportRecords(
   checkPhones(drafts, ctx);
   checkNames(drafts, ctx);
   checkLineManagers(drafts, ctx);
-  suggestLineManagers(drafts);
+  suggestLineManagers(drafts, ctx);
 
   const results: RowResult[] = drafts.map((draft) => {
     if (draft.payReasons.length > 0) {
@@ -1204,6 +1233,8 @@ export function validateImportRecords(
       problems: draft.problems,
       warnings: draft.warnings,
       normalised: normalise(draft),
+      extraValues: draft.record.extraValues ?? 0,
+      numericColumns: [...(draft.record.numericColumns ?? [])],
     };
   });
 

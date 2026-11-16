@@ -15,6 +15,7 @@ import { BusinessForm } from "../../_company/business-form";
 import { InvoicesForm } from "../../_company/invoices-form";
 import { LogoForm } from "../../_company/logo-form";
 import { PlanForm } from "../../_company/plan-form";
+import { ImportWorkspace } from "../../people/import/_components/import-workspace";
 import { SetupFrame } from "./setup-frame";
 import { StepForm } from "./step-form";
 
@@ -109,7 +110,7 @@ export async function ClientsStep() {
   );
 }
 
-export async function EmployeesStep() {
+export async function EmployeesStep({ batchId }: { batchId?: string }) {
   const company = await requireCompany();
   return (
     <SetupFrame
@@ -118,15 +119,7 @@ export async function EmployeesStep() {
       title="Bring in your employees"
       description="One row per employee, with who they report to and which client and project they work on."
     >
-      <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-line px-6 py-10 text-center">
-        <p className="m-0 max-w-md type-body-lg">
-          Importing a CSV or Excel staff file arrives with the next update. Until then, your people
-          live on the People page.
-        </p>
-        <Button asChild variant="outline" className="h-11 rounded-lg px-4">
-          <Link href="/app/people">Go to People</Link>
-        </Button>
-      </div>
+      <ImportWorkspace path="/app/setup/employees" batchId={batchId} />
       <StepForm
         action={finishSetup}
         backHref={setupStepHref("clients")}

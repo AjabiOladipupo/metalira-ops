@@ -71,6 +71,58 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"import_batches": {
+                  Row: {
+                    "cancelled_at": string | null,"columns": (string)[],"committed_at": string | null,"committed_by": string | null,"created_at": string,"created_by": string | null,"file_format": string,"file_name": string,"file_notes": NonNullable<Json>,"file_path": string,"file_problems": NonNullable<Json>,"file_removed_at": string | null,"id": string,"organisation_id": string,"rows_held": number,"rows_imported": number,"rows_ready": number,"rows_total": number,"status": Database["public"]['Enums']["import_batch_status"],"summary": Json | null,"updated_at": string,"validated_at": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cancelled_at"?: string | null,"columns"?: (string)[],"committed_at"?: string | null,"committed_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"file_format": string,"file_name": string,"file_notes"?: NonNullable<Json>,"file_path": string,"file_problems"?: NonNullable<Json>,"file_removed_at"?: string | null,"id"?: string,"organisation_id": string,"rows_held"?: number,"rows_imported"?: number,"rows_ready"?: number,"rows_total"?: number,"status"?: Database["public"]['Enums']["import_batch_status"],"summary"?: Json | null,"updated_at"?: string,"validated_at"?: string | null
+                  }
+                  Update: {
+                    "cancelled_at"?: string | null,"columns"?: (string)[],"committed_at"?: string | null,"committed_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"file_format"?: string,"file_name"?: string,"file_notes"?: NonNullable<Json>,"file_path"?: string,"file_problems"?: NonNullable<Json>,"file_removed_at"?: string | null,"id"?: string,"organisation_id"?: string,"rows_held"?: number,"rows_imported"?: number,"rows_ready"?: number,"rows_total"?: number,"status"?: Database["public"]['Enums']["import_batch_status"],"summary"?: Json | null,"updated_at"?: string,"validated_at"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "import_batches_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"import_rows": {
+                  Row: {
+                    "attention": boolean,"bank_account_enc": string | null,"batch_id": string,"created_at": string,"errors": NonNullable<Json>,"extra_values": number,"fixes": NonNullable<Json>,"id": string,"imported_at": string | null,"nin_enc": string | null,"normalised": Json | null,"numeric_columns": (string)[],"organisation_id": string,"raw": NonNullable<Json>,"row_number": number,"rsa_pin_enc": string | null,"status": Database["public"]['Enums']["import_row_status"],"updated_at": string,"warnings": NonNullable<Json>,"worker_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attention"?: boolean,"bank_account_enc"?: string | null,"batch_id": string,"created_at"?: string,"errors"?: NonNullable<Json>,"extra_values"?: number,"fixes"?: NonNullable<Json>,"id"?: string,"imported_at"?: string | null,"nin_enc"?: string | null,"normalised"?: Json | null,"numeric_columns"?: (string)[],"organisation_id": string,"raw": NonNullable<Json>,"row_number": number,"rsa_pin_enc"?: string | null,"status": Database["public"]['Enums']["import_row_status"],"updated_at"?: string,"warnings"?: NonNullable<Json>,"worker_id"?: string | null
+                  }
+                  Update: {
+                    "attention"?: boolean,"bank_account_enc"?: string | null,"batch_id"?: string,"created_at"?: string,"errors"?: NonNullable<Json>,"extra_values"?: number,"fixes"?: NonNullable<Json>,"id"?: string,"imported_at"?: string | null,"nin_enc"?: string | null,"normalised"?: Json | null,"numeric_columns"?: (string)[],"organisation_id"?: string,"raw"?: NonNullable<Json>,"row_number"?: number,"rsa_pin_enc"?: string | null,"status"?: Database["public"]['Enums']["import_row_status"],"updated_at"?: string,"warnings"?: NonNullable<Json>,"worker_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "import_rows_batch_fkey"
+      columns: ["organisation_id","batch_id"]
+isOneToOne: false
+      referencedRelation: "import_batches"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "import_rows_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "import_rows_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"membership_invites": {
                   Row: {
                     "accepted_at": string | null,"accepted_by": string | null,"created_at": string,"created_by": string | null,"email": string,"expires_at": string,"id": string,"organisation_id": string,"role": Database["public"]['Enums']["membership_role"],"token_hash": string
@@ -374,11 +426,17 @@ isOneToOne: false
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
+"cancel_import_batch":
+{ Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
 "cancel_pay_rate":
 { Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
                            },
 "choose_company_plan":
 { Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
+                           },
+"commit_import_batch":
+{ Args: { "p_batch_id": string,"p_organisation_id": string,"p_rows": Json }; Returns: Json
                            },
 "complete_company_setup":
 { Args: { "p_organisation_id": string }; Returns: string
@@ -403,8 +461,16 @@ isOneToOne: false
 "end_employment":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_id": string }; Returns: undefined
                            },
+"list_import_managers":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "email": string,"full_name": string,"membership_id": string
+            }[]
+                           },
 "log_audit":
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
+                           },
+"save_import_check":
+{ Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            },
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
@@ -429,7 +495,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "employment_type": "permanent"|"contract"|"casual"|"daily","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_status": "active"|"ended"
+            "employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_status": "active"|"ended"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -545,7 +611,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "employment_type": ["permanent", "contract", "casual", "daily"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_status": ["active", "ended"]
+            "employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_status": ["active", "ended"]
           }
         }
 } as const

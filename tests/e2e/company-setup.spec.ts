@@ -103,11 +103,11 @@ test("a new owner completes company setup and every save is audited", async ({ p
   await page.getByRole("combobox", { name: "Payment terms" }).selectOption({ label: "14 days" });
   await cont(page).click();
 
-  // 4. Clients (Phase 2) and 5. Employees (import arrives with slice 1.8).
+  // 4. Clients (Phase 2) and 5. Employees (the import itself is covered by people-import.spec.ts).
   await expectStep(page, "clients", "Clients and contracts", 3);
   await cont(page).click();
   await expectStep(page, "employees", "Bring in your employees", 4);
-  await expect(page.getByRole("link", { name: "Go to People" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Download template (.csv)" })).toBeVisible();
   await page.getByRole("button", { name: "Finish setup" }).click();
 
   // 6. Ready.
