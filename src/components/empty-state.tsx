@@ -1,13 +1,15 @@
 import { cn } from "@/lib/utils";
 
-/** One sentence plus at most one action. */
+/** One sentence plus at most one action, with an optional illustration above (one per screen). */
 export function EmptyState({
   message,
   action,
+  illustration,
   className,
 }: {
   message: string;
   action?: React.ReactNode;
+  illustration?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -17,6 +19,7 @@ export function EmptyState({
         className,
       )}
     >
+      {illustration}
       <p className="m-0 max-w-md type-body-lg text-fg-muted">{message}</p>
       {action}
     </div>

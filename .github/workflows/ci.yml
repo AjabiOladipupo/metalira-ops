@@ -57,10 +57,6 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # The people import encrypts personal data (slice 1.8). A fixed dummy key for the
-      # throwaway CI database only: 32 zero bytes, never a real key.
-      PII_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -77,6 +73,11 @@ jobs:
       - name: Start local Supabase
         run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,realtime,postgres-meta
       - run: pnpm test:e2e
+        env:
+          # A fixed dummy key for the app under test, so the People specs can save and reveal
+          # bank details and NIN against the throwaway local database. Not a real key: it is
+          # base64 of "e2e-test-key-not-a-secret-000000". Never reuse it anywhere else.
+          PII_ENCRYPTION_KEY: ZTJlLXRlc3Qta2V5LW5vdC1hLXNlY3JldC0wMDAwMDA=
       - name: Stop local Supabase
         if: always()
         run: pnpm exec supabase stop --no-backup

@@ -205,18 +205,37 @@ export function navForRole(role: Role): NavGroup[] {
 
 /**
  * Pages that are not sidebar items but need their own roles: the setup wizard, settings
- * sections narrower than Settings itself, and the people import. The longest matching prefix wins over NAV.
+ * sections narrower than Settings itself, and the People pages that change data (the people
+ * import included). A segment written `[name]` matches any one segment
+ * (`/app/people/[id]/edit`). The most specific match (most segments) wins over NAV.
  */
 export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
+  { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },
+  { href: "/app/people/new", roles: ["owner", "admin", "hr"] },
+  { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },
 ];
 
+function segments(path: string): string[] {
+  return path.split("/").filter(Boolean);
+}
+
+/** True when `pathname` is `href` or below it, with `[name]` segments matching any segment. */
+function pageMatches(href: string, pathname: string): boolean {
+  const pattern = segments(href);
+  const path = segments(pathname);
+  if (path.length < pattern.length) return false;
+  return pattern.every((part, i) =>
+    /^\[[a-z]+\]$/.test(part) ? (path[i] ?? "") !== "" : part === path[i],
+  );
+}
+
 function extraPage(pathname: string) {
-  return EXTRA_PAGES.filter((p) => pathname === p.href || pathname.startsWith(`${p.href}/`)).sort(
-    (a, b) => b.href.length - a.href.length,
+  return EXTRA_PAGES.filter((p) => pageMatches(p.href, pathname)).sort(
+    (a, b) => segments(b.href).length - segments(a.href).length,
   )[0];
 }
 
