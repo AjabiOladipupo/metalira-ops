@@ -187,8 +187,11 @@ async function PeopleList({
         query={query}
       />
 
-      <div className="flex flex-wrap items-start gap-5">
-        <section aria-label="Employees" className="flex min-w-0 flex-[999_1_560px] flex-col gap-3">
+      <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:flex-wrap lg:items-start">
+        <section
+          aria-label="Employees"
+          className="flex min-w-0 flex-col gap-3 lg:flex-[999_1_560px]"
+        >
           <PeopleSearch query={query} departmentId={departmentId} />
           <p role="status" className="m-0 text-sm text-fg-muted">
             {filtered
