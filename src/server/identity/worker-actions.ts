@@ -71,10 +71,10 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
     return { ok: false, formError: copy.signIn.notConfigured, values };
   }
 
-  const network = ipKey(clientIp(await headers()));
+  const ip = clientIp(await headers());
   let result: Awaited<ReturnType<typeof checkWorkerPin>>;
   try {
-    result = await checkWorkerPin(databaseSignInStore(admin), parsed.data, network);
+    result = await checkWorkerPin(databaseSignInStore(admin), parsed.data, ipKey(ip));
   } catch (error) {
     logFailure("worker_auth.sign_in_failed:", error);
     return { ok: false, formError: copy.signIn.unavailable, values };

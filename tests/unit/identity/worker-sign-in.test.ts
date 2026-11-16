@@ -3,7 +3,9 @@
  * public.worker_sign_in_begin / finish (5 tries, then a 15-minute lock, counted before the PIN
  * is checked); tests/rls/worker-auth.test.ts checks the real functions.
  */
-import { describe, expect, it, vi } from "vitest";
+import { randomBytes } from "node:crypto";
+
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import {
   checkWorkerPin,
@@ -13,6 +15,12 @@ import {
   type BeginResult,
   type WorkerSignInStore,
 } from "@/server/identity/worker-sign-in";
+
+// ipKey is keyed from the personal data key: a throwaway one for these tests.
+vi.stubEnv("PII_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 const LOGIN = { workerId: "w-1", organisationId: "o-1", authUserId: "u-1" };
 const RIGHT = "482913";
@@ -165,12 +173,15 @@ describe("workerSignInSchema", () => {
 });
 
 describe("network key", () => {
-  it("hashes the address, never keeping it", () => {
+  it("keys the address with a server secret, never keeping it", () => {
     expect(ipKey("102.89.1.7")).toMatch(/^[0-9a-f]{64}$/);
     expect(ipKey("102.89.1.7")).not.toContain("102");
     expect(ipKey("102.89.1.7")).toBe(ipKey(" 102.89.1.7 "));
     expect(ipKey("102.89.1.7")).not.toBe(ipKey("102.89.1.8"));
     expect(ipKey(null)).toBe(ipKey(undefined));
+    const before = ipKey("102.89.1.7");
+    vi.stubEnv("PII_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
+    expect(ipKey("102.89.1.7")).not.toBe(before);
   });
 
   it("reads the platform's client address headers", () => {

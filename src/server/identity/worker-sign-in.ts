@@ -1,10 +1,11 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { derivePiiSubkey } from "@/server/crypto/pii";
 import type { Database } from "@/types/db";
 
 import { pinSchema, verifyPin } from "./pin";
@@ -57,10 +58,14 @@ export type WorkerSignInResult =
   | { status: "locked" }
   | { status: "ip_blocked" };
 
-/** The network address as a counter key: hashed, so the raw address is never stored. */
+/**
+ * The network address as a counter key: an HMAC with a server-side key, so the stored value
+ * can't be turned back into the address by trying every IPv4 address. Throws PiiKeyError when
+ * the personal data key is not configured.
+ */
 export function ipKey(ip: string | null | undefined): string {
-  return createHash("sha256")
-    .update(`ip|${(ip ?? "").trim().toLowerCase() || "unknown"}`)
+  return createHmac("sha256", derivePiiSubkey("sign-in-network-key"))
+    .update((ip ?? "").trim().toLowerCase() || "unknown")
     .digest("hex");
 }
 
