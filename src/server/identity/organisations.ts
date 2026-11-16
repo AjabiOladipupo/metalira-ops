@@ -5,11 +5,17 @@ import { z } from "zod";
 
 import type { Database } from "@/types/db";
 
-export const organisationNameSchema = z
-  .string()
-  .trim()
-  .min(1, "Enter your company name")
-  .max(200, "Company name must be 200 characters or fewer");
+import { plainText } from "./names";
+
+/** Same rules as the organisations.name check constraint: 1 to 200 characters, plain text. */
+export const organisationNameSchema = plainText(
+  z
+    .string()
+    .trim()
+    .min(1, "Enter your company name")
+    .max(200, "Company name must be 200 characters or fewer"),
+  "Company name",
+);
 
 /**
  * Creates an organisation with the signed-in user as owner, in one database

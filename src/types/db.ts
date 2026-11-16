@@ -102,6 +102,9 @@ isOneToOne: false
             "accept_membership_invite":
 { Args: { "p_token": string }; Returns: string
                            },
+"create_first_organisation":
+{ Args: { "p_name": string }; Returns: string
+                           },
 "create_membership_invite":
 { Args: { "p_email": string,"p_organisation_id": string,"p_role": Database["public"]['Enums']["membership_role"] }; Returns: string
                            },

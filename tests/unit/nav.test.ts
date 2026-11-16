@@ -3,7 +3,10 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { activeNavHref, NAV, NAV_ITEMS } from "@/lib/nav";
+import { activeNavHref, canAccessHref, NAV, NAV_ITEMS, navForRole } from "@/lib/nav";
+import { MANAGER_ROLES, ROLES, type Role } from "@/lib/roles";
+
+const labels = (role: Role) => navForRole(role).flatMap((g) => g.items.map((i) => i.label));
 
 describe("nav config", () => {
   it("lists the sidebar groups in the agreed order", () => {
@@ -58,5 +61,95 @@ describe("nav config", () => {
     expect(activeNavHref("/app/roster")).toBe("/app/roster");
     expect(activeNavHref("/app/roster/2026-11")).toBe("/app/roster");
     expect(activeNavHref("/design-system")).toBeUndefined();
+  });
+});
+
+// The owner's role-to-nav decision, docs/PHASE_0.md "Roles and access".
+describe("nav by role", () => {
+  it("shows owner and admin every item", () => {
+    const all = NAV_ITEMS.map((i) => i.label);
+    expect(labels("owner")).toEqual(all);
+    expect(labels("admin")).toEqual(all);
+    expect(all).toHaveLength(13);
+  });
+
+  it("matches the decision for hr, finance, ops_manager and line_manager", () => {
+    expect(labels("hr")).toEqual([
+      "Home",
+      "Timesheets",
+      "People",
+      "My team",
+      "Leave",
+      "Payroll run",
+      "Settings",
+    ]);
+    expect(labels("finance")).toEqual([
+      "Home",
+      "Timesheets",
+      "Payroll run",
+      "Unbilled work",
+      "Collections",
+      "Revenue",
+      "Settings",
+    ]);
+    expect(labels("ops_manager")).toEqual([
+      "Home",
+      "Roster",
+      "Live attendance",
+      "Timesheets",
+      "People",
+      "My team",
+      "Leave",
+      "Projects",
+      "Unbilled work",
+    ]);
+    expect(labels("line_manager")).toEqual([
+      "Home",
+      "Live attendance",
+      "Timesheets",
+      "My team",
+      "Leave",
+    ]);
+  });
+
+  it("gives workers and client approvers no manager nav", () => {
+    expect(navForRole("worker")).toEqual([]);
+    expect(navForRole("client_approver")).toEqual([]);
+  });
+
+  it("drops groups with no items for the role", () => {
+    expect(navForRole("line_manager").map((g) => g.label)).toEqual([null, "Workforce"]);
+    expect(navForRole("hr").map((g) => g.label)).toEqual([
+      null,
+      "Workforce",
+      "Payroll",
+      "Settings",
+    ]);
+  });
+
+  it("lists every item for owner and admin, and only real roles", () => {
+    for (const item of NAV_ITEMS) {
+      expect(item.roles).toContain("owner");
+      expect(item.roles).toContain("admin");
+      for (const role of item.roles) expect(ROLES).toContain(role);
+      expect(item.roles).not.toContain("worker");
+      expect(item.roles).not.toContain("client_approver");
+    }
+  });
+
+  it("enforces the same rules for direct URLs", () => {
+    expect(canAccessHref("line_manager", "/app/payroll")).toBe(false);
+    expect(canAccessHref("line_manager", "/app/timesheets")).toBe(true);
+    expect(canAccessHref("finance", "/app/roster")).toBe(false);
+    expect(canAccessHref("finance", "/app/collections/inv-0001")).toBe(true);
+    expect(canAccessHref("hr", "/app/revenue")).toBe(false);
+    for (const role of MANAGER_ROLES) expect(canAccessHref(role, "/app")).toBe(true);
+    expect(canAccessHref("worker", "/app")).toBe(false);
+    expect(canAccessHref("client_approver", "/app")).toBe(false);
+  });
+
+  it("refuses paths that sit under no nav item", () => {
+    expect(canAccessHref("owner", "/app/secret-admin")).toBe(false);
+    expect(canAccessHref("owner", "/design-system")).toBe(false);
   });
 });

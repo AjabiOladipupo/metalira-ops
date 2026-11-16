@@ -95,6 +95,31 @@ describe("create_organisation", () => {
     expect(await countFor(owner.id)).toEqual({ memberships: 0, organisations: 0 });
   });
 
+  it.each([
+    ["angle brackets", "<b>Acme</b> Guards"],
+    ["a web address", "Pay at https://evil.example"],
+    ["a www address", "Visit www.evil.example"],
+    ["a control character", "Acme\u0007 Guards"],
+  ])("rejects a name with %s, which would end up in emails", async (_label, name) => {
+    const owner = await createTestUser("not-plain");
+    const { data, error } = await owner.client.rpc("create_organisation", { p_name: name });
+    expect(data).toBeNull();
+    expect(error?.code).toBe("22023");
+    expect(await countFor(owner.id)).toEqual({ memberships: 0, organisations: 0 });
+  });
+
+  it("refuses a rename to a name that is not plain text", async () => {
+    const owner = await createTestUser("rename-org");
+    const { data: orgId } = await owner.client.rpc("create_organisation", { p_name: "Plain Ltd" });
+    const { error } = await owner.client
+      .from("organisations")
+      .update({ name: "Your invoice is overdue, pay at www.evil.example" })
+      .eq("id", orgId!);
+    expect(error?.code).toBe("23514");
+    const { data } = await admin.from("organisations").select("name").eq("id", orgId!).single();
+    expect(data?.name).toBe("Plain Ltd");
+  });
+
   it("accepts exactly 200 characters", async () => {
     const owner = await createTestUser("long");
     const { error } = await owner.client.rpc("create_organisation", { p_name: "y".repeat(200) });
@@ -124,6 +149,27 @@ describe("profiles", () => {
       .eq("user_id", person.id)
       .single();
     expect(data).toEqual({ user_id: person.id, full_name: "Ada Obi" });
+  });
+
+  it("keep no name when the sign-up metadata name is not plain text", async () => {
+    for (const name of ["<a href=x>Ada</a>", "Ada, see https://evil.example", "www.evil.example"]) {
+      const person = await createTestUser("profile-bad", name);
+      const { data } = await admin
+        .from("profiles")
+        .select("full_name")
+        .eq("user_id", person.id)
+        .single();
+      expect(data).toEqual({ full_name: null });
+    }
+  });
+
+  it("cannot be renamed to a name that is not plain text", async () => {
+    const person = await createTestUser("rename-bad", "Ada Obi");
+    const { error } = await person.client
+      .from("profiles")
+      .update({ full_name: "<script>Ada</script>" })
+      .eq("user_id", person.id);
+    expect(error?.code).toBe("23514");
   });
 
   it("can be renamed by their owner only, and only full_name", async () => {

@@ -3,19 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { activeNavHref, NAV } from "@/lib/nav";
+import { activeNavHref, type NavGroup } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 import { NAV_ICONS } from "./nav-icons";
 
-/** Sidebar links grouped as Home · Workforce · Payroll · Business · Revenue · Settings. */
-export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * Sidebar links grouped as Home · Workforce · Payroll · Business · Revenue · Settings.
+ * `groups` is already filtered for the viewer's role (navForRole).
+ */
+export function NavLinks({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: () => void }) {
   const pathname = usePathname();
   const active = activeNavHref(pathname);
 
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">
-      {NAV.map((group) => (
+      {groups.map((group) => (
         <div key={group.label ?? "top"} className="flex flex-col gap-0.5">
           {group.label ? (
             <div className="px-3 pt-3.5 pb-1.5 type-label text-fg-muted">{group.label}</div>
@@ -44,5 +47,16 @@ export function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
         </div>
       ))}
     </nav>
+  );
+}
+
+/** Placeholder rows while the role-filtered nav loads. */
+export function NavSkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-1.5 px-3 pt-1">
+      {Array.from({ length: 6 }, (_, i) => (
+        <span key={i} className="h-8 rounded-md bg-surface" />
+      ))}
+    </div>
   );
 }

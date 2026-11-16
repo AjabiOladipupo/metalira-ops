@@ -2,8 +2,14 @@ import type { Metadata } from "next";
 
 import { PlaceholderPage } from "@/components/shell/placeholder-page";
 
+import { RouteGate } from "../_shell/slots";
+
 export const metadata: Metadata = { title: "Timesheets" };
 
 export default function Page() {
-  return <PlaceholderPage href="/app/timesheets" />;
+  return (
+    <RouteGate href="/app/timesheets">
+      <PlaceholderPage href="/app/timesheets" />
+    </RouteGate>
+  );
 }
