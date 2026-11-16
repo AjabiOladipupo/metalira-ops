@@ -343,6 +343,14 @@ isOneToOne: false
                            },
 "log_audit":
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
+                           },
+"save_worker_mapping":
+{ Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
+                           },
+"worker_line_manager_contact":
+{ Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: {
+              "email": string,"name": string,"user_id": string
+            }[]
                            }
           }
           Enums: {
