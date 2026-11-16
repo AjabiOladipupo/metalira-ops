@@ -14,8 +14,18 @@ import { last4 } from "@/lib/mask";
  *
  * - AES-256-GCM with a fresh random 96-bit IV for every value, so equal plaintexts never give
  *   equal ciphertexts.
- * - The version byte names the key. It is also bound into the tag as additional authenticated
- *   data, so it cannot be changed without decryption failing.
+ * - The version byte names the key. It is bound into the tag as additional authenticated data
+ *   (AAD), so it cannot be changed without decryption failing.
+ * - The value's place is bound in too. The AAD is the version byte followed by
+ *   `<organisation_id>|<table>|<column>|<row_id>`. A ciphertext copied into another column,
+ *   row or organisation fails its integrity check, so a user who can write rows but may not
+ *   read personal data (admin) cannot splice a NIN into a bank account field that finance may
+ *   reveal. What this means for writers:
+ *   - The row id must be known before the insert: generate it with `crypto.randomUUID()` and
+ *     insert it explicitly instead of relying on the column default.
+ *   - Moving a value to another row or table (for example applying an approved bank-detail
+ *     change to `workers`) means decrypting under the old context and encrypting under the new
+ *     one on the server. Bytes copied in SQL will not decrypt.
  * - Key version 1 is `PII_ENCRYPTION_KEY`: 32 random bytes, base64-encoded. Rotation adds a new
  *   version byte and a second variable; old values keep decrypting under their own version.
  *
@@ -44,9 +54,52 @@ export class PiiKeyError extends Error {
   override name = "PiiKeyError";
 }
 
-/** A stored value could not be decrypted: tampered, truncated, wrong key or unknown version. */
+/**
+ * A stored value could not be decrypted: tampered, truncated, wrong key, unknown version, or
+ * written for a different organisation, table, column or row.
+ */
 export class PiiDecryptError extends Error {
   override name = "PiiDecryptError";
+}
+
+/** Where a value lives. Bound into the authentication tag; see the format notes above. */
+export interface PiiContext {
+  organisationId: string;
+  /** Table name, for example `workers`. */
+  table: string;
+  /** The `_enc` column, for example `nin_enc`. */
+  column: string;
+  /** The row's primary key. */
+  rowId: string;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDENTIFIER = /^[a-z][a-z0-9_]{0,62}$/;
+
+/**
+ * The AAD for one value: the version byte, then the canonical context. UUIDs are lower-cased
+ * (Postgres returns them that way) and identifiers cannot contain `|`, so the joined form is
+ * unambiguous. Throws `TypeError` for a malformed context before any crypto runs.
+ */
+function aadFor(version: number, ctx: PiiContext): Buffer {
+  if (!ctx || typeof ctx !== "object") {
+    throw new TypeError("Personal data needs its context: organisation, table, column and row.");
+  }
+  const { organisationId, table, column, rowId } = ctx;
+  if (typeof organisationId !== "string" || !UUID.test(organisationId)) {
+    throw new TypeError("PiiContext.organisationId must be a UUID.");
+  }
+  if (typeof rowId !== "string" || !UUID.test(rowId)) {
+    throw new TypeError("PiiContext.rowId must be a UUID.");
+  }
+  if (typeof table !== "string" || !IDENTIFIER.test(table)) {
+    throw new TypeError("PiiContext.table must be a lower-case table name.");
+  }
+  if (typeof column !== "string" || !IDENTIFIER.test(column) || !column.endsWith("_enc")) {
+    throw new TypeError("PiiContext.column must be an `_enc` column name.");
+  }
+  const canonical = `${organisationId.toLowerCase()}|${table}|${column}|${rowId.toLowerCase()}`;
+  return Buffer.concat([Buffer.from([version]), Buffer.from(canonical, "utf8")]);
 }
 
 const KEY_HELP =
@@ -81,21 +134,24 @@ export function assertPiiKeyConfigured(): void {
   keyFor(PII_KEY_VERSION);
 }
 
-/** Encrypts one personal data value. Store the result in a `bytea` `_enc` column. */
-export function encryptPii(plaintext: string): Buffer {
+/**
+ * Encrypts one personal data value for the place `ctx` names. Store the result in exactly that
+ * `bytea` `_enc` column of that row.
+ */
+export function encryptPii(plaintext: string, ctx: PiiContext): Buffer {
   if (typeof plaintext !== "string" || plaintext.length === 0) {
     throw new TypeError("encryptPii needs a non-empty string. Store null for a missing value.");
   }
   if (plaintext.length > MAX_PLAINTEXT_LENGTH) {
     throw new RangeError(`encryptPii accepts at most ${MAX_PLAINTEXT_LENGTH} characters.`);
   }
+  const aad = aadFor(PII_KEY_VERSION, ctx);
   const key = keyFor(PII_KEY_VERSION);
-  const header = Buffer.from([PII_KEY_VERSION]);
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
-  cipher.setAAD(header);
+  cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  return Buffer.concat([header, iv, cipher.getAuthTag(), ciphertext]);
+  return Buffer.concat([Buffer.from([PII_KEY_VERSION]), iv, cipher.getAuthTag(), ciphertext]);
 }
 
 /** A stored value as it arrives: a Buffer, raw bytes, or PostgREST's `\x…` hex text. */
@@ -112,20 +168,24 @@ function toBuffer(value: PiiCiphertext): Buffer {
   return Buffer.isBuffer(value) ? value : Buffer.from(value);
 }
 
-/** Decrypts a value written by `encryptPii`. Throws `PiiDecryptError` if it was altered. */
-export function decryptPii(value: PiiCiphertext): string {
+/**
+ * Decrypts a value written by `encryptPii` with the same `ctx`. Throws `PiiDecryptError` if it
+ * was altered or was written for another organisation, table, column or row.
+ */
+export function decryptPii(value: PiiCiphertext, ctx: PiiContext): string {
   const data = toBuffer(value);
   if (data.length <= HEADER_BYTES) {
     throw new PiiDecryptError("Encrypted value is too short.");
   }
   const version = data[0] ?? 0;
   const key = keyFor(version);
+  const aad = aadFor(version, ctx);
   const iv = data.subarray(1, 1 + IV_BYTES);
   const tag = data.subarray(1 + IV_BYTES, HEADER_BYTES);
   const ciphertext = data.subarray(HEADER_BYTES);
   try {
     const decipher = createDecipheriv(ALGORITHM, key, iv, { authTagLength: TAG_BYTES });
-    decipher.setAAD(data.subarray(0, 1));
+    decipher.setAAD(aad);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch (cause) {
@@ -139,16 +199,16 @@ export function toByteaHex(value: Buffer | Uint8Array): string {
 }
 
 /** `encryptPii` in the form supabase-js writes to a `bytea` column. */
-export function encryptPiiForDb(plaintext: string): string {
-  return toByteaHex(encryptPii(plaintext));
+export function encryptPiiForDb(plaintext: string, ctx: PiiContext): string {
+  return toByteaHex(encryptPii(plaintext, ctx));
 }
 
 /**
  * The `_enc` value and its `_last4` sibling for one field, so lists show a masked value without
  * decrypting. `last4` is the last four digits, or null when the value has fewer than four.
  */
-export function sealPii(plaintext: string): { enc: string; last4: string | null } {
-  return { enc: encryptPiiForDb(plaintext), last4: last4(plaintext) };
+export function sealPii(plaintext: string, ctx: PiiContext): { enc: string; last4: string | null } {
+  return { enc: encryptPiiForDb(plaintext, ctx), last4: last4(plaintext) };
 }
 
 export { last4 };
