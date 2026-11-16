@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { Button } from "@/components/ui/button";
+import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { signOutWorker } from "@/server/identity/worker-actions";
-import { requireWorkerSession } from "@/server/identity/worker-session";
+import { lookupWorkerSession } from "@/server/identity/worker-session";
 
 import { WorkerBrand } from "./_components/worker-brand";
 
@@ -13,7 +15,20 @@ export const metadata: Metadata = { title: "Home" };
 const copy = workerMessages.home;
 
 async function Greeting() {
-  const worker = await requireWorkerSession();
+  const lookup = await lookupWorkerSession();
+  if (lookup.type === "signed_out") redirect(WORKER_SIGN_IN_PATH);
+  if (lookup.type === "not_worker") redirect(APP_HOME_PATH);
+  if (lookup.type === "unlinked") {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <h1 className="m-0 font-display text-[25px] leading-tight font-bold">
+          {copy.unlinkedTitle}
+        </h1>
+        <p className="m-0 text-[15px] text-fg-muted">{copy.unlinked}</p>
+      </div>
+    );
+  }
+  const worker = lookup.session;
   return (
     <div className="flex flex-col gap-1.5">
       <span className="type-label text-fg-muted">{worker.organisationName}</span>

@@ -56,5 +56,8 @@ export const workerMessages = {
     soon: "Your shifts, leave and payslips will show here.",
     location: "Your location is used only while you are clocked in.",
     signOut: "Sign out",
+    unlinkedTitle: "Almost there",
+    unlinked:
+      "Your login isn't linked to your staff record yet. Ask HR to send you an invite, then open it on this phone.",
   },
 } as const;
