@@ -64,7 +64,7 @@ export function DepartmentTiles({
 }) {
   return (
     <nav aria-label="Departments">
-      <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))] gap-3 p-0">
+      <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,150px),1fr))] gap-3 p-0">
         <Tile
           href={hrefFor("", query)}
           label="All"
