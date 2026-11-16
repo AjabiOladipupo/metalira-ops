@@ -17,9 +17,14 @@ const SECTIONS = [
     title: "Company",
     body: "Business details, logo, pay cycle, invoices and plan.",
   },
+  {
+    href: "/app/settings/departments",
+    title: "Departments",
+    body: "Add and rename departments and set who heads each one.",
+  },
 ] as const;
 
-/** Settings sections the viewer's role may open (company settings are owner and admin only). */
+/** Settings sections the viewer's role may open (company: owner and admin; departments: also hr). */
 async function SettingsSections() {
   const session = await getSession();
   const role = session?.active?.role;
