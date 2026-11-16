@@ -50,16 +50,25 @@ function isRateLimited(error: { status?: number; code?: string }): boolean {
   return error.status === 429 || error.code === "over_request_rate_limit";
 }
 
-/** Creates the pending organisation, if any, and queues the welcome email. */
+/**
+ * Creates the pending organisation, if any, and queues the welcome email. A failure here never
+ * blocks signing in: the user lands on the no-access page and the next sign-in tries again.
+ */
 async function finishOwnerSignUp(
   supabase: Awaited<ReturnType<typeof createServerSupabase>>,
   user: User,
 ): Promise<void> {
-  const created = await ensureOrganisationForNewUser(supabase, user);
+  let created: Awaited<ReturnType<typeof ensureOrganisationForNewUser>> = null;
+  try {
+    created = await ensureOrganisationForNewUser(supabase, user);
+  } catch (error) {
+    console.error("Could not create the organisation after sign-in", error);
+  }
   if (created) {
+    const org = created;
     const fullName =
       typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-    after(() => sendOwnerWelcome(user, created, fullName));
+    after(() => sendOwnerWelcome(user, org, fullName));
   }
 }
 
