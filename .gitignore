@@ -34,3 +34,4 @@ Flat Assets/
 .DS_Store
 Thumbs.db
 *.log
+.claude/settings.local.json

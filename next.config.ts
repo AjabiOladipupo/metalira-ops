@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
+    // Sentry injects debug IDs itself after compile and rewrites the source maps to match.
+    // Turbopack's native debug IDs would be a second, earlier snippet that Sentry's step
+    // shifts by one line without fixing the maps, so production stack traces stay minified.
+    debugIds: false,
     rules: {
       "*.css": {
         loaders: ["@tailwindcss/turbopack"],
