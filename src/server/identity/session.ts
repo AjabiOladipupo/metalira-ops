@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { cache } from "react";
 
 import { getSupabasePublicEnv } from "@/lib/supabase/env";
@@ -76,7 +77,10 @@ export async function loadMemberships(
  * Reads cookies: call it inside a <Suspense> boundary, a Server Function or a Route Handler.
  */
 export const getSession = cache(async (): Promise<Session | null> => {
-  // Read the request first, so prerendering stops here and never reaches the env check.
+  // Request-time only: never part of a prerender or a runtime prefetch, where the Supabase
+  // client's clock reads (Date.now) are not allowed. This also keeps a build without Supabase
+  // settings from ever reaching the env check.
+  await connection();
   const cookieStore = await cookies();
   if (!supabaseConfigured()) return null;
 
