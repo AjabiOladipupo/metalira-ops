@@ -184,6 +184,17 @@ describe("nav by role", () => {
     expect(canAccessHref("ops_manager", "/app/people/new-hires")).toBe(true);
   });
 
+  it("opens worker invites to owner, admin and hr only (slice 1.9)", () => {
+    for (const role of ["owner", "admin", "hr"] as const) {
+      expect(canAccessHref(role, "/app/people/invites"), role).toBe(true);
+    }
+    for (const role of ["finance", "ops_manager", "line_manager", "worker"] as const) {
+      expect(canAccessHref(role, "/app/people/invites"), role).toBe(false);
+    }
+    // People itself stays open to ops_manager.
+    expect(canAccessHref("ops_manager", "/app/people")).toBe(true);
+  });
+
   it("refuses paths that sit under no nav item", () => {
     expect(canAccessHref("owner", "/app/secret-admin")).toBe(false);
     expect(canAccessHref("owner", "/design-system")).toBe(false);

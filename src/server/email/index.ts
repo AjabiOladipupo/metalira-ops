@@ -7,6 +7,7 @@ import { sendEmail, type SendEmailResult } from "./send";
 import { MappingChangedEmail, mappingChangedSubject } from "./templates/mapping-changed";
 import { TestEmail, testEmailSubject } from "./templates/test-email";
 import { WelcomeOwnerEmail, welcomeOwnerSubject } from "./templates/welcome-owner";
+import { WorkerInviteEmail, workerInviteSubject } from "./templates/worker-invite";
 
 export { EmailConfigError, EmailSendError, sendEmail } from "./send";
 export type { SendEmailInput, SendEmailResult } from "./send";
@@ -97,6 +98,55 @@ export async function sendMappingChangedEmail(
     subject: mappingChangedSubject(props.workerName, props.reportsToYou),
     react: createElement(MappingChangedEmail, { ...props, appUrl: emailAppUrl() }),
     tags: [{ name: "type", value: "mapping_changed" }],
+  });
+}
+
+const workerInviteSchema = z.object({
+  to: z.email(),
+  firstName: emailSafeName,
+  organisationName: emailSafeName,
+  companyCode: z.string().regex(/^[2-9A-HJKMNP-Z]{6}$/),
+  staffId: emailSafeName.pipe(z.string().max(64)),
+  inviteUrl: z.url({ protocol: /^https?$/ }),
+  expiresAt: z.date(),
+  inviteId: z.uuid(),
+});
+
+export type WorkerInviteEmailInput = z.input<typeof workerInviteSchema>;
+
+/** "14 Nov 2026" in Lagos time, as the design system writes dates. */
+function lagosDate(at: Date): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Africa/Lagos",
+  }).format(at);
+}
+
+/**
+ * Invite for a worker who has an email address: a single-use link to set their PIN. Sent once
+ * per invite (Resend idempotency key). The address comes from the worker record HR keeps, and
+ * only owners, admins and HR can create invites (public.create_worker_invites).
+ */
+export async function sendWorkerInviteEmail(
+  input: WorkerInviteEmailInput,
+): Promise<SendEmailResult> {
+  const e = workerInviteSchema.parse(input);
+  return sendEmail({
+    to: e.to,
+    subject: workerInviteSubject(e.organisationName),
+    react: createElement(WorkerInviteEmail, {
+      firstName: e.firstName,
+      organisationName: e.organisationName,
+      companyCode: e.companyCode,
+      staffId: e.staffId,
+      inviteUrl: e.inviteUrl,
+      expiresOn: lagosDate(e.expiresAt),
+      appUrl: emailAppUrl(),
+    }),
+    tags: [{ name: "type", value: "worker_invite" }],
+    idempotencyKey: `worker-invite/${e.inviteId}`,
   });
 }
 

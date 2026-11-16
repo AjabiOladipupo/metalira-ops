@@ -1,12 +1,14 @@
 import { expect, test } from "@playwright/test";
 
-test("worker sign-in is design only: labelled fields, numeric PIN, no network call", async ({
+test("worker sign-in: labelled fields, a numeric 6-digit PIN, phone-sized inputs", async ({
   page,
 }) => {
   await page.goto("/m/sign-in");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign in");
   await expect(page.getByLabel("Company code")).toBeVisible();
   await expect(page.getByLabel("Staff ID")).toBeVisible();
+  // English only for now: no language picker (owner decision 16).
+  await expect(page.getByLabel("Language")).toHaveCount(0);
 
   const pin = page.getByLabel("PIN");
   await expect(pin).toHaveAttribute("type", "password");
@@ -20,18 +22,21 @@ test("worker sign-in is design only: labelled fields, numeric PIN, no network ca
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
+});
 
-  const posts: string[] = [];
-  page.on("request", (request) => {
-    if (request.method() === "POST") posts.push(request.url());
-  });
-  await page.getByLabel("Company code").fill("ADEBAYO");
+test("worker sign-in asks for a 6-digit PIN before checking anything", async ({ page }) => {
+  await page.goto("/m/sign-in");
+  await page.getByLabel("Company code").fill("K7PQ2M");
   await page.getByLabel("Staff ID").fill("MO-0114");
-  await pin.fill("1234");
+  await page.getByLabel("PIN").fill("1234");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("status")).toContainText("Phone sign-in arrives with worker invites");
+  await expect(page.getByText("Enter your 6-digit PIN.")).toBeVisible();
   await expect(page).toHaveURL(/\/m\/sign-in$/);
-  expect(posts).toEqual([]);
+});
+
+test("worker pages need a session", async ({ page }) => {
+  await page.goto("/m");
+  await expect(page).toHaveURL(/\/m\/sign-in$/);
 });
 
 test("sign-in and sign-up have no horizontal scroll", async ({ page }) => {

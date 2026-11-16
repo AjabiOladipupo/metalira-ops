@@ -182,8 +182,10 @@ test("client approvers get the no-access page and workers the worker app", async
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
 
+  // A worker membership added by hand, with no staff record linked: the worker app explains.
   await signInViaUi(page, worker.email, worker.password);
-  await expect(page).toHaveURL(/\/m\/sign-in$/);
+  await expect(page).toHaveURL(/\/m$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Almost there");
 });
 
 test("a manager in two companies switches between them, and the choice sticks", async ({

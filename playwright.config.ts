@@ -4,6 +4,8 @@ import path from "node:path";
 
 import { defineConfig, devices } from "@playwright/test";
 
+import { appServerEnv } from "./tests/e2e/helpers/server-env";
+
 const PORT = Number(process.env.PORT ?? 3000);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
@@ -64,7 +66,11 @@ export default defineConfig({
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 240_000,
-        // Email links in tests must come back to this server, whatever the port.
-        env: { NEXT_PUBLIC_APP_URL: baseURL },
+        // Email links in tests must come back to this server, whatever the port. Worker sign-in
+        // needs server-only settings too (tests/e2e/helpers/server-env.ts).
+        env: {
+          NEXT_PUBLIC_APP_URL: baseURL,
+          ...appServerEnv(process.env.NEXT_PUBLIC_SUPABASE_URL),
+        },
       },
 });

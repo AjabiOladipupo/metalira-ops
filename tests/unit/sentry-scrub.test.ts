@@ -230,6 +230,48 @@ describe("scrubEvent", () => {
     ]);
   });
 
+  it("redacts invite tokens in URL paths everywhere they appear", () => {
+    const token = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const invite = `/m/invite/${token}`;
+    const filtered = `/m/invite/${FILTERED}`;
+    const event = scrubEvent({
+      message: `Invite failed for ${invite}`,
+      transaction: invite,
+      request: {
+        url: `https://ops.example.com${invite}`,
+        headers: {
+          referer: `https://ops.example.com${invite}?x=1`,
+          "next-url": invite,
+          "next-router-state-tree": encodeURIComponent(`["",{"token":"${token}"}]`),
+          accept: "text/html",
+        },
+      },
+      contexts: {
+        trace: { trace_id: "0123456789abcdef0123456789abcdef", data: { "http.url": invite } },
+      },
+      exception: { values: [{ value: `Error at ${invite}` }] },
+      breadcrumbs: [
+        { message: "navigation", data: { from: "/m/sign-in", to: invite } },
+        { message: "fetch", data: { method: "POST", url: `https://ops.example.com${invite}` } },
+      ],
+      spans: [{ description: `GET ${invite}`, data: { "url.full": `http://localhost${invite}` } }],
+    });
+
+    expect(JSON.stringify(event)).not.toContain(token);
+    expect(event.message).toBe(`Invite failed for ${filtered}`);
+    expect(event.transaction).toBe(filtered);
+    expect(event.request?.url).toBe(`https://ops.example.com${filtered}`);
+    expect(event.request?.headers?.referer).toBe(`https://ops.example.com${filtered}?${FILTERED}`);
+    expect(event.request?.headers?.["next-url"]).toBe(filtered);
+    expect(event.request?.headers?.accept).toBe("text/html");
+    expect(event.breadcrumbs?.[0]?.data).toEqual({ from: "/m/sign-in", to: filtered });
+    expect(event.spans?.[0]?.description).toBe(`GET ${filtered}`);
+    // Trace ids are 32 hex and stay readable.
+    expect(event.contexts).toEqual({
+      trace: { trace_id: "0123456789abcdef0123456789abcdef", data: { "http.url": filtered } },
+    });
+  });
+
   it("scrubs log entries, mechanism data and drops local variables", () => {
     const event = scrubEvent({
       logentry: { message: "Payout to %s failed for %s", params: ["0123456789", "a@b.com"] },
