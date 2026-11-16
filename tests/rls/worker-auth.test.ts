@@ -561,6 +561,39 @@ describe("PIN sign-in counter", () => {
     });
   });
 
+  it("audits the login changing, not every sign-in try", async () => {
+    const worker = await signedUpWorker();
+    const { rows: creds } = await db.query<{ id: string }>(
+      "select id from public.worker_credentials where worker_id = $1",
+      [worker.id],
+    );
+    const credId = creds[0]!.id;
+    const updates = async () =>
+      (
+        await db.query<{ n: number }>(
+          "select count(*)::int as n from public.audit_log where entity_id = $1 and action = 'worker_credentials.update'",
+          [credId],
+        )
+      ).rows[0]!.n;
+
+    for (let i = 1; i <= 3; i += 1) {
+      await begin(worker.staffId);
+      await finish(worker.id, false);
+    }
+    await begin(worker.staffId);
+    expect(await finish(worker.id, true)).toBe("signed_in");
+    expect(await updates()).toBe(0);
+
+    const token = (await invite(worker.id)).token;
+    const reset = await admin.rpc("accept_worker_invite", {
+      p_token: token,
+      p_auth_user_id: worker.authUserId,
+      p_pin_hash: `s1$k1$${"E".repeat(22)}$${"F".repeat(43)}`,
+    });
+    expect(reset.error).toBeNull();
+    expect(await updates()).toBe(1);
+  });
+
   it("cannot succeed for an unknown pair", async () => {
     const { error } = await admin.rpc("worker_sign_in_finish", {
       p_worker_id: null as unknown as string,
@@ -583,6 +616,37 @@ describe("PIN sign-in counter", () => {
       [`ip:${ip}`],
     );
     expect(rows).toEqual([{ n: 1 }]);
+  });
+});
+
+describe("ending employment", () => {
+  it("signs the worker out everywhere: sessions go and refresh tokens stop working", async () => {
+    const worker = await signedUpWorker();
+    const client = await sessionFor(worker.id);
+    const { data } = await client.auth.getSession();
+    const refreshToken = data.session!.refresh_token;
+    const colleague = await signedUpWorker();
+    const colleagueClient = await sessionFor(colleague.id);
+
+    const { error } = await owner.client.rpc("end_employment", {
+      p_organisation_id: owner.orgId,
+      p_worker_id: worker.id,
+      p_end_date: "2026-11-15",
+    });
+    expect(error).toBeNull();
+
+    const { rows } = await db.query<{ n: number }>(
+      "select count(*)::int as n from auth.sessions where user_id = $1",
+      [worker.authUserId],
+    );
+    expect(rows).toEqual([{ n: 0 }]);
+    const refreshed = await anonClient().auth.refreshSession({ refresh_token: refreshToken });
+    expect(refreshed.error).not.toBeNull();
+    expect(refreshed.data.session).toBeNull();
+    expect((await client.auth.getUser()).error).not.toBeNull();
+
+    // Only the leaver is signed out.
+    expect((await colleagueClient.auth.getUser()).error).toBeNull();
   });
 });
 

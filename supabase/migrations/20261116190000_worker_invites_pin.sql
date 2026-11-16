@@ -21,6 +21,8 @@
 -- 5. Functions. create_worker_invites runs as the signed-in manager (owner, admin, hr). The
 --    invite lookup, acceptance and the two sign-in steps are for the server's secret-key client
 --    only: no signed-in or anonymous role may call them.
+-- 6. Ending a worker's employment (status leaves 'active') deletes their Auth sessions, so a
+--    leaver who is still signed in on a phone is signed out.
 --
 -- memberships.worker_id is set here, in private.accept_worker_invite_impl, as 20261116103000
 -- promised: a worker's own login links to their worker row, so RLS shows them only that row.
@@ -124,8 +126,47 @@ create trigger worker_credentials_set_updated_at before update on public.worker_
 
 create trigger worker_invites_audit after insert or update or delete on public.worker_invites
   for each row execute function private.audit_row_change();
-create trigger worker_credentials_audit after insert or update or delete on public.worker_credentials
+create trigger worker_credentials_audit after insert or delete on public.worker_credentials
   for each row execute function private.audit_row_change();
+-- Updates are audited only when the login itself changes (a PIN set or reset, the notice
+-- accepted). Every sign-in try moves failed_attempts, locked_until or last_sign_in_at; auditing
+-- those would let anyone who knows a company code and staff ID flood the append-only log with
+-- actor-less rows and bury the worker_auth.locked events, which are written explicitly.
+create trigger worker_credentials_audit_update after update on public.worker_credentials
+  for each row
+  when (
+    old.organisation_id is distinct from new.organisation_id
+    or old.worker_id is distinct from new.worker_id
+    or old.auth_user_id is distinct from new.auth_user_id
+    or old.pin_set_at is distinct from new.pin_set_at
+    or old.privacy_notice_accepted_at is distinct from new.privacy_notice_accepted_at
+  )
+  execute function private.audit_row_change();
+
+-- A worker who stops being active is signed out everywhere: their sessions and refresh tokens
+-- are deleted, so a leaver still signed in on a phone loses /m at the next token check. New
+-- sign-ins are already refused for workers who are not active (worker_sign_in_begin_impl).
+create function private.end_worker_sessions()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from auth.sessions s
+  using public.worker_credentials c
+  where c.worker_id = new.id
+    and s.user_id = c.auth_user_id;
+  return null;
+end;
+$$;
+
+revoke all on function private.end_worker_sessions() from public, anon, authenticated;
+
+create trigger workers_end_sessions after update of status on public.workers
+  for each row
+  when (old.status = 'active' and new.status is distinct from 'active')
+  execute function private.end_worker_sessions();
 
 -- ---------------------------------------------------------------------------
 -- 3. Row-level security and grants
