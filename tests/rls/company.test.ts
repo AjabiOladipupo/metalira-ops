@@ -1,0 +1,359 @@
+/**
+ * Slice 1.1: company setup columns, the plan and setup RPCs, the company code, and the private
+ * org-assets bucket for logos. Owners and admins change company settings; nobody else, and never
+ * another organisation's. Every change lands in audit_log with the caller as actor.
+ */
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  adminClient,
+  anonClient,
+  createTenantUser,
+  createTestUser,
+  pgClient,
+  type Client,
+  type TenantUser,
+  type TestUser,
+} from "./helpers/supabase";
+
+const PERMISSION_DENIED = "42501";
+const BUCKET = "org-assets";
+const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+
+let admin: Client;
+let a: TenantUser;
+let b: TenantUser;
+let hrA: TestUser;
+let workerA: TestUser;
+
+beforeAll(async () => {
+  admin = adminClient();
+  a = await createTenantUser("co-a", "Company A");
+  b = await createTenantUser("co-b", "Company B");
+  hrA = await createTestUser("co-hr");
+  workerA = await createTestUser("co-worker");
+  const { error } = await admin.from("memberships").insert([
+    { organisation_id: a.orgId, user_id: hrA.id, role: "hr" },
+    { organisation_id: a.orgId, user_id: workerA.id, role: "worker" },
+  ]);
+  if (error) throw new Error(error.message);
+});
+
+async function org(id: string) {
+  const { data, error } = await admin.from("organisations").select("*").eq("id", id).single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+describe("company code", () => {
+  it("is generated for every organisation: six unambiguous characters, unique", async () => {
+    const [orgA, orgB] = [await org(a.orgId), await org(b.orgId)];
+    expect(orgA.company_code).toMatch(/^[2-9A-HJKMNP-Z]{6}$/);
+    expect(orgB.company_code).toMatch(/^[2-9A-HJKMNP-Z]{6}$/);
+    expect(orgA.company_code).not.toBe(orgB.company_code);
+  });
+
+  it("cannot be changed by the owner", async () => {
+    const before = (await org(a.orgId)).company_code;
+    const { error } = await a.client
+      .from("organisations")
+      .update({ company_code: "ABCDEF" })
+      .eq("id", a.orgId);
+    expect(error?.code).toBe(PERMISSION_DENIED);
+    expect((await org(a.orgId)).company_code).toBe(before);
+  });
+
+  it("is unique in the database", async () => {
+    const db = await pgClient();
+    try {
+      const code = (await org(a.orgId)).company_code;
+      await expect(
+        db.query("update public.organisations set company_code = $1 where id = $2", [
+          code,
+          b.orgId,
+        ]),
+      ).rejects.toThrow(/organisations_company_code_unique/);
+    } finally {
+      await db.end();
+    }
+  });
+});
+
+describe("business details", () => {
+  const details = {
+    legal_name: "Company A Ltd",
+    trading_name: "Company A",
+    rc_number: "RC 1234567",
+    tin: "12345678-0001",
+    industry: "cleaning",
+    head_office_state: "Lagos",
+    address: "12 Admiralty Way",
+    phone: "08000000000",
+    invoice_email: "billing@company-a.example",
+    invoice_number_start: 100,
+    payment_terms_days: 14,
+    vat_registered: true,
+    auto_email_receipts: false,
+    setup_step: 3,
+  };
+
+  it("the owner saves them and the change is audited with the owner as actor", async () => {
+    const { data, error } = await a.client
+      .from("organisations")
+      .update(details)
+      .eq("id", a.orgId)
+      .select("id");
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(await org(a.orgId)).toMatchObject(details);
+
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("actor_id, before, after")
+      .eq("organisation_id", a.orgId)
+      .eq("action", "organisations.update")
+      .order("at", { ascending: false })
+      .limit(1)
+      .single();
+    expect(audit?.actor_id).toBe(a.id);
+    expect(audit?.after).toMatchObject({ tin: "12345678-0001", trading_name: "Company A" });
+  });
+
+  it("hr, a worker and another organisation's owner change nothing", async () => {
+    const snapshot = await org(a.orgId);
+    for (const client of [hrA.client, workerA.client, b.client]) {
+      const { data, error } = await client
+        .from("organisations")
+        .update({ trading_name: "Hijacked" })
+        .eq("id", a.orgId)
+        .select("id");
+      expect(error).toBeNull();
+      expect(data).toEqual([]);
+    }
+    expect(await org(a.orgId)).toEqual(snapshot);
+  });
+
+  it.each([
+    ["tin", "123"],
+    ["rc_number", "RC1234567"],
+    ["industry", "mining"],
+    ["head_office_state", "Lagos State"],
+    ["phone", "0800 000 0000"],
+    ["invoice_email", "Billing@Company-A.example"],
+    ["payment_terms_days", 400],
+    ["trading_name", "<script>"],
+    ["setup_step", 7],
+  ])("the database refuses %s = %j", async (column, value) => {
+    const { error } = await (a.client as unknown as SupabaseClient)
+      .from("organisations")
+      .update({ [column]: value })
+      .eq("id", a.orgId);
+    expect(error?.code).toBe("23514");
+  });
+
+  it("the logo path can only point inside the organisation's own folder", async () => {
+    const wrong = await a.client
+      .from("organisations")
+      .update({ logo_path: `${b.orgId}/logo.png` })
+      .eq("id", a.orgId);
+    expect(wrong.error?.code).toBe("23514");
+    const odd = await a.client
+      .from("organisations")
+      .update({ logo_path: `${a.orgId}/../logo.png` })
+      .eq("id", a.orgId);
+    expect(odd.error?.code).toBe("23514");
+  });
+});
+
+describe("choose_company_plan", () => {
+  it("the owner records a plan and headcount", async () => {
+    const { error } = await a.client.rpc("choose_company_plan", {
+      p_organisation_id: a.orgId,
+      p_plan: "ops_suite",
+      p_expected_workers: 162,
+    });
+    expect(error).toBeNull();
+    expect(await org(a.orgId)).toMatchObject({ plan: "ops_suite", expected_workers: 162 });
+  });
+
+  it("refuses unknown plans and silly headcounts", async () => {
+    for (const [plan, workers] of [
+      ["enterprise", 10],
+      ["trial", 10],
+      ["starter", 0],
+    ] as const) {
+      const { error } = await a.client.rpc("choose_company_plan", {
+        p_organisation_id: a.orgId,
+        p_plan: plan,
+        p_expected_workers: workers,
+      });
+      expect(error?.code).toBe("22023");
+    }
+  });
+
+  it("refuses hr, workers, other organisations and anonymous callers", async () => {
+    for (const client of [hrA.client, workerA.client, b.client]) {
+      const { error } = await client.rpc("choose_company_plan", {
+        p_organisation_id: a.orgId,
+        p_plan: "starter",
+        p_expected_workers: 5,
+      });
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    const anon = await anonClient().rpc("choose_company_plan", {
+      p_organisation_id: a.orgId,
+      p_plan: "starter",
+      p_expected_workers: 5,
+    });
+    expect(anon.error).not.toBeNull();
+    expect(await org(a.orgId)).toMatchObject({ plan: "ops_suite", expected_workers: 162 });
+  });
+
+  it("the plan column itself stays out of reach of direct updates", async () => {
+    const { error } = await a.client
+      .from("organisations")
+      .update({ plan: "starter" })
+      .eq("id", a.orgId);
+    expect(error?.code).toBe(PERMISSION_DENIED);
+  });
+});
+
+describe("complete_company_setup", () => {
+  it("refuses hr and other organisations", async () => {
+    for (const client of [hrA.client, b.client]) {
+      const { error } = await client.rpc("complete_company_setup", { p_organisation_id: a.orgId });
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    expect((await org(a.orgId)).setup_completed_at).toBeNull();
+  });
+
+  it("marks setup complete once, keeps the first time, and is audited", async () => {
+    const first = await a.client.rpc("complete_company_setup", { p_organisation_id: a.orgId });
+    expect(first.error).toBeNull();
+    const row = await org(a.orgId);
+    expect(row.setup_completed_at).not.toBeNull();
+    expect(row.setup_step).toBe(6);
+
+    const again = await a.client.rpc("complete_company_setup", { p_organisation_id: a.orgId });
+    expect(again.error).toBeNull();
+    expect(new Date(again.data!).getTime()).toBe(new Date(row.setup_completed_at!).getTime());
+
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("actor_id, after")
+      .eq("organisation_id", a.orgId)
+      .eq("action", "organisations.update")
+      .not("after->>setup_completed_at", "is", null)
+      .limit(1);
+    expect(audit?.[0]?.actor_id).toBe(a.id);
+  });
+
+  it("cannot be set directly", async () => {
+    const { error } = await a.client
+      .from("organisations")
+      .update({ setup_completed_at: null })
+      .eq("id", a.orgId);
+    expect(error?.code).toBe(PERMISSION_DENIED);
+  });
+});
+
+describe("org-assets bucket", () => {
+  const storage = (client: SupabaseClient) => client.storage.from(BUCKET);
+  const logoA = () => `${a.orgId}/logo.png`;
+  const logoB = () => `${b.orgId}/logo.png`;
+
+  afterAll(async () => {
+    await admin.storage.from(BUCKET).remove([logoA(), logoB(), `${a.orgId}/logo.svg`]);
+  });
+
+  it("is private", async () => {
+    const { data, error } = await admin.storage.getBucket(BUCKET);
+    expect(error).toBeNull();
+    expect(data?.public).toBe(false);
+  });
+
+  it("the owner uploads and replaces their own logo", async () => {
+    const first = await storage(a.client).upload(logoA(), PNG, { contentType: "image/png" });
+    expect(first.error).toBeNull();
+    const again = await storage(a.client).upload(logoA(), PNG, {
+      contentType: "image/png",
+      upsert: true,
+    });
+    expect(again.error).toBeNull();
+    const own = await storage(b.client).upload(logoB(), PNG, { contentType: "image/png" });
+    expect(own.error).toBeNull();
+  });
+
+  it("members read their own organisation's logo, by download and by signed URL", async () => {
+    for (const client of [a.client, hrA.client, workerA.client]) {
+      const download = await storage(client).download(logoA());
+      expect(download.error).toBeNull();
+      const signed = await storage(client).createSignedUrl(logoA(), 60);
+      expect(signed.error).toBeNull();
+      expect(signed.data?.signedUrl).toBeTruthy();
+    }
+  });
+
+  it("another organisation cannot read, sign, list, overwrite or delete it", async () => {
+    const download = await storage(b.client).download(logoA());
+    expect(download.data).toBeNull();
+    const signed = await storage(b.client).createSignedUrl(logoA(), 60);
+    expect(signed.data).toBeNull();
+    const list = await storage(b.client).list(a.orgId);
+    expect(list.data ?? []).toEqual([]);
+
+    const overwrite = await storage(b.client).upload(logoA(), PNG, {
+      contentType: "image/png",
+      upsert: true,
+    });
+    expect(overwrite.error).not.toBeNull();
+    const plant = await storage(b.client).upload(`${a.orgId}/logo.svg`, PNG, {
+      contentType: "image/svg+xml",
+    });
+    expect(plant.error).not.toBeNull();
+
+    await storage(b.client).remove([logoA()]);
+    const still = await storage(a.client).download(logoA());
+    expect(still.error).toBeNull();
+  });
+
+  it("hr and workers of the same organisation cannot upload or delete", async () => {
+    for (const client of [hrA.client, workerA.client]) {
+      const upload = await storage(client).upload(logoA(), PNG, {
+        contentType: "image/png",
+        upsert: true,
+      });
+      expect(upload.error).not.toBeNull();
+      await storage(client).remove([logoA()]);
+    }
+    const still = await storage(a.client).download(logoA());
+    expect(still.error).toBeNull();
+  });
+
+  it("only {organisation_id}/logo.png or .svg may be stored, as PNG or SVG under 1 MB", async () => {
+    const otherName = await storage(a.client).upload(`${a.orgId}/payroll.png`, PNG, {
+      contentType: "image/png",
+    });
+    expect(otherName.error).not.toBeNull();
+    const rootName = await storage(a.client).upload("logo.png", PNG, { contentType: "image/png" });
+    expect(rootName.error).not.toBeNull();
+    const wrongType = await storage(a.client).upload(`${a.orgId}/logo.png`, PNG, {
+      contentType: "text/html",
+      upsert: true,
+    });
+    expect(wrongType.error).not.toBeNull();
+    const tooBig = new Uint8Array(1024 * 1024 + 1);
+    tooBig.set(PNG);
+    const big = await storage(a.client).upload(`${a.orgId}/logo.png`, tooBig, {
+      contentType: "image/png",
+      upsert: true,
+    });
+    expect(big.error).not.toBeNull();
+  });
+
+  it("anonymous callers read nothing", async () => {
+    const download = await anonClient().storage.from(BUCKET).download(logoA());
+    expect(download.data).toBeNull();
+  });
+});

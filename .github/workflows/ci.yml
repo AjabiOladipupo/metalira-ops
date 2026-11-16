@@ -37,9 +37,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Pinned CLI from devDependencies. Only the services the RLS suite needs.
+      # Pinned CLI from devDependencies. Only the services the RLS suite needs (Storage for the
+      # org-assets bucket policies).
       - name: Start local Supabase
-        run: pnpm exec supabase start -x studio,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor,realtime,storage-api
+        run: pnpm exec supabase start -x studio,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor,realtime
       # Definition of done: migrations apply cleanly to a fresh database.
       - name: Reset database
         run: pnpm db:reset
@@ -66,10 +67,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       # Auth flows need the local stack, Mailpit included (sign-up confirmation and magic-link
-      # emails). playwright.config.ts reads the URL and publishable key from `supabase status`,
-      # and the specs read the secret key the same way, so nothing secret is set here.
+      # emails) and Storage (company logo upload). playwright.config.ts reads the URL and
+      # publishable key from `supabase status`, and the specs read the secret key the same way, so
+      # nothing secret is set here.
       - name: Start local Supabase
-        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,realtime,storage-api,postgres-meta
+        run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,realtime,postgres-meta
       - run: pnpm test:e2e
       - name: Stop local Supabase
         if: always()
