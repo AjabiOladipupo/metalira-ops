@@ -137,6 +137,19 @@ function ImportReview({ view, path }: { view: ImportBatchView; path: ImportPath 
     );
   }
 
+  // A check that never reached the end: never show its rows as if they were the whole file.
+  if (view.status === "uploaded") {
+    return (
+      <section
+        aria-label="File not checked"
+        className="flex flex-col gap-3 rounded-xl border border-line p-5"
+      >
+        <h2 className="m-0 type-h3">{view.fileName} hasn&apos;t been checked</h2>
+        <p className="m-0 text-sm text-fg-muted">Upload the file again to check it.</p>
+      </section>
+    );
+  }
+
   const committed = view.status === "committed";
   const ready = Math.max(view.rowsReady - view.rowsAttention, 0);
   const needFixing = view.rowsHeld + view.rowsAttention;

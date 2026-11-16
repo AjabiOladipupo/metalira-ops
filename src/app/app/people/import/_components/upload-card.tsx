@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState, useTransition } from "react";
 
-import { importReviewHref, type ImportPath } from "@/lib/people-import";
+import { IMPORTS_BUCKET, importReviewHref, type ImportPath } from "@/lib/people-import";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 import { checkImportUpload, startImportUpload } from "@/server/people/imports/actions";
 
@@ -49,7 +49,7 @@ export function UploadCard({ path, uploadedName }: { path: ImportPath; uploadedN
       return;
     }
     const { error } = await createBrowserSupabase()
-      .storage.from("imports")
+      .storage.from(IMPORTS_BUCKET)
       .upload(started.path, file, { contentType: started.contentType, upsert: false });
     if (error) {
       setPhase({

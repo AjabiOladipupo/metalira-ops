@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { IMPORTS_BUCKET } from "@/lib/people-import";
 import { MutationError, type MutationSpec } from "@/server/identity/mutate";
 import type { Database, Json } from "@/types/db";
 
@@ -41,9 +42,6 @@ import {
 
 type Client = SupabaseClient<Database>;
 
-/** Private Storage bucket for uploads, at {organisation_id}/{batch_id}.{csv,xlsx}. */
-export const IMPORTS_BUCKET = "imports";
-
 export const IMPORT_CONTENT_TYPES: Record<ImportFormat, string> = {
   csv: "text/csv",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -66,12 +64,16 @@ interface BatchRow {
   file_removed_at: string | null;
   columns: string[];
   file_notes: Json;
+  file_problems: Json;
+  created_by: string | null;
 }
 
 async function loadBatch(supabase: Client, organisationId: string, batchId: string) {
   const { data, error } = await supabase
     .from("import_batches")
-    .select("id, status, file_name, file_format, file_path, file_removed_at, columns, file_notes")
+    .select(
+      "id, status, file_name, file_format, file_path, file_removed_at, columns, file_notes, file_problems, created_by",
+    )
     .eq("id", batchId)
     .eq("organisation_id", organisationId)
     .maybeSingle();
@@ -114,12 +116,22 @@ async function loadOpenRows(
 
 type CheckedResult = Extract<ImportResult, { ok: true }>;
 
-/** Stores checked rows and refreshes the batch counts, in chunks. */
+/**
+ * Stores checked rows and refreshes the batch counts, in chunks. On a first check
+ * `rowsExpected` is the file's row count: the database moves the batch to `validated` only on
+ * the last chunk and only once that many rows are stored, so a check that stops part way
+ * leaves the batch `uploaded` rather than reviewable with some of its rows missing.
+ */
 async function saveCheck(
   supabase: Client,
   organisationId: string,
   batchId: string,
-  check: { columns: readonly string[]; fileNotes: readonly string[]; summary: Json | null },
+  check: {
+    columns: readonly string[];
+    fileNotes: readonly string[];
+    summary: Json | null;
+    rowsExpected?: number;
+  },
   docs: readonly ImportRowDoc[],
 ): Promise<void> {
   const pCheck: Record<string, Json> = {
@@ -127,17 +139,40 @@ async function saveCheck(
     file_notes: [...check.fileNotes],
   };
   if (check.summary !== null) pCheck.summary = check.summary;
+  if (check.rowsExpected !== undefined) pCheck.rows_expected = check.rowsExpected;
   const chunks: (readonly ImportRowDoc[])[] = [];
   for (let i = 0; i < docs.length; i += SAVE_CHUNK) chunks.push(docs.slice(i, i + SAVE_CHUNK));
   if (chunks.length === 0) chunks.push([]);
-  for (const chunk of chunks) {
+  for (const [index, chunk] of chunks.entries()) {
     const { error } = await supabase.rpc("save_import_check", {
       p_organisation_id: organisationId,
       p_batch_id: batchId,
       p_check: pCheck,
       p_rows: chunk as unknown as Json,
+      p_final: index === chunks.length - 1,
     });
     if (error) fromDbError(error);
+  }
+}
+
+/** Ids of rows already stored for a batch by row number (a first check that stopped part way). */
+async function storedRowIds(
+  supabase: Client,
+  organisationId: string,
+  batchId: string,
+): Promise<Map<number, string>> {
+  const ids = new Map<number, string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("import_rows")
+      .select("id, row_number")
+      .eq("batch_id", batchId)
+      .eq("organisation_id", organisationId)
+      .order("row_number")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`Could not read the import rows: ${error.message}`);
+    for (const row of data ?? []) ids.set(row.row_number, row.id);
+    if (!data || data.length < PAGE) return ids;
   }
 }
 
@@ -155,6 +190,7 @@ function fromDbError(error: PostgrestError): never {
     case "MLIM1":
     case "MLIM2":
     case "MLIM3":
+    case "MLIM4":
     case "MLLM1":
     case "MLLM2":
     case "MLPR1":
@@ -216,16 +252,88 @@ async function recheck(
   return { result, rows, docs };
 }
 
-async function removeUpload(supabase: Client, organisationId: string, batch: BatchRow) {
+/**
+ * Removes a batch's upload from Storage and records it. Storage removes only objects the
+ * caller can read, and only the uploader (the batch's creator) can read an upload: for them an
+ * empty answer means the file isn't there; for anyone else it may be someone else's file, which
+ * is left (not marked removed) for the sweep (sweep.ts) to remove with the secret key.
+ */
+async function removeUpload(
+  supabase: Client,
+  organisationId: string,
+  userId: string,
+  batch: BatchRow,
+): Promise<void> {
   if (batch.file_removed_at) return;
-  const { error } = await supabase.storage.from(IMPORTS_BUCKET).remove([batch.file_path]);
+  const { data, error } = await supabase.storage.from(IMPORTS_BUCKET).remove([batch.file_path]);
   if (error) throw new Error(`Could not remove the upload: ${error.message}`);
+  if ((data ?? []).length === 0 && batch.created_by !== userId) return;
   const { error: updateError } = await supabase
     .from("import_batches")
     .update({ file_removed_at: new Date().toISOString() })
     .eq("id", batch.id)
-    .eq("organisation_id", organisationId);
+    .eq("organisation_id", organisationId)
+    .is("file_removed_at", null);
   if (updateError) throw new Error(`Could not record the upload's removal: ${updateError.message}`);
+}
+
+/** removeUpload where a failure must not stop the step: the sweep removes what is left. */
+async function removeUploadQuietly(
+  supabase: Client,
+  organisationId: string,
+  userId: string,
+  batch: BatchRow,
+): Promise<void> {
+  try {
+    await removeUpload(supabase, organisationId, userId, batch);
+  } catch (cause) {
+    console.error(
+      "people.import_upload_not_removed:",
+      cause instanceof Error ? cause.name : "unknown error",
+    );
+  }
+}
+
+const CHECK_UNFINISHED = "The check didn't finish, so nothing was saved. Upload the file again.";
+const UPLOAD_GONE = "This upload was removed before it was checked. Upload the file again.";
+
+interface StoredProblem {
+  code: string;
+  message: string;
+}
+
+/** The file problems stored on a batch, or why it can't be checked any more. */
+function storedProblems(batch: BatchRow): StoredProblem[] {
+  const problems = Array.isArray(batch.file_problems)
+    ? batch.file_problems.flatMap((p) =>
+        p && typeof p === "object" && !Array.isArray(p) && typeof p.message === "string"
+          ? [{ code: typeof p.code === "string" ? p.code : "file_problem", message: p.message }]
+          : [],
+      )
+    : [];
+  return problems.length > 0 ? problems : [{ code: "upload_removed", message: UPLOAD_GONE }];
+}
+
+/**
+ * A first check that failed part way: say so on the batch (only while it is still
+ * `uploaded`, so a check that did finish in the database is never marked failed). Best effort:
+ * this runs while another error is on its way to the user.
+ */
+async function recordUnfinishedCheck(supabase: Client, organisationId: string, batchId: string) {
+  try {
+    const { error } = await supabase
+      .from("import_batches")
+      .update({ file_problems: [{ code: "check_unfinished", message: CHECK_UNFINISHED }] })
+      .eq("id", batchId)
+      .eq("organisation_id", organisationId)
+      .eq("status", "uploaded");
+    if (error) console.error("people.import_check_not_recorded:", error.code);
+  } catch (cause) {
+    console.error(
+      "people.import_check_not_recorded:",
+      cause instanceof Error ? cause.name : "unknown error",
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -280,7 +388,8 @@ export const startImportSpec: MutationSpec<typeof startImportSchema, StartedImpo
 // ---------------------------------------------------------------------------------------------
 
 export type CheckedImport =
-  { ok: true; batchId: string } | { ok: false; batchId: string; problems: FileProblem[] };
+  | { ok: true; batchId: string }
+  | { ok: false; batchId: string; problems: (FileProblem | StoredProblem)[] };
 
 export const checkImportSpec: MutationSpec<
   z.ZodObject<{ batchId: typeof batchIdSchema }>,
@@ -288,43 +397,68 @@ export const checkImportSpec: MutationSpec<
 > = {
   schema: z.object({ batchId: batchIdSchema }),
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, userId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
-    if (batch.status !== "uploaded" || batch.file_removed_at) {
+    if (batch.status !== "uploaded") {
+      // Checked already. Make sure the upload is gone (its removal may have failed last time).
+      await removeUploadQuietly(supabase, organisationId, userId, batch);
       return { ok: true, batchId: batch.id };
+    }
+    if (batch.file_removed_at) {
+      // Refused, failed part way or past its time: the file has to be uploaded again.
+      return { ok: false, batchId: batch.id, problems: storedProblems(batch) };
     }
 
     const download = await supabase.storage.from(IMPORTS_BUCKET).download(batch.file_path);
     if (download.error || !download.data) {
       throw new MutationError("invalid", "The upload didn't arrive. Choose the file again.");
     }
-    const bytes = new Uint8Array(await download.data.arrayBuffer());
-    const context = await loadImportContext(supabase, organisationId);
-    const result = await validatePeopleImport({ name: batch.file_name, bytes }, context);
 
-    if (!result.ok) {
-      const { error } = await supabase
-        .from("import_batches")
-        .update({
-          file_problems: result.problems.map((p) => ({ code: p.code, message: p.message })),
-        })
-        .eq("id", batch.id)
-        .eq("organisation_id", organisationId);
-      if (error) fromDbError(error);
-      await removeUpload(supabase, organisationId, batch);
-      return { ok: false, batchId: batch.id, problems: result.problems };
+    // From here on the upload is removed however the check ends. A check that throws is
+    // recorded on the batch, which stays `uploaded` and is never reviewed or imported.
+    let finished = false;
+    try {
+      const bytes = new Uint8Array(await download.data.arrayBuffer());
+      const context = await loadImportContext(supabase, organisationId);
+      const result = await validatePeopleImport({ name: batch.file_name, bytes }, context);
+
+      if (!result.ok) {
+        const { error } = await supabase
+          .from("import_batches")
+          .update({
+            file_problems: result.problems.map((p) => ({ code: p.code, message: p.message })),
+          })
+          .eq("id", batch.id)
+          .eq("organisation_id", organisationId);
+        if (error) fromDbError(error);
+        finished = true;
+        return { ok: false, batchId: batch.id, problems: result.problems };
+      }
+
+      // Rows a check that stopped part way already stored keep their ids, so they are
+      // rewritten rather than skipped (personal data is encrypted for the row id).
+      const ids = await storedRowIds(supabase, organisationId, batch.id);
+      const docs = result.rows.map((row) =>
+        toRowDoc(organisationId, ids.get(row.rowNumber) ?? randomUUID(), row, []),
+      );
+      await saveCheck(
+        supabase,
+        organisationId,
+        batch.id,
+        {
+          columns: result.columns.present,
+          fileNotes: result.fileNotes,
+          summary: summaryDoc(result),
+          rowsExpected: docs.length,
+        },
+        docs,
+      );
+      finished = true;
+      return { ok: true, batchId: batch.id };
+    } finally {
+      if (!finished) await recordUnfinishedCheck(supabase, organisationId, batch.id);
+      await removeUploadQuietly(supabase, organisationId, userId, batch);
     }
-
-    const docs = result.rows.map((row) => toRowDoc(organisationId, randomUUID(), row, []));
-    await saveCheck(
-      supabase,
-      organisationId,
-      batch.id,
-      { columns: result.columns.present, fileNotes: result.fileNotes, summary: summaryDoc(result) },
-      docs,
-    );
-    await removeUpload(supabase, organisationId, batch);
-    return { ok: true, batchId: batch.id };
   },
 };
 
@@ -432,7 +566,7 @@ const commitResultSchema = z.object({
 export const commitImportSpec: MutationSpec<typeof commitImportSchema, CommittedImport> = {
   schema: commitImportSchema,
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, userId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
     if (batch.status === "uploaded") {
       throw new MutationError("invalid", "Check the file before importing it.");
@@ -440,6 +574,8 @@ export const commitImportSpec: MutationSpec<typeof commitImportSchema, Committed
     if (batch.status === "cancelled") {
       throw new MutationError("invalid", "This import was cancelled. Upload the file again.");
     }
+    // Everything commit needs is in the stored rows; an upload left behind goes now.
+    await removeUploadQuietly(supabase, organisationId, userId, batch);
 
     const fresh = await recheck(supabase, organisationId, batch, null);
     const importable = importableCount(fresh.rows.map((r) => r.result));
@@ -512,20 +648,15 @@ export const cancelImportSpec: MutationSpec<
 > = {
   schema: z.object({ batchId: batchIdSchema }),
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, userId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
     const { error } = await supabase.rpc("cancel_import_batch", {
       p_organisation_id: organisationId,
       p_batch_id: batch.id,
     });
     if (error) fromDbError(error);
-    if (!batch.file_removed_at) {
-      // An upload that was never checked: remove it too. Best effort; the batch is cancelled.
-      const { error: removeError } = await supabase.storage
-        .from(IMPORTS_BUCKET)
-        .remove([batch.file_path]);
-      if (removeError) console.error("people.import_upload_not_removed:", removeError.name);
-    }
+    // An upload that was never checked: remove it too. Best effort; the batch is cancelled.
+    await removeUploadQuietly(supabase, organisationId, userId, batch);
     return { batchId: batch.id };
   },
 };

@@ -4,9 +4,10 @@
 --   1. The server creates a batch (status `uploaded`) and the browser uploads the file to the
 --      private Storage bucket `imports` at {organisation_id}/{batch_id}.{csv,xlsx}.
 --   2. The server reads the file back, checks it with the slice 1.4 validator and stores every
---      row (status `validated`). The file is then removed from Storage: everything needed to
---      fix and import a row is in import_rows, and the upload was the only place personal data
---      sat in clear.
+--      row, in chunks; only the last chunk, once every row of the file is stored, moves the
+--      batch to `validated`. The file is then removed from Storage: everything needed to fix
+--      and import a row is in import_rows, and the upload was the only place personal data sat
+--      in clear.
 --   3. One-click fixes patch a held row and the whole batch is checked again.
 --   4. Commit (`commit_import_batch`) creates, in one transaction, the new departments,
 --      name-only clients, sites and projects, the workers, their first pay rates and their
@@ -14,19 +15,35 @@
 --      does nothing for rows already imported (idempotent on batch and row; staff IDs stay
 --      unique through workers_staff_id_key).
 --
+-- Uploads never outlive their use. The server removes the file on every way out of a check
+-- (finished, refused or failed), on a later check, on commit and on cancel. What the server
+-- never got to (a tab closed between upload and check) is removed by a daily sweep through the
+-- Storage API (src/server/people/imports/sweep.ts, /api/cron/import-uploads): Storage refuses
+-- deletes in SQL, and deleting the row alone would leave the file behind. In the database,
+-- pg_cron cancels batches still `uploaded` after 24 hours and clears their personal data
+-- (private.expire_import_batches, hourly).
+--
 -- Personal data (CLAUDE.md rule 9): a row's NIN, bank account number and RSA PIN never sit in
 -- `raw` or `normalised`. They are stripped from the cells and stored encrypted by the server in
 -- `nin_enc`, `bank_account_enc` and `rsa_pin_enc` (src/server/crypto/pii.ts, bound to this
 -- table, column and row id). At commit the server decrypts them and encrypts them again for
 -- the new worker's row. Check constraints refuse a `raw` or `normalised` document carrying
--- those keys, whoever writes it.
+-- those keys, whoever writes it. The encrypted copies are kept only while a row may still be
+-- imported: commit clears them on the rows it imports, and cancelling (by hand or by expiry)
+-- clears them on every row of the batch.
 --
--- Audit: import_batches changes are audited by the row trigger (upload, check, commit,
--- cancel), commit adds one `people.import_committed` event, and every created worker,
--- department, client, site, project, pay rate and assignment is audited by its own trigger.
--- import_rows is working data for the review screen (up to 5,000 rows a batch, rewritten on
--- every check) and has no row trigger; applying a fix is logged as `people.import_row_fixed`
--- by the server.
+-- Writes: signed-in users read import_rows but never write it directly. Rows are written only
+-- by save_import_check, commit_import_batch and cancel_import_batch, through security definer
+-- functions in `private` that check the caller's role (owner, admin, hr) and scope every
+-- statement to the batch and organisation.
+--
+-- Audit: import_batches changes are audited by the row trigger (upload, each check, commit,
+-- cancel, expiry, upload removal), commit adds one `people.import_committed` event, and every
+-- created worker, department, client, site, project, pay rate and assignment is audited by its
+-- own trigger. import_rows is working data for the review screen (up to 5,000 rows a batch,
+-- rewritten on every check) and has no row trigger: every write to it goes through one of the
+-- functions above, each of which also updates the batch row (and so writes its audit row);
+-- applying a fix is logged as `people.import_row_fixed` by the server.
 
 -- ---------------------------------------------------------------------------
 -- 1. Types
@@ -153,14 +170,20 @@ comment on table public.import_rows is
 -- 3. Trigger functions and triggers
 -- ---------------------------------------------------------------------------
 
--- BEFORE UPDATE on import_batches: committed batches never go back, cancelled is final.
+-- BEFORE UPDATE on import_batches: committed batches never go back, cancelled is final (except
+-- for recording that the upload was removed), and a removed upload stays removed.
 create function private.import_batches_guard()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  if old.status = 'cancelled' then
+  if old.file_removed_at is not null and new.file_removed_at is distinct from old.file_removed_at then
+    raise exception 'The upload of this import was removed already.' using errcode = 'MLIM2';
+  end if;
+  if old.status = 'cancelled'
+    and (to_jsonb(new) - 'file_removed_at' - 'updated_at')
+      is distinct from (to_jsonb(old) - 'file_removed_at' - 'updated_at') then
     raise exception 'This import was cancelled. Upload the file again.' using errcode = 'MLIM2';
   end if;
   if old.status = 'committed' and new.status <> 'committed' then
@@ -203,7 +226,9 @@ create trigger import_batches_audit after insert or update or delete on public.i
 -- 4. Row-level security and grants
 -- ---------------------------------------------------------------------------
 -- Owner, admin and hr run imports (docs/PHASE_1.md 1.8). Nobody deletes: a batch is
--- cancelled, and its rows stay as the record of what was checked.
+-- cancelled, and its rows stay as the record of what was checked. import_rows is read-only
+-- for signed-in users: the functions in section 7 and 8 write it (security definer, role
+-- checked), so a row's status, worker and cells can't be set by hand through the API.
 
 alter table public.import_batches enable row level security;
 alter table public.import_rows enable row level security;
@@ -218,11 +243,6 @@ create policy import_batches_update on public.import_batches for update to authe
 
 create policy import_rows_select on public.import_rows for select to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'hr']));
-create policy import_rows_insert on public.import_rows for insert to authenticated
-  with check (private.has_role(organisation_id, array['owner', 'admin', 'hr']));
-create policy import_rows_update on public.import_rows for update to authenticated
-  using (private.has_role(organisation_id, array['owner', 'admin', 'hr']))
-  with check (private.has_role(organisation_id, array['owner', 'admin', 'hr']));
 
 revoke all on table public.import_batches from anon, authenticated;
 grant select on table public.import_batches to authenticated;
@@ -235,14 +255,6 @@ grant update (
 
 revoke all on table public.import_rows from anon, authenticated;
 grant select on table public.import_rows to authenticated;
-grant insert (
-  id, organisation_id, batch_id, row_number, raw, nin_enc, bank_account_enc, rsa_pin_enc,
-  numeric_columns, extra_values, normalised, errors, warnings, attention, fixes, status
-) on table public.import_rows to authenticated;
-grant update (
-  raw, nin_enc, bank_account_enc, rsa_pin_enc, normalised, errors, warnings, attention, fixes,
-  status, worker_id, imported_at
-) on table public.import_rows to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. Upload storage
@@ -254,7 +266,9 @@ grant update (
 --           exactly its file_path;
 --   select: the user who uploaded the object (still owner, admin or hr), so an admin, who may
 --           not see personal data, can't read someone else's upload;
---   delete: owner, admin or hr of the organisation (removal after reading).
+--   delete: owner, admin or hr of the organisation (removal after reading). The Storage API
+--           also needs select to remove an object, so a signed-in user removes only their own
+--           upload; the sweep (secret key) removes any other.
 -- No update policy: an upload is never replaced.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -352,30 +366,47 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
--- 7. Saving a check (security invoker: RLS and column grants apply to the caller)
+-- 7. Saving a check (security definer in private, role checked; invoker wrapper in public)
 -- ---------------------------------------------------------------------------
 -- Stores (or rewrites) checked rows of a batch and refreshes its counts. p_rows is an array of
 -- import_rows documents by column name (id included: personal data is encrypted for that row
 -- id before the call; bytea values are `\x` hex strings). An existing row keeps its id (a
 -- document with another id for the same row number changes nothing, so encrypted values never
--- end up under the wrong row id), and imported rows are never touched. The server sends a
--- large batch in several calls; each one refreshes the counts, so the last call leaves them
--- right. p_check carries the batch fields: columns, file_notes, summary.
-create function public.save_import_check(
+-- end up under the wrong row id), and imported rows are never touched. p_check carries the
+-- batch fields: columns, file_notes, summary, and on a first check `rows_expected`, the number
+-- of rows in the file.
+--
+-- The server sends a large batch in several calls (one transaction each); each one refreshes
+-- the counts. p_final marks the last call. A batch still `uploaded` moves to `validated` only
+-- on the last call and only when every row of the file is stored (count = rows_expected), so
+-- a check that stops part way leaves the batch `uploaded`: it is never reviewed or imported
+-- as if the rows saved so far were the whole file.
+create function private.save_import_check(
   p_organisation_id uuid,
   p_batch_id uuid,
   p_check jsonb,
-  p_rows jsonb
+  p_rows jsonb,
+  p_final boolean
 )
 returns void
 language plpgsql
 volatile
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
   v_status public.import_batch_status;
+  v_total integer;
+  v_expected integer;
+  v_validate boolean;
 begin
+  if not private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
+    raise exception 'Your role can''t import employees.' using errcode = '42501';
+  end if;
+  if p_rows is not null and jsonb_typeof(p_rows) <> 'array' then
+    raise exception 'The rows to save must be a list.' using errcode = '22023';
+  end if;
+
   select b.status into v_status
   from public.import_batches b
   where b.id = p_batch_id and b.organisation_id = p_organisation_id
@@ -411,6 +442,21 @@ begin
   where public.import_rows.status <> 'imported'
     and public.import_rows.id = excluded.id;
 
+  -- A first check is finished only when the last call finds every row of the file stored.
+  v_validate := v_status = 'uploaded' and coalesce(p_final, false);
+  if v_validate then
+    select count(*)::integer into v_total
+    from public.import_rows r
+    where r.batch_id = p_batch_id and r.organisation_id = p_organisation_id;
+    if jsonb_typeof(p_check -> 'rows_expected') = 'number' then
+      v_expected := (p_check ->> 'rows_expected')::integer;
+    end if;
+    if v_expected is null or v_expected <> v_total then
+      raise exception 'Some rows of this file weren''t saved. Check the file again.'
+        using errcode = 'MLIM4';
+    end if;
+  end if;
+
   update public.import_batches b
   set columns = coalesce(
         (select array_agg(c) from jsonb_array_elements_text(p_check -> 'columns') as c),
@@ -422,8 +468,8 @@ begin
       rows_ready = counts.ready,
       rows_held = counts.held,
       rows_imported = counts.imported,
-      validated_at = now(),
-      status = case when b.status = 'uploaded' then 'validated'::public.import_batch_status else b.status end
+      validated_at = case when b.status = 'uploaded' and not v_validate then b.validated_at else now() end,
+      status = case when v_validate then 'validated'::public.import_batch_status else b.status end
   from (
     select
       count(*)::integer as total,
@@ -437,8 +483,24 @@ begin
 end;
 $$;
 
+create function public.save_import_check(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_check jsonb,
+  p_rows jsonb,
+  p_final boolean
+)
+returns void
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.save_import_check(p_organisation_id, p_batch_id, p_check, p_rows, p_final)
+$$;
+
 -- ---------------------------------------------------------------------------
--- 8. Commit (security invoker)
+-- 8. Commit (security invoker; rows marked by a private security definer helper)
 -- ---------------------------------------------------------------------------
 -- Creates the employees of a checked batch in one transaction. The server checks the batch
 -- again against the account as it is now and sends only rows that import, managers before
@@ -466,6 +528,58 @@ $$;
 --
 -- statement_timeout: a large file (up to 5,000 rows) takes longer than the 8 seconds signed-in
 -- users get by default. PostgREST applies a function's own setting to the call.
+--
+-- Writers to a batch's rows (save, commit, cancel, expiry) all lock the batch row first, so
+-- holding that lock is enough to keep the rows still while commit runs.
+
+-- Marks the rows commit just imported, linking each to its new worker, and clears their
+-- encrypted personal data (the worker row has its own copy now). Security definer because
+-- signed-in users can't update import_rows; called only from commit_import_batch, in its
+-- transaction. Every row named must be open in this batch and its worker must exist in this
+-- organisation, or nothing is marked.
+create function private.mark_import_rows_imported(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_rows jsonb
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_sent integer;
+  v_marked integer;
+begin
+  if not private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
+    raise exception 'Your role can''t import employees.' using errcode = '42501';
+  end if;
+  select count(*)::integer into v_sent from jsonb_array_elements(p_rows);
+
+  update public.import_rows r
+  set status = 'imported',
+      worker_id = w.id,
+      imported_at = now(),
+      nin_enc = null,
+      bank_account_enc = null,
+      rsa_pin_enc = null
+  from jsonb_array_elements(p_rows) as e (item)
+  join public.workers w
+    on w.id = (e.item -> 'worker' ->> 'id')::uuid
+   and w.organisation_id = p_organisation_id
+  where r.id = (e.item ->> 'row_id')::uuid
+    and r.batch_id = p_batch_id
+    and r.organisation_id = p_organisation_id
+    and r.status <> 'imported';
+  get diagnostics v_marked = row_count;
+
+  if v_marked <> v_sent then
+    raise exception 'A row of this import wasn''t found.' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
 create function public.commit_import_batch(
   p_organisation_id uuid,
   p_batch_id uuid,
@@ -523,20 +637,16 @@ begin
     raise exception 'Check the file before importing it.' using errcode = 'MLIM2';
   end if;
 
-  -- The rows named, locked for the rest of the transaction.
+  -- The rows named (kept still by the batch lock above).
   select count(*)::integer into v_sent from jsonb_array_elements(p_rows);
   select count(*)::integer,
          count(*) filter (where r.status = 'imported')::integer,
          count(*) filter (where r.status = 'held')::integer
   into v_found, v_done, v_held
-  from (
-    select r.status
-    from public.import_rows r
-    where r.batch_id = p_batch_id
-      and r.organisation_id = p_organisation_id
-      and r.id in (select (e.item ->> 'row_id')::uuid from jsonb_array_elements(p_rows) as e (item))
-    for update
-  ) as r;
+  from public.import_rows r
+  where r.batch_id = p_batch_id
+    and r.organisation_id = p_organisation_id
+    and r.id in (select (e.item ->> 'row_id')::uuid from jsonb_array_elements(p_rows) as e (item));
 
   if v_found <> v_sent then
     raise exception 'A row of this import wasn''t found.' using errcode = 'P0002';
@@ -729,14 +839,7 @@ begin
     v_created := v_created + 1;
   end loop;
 
-  update public.import_rows r
-  set status = 'imported',
-      worker_id = (e.item -> 'worker' ->> 'id')::uuid,
-      imported_at = now()
-  from jsonb_array_elements(p_rows) as e (item)
-  where r.id = (e.item ->> 'row_id')::uuid
-    and r.batch_id = p_batch_id
-    and r.organisation_id = p_organisation_id;
+  perform private.mark_import_rows_imported(p_organisation_id, p_batch_id, p_rows);
 
   update public.import_batches b
   set status = 'committed',
@@ -782,30 +885,117 @@ begin
 end;
 $$;
 
--- Cancels a batch that has no imported rows yet. Rows stay as the record of what was checked.
-create function public.cancel_import_batch(p_organisation_id uuid, p_batch_id uuid)
+-- Cancels a batch that has no imported rows yet. Rows stay as the record of what was checked,
+-- without their encrypted personal data, which nothing will import any more. Security
+-- definer (signed-in users can't update import_rows), role checked, one batch only.
+create function private.cancel_import_batch(p_organisation_id uuid, p_batch_id uuid)
 returns void
 language plpgsql
 volatile
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
   v_id uuid;
 begin
-  update public.import_batches b
-  set status = 'cancelled',
-      cancelled_at = now()
+  if not private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
+    raise exception 'Your role can''t import employees.' using errcode = '42501';
+  end if;
+
+  select b.id into v_id
+  from public.import_batches b
   where b.id = p_batch_id
     and b.organisation_id = p_organisation_id
     and b.status in ('uploaded', 'validated')
-  returning b.id into v_id;
+  for update;
   if v_id is null then
     raise exception 'That import wasn''t found, or it has employees in it already.'
       using errcode = 'P0002';
   end if;
+
+  update public.import_rows r
+  set nin_enc = null,
+      bank_account_enc = null,
+      rsa_pin_enc = null
+  where r.batch_id = p_batch_id
+    and r.organisation_id = p_organisation_id
+    and (r.nin_enc is not null or r.bank_account_enc is not null or r.rsa_pin_enc is not null);
+
+  update public.import_batches b
+  set status = 'cancelled',
+      cancelled_at = now()
+  where b.id = p_batch_id
+    and b.organisation_id = p_organisation_id;
 end;
 $$;
+
+create function public.cancel_import_batch(p_organisation_id uuid, p_batch_id uuid)
+returns void
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.cancel_import_batch(p_organisation_id, p_batch_id)
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 8b. Expiry (pg_cron)
+-- ---------------------------------------------------------------------------
+-- A batch still `uploaded` a day after it was created was never checked to the end (the tab
+-- closed, or the check failed): cancel it and clear any personal data its partly saved rows
+-- hold. The upload itself is removed through the Storage API by the sweep
+-- (src/server/people/imports/sweep.ts), which also picks up these batches: Storage refuses
+-- deletes in SQL, and removing only the storage.objects row would leave the file behind.
+-- Runs as the job owner from pg_cron; not callable by signed-in users. Returns the number of
+-- batches cancelled.
+create function private.expire_import_batches(p_older_than interval default interval '24 hours')
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_ids uuid[];
+begin
+  select array_agg(b.id) into v_ids
+  from (
+    select b.id
+    from public.import_batches b
+    where b.status = 'uploaded'
+      and b.created_at < now() - p_older_than
+    order by b.created_at
+    limit 1000
+    for update skip locked
+  ) as b;
+  if v_ids is null then
+    return 0;
+  end if;
+
+  update public.import_rows r
+  set nin_enc = null,
+      bank_account_enc = null,
+      rsa_pin_enc = null
+  where r.batch_id = any (v_ids)
+    and (r.nin_enc is not null or r.bank_account_enc is not null or r.rsa_pin_enc is not null);
+
+  update public.import_batches b
+  set status = 'cancelled',
+      cancelled_at = now()
+  where b.id = any (v_ids);
+
+  return cardinality(v_ids);
+end;
+$$;
+
+create extension if not exists pg_cron;
+
+select cron.schedule(
+  'expire-import-batches',
+  '17 * * * *',
+  'select private.expire_import_batches()'
+);
 
 -- ---------------------------------------------------------------------------
 -- 9. Function grants
@@ -818,11 +1008,21 @@ revoke all on function private.import_manager_directory(uuid) from public, anon;
 grant execute on function private.import_file_org_id(text) to authenticated, service_role;
 grant execute on function private.import_manager_directory(uuid) to authenticated, service_role;
 
+-- The private writers run only through the public wrappers (the private schema isn't served
+-- by the API); each checks the caller's role itself.
+revoke all on function private.save_import_check(uuid, uuid, jsonb, jsonb, boolean) from public, anon;
+revoke all on function private.mark_import_rows_imported(uuid, uuid, jsonb) from public, anon;
+revoke all on function private.cancel_import_batch(uuid, uuid) from public, anon;
+grant execute on function private.save_import_check(uuid, uuid, jsonb, jsonb, boolean) to authenticated;
+grant execute on function private.mark_import_rows_imported(uuid, uuid, jsonb) to authenticated;
+grant execute on function private.cancel_import_batch(uuid, uuid) to authenticated;
+revoke all on function private.expire_import_batches(interval) from public, anon, authenticated;
+
 revoke all on function public.list_import_managers(uuid) from public, anon;
-revoke all on function public.save_import_check(uuid, uuid, jsonb, jsonb) from public, anon;
+revoke all on function public.save_import_check(uuid, uuid, jsonb, jsonb, boolean) from public, anon;
 revoke all on function public.commit_import_batch(uuid, uuid, jsonb) from public, anon;
 revoke all on function public.cancel_import_batch(uuid, uuid) from public, anon;
 grant execute on function public.list_import_managers(uuid) to authenticated, service_role;
-grant execute on function public.save_import_check(uuid, uuid, jsonb, jsonb) to authenticated, service_role;
+grant execute on function public.save_import_check(uuid, uuid, jsonb, jsonb, boolean) to authenticated, service_role;
 grant execute on function public.commit_import_batch(uuid, uuid, jsonb) to authenticated, service_role;
 grant execute on function public.cancel_import_batch(uuid, uuid) to authenticated, service_role;

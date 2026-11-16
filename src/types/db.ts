@@ -408,7 +408,7 @@ isOneToOne: false
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
                            },
 "save_import_check":
-{ Args: { "p_batch_id": string,"p_check": Json,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
+{ Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            }
           }
           Enums: {

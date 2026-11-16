@@ -9,6 +9,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { sweepImportUploads } from "@/server/people/imports/sweep";
 import type { Database, Json } from "@/types/db";
 
 import {
@@ -65,10 +66,15 @@ function rowDoc(rowNumber: number, fields: Record<string, Json> = {}) {
   };
 }
 
+/**
+ * One save_import_check call. By default it is the whole check of a file of `rows.length`
+ * rows (one chunk, the last); `final` and `expected` describe one chunk of a larger file.
+ */
 async function saveRows(
   batchId: string,
   rows: Record<string, Json>[],
   by: Client = people.hr.client,
+  { final = true, expected = rows.length }: { final?: boolean; expected?: number } = {},
 ) {
   return by.rpc("save_import_check", {
     p_organisation_id: owner.orgId,
@@ -76,11 +82,39 @@ async function saveRows(
     p_check: {
       columns: ["employee_id", "first_name"],
       file_notes: [],
-      summary: { rows: rows.length },
+      summary: { rows: expected },
+      rows_expected: expected,
     },
     p_rows: rows,
+    p_final: final,
   });
 }
+
+async function batchState(id: string) {
+  const { rows } = await db.query<{
+    status: string;
+    rows_total: number;
+    rows_held: number;
+    file_removed_at: Date | null;
+  }>(
+    "select status, rows_total, rows_held, file_removed_at from public.import_batches where id = $1",
+    [id],
+  );
+  return rows[0];
+}
+
+/** How many rows of a batch still hold any encrypted personal data. */
+async function rowsWithPersonalData(batchId: string) {
+  const { rows } = await db.query<{ n: number }>(
+    `select count(*)::int as n from public.import_rows
+     where batch_id = $1
+       and (nin_enc is not null or bank_account_enc is not null or rsa_pin_enc is not null)`,
+    [batchId],
+  );
+  return rows[0]?.n ?? 0;
+}
+
+const withPersonalData = () => ({ nin_enc: hex(), bank_account_enc: hex(), rsa_pin_enc: hex() });
 
 let staffCounter = 0;
 function workerDoc(fields: Record<string, Json> = {}) {
@@ -595,8 +629,9 @@ describe("commit", () => {
 describe("batch lifecycle", () => {
   it("freezes imported rows", async () => {
     const { id } = await createBatch();
-    const a = rowDoc(2);
-    expect((await saveRows(id, [a])).error).toBeNull();
+    const a = rowDoc(2, withPersonalData());
+    const held = rowDoc(3, { ...withPersonalData(), status: "held" });
+    expect((await saveRows(id, [a, held])).error).toBeNull();
     const commit = await people.hr.client.rpc("commit_import_batch", {
       p_organisation_id: owner.orgId,
       p_batch_id: id,
@@ -605,21 +640,44 @@ describe("batch lifecycle", () => {
       ],
     });
     expect(commit.error).toBeNull();
+
+    // The imported row no longer holds personal data (the worker has its own copy); the held
+    // row keeps it, to be fixed and imported later.
+    const { rows } = await db.query<{ id: string; status: string; enc: number }>(
+      `select id, status,
+              num_nonnulls(nin_enc, bank_account_enc, rsa_pin_enc)::int as enc
+       from public.import_rows where batch_id = $1 order by row_number`,
+      [id],
+    );
+    expect(rows).toEqual([
+      { id: a.id, status: "imported", enc: 0 },
+      { id: held.id, status: "held", enc: 3 },
+    ]);
+
+    // Nobody changes an imported row: not through the API, and not even the table owner.
     const { error } = await people.hr.client
       .from("import_rows")
       .update({ status: "held" })
       .eq("id", a.id);
-    expect(error?.code).toBe("MLIM3");
+    expect(error?.code).toBe(PERMISSION_DENIED);
+    await expect(
+      db.query("update public.import_rows set status = 'held' where id = $1", [a.id]),
+    ).rejects.toMatchObject({ code: "MLIM3" });
   });
 
-  it("cancels a checked batch, and then refuses changes to it", async () => {
+  it("cancels a checked batch, clears its personal data, and then refuses changes to it", async () => {
     const { id } = await createBatch();
-    expect((await saveRows(id, [rowDoc(2)])).error).toBeNull();
+    expect(
+      (await saveRows(id, [rowDoc(2, withPersonalData()), rowDoc(3, withPersonalData())])).error,
+    ).toBeNull();
+    expect(await rowsWithPersonalData(id)).toBe(2);
     const cancel = await people.hr.client.rpc("cancel_import_batch", {
       p_organisation_id: owner.orgId,
       p_batch_id: id,
     });
     expect(cancel.error).toBeNull();
+    expect(await rowsWithPersonalData(id)).toBe(0);
+
     const save = await saveRows(id, [rowDoc(3)]);
     expect(save.error?.code).toBe("MLIM2");
     const commit = await people.hr.client.rpc("commit_import_batch", {
@@ -628,6 +686,35 @@ describe("batch lifecycle", () => {
       p_rows: [],
     });
     expect(commit.error?.code).toBe("MLIM2");
+    const counts = await people.hr.client
+      .from("import_batches")
+      .update({ rows_total: 0 })
+      .eq("id", id);
+    expect(counts.error?.code).toBe("MLIM2");
+
+    // Recording that the upload was removed is the one change a cancelled batch takes, once.
+    const removed = await people.hr.client
+      .from("import_batches")
+      .update({ file_removed_at: new Date().toISOString() })
+      .eq("id", id);
+    expect(removed.error).toBeNull();
+    const again = await people.hr.client
+      .from("import_batches")
+      .update({ file_removed_at: new Date().toISOString() })
+      .eq("id", id);
+    expect(again.error?.code).toBe("MLIM2");
+  });
+
+  it("lets only owner, admin and hr cancel", async () => {
+    const { id } = await createBatch();
+    for (const by of [people.finance.client, people.ops.client, other.client]) {
+      const { error } = await by.rpc("cancel_import_batch", {
+        p_organisation_id: owner.orgId,
+        p_batch_id: id,
+      });
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    expect((await batchState(id))?.status).toBe("uploaded");
   });
 
   it("won't cancel a batch that has employees in it", async () => {
@@ -655,5 +742,207 @@ describe("batch lifecycle", () => {
       .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
       .eq("id", id);
     expect(direct.error?.code).toBe("MLIM2");
+  });
+});
+
+describe("writing import rows", () => {
+  it("refuses direct inserts and updates, even for hr", async () => {
+    const { id } = await createBatch();
+    const a = rowDoc(2);
+    expect((await saveRows(id, [a])).error).toBeNull();
+
+    const insert = await people.hr.client.from("import_rows").insert({
+      organisation_id: owner.orgId,
+      batch_id: id,
+      row_number: 3,
+      raw: { first_name: "Typed" },
+      status: "ready",
+    });
+    expect(insert.error?.code).toBe(PERMISSION_DENIED);
+
+    const update = await people.hr.client
+      .from("import_rows")
+      .update({ status: "imported", imported_at: new Date().toISOString() })
+      .eq("id", a.id);
+    expect(update.error?.code).toBe(PERMISSION_DENIED);
+    const raw = await people.hr.client
+      .from("import_rows")
+      .update({ raw: { first_name: "Changed" } })
+      .eq("id", a.id);
+    expect(raw.error?.code).toBe(PERMISSION_DENIED);
+
+    const { rows } = await db.query<{ status: string; raw: Json }>(
+      "select status, raw from public.import_rows where id = $1",
+      [a.id],
+    );
+    expect(rows).toEqual([{ status: "ready", raw: a.raw }]);
+  });
+
+  it("lets only owner, admin and hr save a check", async () => {
+    const { id } = await createBatch();
+    for (const by of [people.finance.client, people.ops.client, other.client]) {
+      const { error } = await saveRows(id, [rowDoc(2)], by);
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    expect(await batchState(id)).toMatchObject({ status: "uploaded", rows_total: 0 });
+  });
+});
+
+describe("a check saved in chunks", () => {
+  it("stays uploaded until the last chunk finds every row stored, and a re-run stores them all", async () => {
+    const { id } = await createBatch();
+    // A file of 4 rows (2 to 5), saved 2 at a time.
+    const r2 = rowDoc(2, withPersonalData());
+    const r3 = rowDoc(3, withPersonalData());
+    const r4 = rowDoc(4, withPersonalData());
+    const r5 = rowDoc(5, withPersonalData());
+    const chunk = { final: false, expected: 4 };
+    const last = { final: true, expected: 4 };
+
+    expect((await saveRows(id, [r2, r3], undefined, chunk)).error).toBeNull();
+    expect(await batchState(id)).toMatchObject({ status: "uploaded", rows_total: 2 });
+
+    // The second chunk never arrives whole: a last call that leaves rows missing is refused
+    // and rolled back, and the batch is still `uploaded`.
+    const short = await saveRows(id, [r4], undefined, last);
+    expect(short.error?.code).toBe("MLIM4");
+    expect(await batchState(id)).toMatchObject({ status: "uploaded", rows_total: 2 });
+
+    // Nothing can be imported from it meanwhile.
+    const commit = await people.hr.client.rpc("commit_import_batch", {
+      p_organisation_id: owner.orgId,
+      p_batch_id: id,
+      p_rows: [],
+    });
+    expect(commit.error?.code).toBe("MLIM2");
+
+    // Checking again from the file rewrites the rows already stored (same ids) and stores the
+    // rest; only then is the batch validated.
+    expect(
+      (await saveRows(id, [r2, { ...r3, status: "held" }], undefined, chunk)).error,
+    ).toBeNull();
+    expect((await saveRows(id, [r4, r5], undefined, last)).error).toBeNull();
+    expect(await batchState(id)).toMatchObject({
+      status: "validated",
+      rows_total: 4,
+      rows_held: 1,
+    });
+  });
+
+  it("refuses a last chunk that doesn't say how many rows the file has", async () => {
+    const { id } = await createBatch();
+    const { error } = await people.hr.client.rpc("save_import_check", {
+      p_organisation_id: owner.orgId,
+      p_batch_id: id,
+      p_check: { columns: ["first_name"], file_notes: [] },
+      p_rows: [rowDoc(2)],
+      p_final: true,
+    });
+    expect(error?.code).toBe("MLIM4");
+    expect(await batchState(id)).toMatchObject({ status: "uploaded", rows_total: 0 });
+  });
+});
+
+describe("expiry", () => {
+  it("is scheduled hourly with pg_cron", async () => {
+    const { rows } = await db.query<{ schedule: string; command: string; active: boolean }>(
+      "select schedule, command, active from cron.job where jobname = 'expire-import-batches'",
+    );
+    expect(rows).toEqual([
+      { schedule: "17 * * * *", command: "select private.expire_import_batches()", active: true },
+    ]);
+  });
+
+  it("cancels batches still uploaded after a day and clears their personal data", async () => {
+    const stale = await createBatch();
+    expect(
+      (
+        await saveRows(stale.id, [rowDoc(2, withPersonalData())], undefined, {
+          final: false,
+          expected: 3,
+        })
+      ).error,
+    ).toBeNull();
+    const fresh = await createBatch();
+    const checked = await createBatch();
+    expect((await saveRows(checked.id, [rowDoc(2, withPersonalData())])).error).toBeNull();
+    await db.query(
+      "update public.import_batches set created_at = now() - interval '25 hours' where id = any($1)",
+      [[stale.id, checked.id]],
+    );
+
+    const { rows } = await db.query<{ n: number }>("select private.expire_import_batches() as n");
+    expect(rows[0]?.n).toBeGreaterThanOrEqual(1);
+
+    expect((await batchState(stale.id))?.status).toBe("cancelled");
+    expect(await rowsWithPersonalData(stale.id)).toBe(0);
+    expect((await batchState(fresh.id))?.status).toBe("uploaded");
+    expect((await batchState(checked.id))?.status).toBe("validated");
+    expect(await rowsWithPersonalData(checked.id)).toBe(1);
+  });
+
+  it("can't be run by signed-in users", async () => {
+    await db.query("begin");
+    try {
+      await db.query("set local role authenticated");
+      await expect(db.query("select private.expire_import_batches()")).rejects.toMatchObject({
+        code: PERMISSION_DENIED,
+      });
+    } finally {
+      await db.query("rollback");
+    }
+  });
+});
+
+describe("upload sweep", () => {
+  const csv = () => new Blob(["employee_id,first_name\nAFS-1,Ada\n"], { type: "text/csv" });
+
+  async function uploaded(by: Client = people.hr.client) {
+    const batch = await createBatch(by);
+    expect(batch.error).toBeNull();
+    const { error } = await by.storage
+      .from("imports")
+      .upload(batch.path, csv(), { contentType: "text/csv" });
+    expect(error).toBeNull();
+    return batch;
+  }
+
+  async function stored(path: string) {
+    const { data } = await admin.storage.from("imports").download(path);
+    return data !== null;
+  }
+
+  it("removes uploads left behind by checked, abandoned and cancelled batches", async () => {
+    // Checked, but the server's removal never happened.
+    const checked = await uploaded();
+    expect((await saveRows(checked.id, [rowDoc(2)])).error).toBeNull();
+    // Uploaded two hours ago and never checked (the tab closed).
+    const abandoned = await uploaded();
+    await db.query(
+      "update public.import_batches set created_at = now() - interval '2 hours' where id = $1",
+      [abandoned.id],
+    );
+    // Cancelled by someone who can't read the uploader's file.
+    const cancelled = await uploaded();
+    expect(
+      (
+        await owner.client.rpc("cancel_import_batch", {
+          p_organisation_id: owner.orgId,
+          p_batch_id: cancelled.id,
+        })
+      ).error,
+    ).toBeNull();
+    // Being uploaded and checked right now.
+    const current = await uploaded();
+
+    const result = await sweepImportUploads(admin);
+    expect(result.removed).toBeGreaterThanOrEqual(3);
+
+    for (const batch of [checked, abandoned, cancelled]) {
+      expect(await stored(batch.path)).toBe(false);
+      expect((await batchState(batch.id))?.file_removed_at).not.toBeNull();
+    }
+    expect(await stored(current.path)).toBe(true);
+    expect((await batchState(current.id))?.file_removed_at).toBeNull();
   });
 });

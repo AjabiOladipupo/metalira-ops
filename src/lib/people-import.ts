@@ -2,6 +2,9 @@
  * Shared by the people import screens (slice 1.8) and their Server Actions. Browser-safe.
  */
 
+/** Private Storage bucket for uploads, at {organisation_id}/{batch_id}.{csv,xlsx}. */
+export const IMPORTS_BUCKET = "imports";
+
 /** The two places the import lives: its own page, and step 5 of company setup. */
 export const IMPORT_PATHS = ["/app/people/import", "/app/setup/employees"] as const;
 
