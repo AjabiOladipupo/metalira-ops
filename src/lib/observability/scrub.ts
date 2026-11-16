@@ -17,8 +17,10 @@ const SENSITIVE_HEADERS = new Set([
   "apikey",
   "x-debug-token",
   "x-api-key",
+  "monnify-signature",
+  // Webhook signatures and shared secrets from any provider, including a stale Flutterwave
+  // dashboard still posting here; the pattern below catches `*-signature` and `*-hash` too.
   "verif-hash",
-  "flutterwave-signature",
   // Client IP and location. Location is collected only with recorded consent (rule 9).
   "forwarded",
   "x-real-ip",
@@ -28,8 +30,11 @@ const SENSITIVE_HEADERS = new Set([
   "cf-ipcountry",
 ]);
 
-/** Header name patterns that carry client IP or location: `*-forwarded-for`, `x-vercel-ip-*`. */
-const SENSITIVE_HEADER_PATTERN = /(forwarded-for$|^x-vercel-ip-|^x-geo-)/;
+/**
+ * Header name patterns that carry client IP or location (`*-forwarded-for`, `x-vercel-ip-*`) or a
+ * webhook signature or shared secret (`*-signature`, `*-hash`).
+ */
+const SENSITIVE_HEADER_PATTERN = /(forwarded-for$|^x-vercel-ip-|^x-geo-|(^|-)(signature|hash)$)/;
 
 /** Key parts (snake_case after splitting camelCase) that mark a value as sensitive. */
 const SENSITIVE_KEY =

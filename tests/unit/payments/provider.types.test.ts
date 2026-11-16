@@ -3,10 +3,8 @@ import type { Kobo } from "@/lib/money";
 import {
   getPaymentProvider,
   type CreatePaymentLinkInput,
-  type CreateVirtualAccountInput,
   type PaymentProvider,
   type PaymentProviderOptions,
-  type TransferItem,
   type VerifiedTransaction,
   type WebhookEvent,
 } from "@/lib/payments";
@@ -14,21 +12,24 @@ import {
 describe("payment provider types", () => {
   it("keeps every amount as bigint kobo, never number", () => {
     expectTypeOf<VerifiedTransaction["amountKobo"]>().toEqualTypeOf<Kobo>();
-    expectTypeOf<VerifiedTransaction["chargedAmountKobo"]>().toEqualTypeOf<bigint>();
-    expectTypeOf<TransferItem["amountKobo"]>().toEqualTypeOf<bigint>();
+    expectTypeOf<VerifiedTransaction["paidAmountKobo"]>().toEqualTypeOf<bigint>();
     expectTypeOf<CreatePaymentLinkInput["amountKobo"]>().toEqualTypeOf<bigint>();
-    expectTypeOf<CreateVirtualAccountInput["amountKobo"]>().toEqualTypeOf<bigint | undefined>();
-    expectTypeOf<TransferItem["amountKobo"]>().not.toEqualTypeOf<number>();
+    expectTypeOf<CreatePaymentLinkInput["amountKobo"]>().not.toEqualTypeOf<number>();
   });
 
-  it("builds a provider from one organisation's credentials and webhook scheme", () => {
-    const provider = getPaymentProvider(
-      { publicKey: "pk", secretKey: "sk", encryptionKey: "enc", webhookSecretHash: "hash" },
-      { webhookScheme: "hmac-sha256" },
-    );
+  it("builds the provider from Metalira's own credentials", () => {
+    const provider = getPaymentProvider({ apiKey: "ak", secretKey: "sk", contractCode: "cc" });
     expectTypeOf(provider).toEqualTypeOf<PaymentProvider>();
     expect(typeof provider.verifyWebhook).toBe("function");
-    expectTypeOf(getPaymentProvider).parameter(1).toEqualTypeOf<PaymentProviderOptions>();
+    expect(typeof provider.isTrustedWebhookSource).toBe("function");
+    expectTypeOf(getPaymentProvider)
+      .parameter(1)
+      .toEqualTypeOf<PaymentProviderOptions | undefined>();
+  });
+
+  it("has no payout methods: customers pay staff from their own bank (rule 6)", () => {
+    expectTypeOf<PaymentProvider>().not.toHaveProperty("createBulkTransfer");
+    expectTypeOf<PaymentProvider>().not.toHaveProperty("getBulkTransfer");
   });
 
   it("keys money idempotency on the transaction, not the webhook delivery", () => {

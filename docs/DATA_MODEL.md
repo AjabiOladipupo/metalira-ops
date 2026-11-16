@@ -24,7 +24,9 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 ## Clients and contracts (Phase 2)
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| clients | name, rc_number, tin, billing_terms_days, wht_rate_bps, provider_virtual_account (Flutterwave) | |
+| organisation_bank_accounts | bank_name, account_name, bank_account_enc, bank_account_last4, is_default, status | The company's own collection account, shown on invoices. Changes need a second approver (rule 10). Phase 2 |
+| clients | name, rc_number, tin, billing_terms_days | |
+| client_wht_rates | client_id, rate_bps, effective_from, effective_to | Dated (rule 3); the rate valid on the invoice date applies. WHT base (subtotal or total) is a RULES_NIGERIA gap |
 | client_contacts | client_id, name, email, role (billing, approver, ops) | |
 | sites | client_id, name, address, geofence geography(Polygon), radius_m, checkpoints jsonb | PostGIS |
 | contracts | client_id, type (manned_post, per_visit, fixed_monthly, per_job, milestone, cost_plus), start, end, sla jsonb, status | |
@@ -50,19 +52,21 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 | tax_rule_sets | name, effective_from, effective_to, rules jsonb | Dated; see RULES_NIGERIA.md |
 | payroll_runs | period, status (draft, review, approved, released), prepared_by, approved_by | Two-person rule |
 | payslips | run_id, worker_id, gross, paye, pension_employee, pension_employer, nhf, other_deductions, net, trace jsonb | Posted = immutable |
-| payout_batches / payout_items | run_id, provider, reference; payslip_id, amount, status | Flutterwave bulk transfer or bank file |
+| payout_batches / payout_items | run_id, bank_format, file_path, file_sha256, item_count, total_kobo, status (active, voided); payslip_id, bank account snapshot, amount, status | Bank file the company uploads to its own bank; Metalira never moves the money. One active batch per run: regenerating voids the previous one. Control totals shown to the second approver. Item status set by matching statement debits |
 | statutory_remittances | run_id, kind (paye, pension, nhf, nsitf, itf), amount, due_date, paid_at, evidence_path | |
 
 ## Billing (Phase 6)
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| invoices | client_id, contract_id, number, issue_date, due_date, subtotal, vat, total, status (draft, sent, part_paid, paid, credited) | Posted = immutable |
+| invoices | client_id, contract_id, organisation_bank_account_id, number, issue_date, due_date, subtotal, vat, total, status (draft, sent, part_paid, paid, credited) | Posted = immutable |
 | invoice_lines | invoice_id, work_unit_id null, description, qty, unit_rate, amount | |
 | credit_notes | invoice_id, amount, reason | |
-| payments | client_id, provider, transaction_reference unique, amount, paid_at, raw jsonb | Webhook idempotency |
-| payment_allocations | payment_id, invoice_id, amount, wht_amount | |
-| receipts | payment_id, number, pdf_path | |
-| webhook_events | provider, event_id unique, payload jsonb, processed_at | Raw log |
+| bank_statement_imports | organisation_bank_account_id, file_path, period_from, period_to, status | Uploaded statement (CSV/XLSX), column map per bank format. Amounts parsed by a dedicated strict statement parser (commas, brackets, DR/CR columns), never `parseNairaToKobo` |
+| bank_statement_lines | import_id, organisation_bank_account_id, value_date, narration, direction (credit, debit), amount, balance, bank_reference, occurrence, line_hash, status (new, suspected_duplicate, matched, ignored) | Insert-only. Unique (organisation_bank_account_id, line_hash). The hash uses value_date, signed amount, running balance, bank_reference and an occurrence index for identical rows in one file, so two equal same-day credits both survive. Lines from an overlapping period that may repeat an earlier import go to review, never silently dropped |
+| payments | client_id, statement_line_id unique, amount, paid_at | One payment per matched credit line; `amount` must equal the line's amount and the line must be a credit |
+| client_credits | payment_id, amount, status | Money left after an overpayment or partial match, until applied or refunded |
+| payment_allocations | payment_id, invoice_id, amount, wht_amount, reverses_allocation_id null, reason, actor | Written only by one server function that locks the payment and invoice rows and enforces: allocations ≤ payment amount, and allocations + WHT per invoice ≤ invoice total − credit notes. A wrong match is undone by a reversal row (negative amounts) with reason and actor, never by editing |
+| receipts | payment_id, number, pdf_path, voided_by_id null | Posted. A receipt for a reversed allocation is voided by a cancellation row, never edited. Only an exact match (amount equals the invoice total and the invoice number is in the narration) receipts automatically; other matches wait in the suggested queue |
 
 ## Costs and revenue (Phase 7)
 | Table | Key columns | Notes |
@@ -99,3 +103,12 @@ Rules:
 | sub_jobs | phase_id, title, owner_worker_id, deadline, status, pay_ot_multiplier_bps null | Overrides the project multiplier for a special task |
 | kpis | project_id, name, target, unit, actual | |
 | reviews | phase_id, held_at, attendees, outcome, approved_by | Approval creates a milestone Work Unit |
+
+## Metalira subscription billing (Phase 9)
+Metalira's own income from subscribing organisations, collected through Metalira's Monnify account. No customer-to-client money is recorded here. These tables carry the subscriber's `organisation_id`; owners read their own rows, writes are server-only. Phase 9 designs them in full (allocations across invoices, partial payments, reversals and credit notes, VAT if it applies).
+
+| Table | Key columns | Notes |
+| --- | --- | --- |
+| subscription_invoices | number, period_from, period_to, plan, subtotal, vat, total, status (draft, issued, paid, part_paid, credited) | `organisation_id` is the subscriber. Posted = immutable |
+| subscription_payments | subscription_invoice_id, provider, transaction_reference (unique with provider), amount, paid_at, audit_payload jsonb | Webhook idempotency on `transaction_reference`. `audit_payload` holds allow-listed fields only |
+| provider_webhook_events | provider, delivery_key (unique with provider), received_at, processed_at, audit_payload jsonb | Insert-only log, stored before the organisation is known. Never the raw body |
