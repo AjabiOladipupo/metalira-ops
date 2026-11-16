@@ -559,9 +559,7 @@ export async function loadWorkerProfile(
     loadCurrentAssignments(supabase, organisationId, today, workerId),
     loadNames(supabase, "sites", organisationId),
     loadNames(supabase, "projects", organisationId),
-    viewer === "self"
-      ? Promise.resolve([])
-      : listPayRates(supabase, organisationId, workerId),
+    viewer === "self" ? Promise.resolve([]) : listPayRates(supabase, organisationId, workerId),
   ]);
 
   const siteIds = unique(assignments.map((a) => a.site_id));
@@ -621,7 +619,10 @@ export async function loadWorkerProfile(
  * is set. A manager-app line manager with no profile name comes back as null too; the screen
  * still knows one is set from the worker row.
  */
-async function ownLineManagerName(supabase: Client, organisationId: string): Promise<string | null> {
+async function ownLineManagerName(
+  supabase: Client,
+  organisationId: string,
+): Promise<string | null> {
   const { data, error } = await supabase.rpc("my_line_manager", {
     p_organisation_id: organisationId,
   });

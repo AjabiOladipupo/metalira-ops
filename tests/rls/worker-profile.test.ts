@@ -241,7 +241,9 @@ describe("worker change requests", () => {
       .select("action, actor_id")
       .eq("entity", "worker_change_requests")
       .eq("entity_id", data!.id);
-    expect(audit.data).toEqual([{ action: "worker_change_requests.insert", actor_id: login.user!.id }]);
+    expect(audit.data).toEqual([
+      { action: "worker_change_requests.insert", actor_id: login.user!.id },
+    ]);
   });
 
   it("can't be raised for a colleague, or by HR, finance or a line manager", async () => {
@@ -276,7 +278,12 @@ describe("worker change requests", () => {
       const read = await client.from("worker_change_requests").select("id").eq("id", id);
       expect(read.data).toEqual([{ id }]);
     }
-    for (const client of [staff.finance.client, staff.ops.client, staff.lineManager.client, colleagueClient]) {
+    for (const client of [
+      staff.finance.client,
+      staff.ops.client,
+      staff.lineManager.client,
+      colleagueClient,
+    ]) {
       const read = await client.from("worker_change_requests").select("id").eq("id", id);
       expect(read.data).toEqual([]);
     }
@@ -325,9 +332,16 @@ describe("worker change requests", () => {
       .eq("id", id);
     expect(again.error?.code).toBe("MLCR4");
 
-    const removed = await owner.client.from("worker_change_requests").delete().eq("id", id).select();
+    const removed = await owner.client
+      .from("worker_change_requests")
+      .delete()
+      .eq("id", id)
+      .select();
     expect(removed.data ?? []).toEqual([]);
-    const { rowCount } = await db.query("select 1 from public.worker_change_requests where id = $1", [id]);
+    const { rowCount } = await db.query(
+      "select 1 from public.worker_change_requests where id = $1",
+      [id],
+    );
     expect(rowCount).toBe(1);
   });
 });
@@ -373,4 +387,3 @@ describe("a bank change from the worker's phone", () => {
     expect(seen.data).toEqual([]);
   });
 });
-

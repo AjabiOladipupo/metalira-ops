@@ -112,9 +112,7 @@ function Requests({
               {copy.bankRequest(change.bankName, maskAccount(change.last4))}
             </span>
             <StatusLine tone={BANK_TONE[change.status]} text={bankStatusText(change)} />
-            <span className="text-xs text-fg-muted">
-              {copy.sentOn(sentDate(change.createdAt))}
-            </span>
+            <span className="text-xs text-fg-muted">{copy.sentOn(sentDate(change.createdAt))}</span>
           </li>
         ))}
         {requests.map((request) => (

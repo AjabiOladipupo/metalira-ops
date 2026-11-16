@@ -77,12 +77,7 @@ export const ownBankChangeSchema = z.object({
     .pipe(z.string().regex(/^\d{10}$/, copy.accountNumberInvalid)),
   reason: z.preprocess(
     (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-    z
-      .string()
-      .trim()
-      .max(500, copy.tooLong(500))
-      .regex(NO_CONTROL, copy.plainText)
-      .optional(),
+    z.string().trim().max(500, copy.tooLong(500)).regex(NO_CONTROL, copy.plainText).optional(),
   ),
 });
 
@@ -149,9 +144,10 @@ export async function runOwnBankChange(ctx: OwnContext, input: unknown): Promise
     data.bankAccountNumber,
     bankAccountContext(ctx.organisationId, ctx.workerId),
   );
-  if (!sealed.last4) throw new MutationError("invalid", "", {
-    bankAccountNumber: copy.accountNumberInvalid,
-  });
+  if (!sealed.last4)
+    throw new MutationError("invalid", "", {
+      bankAccountNumber: copy.accountNumberInvalid,
+    });
   const { data: row, error } = await ctx.supabase
     .from("bank_detail_changes")
     .insert({

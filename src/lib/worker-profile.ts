@@ -72,10 +72,7 @@ export function myProfileSections(p: MyProfileInput): ProfileSection[] {
         { label: copy.project, value: list(p.projectNames), testId: "me-project" },
         {
           label: copy.started,
-          value: copy.startedValue(
-            formatDate(p.startDate),
-            copy.employmentTypes[p.employmentType],
-          ),
+          value: copy.startedValue(formatDate(p.startDate), copy.employmentTypes[p.employmentType]),
           testId: "me-started",
         },
       ],
@@ -88,8 +85,7 @@ export function myProfileSections(p: MyProfileInput): ProfileSection[] {
           label: copy.bank,
           // "GTBank ••••7712", as on the board.
           value:
-            [p.bankName?.trim(), maskAccount(p.bankAccountLast4)].filter(Boolean).join(" ") ||
-            null,
+            [p.bankName?.trim(), maskAccount(p.bankAccountLast4)].filter(Boolean).join(" ") || null,
           testId: "me-bank",
         },
         {

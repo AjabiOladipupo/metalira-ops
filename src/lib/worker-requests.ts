@@ -7,8 +7,7 @@ import { Constants, type Database } from "@/types/db";
  */
 
 export type WorkerChangeTopic = Database["public"]["Enums"]["worker_change_topic"];
-export type WorkerChangeRequestStatus =
-  Database["public"]["Enums"]["worker_change_request_status"];
+export type WorkerChangeRequestStatus = Database["public"]["Enums"]["worker_change_request_status"];
 
 /** The topics a free-text request can be about, in the order the form lists them. */
 export const WORKER_CHANGE_TOPICS: readonly WorkerChangeTopic[] =

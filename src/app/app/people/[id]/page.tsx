@@ -443,9 +443,7 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
       ctx.role,
       canSeePii(ctx.role, "bank_account"),
     ),
-    ctx.canEdit
-      ? loadChangeRequests(ctx.supabase, ctx.organisationId, id)
-      : Promise.resolve([]),
+    ctx.canEdit ? loadChangeRequests(ctx.supabase, ctx.organisationId, id) : Promise.resolve([]),
   ]);
   return (
     <Profile

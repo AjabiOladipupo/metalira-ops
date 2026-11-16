@@ -136,7 +136,8 @@ describe("a worker's own bank change", () => {
       data: null,
       error: {
         code: "23505",
-        message: 'duplicate key value violates unique constraint "bank_detail_changes_one_open_key"',
+        message:
+          'duplicate key value violates unique constraint "bank_detail_changes_one_open_key"',
       },
     });
     const error = await refusal(runOwnBankChange(ctx(fake.client), input));
