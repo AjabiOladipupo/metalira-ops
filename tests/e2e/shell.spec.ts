@@ -1,6 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { NAV_ITEMS } from "../../src/lib/nav";
+import { NEEDS_SUPABASE, supabaseReady } from "./helpers/auth";
+import { expect, test } from "./helpers/signed-in";
+
+// /app needs a session now: every check here runs as a signed-in owner, who sees every page.
+test.skip(!supabaseReady, NEEDS_SUPABASE);
 
 async function expectNoHorizontalScroll(page: Page) {
   const overflow = await page.evaluate(
