@@ -140,6 +140,8 @@ export interface CreatedWorker {
   staffId: string;
   staffIdGenerated: boolean;
   supervisorClockIn: boolean;
+  /** Bank details were given: they wait as a bank-detail change for a second approver. */
+  bankDetailsPending: boolean;
 }
 
 /** Generated staff IDs are retried this many times when another save takes the same ID. */
@@ -198,10 +200,20 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
       const staffIdGenerated = data.staffId === null;
       const staffId = data.staffId ?? nextStaffId(await loadStaffIds(supabase, organisationId));
       const { error } = await supabase.rpc("create_worker", {
-        p_worker: { ...worker, staff_id: staffId },
+        // Bank details entered here wait for a second approver (slice 1.7): the database
+        // raises them as a pending bank-detail change instead of writing them to the worker.
+        p_worker: { ...worker, staff_id: staffId, hold_bank_details: true },
         p_pay_rate: payRate ?? undefined,
       });
-      if (!error) return { id, staffId, staffIdGenerated, supervisorClockIn };
+      if (!error) {
+        return {
+          id,
+          staffId,
+          staffIdGenerated,
+          supervisorClockIn,
+          bankDetailsPending: bank !== null,
+        };
+      }
 
       const takenByRace =
         staffIdGenerated &&

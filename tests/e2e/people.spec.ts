@@ -106,12 +106,19 @@ test("HR adds an employee and changes pay; other roles see masked, read-only vie
   const workerId = page.url().split("/").at(-1)!;
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
   await expect(page.getByTestId("current-pay")).toHaveText("₦200,000.00 a month");
-  await expect(page.getByTestId("bank-account")).toHaveText("••••7712");
+  // Bank details entered when adding wait for a second approver (slice 1.7): the worker has
+  // none on file yet, and the request shows the new account masked.
+  await expect(page.getByTestId("bank-account")).toHaveCount(0);
+  const pendingBank = page.getByRole("article", { name: `Bank change for ${name}` });
+  await expect(pendingBank).toContainText("Waiting for approval");
+  await expect(pendingBank.getByTestId("bank-change-account")).toHaveText("••••7712");
   await expectNoHorizontalScroll(page);
 
   // HR may see the account number in full; the reveal is audited.
-  await page.getByRole("button", { name: "Show account number" }).click();
-  await expect(page.getByTestId("bank-account")).toHaveText(NUBAN, { timeout: 15_000 });
+  await pendingBank.getByRole("button", { name: "Show account number" }).click();
+  await expect(pendingBank.getByTestId("bank-change-account")).toHaveText(NUBAN, {
+    timeout: 15_000,
+  });
 
   // --- HR: change pay from next month -----------------------------------------------------
   const payForm = page.getByRole("form", { name: "Change pay" });
@@ -170,13 +177,19 @@ test("HR adds an employee and changes pay; other roles see masked, read-only vie
   // The audit log has the worker's rows, with no personal data in clear.
   const { data: audit, error } = await adminClient()
     .from("audit_log")
-    .select("action, before, after")
-    .eq("organisation_id", owner.orgId)
-    .eq("entity_id", workerId);
+    .select("action, entity, entity_id, before, after")
+    .eq("organisation_id", owner.orgId);
   expect(error).toBeNull();
-  const actions = (audit ?? []).map((r) => r.action);
+  const actions = (audit ?? [])
+    .filter((r) => r.entity_id === workerId || r.entity === "bank_detail_changes")
+    .map((r) => r.action);
   expect(actions).toEqual(
-    expect.arrayContaining(["workers.insert", "workers.update", "pii.reveal"]),
+    expect.arrayContaining([
+      "workers.insert",
+      "workers.update",
+      "bank_detail_changes.insert",
+      "pii.reveal",
+    ]),
   );
   const auditText = JSON.stringify(audit);
   expect(auditText).not.toContain(NUBAN);
@@ -186,7 +199,9 @@ test("HR adds an employee and changes pay; other roles see masked, read-only vie
   const opsPage = await signedInPage(browser, ops);
   await opsPage.goto(`/app/people/${workerId}`);
   await expect(opsPage.getByRole("heading", { level: 1 })).toHaveText(name);
-  await expect(opsPage.getByTestId("bank-account")).toHaveText("••••7712");
+  // Operations managers don't see bank-detail requests; bank-changes.spec.ts checks they see an
+  // applied account masked.
+  await expect(opsPage.getByTestId("bank-change")).toHaveCount(0);
   await expect(opsPage.getByRole("button", { name: "Show account number" })).toHaveCount(0);
   await expect(opsPage.getByRole("link", { name: "Edit details" })).toHaveCount(0);
   await expect(opsPage.getByRole("form", { name: "Change pay" })).toHaveCount(0);

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { addDays, firstOfNextMonth, formatDate, isWithin, lagosToday } from "@/lib/dates";
+import {
+  addDays,
+  firstOfNextMonth,
+  formatDate,
+  formatDateTime,
+  isWithin,
+  lagosToday,
+} from "@/lib/dates";
 
 describe("dates", () => {
   it("formats ISO dates as 14 Nov 2026", () => {
@@ -32,5 +39,13 @@ describe("dates", () => {
     expect(isWithin("2026-11-16", "2026-11-16", "2026-11-16")).toBe(true);
     expect(isWithin("2026-11-16", "2026-11-17", null)).toBe(false);
     expect(isWithin("2026-11-16", "2026-10-01", "2026-11-15")).toBe(false);
+  });
+
+  it("formats a moment in Lagos time on a 24-hour clock", () => {
+    expect(formatDateTime("2026-11-19T13:05:00Z")).toBe("19 Nov 2026, 14:05");
+    // Just before midnight UTC is already the next day in Lagos.
+    expect(formatDateTime(new Date("2026-12-31T23:30:00Z"))).toBe("1 Jan 2027, 00:30");
+    expect(formatDateTime("2026-09-02T09:00:00+01:00")).toBe("2 Sep 2026, 09:00");
+    expect(() => formatDateTime("not a date")).toThrow(RangeError);
   });
 });

@@ -215,6 +215,8 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },
   { href: "/app/people/new", roles: ["owner", "admin", "hr"] },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
+  // Bank-detail approvals (slice 1.7): finance approves too, without the People list.
+  { href: "/app/people/approvals", roles: ["owner", "admin", "hr", "finance"] },
 ];
 
 function segments(path: string): string[] {

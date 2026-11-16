@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
@@ -13,6 +14,7 @@ import { MutationError } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 import { getSession } from "@/server/identity/session";
 
+import { notifyApproversOfNewWorkerBankDetails } from "./bank-change-notices";
 import { createDepartment, updateDepartment } from "./departments";
 import { echoableValues, workerFormErrors, workerFormInput } from "./form-input";
 import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "./pii-access";
@@ -69,14 +71,19 @@ export async function createWorkerAction(
   formData: FormData,
 ): Promise<PeopleFormState> {
   const fields = formFields(formData);
-  let id: string;
+  let created: Awaited<ReturnType<typeof createWorker>>;
   try {
-    ({ id } = await createWorker(workerFormInput(fields, "create")));
+    created = await createWorker(workerFormInput(fields, "create"));
   } catch (error) {
     return refusal(error, echoableValues(fields), workerFormErrors);
   }
+  // Bank details given here wait for a second approver (slice 1.7): tell the approvers.
+  const organisationId = (await getSession())?.active?.organisationId;
+  if (created.bankDetailsPending && organisationId) {
+    after(() => notifyApproversOfNewWorkerBankDetails(organisationId, created.id));
+  }
   refreshPeople();
-  redirect(`/app/people/${id}`);
+  redirect(`/app/people/${created.id}`);
 }
 
 export async function updateWorkerAction(

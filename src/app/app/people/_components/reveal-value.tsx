@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import type { PiiField } from "@/lib/mask";
 import { revealWorkerPii } from "@/server/people/actions";
+import { revealBankChangeAccount } from "@/server/people/bank-change-actions";
 
 const FIELD_NAMES: Record<PiiField, string> = {
   nin: "NIN",
@@ -16,7 +17,8 @@ const FIELD_NAMES: Record<PiiField, string> = {
 /**
  * A masked personal data value with a Show button for roles allowed to see it in full. The full
  * value is fetched only on request, from the server, which checks the role and writes the
- * reveal to the audit log; it is kept in memory only while shown.
+ * reveal to the audit log; it is kept in memory only while shown. With `bankChangeId`, the value
+ * is the new account number of that bank-detail change instead of the worker's own.
  */
 export function RevealValue({
   workerId,
@@ -24,12 +26,14 @@ export function RevealValue({
   masked,
   canReveal,
   testId,
+  bankChangeId,
 }: {
   workerId: string;
   field: PiiField;
   masked: string;
   canReveal: boolean;
   testId?: string;
+  bankChangeId?: string;
 }) {
   const [value, setValue] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -38,7 +42,9 @@ export function RevealValue({
   function show() {
     setMessage(null);
     startTransition(async () => {
-      const result = await revealWorkerPii({ workerId, field });
+      const result = bankChangeId
+        ? await revealBankChangeAccount({ changeId: bankChangeId })
+        : await revealWorkerPii({ workerId, field });
       if (result.ok) {
         if (result.value === null) setMessage("Nothing on file.");
         else setValue(result.value);

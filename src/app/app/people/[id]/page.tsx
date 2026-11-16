@@ -19,12 +19,22 @@ import {
   payVersionState,
 } from "@/lib/people";
 import { ROLE_LABELS } from "@/lib/roles";
+import {
+  applyDueBankChanges,
+  canViewBankChanges,
+  loadBankChangeViewer,
+  loadBankChanges,
+  type BankChangeView,
+  type BankChangeViewer,
+} from "@/server/people/bank-changes";
 import type { PayRateVersion } from "@/server/people/pay-rates";
 import { loadWorkerProfile, type WorkerProfile } from "@/server/people/people-data";
 import { peoplePageContext } from "@/server/people/page-context";
 import { canSeePii } from "@/server/people/pii-access";
 
 import { RouteGate } from "../../_shell/slots";
+import { BankChangeCard } from "../_components/bank-change-card";
+import { BankChangeRequestForm } from "../_components/bank-change-forms";
 import { CancelPayButton } from "../_components/cancel-pay-button";
 import { DetailList, NotSet, Section } from "../_components/display";
 import { EndEmploymentForm } from "../_components/end-employment-form";
@@ -129,9 +139,14 @@ function amountsForForm(rate: PayRateVersion | null): Partial<Record<string, str
 function Profile({
   worker,
   ctx,
+  bankChanges,
+  viewer,
 }: {
   worker: WorkerProfile;
   ctx: Awaited<ReturnType<typeof peoplePageContext>>;
+  /** This worker's bank-detail changes, newest first (empty for roles that can't see them). */
+  bankChanges: BankChangeView[];
+  viewer: BankChangeViewer;
 }) {
   const { today, canEdit, role } = ctx;
   const active = worker.status === "active";
@@ -275,7 +290,14 @@ function Profile({
       <Section
         id="bank"
         title="Bank details"
-        description="Changes need a second person to approve before payouts use them."
+        description="Changes need a second person to approve, then wait 72 hours before payouts use them."
+        actions={
+          canViewBankChanges(role) ? (
+            <Link href="/app/people/approvals" className="text-sm">
+              All bank changes
+            </Link>
+          ) : null
+        }
       >
         <DetailList
           items={[
@@ -295,6 +317,18 @@ function Profile({
             },
           ]}
         />
+        {bankChanges.map((change) => (
+          <BankChangeCard key={change.id} change={change} viewer={viewer} showWorker={false} />
+        ))}
+        {canEdit && active ? (
+          bankChanges.some((c) => c.status === "pending" || c.status === "approved") ? (
+            <p className="m-0 text-sm text-fg-muted">
+              A new change can be raised once this one is applied, rejected or withdrawn.
+            </p>
+          ) : (
+            <BankChangeRequestForm workerId={worker.id} />
+          )
+        ) : null}
       </Section>
 
       <Section id="tax" title="Tax and pension">
@@ -373,9 +407,23 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   const { id } = await params;
   if (!UUID.test(id)) notFound();
   const ctx = await peoplePageContext();
+  // A change whose 72-hour hold has ended takes effect before the bank details are shown.
+  await applyDueBankChanges(ctx.supabase, ctx.organisationId);
   const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today);
   if (!worker) notFound();
-  return <Profile worker={worker} ctx={ctx} />;
+  const [bankChanges, viewer] = await Promise.all([
+    canViewBankChanges(ctx.role)
+      ? loadBankChanges(ctx.supabase, ctx.organisationId, { workerId: id, limit: 5 })
+      : Promise.resolve([]),
+    loadBankChangeViewer(
+      ctx.supabase,
+      ctx.organisationId,
+      ctx.userId,
+      ctx.role,
+      canSeePii(ctx.role, "bank_account"),
+    ),
+  ]);
+  return <Profile worker={worker} ctx={ctx} bankChanges={bankChanges} viewer={viewer} />;
 }
 
 export default function Page({ params }: PageProps<"/app/people/[id]">) {

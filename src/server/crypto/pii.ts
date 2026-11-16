@@ -23,9 +23,12 @@ import { last4 } from "@/lib/mask";
  *   reveal. What this means for writers:
  *   - The row id must be known before the insert: generate it with `crypto.randomUUID()` and
  *     insert it explicitly instead of relying on the column default.
- *   - Moving a value to another row or table (for example applying an approved bank-detail
- *     change to `workers`) means decrypting under the old context and encrypting under the new
- *     one on the server. Bytes copied in SQL will not decrypt.
+ *   - Moving a value to another row or table means decrypting under the old context and
+ *     encrypting under the new one on the server. Bytes copied in SQL will not decrypt.
+ *   - A value that waits elsewhere before reaching its column is encrypted for its destination
+ *     from the start: a bank-detail change (slice 1.7) holds the new account number encrypted
+ *     for `workers.bank_account_enc` of the worker, so the database copies it into the worker
+ *     when the 72-hour hold ends, and a reveal of the request decrypts under that context.
  * - Key version 1 is `PII_ENCRYPTION_KEY`: 32 random bytes, base64-encoded. Rotation adds a new
  *   version byte and a second variable; old values keep decrypting under their own version.
  *

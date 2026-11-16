@@ -142,10 +142,15 @@ describe("revealPii", () => {
     expect(sent).not.toContain(value.slice(2));
   });
 
-  it("reads a pending bank-detail change's account under its own context", async () => {
+  it("reads a bank-detail change's account under its destination, the worker's column", async () => {
     signIn([{ organisationId: ORG, role: "hr" }]);
-    const value = encryptPiiForDb(NUBAN, ctx("bank_account_enc", CHANGE, "bank_detail_changes"));
-    const { from, rpc } = fakeClient({ data: { bank_account_enc: value }, error: null });
+    // Slice 1.7: the request holds the number encrypted for workers.bank_account_enc of its
+    // worker, so the database can apply it when the hold ends without a key.
+    const value = encryptPiiForDb(NUBAN, ctx("bank_account_enc", WORKER));
+    const { from, rpc, query } = fakeClient({
+      data: { bank_account_enc: value, worker_id: WORKER },
+      error: null,
+    });
 
     await expect(
       revealPii({
@@ -157,11 +162,31 @@ describe("revealPii", () => {
       }),
     ).resolves.toBe(NUBAN);
     expect(from).toHaveBeenCalledWith("bank_detail_changes");
+    expect(query.select).toHaveBeenCalledWith("bank_account_enc, worker_id");
     expect(rpc.mock.calls[0]?.[1]).toMatchObject({
       p_entity: "bank_detail_changes",
       p_entity_id: CHANGE,
       p_reason: "Checking before approval",
     });
+  });
+
+  it("refuses a bank-detail change whose number was encrypted for another worker", async () => {
+    signIn([{ organisationId: ORG, role: "hr" }]);
+    const spliced = encryptPiiForDb(NUBAN, ctx("bank_account_enc", OTHER_WORKER));
+    const { rpc } = fakeClient({
+      data: { bank_account_enc: spliced, worker_id: WORKER },
+      error: null,
+    });
+
+    await expect(
+      revealPii({
+        organisationId: ORG,
+        field: "bank_account",
+        entity: "bank_detail_changes",
+        entityId: CHANGE,
+      }),
+    ).rejects.toBeInstanceOf(PiiDecryptError);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("refuses a NIN spliced into the bank account column, without auditing", async () => {
