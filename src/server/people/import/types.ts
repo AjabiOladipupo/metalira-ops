@@ -193,6 +193,10 @@ export interface RowResult {
   warnings: ImportWarning[];
   /** Null when the row is held back. */
   normalised: NormalisedRow | null;
+  /** Non-blank cells beyond the header (kept so a stored row can be checked again as read). */
+  extraValues: number;
+  /** .xlsx only: columns whose cell in this row was a number cell (same reason). */
+  numericColumns: ColumnKey[];
 }
 
 export interface FoundCounts {

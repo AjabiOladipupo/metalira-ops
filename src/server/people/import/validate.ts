@@ -1204,6 +1204,8 @@ export function validateImportRecords(
       problems: draft.problems,
       warnings: draft.warnings,
       normalised: normalise(draft),
+      extraValues: draft.record.extraValues ?? 0,
+      numericColumns: [...(draft.record.numericColumns ?? [])],
     };
   });
 
