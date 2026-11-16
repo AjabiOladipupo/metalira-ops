@@ -59,8 +59,9 @@ test("a new owner signs up, signs out, signs back in and sees only their own com
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Check your email");
     await followEmailLink(page, await latestEmailTo(email));
   }
-  await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Home");
+  // A new owner has not set up the company yet, so the app opens the setup wizard.
+  await expect(page).toHaveURL(/\/app\/setup\/plan$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your plan");
   await expect(switcher(page)).toHaveText(alphaName);
 
   // 3. Sign out; the app is closed again.
@@ -70,7 +71,7 @@ test("a new owner signs up, signs out, signs back in and sees only their own com
 
   // 4. Sign back in with the password.
   await signInViaUi(page, email, password);
-  await expect(page).toHaveURL(/\/app$/);
+  await expect(page).toHaveURL(/\/app\/setup\/plan$/);
   await expect(switcher(page)).toHaveText(alphaName);
 
   // 5. Another owner, in another browser, sees only their own company, and Alpha never sees it.

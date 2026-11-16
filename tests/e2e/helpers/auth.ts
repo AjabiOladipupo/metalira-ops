@@ -66,8 +66,16 @@ export interface TestOwner extends TestAccount {
   orgName: string;
 }
 
-/** A confirmed owner with their own organisation, created through the public RPC. */
-export async function createOwner(label: string, orgName: string): Promise<TestOwner> {
+/**
+ * A confirmed owner with their own organisation, created through the public RPC. Company setup
+ * is marked complete unless `setupDone` is false, so the owner lands on the dashboard rather
+ * than the setup wizard (slice 1.1).
+ */
+export async function createOwner(
+  label: string,
+  orgName: string,
+  { setupDone = true }: { setupDone?: boolean } = {},
+): Promise<TestOwner> {
   const account = await createAccount(label, "Test Owner");
   const client = anonClient();
   const signIn = await client.auth.signInWithPassword({
@@ -77,6 +85,10 @@ export async function createOwner(label: string, orgName: string): Promise<TestO
   if (signIn.error) throw new Error(`Could not sign in ${label}: ${signIn.error.message}`);
   const { data, error } = await client.rpc("create_organisation", { p_name: orgName });
   if (error || !data) throw new Error(`Could not create ${orgName}: ${error?.message}`);
+  if (setupDone) {
+    const done = await client.rpc("complete_company_setup", { p_organisation_id: data });
+    if (done.error) throw new Error(`Could not finish setup for ${orgName}: ${done.error.message}`);
+  }
   return { ...account, orgId: data, orgName };
 }
 

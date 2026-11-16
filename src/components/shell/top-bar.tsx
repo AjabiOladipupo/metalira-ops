@@ -15,8 +15,6 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
-import { PlanCard } from "./app-sidebar";
-
 /**
  * Company switcher, site filter, search, notifications and user menu. The session-dependent
  * parts (`menuNav`, `orgSwitcher`, `userMenu`) are server-rendered slots that stream in behind
@@ -26,10 +24,12 @@ export function TopBar({
   menuNav,
   orgSwitcher,
   userMenu,
+  planCard,
 }: {
   menuNav: React.ReactNode;
   orgSwitcher: React.ReactNode;
   userMenu: React.ReactNode;
+  planCard: React.ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -61,7 +61,7 @@ export function TopBar({
             </span>
           </Link>
           {menuNav}
-          <PlanCard />
+          {planCard}
         </SheetContent>
       </Sheet>
 

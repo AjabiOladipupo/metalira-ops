@@ -1,12 +1,15 @@
 import { Suspense } from "react";
 
+import { PlanCard } from "@/components/shell/app-sidebar";
 import { NavLinks, NavSkeleton } from "@/components/shell/nav-links";
 import { OrgSwitcher } from "@/components/shell/org-switcher";
 import { OrgSwitcherSkeleton } from "@/components/shell/top-bar";
 import { UserMenu, UserMenuFallback } from "@/components/shell/user-menu";
+import { planName } from "@/lib/company";
 import { navForRole } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { signOut, switchOrganisation } from "@/server/identity/actions";
+import { getActiveCompany, getActiveCompanyLogoUrl } from "@/server/identity/company-data";
 import { getSession, requireAppAccess } from "@/server/identity/session";
 
 /**
@@ -32,8 +35,10 @@ export function RoleNav() {
 async function OrgSwitcherInner() {
   const session = await getSession();
   if (!session?.active) return null;
+  const logoUrl = await getActiveCompanyLogoUrl();
   return (
     <OrgSwitcher
+      logoUrl={logoUrl}
       options={session.managerMemberships.map((m) => ({
         id: m.organisationId,
         name: m.organisationName,
@@ -49,6 +54,20 @@ export function OrgSwitcherSlot() {
   return (
     <Suspense fallback={<OrgSwitcherSkeleton />}>
       <OrgSwitcherInner />
+    </Suspense>
+  );
+}
+
+async function PlanCardInner() {
+  const company = await getActiveCompany();
+  return <PlanCard planName={planName(company?.plan ?? "trial")} />;
+}
+
+/** The plan the active company chose, at the foot of the sidebar and the mobile menu. */
+export function PlanCardSlot() {
+  return (
+    <Suspense fallback={<PlanCard />}>
+      <PlanCardInner />
     </Suspense>
   );
 }
