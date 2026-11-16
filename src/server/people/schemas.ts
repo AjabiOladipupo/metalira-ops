@@ -446,3 +446,48 @@ export const updateDepartmentSchema = z.object({
 });
 
 export type UpdateDepartmentInput = z.input<typeof updateDepartmentSchema>;
+
+// ---------------------------------------------------------------------------
+// Mapping (slice 1.6)
+// ---------------------------------------------------------------------------
+
+/** Most projects one worker can be put on in one save. */
+export const MAX_MAPPING_PROJECTS = 50;
+
+/**
+ * The mapping panel: department, line manager (a worker or a manager-app user, never both),
+ * site and projects. Every choice may be blank, which clears it; a worker stays "Incomplete"
+ * until department, line manager and site are all set.
+ */
+export const saveMappingSchema = z
+  .object({
+    workerId: z.uuid("Choose an employee"),
+    departmentId: optional(z.uuid("Choose a department")),
+    lineManagerWorkerId: optional(z.uuid("Choose a line manager")),
+    lineManagerMembershipId: optional(z.uuid("Choose a line manager")),
+    siteId: optional(z.uuid("Choose a site")),
+    projectIds: z
+      .array(z.uuid("Choose projects from the list"))
+      .max(MAX_MAPPING_PROJECTS, `Choose ${MAX_MAPPING_PROJECTS} projects or fewer`)
+      .default([])
+      .transform((ids) => [...new Set(ids)]),
+  })
+  .superRefine((data, ctx) => {
+    if (data.lineManagerWorkerId && data.lineManagerMembershipId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lineManagerWorkerId"],
+        message: "Choose one line manager",
+      });
+    }
+    if (data.lineManagerWorkerId && data.lineManagerWorkerId === data.workerId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["lineManagerWorkerId"],
+        message: "An employee can't be their own line manager",
+      });
+    }
+  });
+
+export type SaveMappingInput = z.input<typeof saveMappingSchema>;
+export type SaveMappingData = z.output<typeof saveMappingSchema>;

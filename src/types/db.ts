@@ -472,9 +472,17 @@ isOneToOne: false
 "save_import_check":
 { Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            },
+"save_worker_mapping":
+{ Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
+                           },
 "worker_invite_lookup":
 { Args: { "p_token": string }; Returns: {
               "auth_user_id": string,"company_code": string,"first_name": string,"invite_id": string,"last_name": string,"organisation_id": string,"organisation_name": string,"staff_id": string,"state": string,"worker_id": string
+            }[]
+                           },
+"worker_line_manager_contact":
+{ Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: {
+              "email": string,"name": string,"user_id": string
             }[]
                            },
 "worker_sign_in_begin":
