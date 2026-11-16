@@ -166,6 +166,74 @@ describe("checking a stored batch again", () => {
     expect(again.summary.importable).toBe(160);
     expect(again.summary.held).toBe(2);
   });
+
+  it("still suggests the line manager once the other rows are in the account", () => {
+    // The account after importing every row that imports: workers with their department,
+    // site and client, and those records themselves.
+    const departments = new Map<string, string>();
+    const clients = new Map<string, string>();
+    const sites = new Map<string, { id: string; clientId: string; name: string }>();
+    const projects = new Map<string, { id: string; clientId: string; name: string }>();
+    const idFor = <T>(map: Map<string, T>, key: string, make: (id: string) => T) => {
+      if (!map.has(key)) map.set(key, make(`${map.size + 1}-${key}`));
+      return map.get(key)!;
+    };
+    const existingWorkers = checked.rows.flatMap((r) => {
+      const n = r.normalised;
+      if (!n) return [];
+      const departmentId = idFor(departments, n.department.name, (id) => id);
+      const client = n.mapping.client;
+      const clientId = client ? idFor(clients, client.name, (id) => id) : null;
+      const site =
+        client && clientId && n.mapping.site
+          ? idFor(sites, `${client.name}|${n.mapping.site.name}`, (id) => ({
+              id,
+              clientId,
+              name: n.mapping.site!.name,
+            }))
+          : null;
+      if (client && clientId && n.mapping.project) {
+        idFor(projects, `${client.name}|${n.mapping.project.name}`, (id) => ({
+          id,
+          clientId,
+          name: n.mapping.project!.name,
+        }));
+      }
+      const ref = n.lineManager;
+      return [
+        {
+          id: `w-${n.worker.staffId}`,
+          staffId: n.worker.staffId,
+          firstName: n.worker.firstName,
+          lastName: n.worker.lastName,
+          phone: n.worker.phone,
+          lineManagerStaffId: ref && ref.kind !== "membership" ? ref.staffId : null,
+          departmentId,
+          siteId: site?.id ?? null,
+          clientId,
+        },
+      ];
+    });
+    const context = {
+      existingWorkers,
+      departments: [...departments].map(([name, id]) => ({ id, name })),
+      clients: [...clients].map(([name, id]) => ({ id, name })),
+      sites: [...sites.values()],
+      projects: [...projects.values()],
+    };
+    const held = checked.rows
+      .filter((r) => r.status === "held")
+      .map((r) => recordFromStored(ORG, stored(toRowDoc(ORG, nextId(), r, []))));
+    const again = validateImportRecords(held, checked.columns.present, context, { format: "csv" });
+    if (!again.ok) throw new Error("re-check failed");
+    const row23 = again.rows.find((r) => r.rowNumber === 23);
+    expect(row23?.problems).toEqual([
+      expect.objectContaining({
+        code: "line_manager_unknown",
+        fix: { label: "Set to Kola Adebayo", patch: { line_manager_employee_id: "AFS-0003" } },
+      }),
+    ]);
+  });
 });
 
 describe("the commit payload", () => {

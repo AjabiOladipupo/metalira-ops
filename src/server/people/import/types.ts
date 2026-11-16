@@ -19,6 +19,13 @@ export const importContextSchema = z.object({
         phone: z.string().nullable(),
         /** Staff ID of this worker's line manager, when that manager is a worker. */
         lineManagerStaffId: z.string().nullable(),
+        /**
+         * Where the worker is now (department, current site and its client), so a held row can
+         * be offered the line manager most used there ("Set to Kola Adebayo").
+         */
+        departmentId: z.string().nullable().default(null),
+        siteId: z.string().nullable().default(null),
+        clientId: z.string().nullable().default(null),
       }),
     )
     .default([]),

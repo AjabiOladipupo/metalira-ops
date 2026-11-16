@@ -448,18 +448,24 @@ $$;
 --     "worker": workers columns by name, as public.create_worker takes them (id included,
 --               personal data encrypted for that worker id; organisation, department and
 --               line manager are set here, not taken from this document),
---     "pay_rate": public.add_pay_rate document, or null,
+--     "pay_rate": the first pay version, as public.add_pay_rate takes it, or null,
 --     "department": { "id": uuid } | { "name": text },
 --     "line_manager": { "worker_id": uuid } | { "membership_id": uuid } | null,
 --     "client" / "site" / "project": { "id": uuid } | { "name": text } | null
 --   }
 -- Unknown department, client, site and project names become name-only records ("New names
 -- become new clients you can finish later"); an existing name is reused (case-insensitive).
+-- Names are resolved once for the whole batch; workers, pay rates and assignments are then
+-- inserted row by row, so every table's own triggers (line-manager checks, needs_pay_details,
+-- pay-rate rules, audit) run as for a worker added by hand.
 --
 -- Idempotent: if every row sent is already imported (a double submit), nothing happens and
 -- the result says so. If only some are, the batch changed under the caller and the whole call
 -- is refused (MLIM1), so the server checks the batch again rather than guessing.
 -- Returns { "created", "already_imported", "departments", "clients", "sites", "projects" }.
+--
+-- statement_timeout: a large file (up to 5,000 rows) takes longer than the 8 seconds signed-in
+-- users get by default. PostgREST applies a function's own setting to the call.
 create function public.commit_import_batch(
   p_organisation_id uuid,
   p_batch_id uuid,
@@ -470,16 +476,21 @@ language plpgsql
 volatile
 security invoker
 set search_path = ''
+set statement_timeout = '300s'
 as $$
 declare
   v_status public.import_batch_status;
   v_sent integer;
+  v_found integer;
   v_done integer;
+  v_held integer;
   v_item jsonb;
-  v_row public.import_rows;
   v_worker jsonb;
   v_worker_id uuid;
-  v_start date;
+  v_departments jsonb;
+  v_clients jsonb;
+  v_sites jsonb;
+  v_projects jsonb;
   v_department uuid;
   v_client uuid;
   v_site uuid;
@@ -489,7 +500,6 @@ declare
   v_new_clients integer := 0;
   v_new_sites integer := 0;
   v_new_projects integer := 0;
-  v_count integer;
 begin
   if not private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
     raise exception 'Your role can''t import employees.' using errcode = '42501';
@@ -513,16 +523,29 @@ begin
     raise exception 'Check the file before importing it.' using errcode = 'MLIM2';
   end if;
 
+  -- The rows named, locked for the rest of the transaction.
+  select count(*)::integer into v_sent from jsonb_array_elements(p_rows);
   select count(*)::integer,
-         count(*) filter (where r.status = 'imported')::integer
-  into v_sent, v_done
-  from jsonb_array_elements(p_rows) as e (item)
-  left join public.import_rows r
-    on r.id = (e.item ->> 'row_id')::uuid
-   and r.batch_id = p_batch_id
-   and r.organisation_id = p_organisation_id;
+         count(*) filter (where r.status = 'imported')::integer,
+         count(*) filter (where r.status = 'held')::integer
+  into v_found, v_done, v_held
+  from (
+    select r.status
+    from public.import_rows r
+    where r.batch_id = p_batch_id
+      and r.organisation_id = p_organisation_id
+      and r.id in (select (e.item ->> 'row_id')::uuid from jsonb_array_elements(p_rows) as e (item))
+    for update
+  ) as r;
 
-  if v_sent > 0 and v_done = v_sent then
+  if v_found <> v_sent then
+    raise exception 'A row of this import wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_sent = 0 then
+    return jsonb_build_object('created', 0, 'already_imported', 0, 'departments', 0,
+      'clients', 0, 'sites', 0, 'projects', 0);
+  end if;
+  if v_done = v_sent then
     return jsonb_build_object('created', 0, 'already_imported', v_done, 'departments', 0,
       'clients', 0, 'sites', 0, 'projects', 0);
   end if;
@@ -530,114 +553,132 @@ begin
     raise exception 'Some of these rows were imported a moment ago. Check the file again.'
       using errcode = 'MLIM1';
   end if;
+  if v_held > 0 then
+    raise exception 'Rows that need fixing can''t be imported yet. Check the file again.'
+      using errcode = 'MLIM1';
+  end if;
 
-  for v_item in select e.item from jsonb_array_elements(p_rows) as e (item) loop
-    select r.* into v_row
-    from public.import_rows r
-    where r.id = (v_item ->> 'row_id')::uuid
-      and r.batch_id = p_batch_id
-      and r.organisation_id = p_organisation_id
-    for update;
-    if v_row.id is null then
-      raise exception 'A row of this import wasn''t found.' using errcode = 'P0002';
-    end if;
-    if v_row.status = 'held' then
-      raise exception 'Row % needs fixing before it can be imported.', v_row.row_number
-        using errcode = 'MLIM1';
-    end if;
+  -- New names, once each. The server sends a name only when it found no match.
+  insert into public.departments (organisation_id, name)
+  select distinct on (lower(n.name)) p_organisation_id, n.name
+  from (
+    select btrim(e.item -> 'department' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where (e.item -> 'department') ? 'name'
+  ) as n
+  where n.name <> ''
+  on conflict (organisation_id, lower(name)) do nothing;
+  get diagnostics v_new_departments = row_count;
 
-    -- Department: existing by id (in this organisation), or by name, created when new.
-    v_department := null;
-    if (v_item -> 'department') ? 'id' then
-      select d.id into v_department
-      from public.departments d
-      where d.id = (v_item -> 'department' ->> 'id')::uuid
-        and d.organisation_id = p_organisation_id;
-    elsif (v_item -> 'department') ? 'name' then
-      insert into public.departments (organisation_id, name)
-      values (p_organisation_id, btrim(v_item -> 'department' ->> 'name'))
-      on conflict (organisation_id, lower(name)) do nothing;
-      get diagnostics v_count = row_count;
-      v_new_departments := v_new_departments + v_count;
-      select d.id into v_department
-      from public.departments d
-      where d.organisation_id = p_organisation_id
-        and lower(d.name) = lower(btrim(v_item -> 'department' ->> 'name'));
-    end if;
+  insert into public.clients (organisation_id, name)
+  select distinct on (lower(n.name)) p_organisation_id, n.name
+  from (
+    select btrim(e.item -> 'client' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object' and (e.item -> 'client') ? 'name'
+  ) as n
+  where n.name <> ''
+  on conflict (organisation_id, lower(name)) do nothing;
+  get diagnostics v_new_clients = row_count;
+
+  -- Lookups by id and by lower-case name, for this organisation only.
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_departments
+  from public.departments d
+  cross join lateral (values ('id:' || d.id::text, d.id), ('name:' || lower(d.name), d.id)) as m (k, v)
+  where d.organisation_id = p_organisation_id;
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_clients
+  from public.clients c
+  cross join lateral (values ('id:' || c.id::text, c.id), ('name:' || lower(c.name), c.id)) as m (k, v)
+  where c.organisation_id = p_organisation_id;
+
+  -- Sites and projects belong to a client: new ones once each per client.
+  insert into public.sites (organisation_id, client_id, name)
+  select distinct on (n.client_id, lower(n.name)) p_organisation_id, n.client_id, n.name
+  from (
+    select (v_clients ->> case
+              when (e.item -> 'client') ? 'id' then 'id:' || (e.item -> 'client' ->> 'id')
+              else 'name:' || lower(btrim(e.item -> 'client' ->> 'name'))
+            end)::uuid as client_id,
+           btrim(e.item -> 'site' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object'
+      and jsonb_typeof(e.item -> 'site') = 'object'
+      and (e.item -> 'site') ? 'name'
+  ) as n
+  where n.client_id is not null and n.name <> ''
+  on conflict (organisation_id, client_id, lower(name)) do nothing;
+  get diagnostics v_new_sites = row_count;
+
+  insert into public.projects (organisation_id, client_id, name)
+  select distinct on (n.client_id, lower(n.name)) p_organisation_id, n.client_id, n.name
+  from (
+    select (v_clients ->> case
+              when (e.item -> 'client') ? 'id' then 'id:' || (e.item -> 'client' ->> 'id')
+              else 'name:' || lower(btrim(e.item -> 'client' ->> 'name'))
+            end)::uuid as client_id,
+           btrim(e.item -> 'project' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object'
+      and jsonb_typeof(e.item -> 'project') = 'object'
+      and (e.item -> 'project') ? 'name'
+  ) as n
+  where n.client_id is not null and n.name <> ''
+  on conflict (organisation_id, client_id, lower(name)) do nothing;
+  get diagnostics v_new_projects = row_count;
+
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_sites
+  from public.sites s
+  cross join lateral (
+    values ('id:' || s.client_id::text || ':' || s.id::text, s.id),
+           ('name:' || s.client_id::text || ':' || lower(s.name), s.id)
+  ) as m (k, v)
+  where s.organisation_id = p_organisation_id;
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_projects
+  from public.projects p
+  cross join lateral (
+    values ('id:' || p.client_id::text || ':' || p.id::text, p.id),
+           ('name:' || p.client_id::text || ':' || lower(p.name), p.id)
+  ) as m (k, v)
+  where p.organisation_id = p_organisation_id;
+
+  for v_item in
+    select e.item from jsonb_array_elements(p_rows) with ordinality as e (item, n) order by e.n
+  loop
+    v_department := (v_departments ->> case
+      when (v_item -> 'department') ? 'id' then 'id:' || (v_item -> 'department' ->> 'id')
+      else 'name:' || lower(btrim(v_item -> 'department' ->> 'name'))
+    end)::uuid;
     if v_department is null then
-      raise exception 'Row % has no department.', v_row.row_number using errcode = '22023';
+      raise exception 'An employee in this import has no department.' using errcode = '22023';
     end if;
 
-    -- Client, then the site and project within it.
     v_client := null;
     v_site := null;
     v_project := null;
     if jsonb_typeof(v_item -> 'client') = 'object' then
-      if (v_item -> 'client') ? 'id' then
-        select c.id into v_client
-        from public.clients c
-        where c.id = (v_item -> 'client' ->> 'id')::uuid
-          and c.organisation_id = p_organisation_id;
-      else
-        insert into public.clients (organisation_id, name)
-        values (p_organisation_id, btrim(v_item -> 'client' ->> 'name'))
-        on conflict (organisation_id, lower(name)) do nothing;
-        get diagnostics v_count = row_count;
-        v_new_clients := v_new_clients + v_count;
-        select c.id into v_client
-        from public.clients c
-        where c.organisation_id = p_organisation_id
-          and lower(c.name) = lower(btrim(v_item -> 'client' ->> 'name'));
-      end if;
+      v_client := (v_clients ->> case
+        when (v_item -> 'client') ? 'id' then 'id:' || (v_item -> 'client' ->> 'id')
+        else 'name:' || lower(btrim(v_item -> 'client' ->> 'name'))
+      end)::uuid;
       if v_client is null then
-        raise exception 'Row %: that client wasn''t found.', v_row.row_number using errcode = 'P0002';
+        raise exception 'A client in this import wasn''t found.' using errcode = 'P0002';
       end if;
-
       if jsonb_typeof(v_item -> 'site') = 'object' then
-        if (v_item -> 'site') ? 'id' then
-          select s.id into v_site
-          from public.sites s
-          where s.id = (v_item -> 'site' ->> 'id')::uuid
-            and s.organisation_id = p_organisation_id
-            and s.client_id = v_client;
-        else
-          insert into public.sites (organisation_id, client_id, name)
-          values (p_organisation_id, v_client, btrim(v_item -> 'site' ->> 'name'))
-          on conflict (organisation_id, client_id, lower(name)) do nothing;
-          get diagnostics v_count = row_count;
-          v_new_sites := v_new_sites + v_count;
-          select s.id into v_site
-          from public.sites s
-          where s.organisation_id = p_organisation_id
-            and s.client_id = v_client
-            and lower(s.name) = lower(btrim(v_item -> 'site' ->> 'name'));
-        end if;
+        v_site := (v_sites ->> case
+          when (v_item -> 'site') ? 'id' then 'id:' || v_client::text || ':' || (v_item -> 'site' ->> 'id')
+          else 'name:' || v_client::text || ':' || lower(btrim(v_item -> 'site' ->> 'name'))
+        end)::uuid;
         if v_site is null then
-          raise exception 'Row %: that site wasn''t found.', v_row.row_number using errcode = 'P0002';
+          raise exception 'A site in this import wasn''t found.' using errcode = 'P0002';
         end if;
       end if;
-
       if jsonb_typeof(v_item -> 'project') = 'object' then
-        if (v_item -> 'project') ? 'id' then
-          select p.id into v_project
-          from public.projects p
-          where p.id = (v_item -> 'project' ->> 'id')::uuid
-            and p.organisation_id = p_organisation_id
-            and p.client_id = v_client;
-        else
-          insert into public.projects (organisation_id, client_id, name)
-          values (p_organisation_id, v_client, btrim(v_item -> 'project' ->> 'name'))
-          on conflict (organisation_id, client_id, lower(name)) do nothing;
-          get diagnostics v_count = row_count;
-          v_new_projects := v_new_projects + v_count;
-          select p.id into v_project
-          from public.projects p
-          where p.organisation_id = p_organisation_id
-            and p.client_id = v_client
-            and lower(p.name) = lower(btrim(v_item -> 'project' ->> 'name'));
-        end if;
+        v_project := (v_projects ->> case
+          when (v_item -> 'project') ? 'id' then 'id:' || v_client::text || ':' || (v_item -> 'project' ->> 'id')
+          else 'name:' || v_client::text || ':' || lower(btrim(v_item -> 'project' ->> 'name'))
+        end)::uuid;
         if v_project is null then
-          raise exception 'Row %: that project wasn''t found.', v_row.row_number using errcode = 'P0002';
+          raise exception 'A project in this import wasn''t found.' using errcode = 'P0002';
         end if;
       end if;
     end if;
@@ -652,27 +693,50 @@ begin
         'line_manager_worker_id', v_item -> 'line_manager' ->> 'worker_id',
         'line_manager_membership_id', v_item -> 'line_manager' ->> 'membership_id'
       );
-    v_worker_id := public.create_worker(
-      v_worker,
-      case when jsonb_typeof(v_item -> 'pay_rate') = 'object' then v_item -> 'pay_rate' end
-    );
+    v_worker_id := public.create_worker(v_worker, null);
+
+    -- The first pay version from the start date. The worker is new, so there is nothing to
+    -- close; private.pay_rates_guard still checks the start date.
+    if jsonb_typeof(v_item -> 'pay_rate') = 'object' then
+      insert into public.pay_rates (
+        organisation_id, worker_id, pay_type, basic_kobo, housing_kobo, transport_kobo,
+        other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, effective_from
+      )
+      values (
+        p_organisation_id,
+        v_worker_id,
+        (v_item -> 'pay_rate' ->> 'pay_type')::public.pay_type,
+        (v_item -> 'pay_rate' ->> 'basic_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'housing_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'transport_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'other_allowances_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'daily_rate_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'hourly_rate_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'effective_from')::date
+      );
+    end if;
 
     if v_client is not null then
-      select w.start_date into v_start from public.workers w where w.id = v_worker_id;
       insert into public.worker_assignments (
         organisation_id, worker_id, client_id, site_id, project_id, effective_from
       )
-      values (p_organisation_id, v_worker_id, v_client, v_site, v_project, v_start);
+      values (
+        p_organisation_id, v_worker_id, v_client, v_site, v_project,
+        (v_worker ->> 'start_date')::date
+      );
     end if;
-
-    update public.import_rows r
-    set status = 'imported',
-        worker_id = v_worker_id,
-        imported_at = now()
-    where r.id = v_row.id;
 
     v_created := v_created + 1;
   end loop;
+
+  update public.import_rows r
+  set status = 'imported',
+      worker_id = (e.item -> 'worker' ->> 'id')::uuid,
+      imported_at = now()
+  from jsonb_array_elements(p_rows) as e (item)
+  where r.id = (e.item ->> 'row_id')::uuid
+    and r.batch_id = p_batch_id
+    and r.organisation_id = p_organisation_id;
 
   update public.import_batches b
   set status = 'committed',
