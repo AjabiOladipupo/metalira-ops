@@ -178,9 +178,9 @@ test("HR maps and remaps employees from the People list", async ({ browser }) =>
   await kunleForm.getByRole("button", { name: "Save mapping" }).click();
   await expect(kunleForm.getByRole("status")).toHaveText(savedFromTomorrow, { timeout: 15_000 });
 
-  // The status flips and the Incomplete count drops at once.
-  await expect(heading).toHaveText("2 employees · all mapped");
+  // The status flips and the Incomplete count drops at once (behind the sheet on phones).
   await closeSheetOnPhone(page);
+  await expect(heading).toHaveText("2 employees · all mapped");
   await expect(kunleRow).toContainText("Mapped");
   await expect(kunleRow).toContainText(musaName);
   await expect(kunleRow).toContainText("Lekki Estate Gate B");

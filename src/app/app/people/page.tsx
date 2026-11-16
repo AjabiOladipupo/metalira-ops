@@ -78,7 +78,7 @@ function columns(mapHref: ((row: PeopleRow) => string) | null): Column<PeopleRow
           <Link
             href={mapHref(row)}
             scroll={false}
-            className="inline-flex min-h-9 items-center text-foreground no-underline hover:underline"
+            className="relative inline-flex min-h-9 items-center text-foreground no-underline hover:underline"
           >
             <MappingStatus row={row} />
             <span className="sr-only">, change mapping for {row.name}</span>
