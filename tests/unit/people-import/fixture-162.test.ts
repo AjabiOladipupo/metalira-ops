@@ -148,8 +148,9 @@ describe("personal data in the result", () => {
       for (const value of personal) expect(text).not.toContain(value);
       expect(text).not.toMatch(/PEN\d{12}/);
     }
-    expect(json).toContain('"bankAccountNumber":"•••• ');
-    expect(json).toContain('"nin":"••••"');
+    expect(json).toContain('"bankAccountNumber":"••••');
+    expect(json).toContain('"nin":"•••••••');
+    expect(json).toContain('"rsa_pin":"PEN••••');
   });
 
   it("keeps the real values for code that reads the fields to encrypt them", async () => {

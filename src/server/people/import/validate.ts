@@ -1044,7 +1044,11 @@ function normalise(draft: Draft): NormalisedRow | null {
     supervisorClockIn: draft.supervisorClockIn,
   };
   return {
-    worker: guardPersonalData(worker, ["nin", "rsaPin"], ["bankAccountNumber"]),
+    worker: guardPersonalData(worker, {
+      nin: "nin",
+      bankAccountNumber: "bank_account",
+      rsaPin: "rsa_pin",
+    }),
     department: draft.department,
     lineManager: draft.lineManager,
     payRate: draft.payRate,
@@ -1191,7 +1195,11 @@ export function validateImportRecords(
         : "ready";
     return {
       rowNumber: draft.record.rowNumber,
-      raw: guardPersonalData(draft.v, ["nin", "rsa_pin"], ["bank_account_number"]),
+      raw: guardPersonalData(draft.v, {
+        nin: "nin",
+        bank_account_number: "bank_account",
+        rsa_pin: "rsa_pin",
+      }),
       status,
       problems: draft.problems,
       warnings: draft.warnings,
