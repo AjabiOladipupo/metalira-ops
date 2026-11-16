@@ -96,7 +96,7 @@ function Checkbox({
 
 /**
  * Add or edit an employee. Adding takes everything, including the first pay rate and bank
- * details. Editing leaves out the staff ID (fixed once saved), bank details (a second person
+ * details (held for a second approver, slice 1.7). Editing leaves out the staff ID (fixed once saved), bank details (a second person
  * approves changes, slice 1.7) and pay (changed as a new dated version on the profile). Personal
  * data inputs start empty: blank keeps what is on file, and typed values are never sent back to
  * the browser after a refusal.
@@ -290,7 +290,7 @@ export function WorkerForm({
       {mode === "create" ? (
         <Fieldset
           legend="Bank details"
-          note="Enter all three, or leave them blank and add them later. After this, changes need a second person to approve."
+          note="Enter all three, or leave them blank and add them later. Someone other than you approves them, and payouts use them 72 hours after approval."
         >
           <div className={GRID}>
             <Field
@@ -319,7 +319,7 @@ export function WorkerForm({
       ) : (
         <Fieldset
           legend="Bank details"
-          note="Bank details change through a request that a second person approves. They can't be edited here."
+          note="Bank details change through a request on the employee page, which a second person approves. They can't be edited here."
         >
           {null}
         </Fieldset>

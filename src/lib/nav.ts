@@ -219,6 +219,8 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },
   // Worker invites and PIN resets (slice 1.9): the roles that may create invites.
   { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
+  // Bank-detail approvals (slice 1.7): finance approves too, without the People list.
+  { href: "/app/people/approvals", roles: ["owner", "admin", "hr", "finance"] },
 ];
 
 function segments(path: string): string[] {

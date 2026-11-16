@@ -421,7 +421,8 @@ describe("commit", () => {
       expect.objectContaining({
         id: managerWorker.id,
         line_manager_worker_id: null,
-        needs_pay_details: false,
+        // Pay is set, but the bank details wait for a second approver (slice 1.7).
+        needs_pay_details: true,
         supervisor_clock_in: false,
       }),
       expect.objectContaining({
@@ -433,6 +434,31 @@ describe("commit", () => {
       }),
     ]);
     expect(workers[0]?.department_id).toBe(workers[1]?.department_id);
+
+    // The import is not a way round the two-person rule: the bank details became a pending
+    // request by the importer, not columns on the worker (slice 1.7).
+    const { rows: requests } = await db.query<{
+      worker_id: string;
+      status: string;
+      requested_by: string;
+      bank_account_last4: string;
+      on_worker: string | null;
+    }>(
+      `select c.worker_id, c.status, c.requested_by, c.bank_account_last4,
+         w.bank_account_last4 as on_worker
+       from public.bank_detail_changes c join public.workers w on w.id = c.worker_id
+       where c.worker_id = any($1)`,
+      [[managerWorker.id, reporteeWorker.id]],
+    );
+    expect(requests).toEqual([
+      {
+        worker_id: managerWorker.id,
+        status: "pending",
+        requested_by: people.hr.id,
+        bank_account_last4: "7712",
+        on_worker: null,
+      },
+    ]);
 
     const { rows: assignments } = await db.query<{
       worker_id: string;

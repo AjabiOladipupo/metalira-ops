@@ -25,6 +25,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"bank_detail_changes": {
+                  Row: {
+                    "account_name": string,"applied_at": string | null,"applied_notified_at": string | null,"applies_after": string | null,"approved_by": string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"cancelled_at": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"organisation_id": string,"previous_account_name": string | null,"previous_bank_account_enc": string | null,"previous_bank_account_last4": string | null,"previous_bank_name": string | null,"raised_by_worker": boolean,"reason": string | null,"rejected_by": string | null,"requested_by": string,"status": Database["public"]['Enums']["bank_detail_change_status"],"updated_at": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "account_name": string,"applied_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"organisation_id": string,"previous_account_name"?: string | null,"previous_bank_account_enc"?: string | null,"previous_bank_account_last4"?: string | null,"previous_bank_name"?: string | null,"raised_by_worker"?: boolean,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["bank_detail_change_status"],"updated_at"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "account_name"?: string,"applied_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"bank_account_enc"?: string,"bank_account_last4"?: string,"bank_name"?: string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"organisation_id"?: string,"previous_account_name"?: string | null,"previous_bank_account_enc"?: string | null,"previous_bank_account_last4"?: string | null,"previous_bank_name"?: string | null,"raised_by_worker"?: boolean,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["bank_detail_change_status"],"updated_at"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "bank_detail_changes_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "bank_detail_changes_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"clients": {
                   Row: {
                     "created_at": string,"created_by": string | null,"id": string,"name": string,"organisation_id": string,"updated_at": string
@@ -426,6 +452,9 @@ isOneToOne: false
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
+"apply_due_bank_detail_changes":
+{ Args: { "p_organisation_id": string }; Returns: number
+                           },
 "cancel_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
                            },
@@ -475,6 +504,11 @@ isOneToOne: false
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
                            },
+"worker_bank_details_as_of":
+{ Args: { "p_at"?: string,"p_organisation_id": string,"p_worker_id": string }; Returns: {
+              "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_detail_change_id": string,"bank_name": string
+            }[]
+                           },
 "worker_invite_lookup":
 { Args: { "p_token": string }; Returns: {
               "auth_user_id": string,"company_code": string,"first_name": string,"invite_id": string,"last_name": string,"organisation_id": string,"organisation_name": string,"staff_id": string,"state": string,"worker_id": string
@@ -495,7 +529,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_status": "active"|"ended"
+            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_status": "active"|"ended"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -611,7 +645,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_status": ["active", "ended"]
+            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_status": ["active", "ended"]
           }
         }
 } as const

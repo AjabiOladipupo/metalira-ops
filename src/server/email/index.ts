@@ -17,7 +17,7 @@ export type { SendEmailInput, SendEmailResult } from "./send";
  * body, footer). Plain text only: no control characters, no angle brackets and nothing that a
  * mail client would turn into a link, so a sign-up form cannot be used to send branded phishing.
  */
-const emailSafeName = z
+export const emailSafeName = z
   .string()
   .trim()
   .min(1)

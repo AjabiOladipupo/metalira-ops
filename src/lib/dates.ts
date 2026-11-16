@@ -54,3 +54,24 @@ export function firstOfNextMonth(iso: string): string {
 export function isWithin(iso: string, from: string, to: string | null): boolean {
   return from <= iso && (to === null || iso <= to);
 }
+
+const LAGOS_DATE_TIME = new Intl.DateTimeFormat("en-GB", {
+  timeZone: LAGOS_TIME_ZONE,
+  day: "numeric",
+  month: "numeric",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** A moment as "19 Nov 2026, 14:05" in Lagos time (24-hour clock). */
+export function formatDateTime(at: string | Date): string {
+  const date = typeof at === "string" ? new Date(at) : at;
+  if (Number.isNaN(date.getTime())) throw new RangeError(`Not a date and time: ${String(at)}`);
+  const parts = LAGOS_DATE_TIME.formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  const month = MONTHS[Number(get("month")) - 1] ?? "";
+  return `${Number(get("day"))} ${month} ${get("year")}, ${get("hour")}:${get("minute")}`;
+}

@@ -197,6 +197,15 @@ describe("nav by role", () => {
     expect(canAccessHref("ops_manager", "/app/people/new-hires")).toBe(true);
   });
 
+  it("lets owner, admin, hr and finance open bank-detail approvals", () => {
+    for (const role of ["owner", "admin", "hr", "finance"] as const) {
+      expect(canAccessHref(role, "/app/people/approvals"), role).toBe(true);
+    }
+    for (const role of ["ops_manager", "line_manager", "worker", "client_approver"] as const) {
+      expect(canAccessHref(role, "/app/people/approvals"), role).toBe(false);
+    }
+  });
+
   it("opens worker invites to owner, admin and hr only (slice 1.9)", () => {
     for (const role of ["owner", "admin", "hr"] as const) {
       expect(canAccessHref(role, "/app/people/invites"), role).toBe(true);

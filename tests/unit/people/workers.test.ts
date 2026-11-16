@@ -154,6 +154,8 @@ describe("createWorker", () => {
     expect(decryptPii(worker.nin_enc!, ctx("nin_enc", result.id))).toBe(NIN);
     expect(decryptPii(worker.bank_account_enc!, ctx("bank_account_enc", result.id))).toBe(NUBAN);
     expect(decryptPii(worker.rsa_pin_enc!, ctx("rsa_pin_enc", result.id))).toBe(RSA_PIN);
+    // Bank details wait for a second approver (slice 1.7): the database holds them as a request.
+    expect(result.bankDetailsPending).toBe(true);
 
     const sent = JSON.stringify(args);
     for (const secret of [NIN, NUBAN, RSA_PIN]) expect(sent).not.toContain(secret);

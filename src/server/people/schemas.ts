@@ -448,6 +448,42 @@ export const updateDepartmentSchema = z.object({
 export type UpdateDepartmentInput = z.input<typeof updateDepartmentSchema>;
 
 // ---------------------------------------------------------------------------
+// Bank-detail changes (slice 1.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * A request to change a worker's bank details. It changes nothing until a second person
+ * approves it and the 72-hour hold after approval has passed (CLAUDE.md rule 10, owner
+ * decision 9).
+ */
+export const requestBankChangeSchema = z.object({
+  workerId: z.uuid("Choose an employee"),
+  bankName: note("Bank name"),
+  accountName: text("Account name"),
+  bankAccountNumber: nubanSchema,
+  reason: optional(note("Reason", 500)),
+});
+
+export type RequestBankChangeInput = z.input<typeof requestBankChangeSchema>;
+
+/** What a second person (owner, HR or finance) does with a request. */
+export const BANK_CHANGE_DECISIONS = ["approve", "reject", "stop"] as const;
+export type BankChangeDecision = (typeof BANK_CHANGE_DECISIONS)[number];
+
+export const decideBankChangeSchema = z.object({
+  changeId: z.uuid("Choose a request"),
+  decision: z.enum(BANK_CHANGE_DECISIONS, "Choose approve, reject or stop"),
+  note: optional(note("Note", 500)),
+});
+
+export type DecideBankChangeInput = z.input<typeof decideBankChangeSchema>;
+
+/** The person who raised a request takes it back before anyone decides. */
+export const withdrawBankChangeSchema = z.object({
+  changeId: z.uuid("Choose a request"),
+});
+
+// ---------------------------------------------------------------------------
 // Mapping (slice 1.6)
 // ---------------------------------------------------------------------------
 

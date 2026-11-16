@@ -6,7 +6,7 @@ import { z } from "zod";
 import { PII_FIELDS, type PiiField } from "@/lib/mask";
 import type { Role } from "@/lib/roles";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { decryptPii, type PiiCiphertext } from "@/server/crypto/pii";
+import { decryptPii, type PiiCiphertext, type PiiContext } from "@/server/crypto/pii";
 import { logAuditEvent } from "@/server/identity/audit";
 import { getSession } from "@/server/identity/session";
 
@@ -45,6 +45,27 @@ export const PII_ENTITIES = Object.keys(PII_COLUMNS) as [PiiEntity, ...PiiEntity
 function piiColumn(entity: PiiEntity, field: PiiField): string | undefined {
   const columns: Partial<Record<PiiField, string>> = PII_COLUMNS[entity];
   return columns[field];
+}
+
+/**
+ * Where a stored value was encrypted for. A value on a worker is bound to its own row. A
+ * bank-detail change holds the new account number encrypted for its destination,
+ * `workers.bank_account_enc` of the worker, so the database can apply it when the 72-hour hold
+ * ends without decrypting it (slice 1.7); it is decrypted under that same context here.
+ */
+function decryptionContext(
+  organisationId: string,
+  entity: PiiEntity,
+  column: string,
+  entityId: string,
+  row: Record<string, unknown>,
+): PiiContext {
+  if (entity === "bank_detail_changes") {
+    const workerId = row.worker_id;
+    if (typeof workerId !== "string") throw new PiiRecordNotFoundError();
+    return { organisationId, table: "workers", column: "bank_account_enc", rowId: workerId };
+  }
+  return { organisationId, table: entity, column, rowId: entityId };
 }
 
 /** The caller is not a member of the organisation, or their role may not reveal this field. */
@@ -105,11 +126,12 @@ export async function revealPii(input: RevealPiiInput): Promise<string | null> {
   if (!membership || !canSeePii(membership.role, field)) throw new PiiAccessError(field);
 
   const supabase = await createServerSupabase();
-  // The table name comes from PII_COLUMNS, and `bank_detail_changes` arrives in slice 1.7, so
-  // the read goes through an untyped view of the same client (same session, same RLS).
+  // The table and column come from PII_COLUMNS, so the read goes through an untyped view of the
+  // same client (same session, same RLS).
+  const columns = entity === "bank_detail_changes" ? `${column}, worker_id` : column;
   const { data, error } = await (supabase as unknown as SupabaseClient)
     .from(entity)
-    .select(column)
+    .select(columns)
     .eq("id", entityId)
     .eq("organisation_id", organisationId)
     .maybeSingle<Record<string, PiiCiphertext | null>>();
@@ -119,7 +141,10 @@ export async function revealPii(input: RevealPiiInput): Promise<string | null> {
   const value = data[column];
   if (value == null) return null;
 
-  const plaintext = decryptPii(value, { organisationId, table: entity, column, rowId: entityId });
+  const plaintext = decryptPii(
+    value,
+    decryptionContext(organisationId, entity, column, entityId, data),
+  );
   await logAuditEvent(supabase, {
     organisationId,
     action: "pii.reveal",

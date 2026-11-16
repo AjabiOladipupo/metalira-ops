@@ -14,6 +14,8 @@ import { PEOPLE_EDITORS } from "./workers";
 
 export interface PeoplePageContext {
   supabase: SupabaseClient<Database>;
+  /** The signed-in user. */
+  userId: string;
   organisationId: string;
   role: ManagerRole;
   /** Owner, admin or hr: may add and change employees. Actions check this again. */
@@ -33,6 +35,7 @@ export async function peoplePageContext(): Promise<PeoplePageContext> {
   const { organisationId, role } = session.active;
   return {
     supabase: await createServerSupabase(),
+    userId: session.user.id,
     organisationId,
     role,
     canEdit: (PEOPLE_EDITORS as readonly ManagerRole[]).includes(role),

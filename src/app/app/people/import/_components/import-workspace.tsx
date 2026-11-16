@@ -36,7 +36,8 @@ export async function ImportWorkspace({
           <span className="text-sm text-fg-muted">
             32 columns: identity, job, department, line manager ID, client, project, site, shift,
             pay, bank, tax, pension and next of kin. The first 15 are enough to start; pay and bank
-            columns are needed before the first payroll.
+            columns are needed before the first payroll. Bank details wait for a second person to
+            approve them in Bank-detail approvals.
           </span>
           <Button asChild variant="outline" className="h-11 self-start rounded-lg px-4">
             <a href={IMPORT_TEMPLATE_HREF} download>

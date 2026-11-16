@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { findNavItem } from "@/lib/nav";
 import { initials } from "@/lib/people";
+import { canViewBankChanges, countPendingBankChanges } from "@/server/people/bank-changes";
 import {
   loadMappingTargets,
   loadPeopleDirectory,
@@ -17,6 +18,7 @@ import {
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../_shell/slots";
+import { BankApprovalsLink } from "./_components/bank-approvals-link";
 import { DepartmentTiles } from "./_components/department-tiles";
 import { NotSet, plural } from "./_components/display";
 import { MappingPanel, type MappingWorker } from "./_components/mapping-panel";
@@ -127,11 +129,22 @@ async function PeopleList({
   const departmentId = firstParam(params.dept).slice(0, 64);
   const mapId = firstParam(params.map).slice(0, 64);
   const ctx = await peoplePageContext();
-  const directory = await loadPeopleDirectory(ctx.supabase, ctx.organisationId, ctx.today, {
-    query,
-    departmentId: departmentId || undefined,
-    selectedId: mapId || undefined,
-  });
+  const [directory, pendingBankChanges] = await Promise.all([
+    loadPeopleDirectory(ctx.supabase, ctx.organisationId, ctx.today, {
+      query,
+      departmentId: departmentId || undefined,
+      selectedId: mapId || undefined,
+    }),
+    canViewBankChanges(ctx.role)
+      ? countPendingBankChanges(ctx.supabase, ctx.organisationId)
+      : Promise.resolve(0),
+  ]);
+  const actions = (
+    <>
+      <BankApprovalsLink count={pendingBankChanges} />
+      <PeopleActions canEdit={ctx.canEdit} />
+    </>
+  );
 
   if (directory.activeCount === 0) {
     const item = findNavItem("/app/people");
@@ -141,7 +154,7 @@ async function PeopleList({
           eyebrow="Workforce"
           title={item.label}
           description={item.description}
-          actions={<PeopleActions canEdit={ctx.canEdit} />}
+          actions={actions}
         />
         <EmptyState illustration={<Illustration name="import-people" />} message={item.empty} />
       </>
@@ -176,7 +189,7 @@ async function PeopleList({
         eyebrow="People and mapping"
         title={`${plural(directory.activeCount, "employee", "employees")} · ${unmapped}`}
         description="Every employee needs a department, a line manager and a site. Line managers approve their reportees' leave and timesheets; projects decide whose hours count toward which client."
-        actions={<PeopleActions canEdit={ctx.canEdit} />}
+        actions={actions}
       />
 
       <DepartmentTiles
