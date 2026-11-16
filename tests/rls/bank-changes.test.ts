@@ -50,7 +50,7 @@ async function addMember(user: TestUser, role: Role, workerId: string | null = n
 
 let staffCounter = 0;
 
-/** A worker with bank details already on file (setup not finished, written directly). */
+/** A worker with bank details already on file (written with the secret key, as after an applied change). */
 async function addWorker(org = owner.orgId, extra: Record<string, unknown> = {}): Promise<string> {
   staffCounter += 1;
   const id = randomUUID();
@@ -592,28 +592,51 @@ describe("new workers", () => {
     return rows;
   }
 
-  it("holds bank details as a request when the app asks, even during setup", async () => {
-    const { id, error } = await newWorker(people.hr.client, owner.orgId, {
-      hold_bank_details: true,
-    });
-    expect(error).toBeNull();
-    const bank = await workerBank(id);
-    expect(bank.bank_name).toBeNull();
-    expect(bank.bank_account_last4).toBeNull();
-    expect(bank.needs_pay_details).toBe(true);
-    expect(await openRequests(id)).toEqual([
-      { status: "pending", requested_by: people.hr.id, reason: "Bank details for a new employee" },
-    ]);
+  const newEmployee = (staffId: string) => ({
+    organisation_id: owner.orgId,
+    staff_id: staffId,
+    first_name: "Ngozi",
+    last_name: "Direct",
+    employment_type: "permanent" as const,
+    start_date: "2025-01-06",
+    bank_name: "GTBank",
+    account_name: "Ngozi Direct",
+    bank_account_enc: enc(),
+    bank_account_last4: "4410",
   });
 
-  it("writes them directly only during setup when not asked to hold (onboarding import)", async () => {
-    const { id, error } = await newWorker(people.hr.client, owner.orgId);
-    expect(error).toBeNull();
-    expect((await workerBank(id)).bank_account_last4).toBe("4410");
-    expect(await openRequests(id)).toEqual([]);
+  it("holds bank details as a request on every path, before setup is finished", async () => {
+    const { rows } = await db.query<{ setup_completed_at: Date | null }>(
+      "select setup_completed_at from public.organisations where id = $1",
+      [owner.orgId],
+    );
+    expect(rows[0]?.setup_completed_at).toBeNull();
+
+    // No flag, and an old client asking not to hold: both are held all the same.
+    const variants: Record<string, Json>[] = [{}, { hold_bank_details: false }];
+    for (const fields of variants) {
+      const { id, error } = await newWorker(people.hr.client, owner.orgId, fields);
+      expect(error).toBeNull();
+      const bank = await workerBank(id);
+      expect(bank.bank_name).toBeNull();
+      expect(bank.bank_account_last4).toBeNull();
+      expect(bank.needs_pay_details).toBe(true);
+      expect(await openRequests(id)).toEqual([
+        {
+          status: "pending",
+          requested_by: people.hr.id,
+          reason: "Bank details for a new employee",
+        },
+      ]);
+    }
   });
 
-  it("after setup, always holds them, and refuses a worker row that carries them", async () => {
+  it("refuses a worker row that carries them, before and after setup", async () => {
+    for (const by of [people.hr.client, owner.client]) {
+      const direct = await by.from("workers").insert(newEmployee(`NW-D${(staffCounter += 1)}`));
+      expect(direct.error?.code).toBe(PERMISSION_DENIED);
+    }
+
     await db.query("update public.organisations set setup_completed_at = now() where id = $1", [
       other.orgId,
     ]);
@@ -623,28 +646,84 @@ describe("new workers", () => {
     expect(await openRequests(id)).toEqual([
       { status: "pending", requested_by: other.id, reason: "Bank details for a new employee" },
     ]);
+    const direct = await other.client
+      .from("workers")
+      .insert({ ...newEmployee("NW-DIRECT"), organisation_id: other.orgId });
+    expect(direct.error?.code).toBe(PERMISSION_DENIED);
+  });
 
-    const direct = await other.client.from("workers").insert({
-      organisation_id: other.orgId,
-      staff_id: "NW-DIRECT",
-      first_name: "Ngozi",
-      last_name: "Direct",
-      employment_type: "permanent",
-      start_date: "2025-01-06",
-      bank_name: "GTBank",
-      account_name: "Ngozi Direct",
-      bank_account_enc: enc(),
-      bank_account_last4: "4410",
-    });
-    expect(direct.error?.code).toBe("MLBK6");
+  it("refuses them for a signed-in caller even past the column grants (definer code)", async () => {
+    // As the table owner, with a signed-in user's claims: what a security definer function
+    // run by that user would look like. The grants don't apply; the trigger still refuses.
+    await db.query("begin");
+    try {
+      await db.query("select set_config('request.jwt.claims', $1, true)", [
+        JSON.stringify({ sub: people.hr.id, role: "authenticated" }),
+      ]);
+      const row = newEmployee("NW-DEFINER");
+      await expect(
+        db.query(
+          `insert into public.workers (organisation_id, staff_id, first_name, last_name,
+             employment_type, start_date, bank_name, account_name, bank_account_enc,
+             bank_account_last4)
+           values ($1, $2, $3, $4, 'permanent', $5, $6, $7, decode($8, 'hex'), $9)`,
+          [
+            row.organisation_id,
+            row.staff_id,
+            row.first_name,
+            row.last_name,
+            row.start_date,
+            row.bank_name,
+            row.account_name,
+            row.bank_account_enc.slice(2),
+            row.bank_account_last4,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "MLBK6" });
+    } finally {
+      await db.query("rollback");
+    }
+  });
 
-    // Incomplete details can't become a request; the worker is added without them.
-    const partial = await newWorker(other.client, other.orgId, {
+  it("leaves incomplete details off, so the worker keeps needs_pay_details", async () => {
+    const partial = await newWorker(people.hr.client, owner.orgId, {
       bank_account_enc: null,
       bank_account_last4: null,
     });
     expect(partial.error).toBeNull();
     expect((await workerBank(partial.id)).bank_name).toBeNull();
     expect(await openRequests(partial.id)).toEqual([]);
+  });
+
+  it("holds them for every worker an import creates", async () => {
+    const { id, error } = await newWorker(people.hr.client, owner.orgId);
+    expect(error).toBeNull();
+    // commit_import_batch creates each worker through create_worker (see imports.test.ts).
+    expect(await openRequests(id)).toHaveLength(1);
+  });
+});
+
+describe("bank details as of a payout date", () => {
+  it("answers the owner, HR and finance, and refuses everyone else rather than guess", async () => {
+    const workerId = await addWorker();
+    const ask = (by: Client) =>
+      by.rpc("worker_bank_details_as_of", {
+        p_organisation_id: owner.orgId,
+        p_worker_id: workerId,
+      });
+    for (const by of [owner.client, people.hr.client, people.finance.client]) {
+      const { data, error } = await ask(by);
+      expect(error).toBeNull();
+      expect(data?.[0]?.bank_account_last4).toBe("1234");
+    }
+    for (const by of [people.ops.client, people.admin.client, people.worker.client]) {
+      const { data, error } = await ask(by);
+      expect(error?.code).toBe(PERMISSION_DENIED);
+      expect(data).toBeNull();
+    }
+    // Another company's owner can't ask about this worker either.
+    expect((await ask(other.client)).error?.code).toBe(PERMISSION_DENIED);
+    // Server code with the secret key (no signed-in user) may.
+    expect((await ask(admin)).data?.[0]?.bank_account_last4).toBe("1234");
   });
 });

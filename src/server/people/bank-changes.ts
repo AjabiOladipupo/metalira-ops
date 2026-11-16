@@ -3,7 +3,7 @@ import "server-only";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 import type { ManagerRole } from "@/lib/roles";
-import { sealPii, type PiiContext } from "@/server/crypto/pii";
+import { PiiDecryptError, decryptPii, last4, sealPii, type PiiContext } from "@/server/crypto/pii";
 import { MutationError, mutate, type MutationSpec } from "@/server/identity/mutate";
 import type { Database } from "@/types/db";
 
@@ -18,9 +18,10 @@ import { PEOPLE_EDITORS } from "./workers";
 /**
  * Bank-detail changes (slice 1.7, CLAUDE.md rule 10, owner decision 9). A request changes
  * nothing on its own: a second person approves it, and 72 hours after approval the database
- * copies it onto the worker (public.bank_detail_changes, migration 20261116214500). Every rule
- * that matters is enforced there, for every client; the checks here only give a clearer message
- * sooner.
+ * copies it onto the worker (public.bank_detail_changes, migration 20261116214500). The rules
+ * are enforced there, for every client, with one exception the database can't check without
+ * the key: on approval, `checkRequestedAccount` decrypts the request and refuses it unless its
+ * last four digits belong to its number, so the approver sees the account that will be paid.
  *
  * The new account number is encrypted for its destination, `workers.bank_account_enc` of the
  * worker, so the database can apply it when the hold ends without any key (see pii.ts).
@@ -149,12 +150,89 @@ const DECISION: Record<BankChangeDecision, { from: BankChangeStatus; to: BankCha
   stop: { from: "approved", to: "cancelled" },
 };
 
+const NOT_FOUND_OR_DECIDED = "That request wasn't found, or someone has already decided it.";
+
+const sameText = (a: string | null | undefined, b: string | null | undefined) =>
+  (a ?? "").trim().toLowerCase() === (b ?? "").trim().toLowerCase();
+
+/** The worker's current number, or null when it is missing or can't be read. */
+function currentNumber(enc: string | null | undefined, ctx: PiiContext): string | null {
+  if (!enc) return null;
+  try {
+    return decryptPii(enc, ctx);
+  } catch (error) {
+    if (error instanceof PiiDecryptError) return null;
+    throw error;
+  }
+}
+
+/**
+ * Before an approval: proves that the last four digits the approver sees (on the card, in the
+ * emails, and in "Payouts use the account ending ...") belong to the number that will be paid.
+ * The database can't check this without the key, and a requester writing rows directly could
+ * otherwise pair another account's ciphertext with the worker's current last four digits. Also
+ * refuses a request that changes nothing, which has no honest use. The request's own columns
+ * can't change after insert (trigger), so what is checked here is what gets approved.
+ */
+async function checkRequestedAccount(
+  supabase: Client,
+  organisationId: string,
+  changeId: string,
+): Promise<void> {
+  const { data: change, error } = await supabase
+    .from("bank_detail_changes")
+    .select(
+      "worker_id, status, bank_name, account_name, bank_account_enc, bank_account_last4, workers!bank_detail_changes_worker_fkey ( bank_name, account_name, bank_account_enc )",
+    )
+    .eq("id", changeId)
+    .eq("organisation_id", organisationId)
+    .maybeSingle();
+  if (error) fromDbError(error, "decision");
+  if (change?.status !== "pending") throw new MutationError("invalid", NOT_FOUND_OR_DECIDED);
+
+  const ctx = bankAccountContext(organisationId, change.worker_id);
+  let number: string;
+  try {
+    number = decryptPii(change.bank_account_enc, ctx);
+  } catch (cause) {
+    if (!(cause instanceof PiiDecryptError)) throw cause;
+    throw new MutationError(
+      "invalid",
+      "This request's account number can't be checked, so it can't be approved. Reject it and raise a new one.",
+      {},
+      { cause },
+    );
+  }
+  if (last4(number) !== change.bank_account_last4) {
+    throw new MutationError(
+      "invalid",
+      "The last four digits on this request don't match its account number, so it can't be approved. Reject it and raise a new one.",
+    );
+  }
+
+  const worker = change.workers;
+  if (
+    worker &&
+    sameText(worker.bank_name, change.bank_name) &&
+    sameText(worker.account_name, change.account_name) &&
+    currentNumber(worker.bank_account_enc, ctx) === number
+  ) {
+    throw new MutationError(
+      "invalid",
+      "These are the bank details already on file, so there is nothing to approve. Reject it instead.",
+    );
+  }
+}
+
 export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, DecidedBankChange> =
   {
     schema: decideBankChangeSchema,
     roles: BANK_CHANGE_APPROVERS,
     run: async ({ supabase, organisationId, data }) => {
       const { from, to } = DECISION[data.decision];
+      if (data.decision === "approve") {
+        await checkRequestedAccount(supabase, organisationId, data.changeId);
+      }
       // The database fills in who decided and when, sets the hold, and refuses the requester.
       const { data: row, error } = await supabase
         .from("bank_detail_changes")
@@ -165,12 +243,7 @@ export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, D
         .select("id, worker_id, status, applies_after, bank_account_last4")
         .maybeSingle();
       if (error) fromDbError(error, "decision");
-      if (!row) {
-        throw new MutationError(
-          "invalid",
-          "That request wasn't found, or someone has already decided it.",
-        );
-      }
+      if (!row) throw new MutationError("invalid", NOT_FOUND_OR_DECIDED);
       return {
         id: row.id,
         workerId: row.worker_id,

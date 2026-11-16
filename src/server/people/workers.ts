@@ -201,8 +201,9 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
       const staffId = data.staffId ?? nextStaffId(await loadStaffIds(supabase, organisationId));
       const { error } = await supabase.rpc("create_worker", {
         // Bank details entered here wait for a second approver (slice 1.7): the database
-        // raises them as a pending bank-detail change instead of writing them to the worker.
-        p_worker: { ...worker, staff_id: staffId, hold_bank_details: true },
+        // always raises them as a pending bank-detail change instead of writing them to the
+        // worker.
+        p_worker: { ...worker, staff_id: staffId },
         p_pay_rate: payRate ?? undefined,
       });
       if (!error) {

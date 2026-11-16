@@ -31,12 +31,20 @@
 --   table, column and row into the tag). That is what lets the database copy the bytes into
 --   workers when the hold ends, with no key in SQL. A value spliced in from another worker or
 --   column still fails its integrity check when revealed or paid out.
--- * New workers (recorded from the 1.3 review): once a company has finished setup, a new
---   worker row can't carry bank details; public.create_worker turns them into a pending request
---   instead, and the worker keeps needs_pay_details until a second person approves and the hold
---   ends. The app's "Add employee" always asks for that (hold_bank_details), setup or not.
---   Imports during onboarding (setup not finished) still write bank details directly, pending
---   the owner's decision on whether the first bulk import may stay single-approver.
+-- * The last four digits: the database has no key, so it can't check that bank_account_last4
+--   matches bank_account_enc. The server does, on approval (decideBankChange in
+--   src/server/people/bank-changes.ts decrypts the request and refuses a mismatch), so what the
+--   approver sees on the card and in the emails is what will be paid. A requester who writes
+--   rows directly gains nothing: any number they could encrypt for a worker they can already
+--   send through the app, where it shows with its real last four digits.
+-- * New workers (recorded from the 1.3 review): a new worker row never carries bank details
+--   from a signed-in user, on any path (Add employee, import, a direct insert, or a direct
+--   create_worker call), whether or not the company has finished setup. public.create_worker
+--   turns them into a pending request instead, and the worker keeps needs_pay_details until a
+--   second person approves and the hold ends. Signed-in users have no insert grant on the
+--   workers bank columns, and a BEFORE INSERT trigger refuses them for every signed-in caller,
+--   definer functions included. The owner has not yet decided whether the first bulk import at
+--   onboarding may stay single-approver (docs/PHASE_1.md 1.7); until they do, it is held too.
 -- * Personal data never reaches audit_log in clear: the row audit drops `_enc` and
 --   `bank_account*` keys (private.audit_secret_key), so it logs the bank name, account name,
 --   status and who decided, never the number or its last four digits.
@@ -393,10 +401,11 @@ begin
 end;
 $$;
 
--- BEFORE INSERT on workers: once the company has finished setup, a new worker's bank details
--- need a second approver, so the row itself can't carry them (public.create_worker turns them
--- into a request). Runs as the caller: an insert aimed at another organisation reads nothing
--- here and is refused by RLS.
+-- BEFORE INSERT on workers: a new worker's bank details need a second approver, so a row
+-- inserted by a signed-in user can't carry them (public.create_worker turns them into a
+-- request). The column grants already refuse a direct insert; this also covers any definer
+-- function a signed-in user reaches. Only callers with no signed-in user (server code with the
+-- secret key, CLAUDE.md rule 2) may insert them.
 create function private.workers_bank_details_need_approval()
 returns trigger
 language plpgsql
@@ -404,12 +413,7 @@ set search_path = ''
 as $$
 begin
   if num_nonnulls(new.bank_name, new.account_name, new.bank_account_enc, new.bank_account_last4) > 0
-    and exists (
-      select 1
-      from public.organisations o
-      where o.id = new.organisation_id
-        and o.setup_completed_at is not null
-    ) then
+    and auth.uid() is not null then
     raise exception 'Bank details for a new employee need a second person to approve them. Add the employee, then raise a bank-detail change.'
       using errcode = 'MLBK6';
   end if;
@@ -487,6 +491,10 @@ grant insert (
 ) on table public.bank_detail_changes to authenticated;
 grant update (status, decision_note) on table public.bank_detail_changes to authenticated;
 
+-- A new worker's bank details arrive only as a request (public.create_worker), never on the row.
+revoke insert (bank_name, account_name, bank_account_enc, bank_account_last4)
+  on table public.workers from authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 5. Applying changes whose hold has ended
 -- ---------------------------------------------------------------------------
@@ -548,13 +556,19 @@ select cron.schedule(
 
 -- The account in force for a worker at p_at: the latest approved or applied change whose hold
 -- ended by then; otherwise the account the first later change replaces (its snapshot); otherwise
--- the worker's current details. Correct whether or not the apply job has run yet. Runs as the
--- caller, so RLS decides who may ask. bank_account_enc decrypts under workers.bank_account_enc
--- of the worker.
-create function public.worker_bank_details_as_of(
+-- the worker's current details. Correct whether or not the apply job has run yet.
+-- bank_account_enc decrypts under workers.bank_account_enc of the worker.
+--
+-- Definer, with its own role check: run as a caller who can't read bank_detail_changes, the
+-- "changes" step would find nothing and quietly fall back to the worker's current row, which
+-- during the gap between applies_after and the next apply run is still the old account. So only
+-- the owner, HR and finance (who decide and pay) may ask, and callers without a signed-in user
+-- (server code with the secret key); anyone else gets 42501, never a wrong answer. Callers use
+-- public.worker_bank_details_as_of below, which only forwards here.
+create function private.worker_bank_details_as_of(
   p_organisation_id uuid,
   p_worker_id uuid,
-  p_at timestamptz default now()
+  p_at timestamptz
 )
 returns table (
   bank_name text,
@@ -563,11 +577,20 @@ returns table (
   bank_account_last4 text,
   bank_detail_change_id uuid
 )
-language sql
+language plpgsql
 stable
-security invoker
+security definer
 set search_path = ''
 as $$
+#variable_conflict use_column
+begin
+  if auth.uid() is not null
+    and not private.has_role(p_organisation_id, array['owner', 'hr', 'finance']) then
+    raise exception 'Only the owner, HR or finance can read the bank details used for a payout.'
+      using errcode = '42501';
+  end if;
+
+  return query
   with changes as (
     select c.*
     from public.bank_detail_changes c
@@ -602,20 +625,43 @@ as $$
   union all
   select * from replaced
   union all
-  select * from current_details
+  select * from current_details;
+end;
+$$;
+
+create function public.worker_bank_details_as_of(
+  p_organisation_id uuid,
+  p_worker_id uuid,
+  p_at timestamptz default now()
+)
+returns table (
+  bank_name text,
+  account_name text,
+  bank_account_enc bytea,
+  bank_account_last4 text,
+  bank_detail_change_id uuid
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.worker_bank_details_as_of(p_organisation_id, p_worker_id, p_at)
 $$;
 
 -- ---------------------------------------------------------------------------
 -- 7. New workers: bank details become a request
 -- ---------------------------------------------------------------------------
 
--- As in 20261116103000, plus: when the company has finished setup, or the caller asks
--- (`"hold_bank_details": true` in p_worker, which the app's "Add employee" always sends), bank
--- details are not written to the worker but raised as a pending bank_detail_changes request by
--- the caller. bank_account_enc must be encrypted for workers.bank_account_enc of p_worker.id,
--- as before, which is also what the request holds. Incomplete bank details (a name without the
--- number, say) can't become a request, so they are left off and the worker keeps
--- needs_pay_details, as the import does for a bad account number.
+-- As in 20261116103000, except that bank details are never written to the worker: they are
+-- raised as a pending bank_detail_changes request by the caller, on every path (Add employee,
+-- the import, which calls this per row, or a direct call), setup finished or not. A
+-- `hold_bank_details` key in p_worker, sent by earlier app versions, is ignored.
+-- bank_account_enc must be encrypted for workers.bank_account_enc of p_worker.id, as before,
+-- which is also what the request holds. Incomplete bank details (a name without the number,
+-- say) can't become a request, so they are left off and the worker keeps needs_pay_details, as
+-- the import does for a bad account number. The request's last four digits are checked against
+-- its encrypted number when a second person approves it (decideBankChange).
 create or replace function public.create_worker(p_worker jsonb, p_pay_rate jsonb default null)
 returns uuid
 language plpgsql
@@ -626,41 +672,26 @@ as $$
 declare
   v_id uuid;
   v_org uuid;
-  v_hold boolean;
   r public.workers;
 begin
   r := jsonb_populate_record(null::public.workers, p_worker);
 
-  v_hold := coalesce((p_worker ->> 'hold_bank_details')::boolean, false)
-    or exists (
-      select 1
-      from public.organisations o
-      where o.id = r.organisation_id
-        and o.setup_completed_at is not null
-    );
-
   insert into public.workers (
     id, organisation_id, staff_id, first_name, last_name, phone, email, job_title,
     department_id, line_manager_worker_id, line_manager_membership_id, employment_type,
-    start_date, bank_name, account_name, bank_account_enc, bank_account_last4, nin_enc, tin,
-    tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo,
-    next_of_kin_name, next_of_kin_phone, supervisor_clock_in
+    start_date, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in,
+    annual_rent_declared_kobo, next_of_kin_name, next_of_kin_phone, supervisor_clock_in
   )
   values (
     r.id, r.organisation_id, r.staff_id, r.first_name, r.last_name, r.phone, r.email,
     r.job_title, r.department_id, r.line_manager_worker_id, r.line_manager_membership_id,
-    r.employment_type, r.start_date,
-    case when v_hold then null else r.bank_name end,
-    case when v_hold then null else r.account_name end,
-    case when v_hold then null else r.bank_account_enc end,
-    case when v_hold then null else r.bank_account_last4 end,
-    r.nin_enc, r.tin, r.tax_state, r.pfa_name, r.rsa_pin_enc,
+    r.employment_type, r.start_date, r.nin_enc, r.tin, r.tax_state, r.pfa_name, r.rsa_pin_enc,
     r.rsa_pin_last4, coalesce(r.nhf_opt_in, false), r.annual_rent_declared_kobo,
     r.next_of_kin_name, r.next_of_kin_phone, coalesce(r.supervisor_clock_in, false)
   )
   returning id, organisation_id into v_id, v_org;
 
-  if v_hold and num_nulls(r.bank_name, r.account_name, r.bank_account_enc, r.bank_account_last4) = 0 then
+  if num_nulls(r.bank_name, r.account_name, r.bank_account_enc, r.bank_account_last4) = 0 then
     insert into public.bank_detail_changes (
       organisation_id, worker_id, bank_name, account_name, bank_account_enc, bank_account_last4,
       reason
@@ -694,6 +725,9 @@ grant execute on function private.apply_due_bank_detail_changes(uuid) to authent
 
 revoke all on function public.apply_due_bank_detail_changes(uuid) from public, anon;
 grant execute on function public.apply_due_bank_detail_changes(uuid) to authenticated, service_role;
+
+revoke all on function private.worker_bank_details_as_of(uuid, uuid, timestamptz) from public, anon;
+grant execute on function private.worker_bank_details_as_of(uuid, uuid, timestamptz) to authenticated, service_role;
 
 revoke all on function public.worker_bank_details_as_of(uuid, uuid, timestamptz) from public, anon;
 grant execute on function public.worker_bank_details_as_of(uuid, uuid, timestamptz) to authenticated, service_role;

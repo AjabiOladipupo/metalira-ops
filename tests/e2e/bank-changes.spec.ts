@@ -73,8 +73,8 @@ async function endHold(workerId: string) {
 test("a bank change needs a second approver and applies 72 hours later", async ({ browser }) => {
   test.setTimeout(180_000);
   const suffix = uniqueSuffix();
-  // Setup is finished below, once the worker is on file: after setup, a new worker row can't
-  // carry bank details at all.
+  // The worker's current account is written below with the secret key, as an applied change
+  // would leave it: no signed-in user can put bank details on a worker row.
   const owner = await createOwner("bank-owner", `Apapa Guards ${suffix}`, { setupDone: false });
   const hr = await createAccount("bank-hr", "Hauwa Bello");
   const finance = await createAccount("bank-finance", "Femi Adeyemi");

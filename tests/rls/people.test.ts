@@ -132,6 +132,36 @@ const bank = {
   bank_account_last4: "7712",
 };
 
+/**
+ * Puts bank details on a worker as an applied bank-detail change would (slice 1.7): signed-in
+ * users can't write them, and create_worker holds them as a request for a second approver.
+ */
+async function putBankOnFile(workerId: string) {
+  await db.query(
+    `update public.workers
+     set bank_name = $2, account_name = $3, bank_account_enc = decode($4, 'hex'),
+       bank_account_last4 = $5
+     where id = $1`,
+    [
+      workerId,
+      bank.bank_name,
+      bank.account_name,
+      bank.bank_account_enc.slice(2),
+      bank.bank_account_last4,
+    ],
+  );
+}
+
+/** A worker created by HR, then given bank details as an applied change would. */
+async function mustCreatePaidWorker(
+  fields: Record<string, Json> = {},
+  payRate: Record<string, Json> | null = null,
+) {
+  const id = await mustCreateWorker(fields, payRate);
+  await putBankOnFile(id);
+  return id;
+}
+
 beforeAll(async () => {
   admin = adminClient();
   db = await pgClient();
@@ -481,15 +511,17 @@ describe("workers", () => {
   });
 
   it("maintains needs_pay_details from bank details and pay", async () => {
-    const noPay = await mustCreateWorker(bank);
+    const noPay = await mustCreatePaidWorker();
     const noBank = await mustCreateWorker({}, monthly("2025-01-06"));
-    const complete = await mustCreateWorker(bank, monthly("2025-01-06"));
+    const complete = await mustCreatePaidWorker({}, monthly("2025-01-06"));
+    // Bank details given when adding a worker wait for a second approver (slice 1.7).
+    const held = await mustCreateWorker(bank, monthly("2025-01-06"));
     const { data } = await admin
       .from("workers")
       .select("id, needs_pay_details")
-      .in("id", [noPay, noBank, complete]);
+      .in("id", [noPay, noBank, complete, held]);
     const flag = Object.fromEntries((data ?? []).map((row) => [row.id, row.needs_pay_details]));
-    expect(flag).toEqual({ [noPay]: true, [noBank]: true, [complete]: false });
+    expect(flag).toEqual({ [noPay]: true, [noBank]: true, [complete]: false, [held]: true });
 
     const later = await people.hr.client.rpc("add_pay_rate", {
       p_organisation_id: owner.orgId,
@@ -507,11 +539,11 @@ describe("workers", () => {
 
   it("flags a worker with no pay rate in force, even when one is scheduled", async () => {
     // Started already, but the only rate starts next month.
-    const futureOnly = await mustCreateWorker(bank, monthly(IN_30));
+    const futureOnly = await mustCreatePaidWorker({}, monthly(IN_30));
     // Starts next month with pay from the start date: nothing is missing.
-    const starter = await mustCreateWorker({ ...bank, start_date: IN_30 }, monthly(IN_30));
+    const starter = await mustCreatePaidWorker({ start_date: IN_30 }, monthly(IN_30));
     // Every rate has closed.
-    const closed = await mustCreateWorker(bank, monthly("2025-01-06"));
+    const closed = await mustCreatePaidWorker({}, monthly("2025-01-06"));
     const [row] = await versions(closed);
     expect(
       (
@@ -619,6 +651,7 @@ describe("workers", () => {
 
   it("audits which personal data changed, never the values", async () => {
     const nin = `\\x${randomBytes(40).toString("hex")}`;
+    // Bank details are held as a request (slice 1.7); bank-changes.test.ts covers their audit.
     const workerId = await mustCreateWorker({ ...bank, nin_enc: nin });
     const changed = await people.hr.client
       .from("workers")
@@ -642,12 +675,7 @@ describe("workers", () => {
     );
     const personal = rows.filter((row) => row.action === "workers.personal_data");
     expect(personal.map((row) => row.after)).toEqual([
-      {
-        changes: [
-          { field: "nin", change: "added" },
-          { field: "bank_account", change: "added" },
-        ],
-      },
+      { changes: [{ field: "nin", change: "added" }] },
       {
         changes: [
           { field: "nin", change: "changed" },

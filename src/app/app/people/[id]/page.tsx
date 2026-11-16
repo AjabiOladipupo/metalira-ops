@@ -2,6 +2,7 @@ import { ArrowLeft, Pencil } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { after } from "next/server";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { Status } from "@/components/status";
@@ -19,6 +20,7 @@ import {
   payVersionState,
 } from "@/lib/people";
 import { ROLE_LABELS } from "@/lib/roles";
+import { sendAppliedBankChangeNotices } from "@/server/people/bank-change-notices";
 import {
   applyDueBankChanges,
   canViewBankChanges,
@@ -409,6 +411,8 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   const ctx = await peoplePageContext();
   // A change whose 72-hour hold has ended takes effect before the bank details are shown.
   await applyDueBankChanges(ctx.supabase, ctx.organisationId);
+  // And the worker hears about it now, not at the next daily cron run.
+  after(() => sendAppliedBankChangeNotices(ctx.organisationId));
   const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today);
   if (!worker) notFound();
   const [bankChanges, viewer] = await Promise.all([

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { createElement } from "react";
 import { z } from "zod";
 
@@ -20,8 +21,15 @@ import {
  * Emails for bank-detail changes (slice 1.7). They name the account by its last four digits
  * only, never the bank or the full number. Names come from the database, where they are plain
  * text; they are checked again here because they reach an email from Metalira's own domain.
- * Each send has an idempotency key per change (and recipient), so a retry never sends twice.
+ * Each send has an idempotency key per change and recipient, so a retry never sends twice. A
+ * worker's notices can go to more than one address (bank-change-notices.ts), so their key names
+ * the address by a short hash, never in clear.
  */
+
+/** A short, stable stand-in for an address in an idempotency key. */
+function addressKey(address: string): string {
+  return createHash("sha256").update(address.trim().toLowerCase()).digest("hex").slice(0, 16);
+}
 
 const last4 = z.string().regex(/^\d{4}$/);
 const staffId = z
@@ -89,7 +97,7 @@ export async function sendBankChangeApprovedEmail(
       appUrl: emailAppUrl(),
     }),
     tags: [{ name: "type", value: "bank_change_approved" }],
-    idempotencyKey: `bank-change-approved/${data.changeId}`,
+    idempotencyKey: `bank-change-approved/${data.changeId}/${addressKey(data.to)}`,
   });
 }
 
@@ -109,6 +117,6 @@ export async function sendBankChangeAppliedEmail(
       appUrl: emailAppUrl(),
     }),
     tags: [{ name: "type", value: "bank_change_applied" }],
-    idempotencyKey: `bank-change-applied/${data.changeId}`,
+    idempotencyKey: `bank-change-applied/${data.changeId}/${addressKey(data.to)}`,
   });
 }

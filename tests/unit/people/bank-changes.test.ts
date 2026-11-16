@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { decryptPii } from "@/server/crypto/pii";
+import { decryptPii, sealPii } from "@/server/crypto/pii";
 import { MutationError, runMutation, type MutationContext } from "@/server/identity/mutate";
 import {
   BANK_CHANGE_APPROVERS,
@@ -26,12 +26,17 @@ const NUBAN = "0123457712";
 
 type Result = { data: unknown; error: unknown };
 
-/** A Supabase client double for one insert or update chain. Records what was sent. */
-function fakeSupabase(result: Result) {
+/**
+ * A Supabase client double. Each `from()` chain answers with the next result in turn (the last
+ * one repeats). Records what was sent.
+ */
+function fakeSupabase(results: Result | Result[]) {
+  const queue = Array.isArray(results) ? [...results] : [results];
   const calls: { table: string; op: string; payload: unknown; filters: unknown[][] }[] = [];
   function from(table: string) {
-    const call = { table, op: "", payload: undefined as unknown, filters: [] as unknown[][] };
+    const call = { table, op: "select", payload: undefined as unknown, filters: [] as unknown[][] };
     calls.push(call);
+    const result = (queue.length > 1 ? queue.shift() : queue[0])!;
     const builder = {
       insert(payload: unknown) {
         call.op = "insert";
@@ -194,19 +199,45 @@ describe("decideBankChange", () => {
     bank_account_last4: "7712",
   };
 
+  /** A pending request as the approval check reads it, with the worker's current details. */
+  function pendingRequest(
+    overrides: Record<string, unknown> = {},
+    number = NUBAN,
+    current: Record<string, unknown> | null = {
+      bank_name: "Access Bank",
+      account_name: "Musa Ibrahim",
+      bank_account_enc: sealPii("0987651234", bankAccountContext(ORG, WORKER)).enc,
+    },
+  ): Result {
+    return {
+      data: {
+        worker_id: WORKER,
+        status: "pending",
+        bank_name: "GTBank",
+        account_name: "Musa Ibrahim",
+        bank_account_enc: sealPii(number, bankAccountContext(ORG, WORKER)).enc,
+        bank_account_last4: "7712",
+        workers: current,
+        ...overrides,
+      },
+      error: null,
+    };
+  }
+
   it.each([
     ["approve", "pending", "approved"],
     ["reject", "pending", "rejected"],
     ["stop", "approved", "cancelled"],
   ])("%s moves %s to %s, and sends only the status and note", async (decision, from, to) => {
-    const fake = fakeSupabase({ data: { ...approved, status: to }, error: null });
+    const updated = { data: { ...approved, status: to }, error: null };
+    const fake = fakeSupabase(decision === "approve" ? [pendingRequest(), updated] : updated);
     const result = await runMutation(context(fake.client, "finance"), decideBankChangeSpec, {
       changeId: CHANGE,
       decision,
       note: "Checked the letter",
     });
     expect(result.status).toBe(to);
-    const [call] = fake.calls;
+    const call = fake.calls.at(-1);
     expect(call).toMatchObject({
       op: "update",
       payload: { status: to, decision_note: "Checked the letter" },
@@ -216,6 +247,81 @@ describe("decideBankChange", () => {
       ["organisation_id", ORG],
       ["status", from],
     ]);
+    // Only an approval decrypts the request first; reject and stop write straight away.
+    expect(fake.calls.map((c) => c.op)).toEqual(
+      decision === "approve" ? ["select", "update"] : ["update"],
+    );
+  });
+
+  describe("checks the account before an approval", () => {
+    async function approve(fake: ReturnType<typeof fakeSupabase>) {
+      return refusal(
+        runMutation(context(fake.client, "finance"), decideBankChangeSpec, {
+          changeId: CHANGE,
+          decision: "approve",
+        }),
+      );
+    }
+
+    it("refuses last four digits that don't belong to the encrypted number", async () => {
+      // A requester re-used another request's ciphertext (an account ending 9153) and wrote
+      // the worker's current last four digits beside it, so the card would show no change.
+      const fake = fakeSupabase(pendingRequest({ bank_account_last4: "1234" }, "2000009153"));
+      const error = await approve(fake);
+      expect(error.code).toBe("invalid");
+      expect(error.message).toMatch(/don't match its account number/);
+      expect(fake.calls.map((c) => c.op)).toEqual(["select"]);
+      expect(fake.calls[0]!.filters).toEqual([
+        ["id", CHANGE],
+        ["organisation_id", ORG],
+      ]);
+    });
+
+    it("refuses a number encrypted for another worker or column", async () => {
+      const elsewhere = sealPii(NUBAN, bankAccountContext(ORG, CHANGE)).enc;
+      const fake = fakeSupabase(pendingRequest({ bank_account_enc: elsewhere }));
+      const error = await approve(fake);
+      expect(error.message).toMatch(/can't be checked/);
+      expect(fake.calls.map((c) => c.op)).toEqual(["select"]);
+    });
+
+    it("refuses a request that changes nothing", async () => {
+      const sameAccount = {
+        bank_name: "gtbank ",
+        account_name: "Musa Ibrahim",
+        bank_account_enc: sealPii(NUBAN, bankAccountContext(ORG, WORKER)).enc,
+      };
+      const fake = fakeSupabase(pendingRequest({}, NUBAN, sameAccount));
+      const error = await approve(fake);
+      expect(error.message).toMatch(/already on file/);
+      expect(fake.calls.map((c) => c.op)).toEqual(["select"]);
+    });
+
+    it("allows a corrected account name on the same number, and a first account", async () => {
+      for (const current of [
+        {
+          bank_name: "GTBank",
+          account_name: "Musa Ibrahim Bello",
+          bank_account_enc: sealPii(NUBAN, bankAccountContext(ORG, WORKER)).enc,
+        },
+        { bank_name: null, account_name: null, bank_account_enc: null },
+      ]) {
+        const updated = { data: approved, error: null };
+        const fake = fakeSupabase([pendingRequest({}, NUBAN, current), updated]);
+        const result = await runMutation(context(fake.client, "owner"), decideBankChangeSpec, {
+          changeId: CHANGE,
+          decision: "approve",
+        });
+        expect(result.status).toBe("approved");
+      }
+    });
+
+    it("says so when the request is no longer pending", async () => {
+      const fake = fakeSupabase(pendingRequest({ status: "rejected" }));
+      const error = await approve(fake);
+      expect(error.message).toMatch(/already decided/);
+      expect(fake.calls.map((c) => c.op)).toEqual(["select"]);
+    });
   });
 
   it("refuses admins and operations managers before any write", async () => {
