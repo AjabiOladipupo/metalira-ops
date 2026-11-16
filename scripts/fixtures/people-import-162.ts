@@ -501,9 +501,9 @@ function csvCell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-/** CSV with a header row, CRLF line endings (as Excel writes) and a final line break. */
+/** CSV with a header row, LF line endings (the repo stores text as LF) and a final line break. */
 export function toCsv(rows: readonly FixtureRow[]): string {
   const lines = [PEOPLE_IMPORT_COLUMNS.join(",")];
   for (const row of rows) lines.push(PEOPLE_IMPORT_COLUMNS.map((key) => csvCell(row[key])).join(","));
-  return `${lines.join("\r\n")}\r\n`;
+  return `${lines.join("\n")}\n`;
 }
