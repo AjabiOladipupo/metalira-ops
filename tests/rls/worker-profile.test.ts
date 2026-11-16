@@ -254,8 +254,14 @@ describe("worker change requests", () => {
     expect((await request(owner.client, me)).error?.code).toBe(PERMISSION_DENIED);
   });
 
-  it("never hold a personal number, even split by spaces or dashes", async () => {
-    for (const details of ["NIN 12345678901", "account 0123-457-712", "PEN100012344421"]) {
+  it("never hold a personal number, however it is split", async () => {
+    for (const details of [
+      "NIN 12345678901",
+      "account 0123-457-712",
+      "PEN100012344421",
+      "NIN 123,4567,8901",
+      "account 0123_456_789",
+    ]) {
       const { error } = await request(meClient, me, details);
       expect(error?.code, details).toBe("23514");
     }
@@ -385,5 +391,43 @@ describe("a bank change from the worker's phone", () => {
       .select("id")
       .eq("id", raised.data!.id);
     expect(seen.data).toEqual([]);
+  });
+});
+
+describe("bank changes raised from the worker's phone", () => {
+  function raise(client: Client, worker: string) {
+    return client
+      .from("bank_detail_changes")
+      .insert({
+        organisation_id: owner.orgId,
+        worker_id: worker,
+        bank_name: "GTBank",
+        account_name: "Musa Ibrahim",
+        bank_account_enc: `\\x${randomBytes(40).toString("hex")}`,
+        bank_account_last4: "7712",
+      })
+      .select("id")
+      .single();
+  }
+
+  it("are limited to 3 a day, withdrawn ones included; HR's don't count", async () => {
+    const worker = await addWorker();
+    const client = await workerSession(worker);
+    for (let i = 0; i < 3; i += 1) {
+      const raised = await raise(client, worker);
+      expect(raised.error).toBeNull();
+      const withdrawn = await client
+        .from("bank_detail_changes")
+        .update({ status: "cancelled" })
+        .eq("id", raised.data!.id)
+        .select("status")
+        .single();
+      expect(withdrawn.error).toBeNull();
+    }
+    const fourth = await raise(client, worker);
+    expect(fourth.error?.code).toBe("MLBK7");
+
+    // HR can still raise one for the worker.
+    expect((await raise(staff.hr.client, worker)).error).toBeNull();
   });
 });

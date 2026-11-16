@@ -7,6 +7,7 @@ import { workerMessages } from "@/lib/messages/worker";
 import {
   CHANGE_REQUEST_MAX,
   CHANGE_REQUEST_MIN,
+  MAX_OWN_BANK_CHANGES_PER_DAY,
   WORKER_CHANGE_TOPICS,
   hasPersonalNumber,
   isPlainRequestText,
@@ -119,6 +120,8 @@ function fromDbError(error: PostgrestError, field: string): never {
       throw new MutationError("invalid", copy.left);
     case "MLCR2":
       throw new MutationError("invalid", copy.tooMany);
+    case "MLBK7":
+      throw new MutationError("invalid", copy.bankTooOften(MAX_OWN_BANK_CHANGES_PER_DAY));
     case "23514":
       // A check constraint: the text rules above should have caught it first.
       throw new MutationError("invalid", "", { [field]: copy.detailsNumbers });

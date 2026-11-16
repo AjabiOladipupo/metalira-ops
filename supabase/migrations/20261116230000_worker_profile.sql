@@ -19,7 +19,13 @@
 --   when.
 -- * The text is plain words, never personal numbers: a run of 10 or more digits (a NIN, bank
 --   account, RSA PIN or phone number) is refused, so none of them ever lands in the table or
---   in audit_log in clear (CLAUDE.md rule 9). The worker app says why and HR asks in person.
+--   in audit_log in clear (CLAUDE.md rule 9). Digits are counted with every separator removed
+--   (anything other than an ASCII letter or digit), so commas or underscores don't get past
+--   it. The worker app says why and HR asks in person.
+--
+-- Bank changes raised from the worker app: at most 3 a day per worker (section 7). Each one
+-- emails every approver, and the worker can withdraw their own request, so without a limit a
+-- worker could raise and withdraw in a loop and flood the owner, HR and finance with email.
 
 -- ---------------------------------------------------------------------------
 -- 1. Table
@@ -52,8 +58,10 @@ create table public.worker_change_requests (
       and char_length(details) between 3 and 500
       -- Plain text: line breaks are allowed, other control characters and < > are not.
       and details !~ '[\x01-\x09\x0b-\x1f\x7f-\x9f<>]'
-      -- No personal numbers (NIN, NUBAN, RSA PIN, phone), even split by spaces or dashes.
-      and regexp_replace(details, '[\s.()/-]', '', 'g') !~ '[0-9]{10,}'
+      -- No personal numbers (NIN, NUBAN, RSA PIN, phone), however they are split: every
+      -- character other than an ASCII letter or digit is removed before counting digits
+      -- (src/lib/worker-requests.ts hasPersonalNumber is the same rule).
+      and regexp_replace(details, '[^A-Za-z0-9]', '', 'g') !~ '[0-9]{10,}'
     ),
 
   status public.worker_change_request_status not null default 'open',
@@ -64,7 +72,7 @@ create table public.worker_change_requests (
       resolution_note = btrim(resolution_note)
       and char_length(resolution_note) between 1 and 500
       and resolution_note !~ '[\x01-\x1f\x7f-\x9f<>]'
-      and regexp_replace(resolution_note, '[\s.()/-]', '', 'g') !~ '[0-9]{10,}'
+      and regexp_replace(resolution_note, '[^A-Za-z0-9]', '', 'g') !~ '[0-9]{10,}'
     ),
 
   created_at timestamptz not null default now(),
@@ -307,3 +315,50 @@ revoke all on function private.my_line_manager(uuid) from public, anon;
 grant execute on function private.my_line_manager(uuid) to authenticated, service_role;
 revoke all on function public.my_line_manager(uuid) from public, anon;
 grant execute on function public.my_line_manager(uuid) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. Bank changes raised by a worker: at most 3 a day
+-- ---------------------------------------------------------------------------
+-- Runs after bank_detail_changes_before_insert (triggers fire in name order), which has set
+-- raised_by_worker. Counts the worker's own requests in the last 24 hours, whatever became of
+-- them (withdrawn ones included), so raise-and-withdraw can't send approvers endless email.
+-- Requests HR raises for the worker don't count. Definer: it locks the worker row so two
+-- requests at once can't both get under the limit.
+
+create function private.bank_detail_changes_worker_daily_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_recent integer;
+begin
+  if not new.raised_by_worker then
+    return new;
+  end if;
+
+  perform 1
+  from public.workers w
+  where w.id = new.worker_id and w.organisation_id = new.organisation_id
+  for update;
+
+  select count(*) into v_recent
+  from public.bank_detail_changes c
+  where c.organisation_id = new.organisation_id
+    and c.worker_id = new.worker_id
+    and c.raised_by_worker
+    and c.created_at > now() - interval '24 hours';
+  if v_recent >= 3 then
+    raise exception 'You have asked to change your bank details 3 times in the last 24 hours.'
+      using errcode = 'MLBK7';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger bank_detail_changes_worker_daily_limit
+  before insert on public.bank_detail_changes
+  for each row execute function private.bank_detail_changes_worker_daily_limit();
+
+revoke all on function private.bank_detail_changes_worker_daily_limit() from public, anon, authenticated;

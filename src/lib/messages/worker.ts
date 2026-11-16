@@ -207,6 +207,8 @@ export const workerMessages = {
       "Sent for approval. Once HR approves it, your pay goes to the new account 72 hours later.",
     bankWaiting:
       "You already have a bank change waiting. HR must approve or reject it before you send another.",
+    bankTooOften: (max: number) =>
+      `You have sent ${max} bank changes in the last 24 hours. Try again tomorrow, or ask HR.`,
     left: "You have left this company, so you can't request changes.",
     failed: "That was not sent. Try again in a minute.",
     back: "Back to my profile",

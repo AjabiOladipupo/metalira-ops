@@ -156,6 +156,11 @@ describe("change request text", () => {
       "0803-123-4567",
       "(0803) 123.4567",
       "+234 803 123 4567",
+      "123,4567,8901",
+      "0123_456_789",
+      "NIN: 123 * 456 * 789 * 01",
+      "0803\u00a0123\u00a04567",
+      "1:2:3:4:5:6:7:8:9:0",
     ]) {
       expect(hasPersonalNumber(text), text).toBe(true);
     }
@@ -167,6 +172,8 @@ describe("change request text", () => {
       "I moved to Gate 3 on 12 Nov 2026",
       "Next of kin is my sister Aisha",
       "Started on 2024-03-03",
+      "Shift 12/11/2026 to 13/11/2026",
+      "Gate 3, block 14, room 207",
     ]) {
       expect(hasPersonalNumber(text), text).toBe(false);
     }

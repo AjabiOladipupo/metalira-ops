@@ -23,17 +23,25 @@ export const MAX_OPEN_CHANGE_REQUESTS = 5;
 export const CHANGE_REQUEST_MAX = 500;
 export const CHANGE_REQUEST_MIN = 3;
 
-/** Separators people type inside numbers: spaces, dots, dashes, brackets and slashes. */
-const NUMBER_SEPARATORS = /[\s.()/-]/g;
+/**
+ * Anything people could type between the digits of a number: every character other than an
+ * ASCII letter or digit (spaces, dots, dashes, commas, underscores, symbols, emoji, ...).
+ */
+const NUMBER_SEPARATORS = /[^A-Za-z0-9]/g;
 
 /**
  * True when the text holds a run of 10 or more digits once separators are removed: a NIN,
- * bank account, RSA PIN or phone number. Such text is refused (the database check matches), so
- * personal numbers never reach the request or the audit log in clear (CLAUDE.md rule 9).
+ * bank account, RSA PIN or phone number. Such text is refused (the database check uses the
+ * same rule: `regexp_replace(text, '[^A-Za-z0-9]', '', 'g') !~ '[0-9]{10,}'`), so personal
+ * numbers never reach the request or the audit log in clear (CLAUDE.md rule 9). Letters break a
+ * run, so dates such as "12 Nov 2026" stay allowed.
  */
 export function hasPersonalNumber(text: string): boolean {
   return /[0-9]{10,}/.test(text.replace(NUMBER_SEPARATORS, ""));
 }
+
+/** Most bank changes a worker may raise from the app in 24 hours (the database enforces it). */
+export const MAX_OWN_BANK_CHANGES_PER_DAY = 3;
 
 /** Text as stored: Windows line breaks made plain, outer spaces trimmed. */
 export function normaliseRequestText(text: string): string {

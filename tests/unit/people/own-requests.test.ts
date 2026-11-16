@@ -148,6 +148,13 @@ describe("a worker's own bank change", () => {
     const fake = fakeSupabase({ data: null, error: { code: "MLBK5", message: "left" } });
     expect((await refusal(runOwnBankChange(ctx(fake.client), input))).message).toBe(copy.left);
   });
+
+  it("explains the limit of 3 bank changes a day", async () => {
+    const fake = fakeSupabase({ data: null, error: { code: "MLBK7", message: "limit" } });
+    const error = await refusal(runOwnBankChange(ctx(fake.client), input));
+    expect(error.code).toBe("invalid");
+    expect(error.message).toBe(copy.bankTooOften(3));
+  });
 });
 
 describe("a worker's change request", () => {
