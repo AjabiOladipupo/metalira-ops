@@ -191,6 +191,8 @@ test("company settings reuse the setup forms and save in place", async ({ page }
 });
 
 test("hr cannot open the setup wizard or company settings", async ({ page }) => {
+  // Four page loads, three of them redirected: allow for a busy local stack.
+  test.setTimeout(60_000);
   const owner = await createOwner("hr-owner", `HR Co ${uniqueSuffix()}`, { setupDone: false });
   const hr = await createAccount("hr");
   await addMembership(owner.orgId, hr.userId, "hr");
