@@ -1,56 +1,71 @@
 import { cn } from "@/lib/utils";
 
+import { APP_SCENES } from "./illustrations/app";
+import { LANDING_SCENES } from "./illustrations/landing";
+import { LATER_SCENES } from "./illustrations/later";
+import { ILLUSTRATION_SIZES, type IllustrationSize, type Scene } from "./illustrations/types";
+
 /**
- * Illustration slots (DESIGN_SYSTEM.md "Illustrations"). Each name reserves its place and size
- * on the screen it belongs to. The commissioned black-ink scenes are not drawn yet, so a slot
- * shows a simple line drawing in `currentColor` (it inverts in dark mode) until the artwork is
- * added under `public/illustrations/` and wired in here.
+ * Black-ink scenes (DESIGN_SYSTEM.md "Illustrations"). Each scene is an inline SVG component so
+ * `currentColor` and `var(--bg)` follow the theme: lines and solid fills invert in dark mode, and
+ * the "white" areas take the page background. The slot table in DESIGN_SYSTEM.md lists where each
+ * name goes and at what size.
  */
-export type IllustrationName = "import-people";
+export const SCENES = {
+  ...APP_SCENES,
+  ...LATER_SCENES,
+  ...LANDING_SCENES,
+} satisfies Record<string, Scene>;
 
-const SIZES = { empty: 160, onboarding: 240, worker: 96 } as const;
+export type IllustrationName = keyof typeof SCENES;
 
-function ImportPeople() {
-  // A stack of cards: the staff list waiting to come in.
-  return (
-    <g fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinejoin="round">
-      <rect x={44} y={58} width={84} height={56} rx={6} />
-      <rect x={36} y={50} width={84} height={56} rx={6} fill="var(--bg)" />
-      <rect x={28} y={42} width={84} height={56} rx={6} fill="var(--bg)" />
-      <circle cx={50} cy={64} r={8} />
-      <path d="M38 88c2-8 7-12 12-12s10 4 12 12" strokeLinecap="round" />
-      <path d="M72 60h28M72 70h20M72 80h24" strokeLinecap="round" />
-      <circle cx={124} cy={36} r={12} fill="var(--signal)" stroke="none" />
-      <path d="M124 30v12M118 36h12" stroke="var(--bg)" strokeLinecap="round" />
-    </g>
-  );
-}
+export const ILLUSTRATION_NAMES = Object.keys(SCENES) as IllustrationName[];
 
-const SCENES: Record<IllustrationName, () => React.ReactNode> = {
-  "import-people": ImportPeople,
-};
+/** Lines look this wide (px) at display size. */
+const DISPLAY_LINE = 2.25;
 
 export function Illustration({
   name,
-  size = "empty",
+  size,
+  decorative = false,
+  label,
   className,
 }: {
   name: IllustrationName;
-  size?: keyof typeof SIZES;
+  /** Slot size; defaults to the size the scene was drawn for. */
+  size?: IllustrationSize;
+  /** True when the copy beside it already says what it shows (`alt=""`). */
+  decorative?: boolean;
+  /** Overrides the scene's own description. */
+  label?: string;
   className?: string;
 }) {
-  const Scene = SCENES[name];
-  const px = SIZES[size];
+  const scene: Scene = SCENES[name];
+  const [vw, vh] = scene.viewBox;
+  const height = ILLUSTRATION_SIZES[size ?? scene.size];
+  const width = Math.round((height * vw) / vh);
+  const lw = (DISPLAY_LINE * vh) / height;
+  const a11y = decorative
+    ? ({ "aria-hidden": true } as const)
+    : ({ role: "img", "aria-label": label ?? scene.label } as const);
   return (
     <svg
-      viewBox="0 0 160 160"
-      width={px}
-      height={px}
-      aria-hidden="true"
+      viewBox={`0 0 ${vw} ${vh}`}
+      width={width}
+      height={height}
+      {...a11y}
       data-illustration={name}
-      className={cn("shrink-0 text-foreground", className)}
+      className={cn("h-auto max-w-full shrink-0 text-foreground", className)}
     >
-      <Scene />
+      <g
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={lw}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {scene.draw(lw)}
+      </g>
     </svg>
   );
 }

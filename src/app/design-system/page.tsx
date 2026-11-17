@@ -4,6 +4,8 @@ import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { Illustration, ILLUSTRATION_NAMES, SCENES } from "@/components/illustration";
+import { ILLUSTRATION_SIZES } from "@/components/illustrations/types";
 import { KpiTile } from "@/components/kpi-tile";
 import { Logo, LogoMark } from "@/components/logo";
 import { PageHeader } from "@/components/page-header";
@@ -18,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WorkerAvatar } from "@/components/worker-avatar";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Design system" };
@@ -155,6 +158,12 @@ const COLUMNS: Column<SiteRow>[] = [
   },
 ];
 
+const AVATAR_SAMPLES = [
+  { id: "7f1c2d9e-0001-4a51-9c11-3d5e7a1b0001", name: "Musa Ibrahim" },
+  { id: "7f1c2d9e-0002-4a51-9c11-3d5e7a1b0002", name: "Ngozi Okafor" },
+  { id: "7f1c2d9e-0003-4a51-9c11-3d5e7a1b0003", name: "Tunde Bakare" },
+];
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
@@ -287,6 +296,37 @@ function Gallery({ mode }: { mode: Mode }) {
           message="No shifts yet. Publish a roster to start tracking attendance."
           action={<Button>Publish roster</Button>}
         />
+      </Section>
+
+      <Section title="Illustrations">
+        <p className="m-0 max-w-2xl type-body text-fg-muted">
+          {ILLUSTRATION_NAMES.length} scenes, each at the size of its slot. Lines in fg, paper in
+          bg, one accent in signal at most.
+        </p>
+        <div
+          className="flex flex-wrap items-end gap-x-6 gap-y-8"
+          data-testid={`illustrations-${mode}`}
+        >
+          {ILLUSTRATION_NAMES.map((name) => (
+            <figure key={name} className="m-0 flex max-w-full min-w-0 flex-col gap-2">
+              <Illustration name={name} />
+              <figcaption className="type-caption text-fg-muted">
+                {name} · {ILLUSTRATION_SIZES[SCENES[name].size]}px
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Worker avatars">
+        <div className="flex flex-wrap items-center gap-4" data-testid={`avatars-${mode}`}>
+          {AVATAR_SAMPLES.map((sample) => (
+            <span key={sample.id} className="flex items-center gap-2 text-sm">
+              <WorkerAvatar workerId={sample.id} name={sample.name} size={40} />
+              {sample.name}
+            </span>
+          ))}
+        </div>
       </Section>
     </div>
   );

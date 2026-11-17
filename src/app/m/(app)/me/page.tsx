@@ -3,12 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { Illustration } from "@/components/illustration";
 import { Status, type StatusTone } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { WorkerAvatar } from "@/components/worker-avatar";
 import { formatDate, formatDateTime, lagosToday } from "@/lib/dates";
 import { maskAccount } from "@/lib/mask";
 import { workerMessages } from "@/lib/messages/worker";
-import { initials } from "@/lib/people";
 import { myProfileSections, type ProfileSection } from "@/lib/worker-profile";
 import type { WorkerChangeRequestStatus } from "@/lib/worker-requests";
 import { signOutWorker } from "@/server/identity/worker-actions";
@@ -94,7 +95,23 @@ function Requests({
   bankChanges: MyBankChange[];
   requests: MyChangeRequest[];
 }) {
-  if (bankChanges.length === 0 && requests.length === 0) return null;
+  if (bankChanges.length === 0 && requests.length === 0) {
+    return (
+      <section
+        aria-labelledby="me-requests"
+        data-testid="my-requests-empty"
+        className="flex items-center gap-3 rounded-xl border border-dashed border-line px-4 py-3"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h2 id="me-requests" className="m-0 type-label text-fg-muted">
+            {copy.requests}
+          </h2>
+          <p className="m-0 text-sm text-fg-muted">{copy.noRequests}</p>
+        </div>
+        <Illustration name="worker-profile" size="worker" decorative />
+      </section>
+    );
+  }
   return (
     <section aria-labelledby="me-requests" className="flex flex-col gap-2">
       <h2 id="me-requests" className="m-0 type-label text-fg-muted">
@@ -173,12 +190,7 @@ async function MeContent() {
   return (
     <>
       <div className="flex items-center gap-3.5 px-4 pt-2 pb-3">
-        <span
-          aria-hidden="true"
-          className="flex size-14 shrink-0 items-center justify-center rounded-full bg-foreground text-lg font-semibold text-background"
-        >
-          {initials(profile)}
-        </span>
+        <WorkerAvatar workerId={session.workerId} name={profile.name} size={56} />
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="font-display text-[22px] leading-tight font-bold break-words">
             {profile.name}

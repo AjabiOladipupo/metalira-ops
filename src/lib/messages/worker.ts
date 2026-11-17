@@ -139,6 +139,8 @@ export const workerMessages = {
     phone: "Phone",
     nextOfKin: "Next of kin",
     requests: "Your requests",
+    noRequests:
+      "No requests yet. If something here is wrong, request a change and HR will check it.",
     requestChange: "Request a change",
     bankNote:
       "Bank changes need HR approval and wait 72 hours before your pay goes to the new account.",

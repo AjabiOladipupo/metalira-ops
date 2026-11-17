@@ -7,6 +7,7 @@ import { after } from "next/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { WorkerAvatar } from "@/components/worker-avatar";
 import { addDays, firstOfNextMonth, formatDate } from "@/lib/dates";
 import { maskAccount, maskRsaPin, ninStatus } from "@/lib/mask";
 import { formatNaira, koboToMajorString, type Kobo } from "@/lib/money";
@@ -15,7 +16,6 @@ import {
   PAY_PERIOD,
   PAY_TYPE_LABELS,
   currentPayVersion,
-  initials,
   payHeadline,
   payVersionState,
 } from "@/lib/people";
@@ -177,12 +177,7 @@ function Profile({
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
-            <span
-              aria-hidden="true"
-              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-surface text-base font-semibold"
-            >
-              {initials(worker)}
-            </span>
+            <WorkerAvatar workerId={worker.id} name={worker.name} size={56} />
             <div className="flex min-w-0 flex-col gap-1">
               <h1 className="m-0 type-h1 break-words">{worker.name}</h1>
               <p className="m-0 type-body-lg text-fg-muted">

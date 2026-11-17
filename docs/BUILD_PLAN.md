@@ -15,6 +15,10 @@ Ten phases, about 24 weeks for one person building with Claude Code. Do not star
 | 8 Projects | 2 | Projects, phases, sub-jobs, KPIs, phase review and approval, milestone billing | Approving a phase review adds its milestone to unbilled work |
 | 9 Hardening and pilot | 2 | Security review, backup restore drill, data export, privacy notice and DPA, Metalira subscription billing on Monnify, 3 pilot companies | 3 pilots run one real month: clock-in, payroll, invoices, payments |
 
+## Every phase
+
+- Illustrations: every phase's empty states and onboarding use their illustration slot from the slot table in `docs/DESIGN_SYSTEM.md` ("Illustrations"), rendered with `<Illustration name>` at the slot size and beside a sentence of copy. When a phase needs a screen that has no slot, add the slot to that table and draw the scene in `src/components/illustrations/` in the same pull request.
+
 ## Running costs
 
 - Build: free tiers (Supabase Free, Vercel Hobby, Resend Free, Sentry Free, Monnify sandbox).
