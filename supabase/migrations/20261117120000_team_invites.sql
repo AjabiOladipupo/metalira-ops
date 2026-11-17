@@ -25,6 +25,7 @@
 --   MLTM5 invite cancelled          MLTM6 own role or own membership
 --   MLTM7 the owner can't be changed or removed
 --   MLTM8 not a manager membership (workers and client approvers)
+--   MLTM9 too many invites sent in 24 hours (50 per company, 20 per inviter)
 --   42501 role not allowed, wrong account, inviter no longer allowed
 --   22023 bad input or token        P0002 not found in this organisation
 
@@ -39,11 +40,34 @@ alter table public.membership_invites
   add constraint membership_invites_accepted_or_revoked
     check (num_nonnulls(accepted_at, revoked_at) <= 1);
 
--- New invites carry one manager role. NOT VALID: rows from before this slice are left alone,
--- and acceptance refuses any that is not a manager role.
+-- A pending invite carries one manager role. Pending invites from before this slice with any
+-- other role (owner, worker, client approver) are cancelled first, so the check holds for every
+-- row; used and cancelled invites keep their role for the record.
+update public.membership_invites i
+set revoked_at = now()
+where i.accepted_at is null
+  and i.revoked_at is null
+  and i.role not in ('admin', 'hr', 'finance', 'ops_manager', 'line_manager');
+
 alter table public.membership_invites
   add constraint membership_invites_manager_role
-    check (role in ('admin', 'hr', 'finance', 'ops_manager', 'line_manager')) not valid;
+    check (
+      accepted_at is not null
+      or revoked_at is not null
+      or role in ('admin', 'hr', 'finance', 'ops_manager', 'line_manager')
+    );
+
+-- B: every invite email sent (create or resend), so sends can be capped per company and per
+-- inviter. Private: never exposed through the Data API, written only by the functions below.
+create table private.team_invite_sends (
+  id bigint generated always as identity primary key,
+  organisation_id uuid not null references public.organisations (id) on delete cascade,
+  sent_by uuid not null,
+  sent_at timestamptz not null default now()
+);
+create index team_invite_sends_org_idx on private.team_invite_sends (organisation_id, sent_at);
+create index team_invite_sends_user_idx on private.team_invite_sends (sent_by, sent_at);
+revoke all on table private.team_invite_sends from public, anon, authenticated, service_role;
 
 drop index public.membership_invites_one_pending_idx;
 create unique index membership_invites_one_pending_idx
@@ -83,10 +107,12 @@ as $$
 $$;
 
 -- Raises unless the caller is an owner or admin of `org`, and an owner when `needs_owner`.
+-- Locks the caller's own membership row (FOR SHARE) so their role can't change underneath the
+-- rest of the transaction.
 create function private.assert_team_manager(org uuid, needs_owner boolean)
 returns void
 language plpgsql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
@@ -94,6 +120,11 @@ begin
   if auth.uid() is null then
     raise exception 'sign in to manage your team' using errcode = '42501';
   end if;
+  perform 1
+  from public.memberships m
+  where m.organisation_id = org
+    and m.user_id = auth.uid()
+  for share;
   if org is null or not private.has_role(org, array['owner', 'admin']) then
     raise exception 'only the owner or an admin can manage the team' using errcode = '42501';
   end if;
@@ -101,6 +132,36 @@ begin
     raise exception 'only the owner can make someone an admin or change an admin'
       using errcode = '42501';
   end if;
+end;
+$$;
+
+-- Caps invite emails (create and resend) so the invite email can't be used to send mail at
+-- scale: at most 50 per company and 20 per inviting user in any 24 hours. Records the send.
+create function private.record_team_invite_send(org uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  c_per_organisation constant integer := 50;
+  c_per_inviter constant integer := 20;
+  uid uuid := auth.uid();
+begin
+  -- Serialise sends per company so two at once can't both slip under the cap.
+  perform pg_advisory_xact_lock(hashtextextended('team_invite_sends:' || org::text, 0));
+  if (
+    select count(*) from private.team_invite_sends t
+    where t.organisation_id = org and t.sent_at > now() - interval '24 hours'
+  ) >= c_per_organisation
+  or (
+    select count(*) from private.team_invite_sends t
+    where t.sent_by = uid and t.sent_at > now() - interval '24 hours'
+  ) >= c_per_inviter then
+    raise exception 'too many invites sent in the last 24 hours' using errcode = 'MLTM9';
+  end if;
+  insert into private.team_invite_sends (organisation_id, sent_by) values (org, uid);
 end;
 $$;
 
@@ -126,6 +187,8 @@ declare
   v_email text := lower(btrim(p_email));
   v_token text;
   v_existing public.membership_role;
+  v_pending_id uuid;
+  v_pending_role public.membership_role;
 begin
   perform private.assert_team_manager(p_organisation_id, false);
   if p_role is null or not (p_role = any (private.team_roles())) then
@@ -149,7 +212,7 @@ begin
     where lower(u.email) = v_email
       and u.raw_app_meta_data ->> 'login' = 'worker'
   ) then
-    raise exception 'this email is a worker''s sign-in' using errcode = 'MLTM2';
+    raise exception 'this address can''t be invited as a manager' using errcode = 'MLTM2';
   end if;
 
   select m.role
@@ -160,18 +223,33 @@ begin
     and lower(u.email) = v_email
   limit 1;
   if v_existing = 'worker' then
-    raise exception 'this email is a worker''s sign-in at this company' using errcode = 'MLTM2';
+    raise exception 'this address can''t be invited as a manager' using errcode = 'MLTM2';
   elsif v_existing is not null then
     raise exception 'this person is already a member' using errcode = 'MLTM1';
   end if;
 
-  update public.membership_invites i
-  set revoked_at = now(),
-      revoked_by = uid
+  -- The pending invite this one replaces, locked so two creates for one address queue up. Only
+  -- the owner may replace (and so cancel or downgrade) a pending admin invite.
+  select i.id, i.role
+  into v_pending_id, v_pending_role
+  from public.membership_invites i
   where i.organisation_id = p_organisation_id
     and i.email = v_email
     and i.accepted_at is null
-    and i.revoked_at is null;
+    and i.revoked_at is null
+  for update;
+  if v_pending_role = 'admin' then
+    perform private.assert_team_manager(p_organisation_id, true);
+  end if;
+
+  perform private.record_team_invite_send(p_organisation_id);
+
+  if v_pending_id is not null then
+    update public.membership_invites i
+    set revoked_at = now(),
+        revoked_by = uid
+    where i.id = v_pending_id;
+  end if;
 
   v_token := encode(extensions.gen_random_bytes(32), 'hex');
 
@@ -220,6 +298,10 @@ begin
   if inv.revoked_at is not null then
     raise exception 'this invite was cancelled' using errcode = 'MLTM5';
   end if;
+  if not (inv.role = any (private.team_roles())) then
+    raise exception 'this invite is from before team invites and can''t be sent again'
+      using errcode = '22023';
+  end if;
   if inv.role = 'admin' then
     perform private.assert_team_manager(p_organisation_id, true);
   end if;
@@ -232,6 +314,8 @@ begin
   ) then
     raise exception 'this person is already a member' using errcode = 'MLTM1';
   end if;
+
+  perform private.record_team_invite_send(p_organisation_id);
 
   v_token := encode(extensions.gen_random_bytes(32), 'hex');
 
@@ -274,6 +358,9 @@ begin
   end if;
   if inv.revoked_at is not null then
     raise exception 'this invite was cancelled' using errcode = 'MLTM5';
+  end if;
+  if not (inv.role = any (private.team_roles())) then
+    raise exception 'this invite is from before team invites' using errcode = '22023';
   end if;
   if inv.role = 'admin' then
     perform private.assert_team_manager(p_organisation_id, true);
@@ -343,6 +430,7 @@ declare
   v_confirmed_at timestamptz;
   v_login text;
   v_existing public.membership_role;
+  v_inviter_role public.membership_role;
 begin
   if uid is null then
     raise exception 'sign in to accept the invite' using errcode = '42501';
@@ -386,13 +474,17 @@ begin
     raise exception 'this invite is for a different email address' using errcode = '42501';
   end if;
 
-  if inv.created_by is null or not exists (
-    select 1
-    from public.memberships m
-    where m.organisation_id = inv.organisation_id
-      and m.user_id = inv.created_by
-      and (m.role = 'owner' or (m.role = 'admin' and inv.role <> 'admin'))
-  ) then
+  -- The inviter must still be allowed to grant the role; their row is locked (FOR SHARE) so a
+  -- concurrent demotion or removal waits for this acceptance, or wins before it.
+  select m.role
+  into v_inviter_role
+  from public.memberships m
+  where m.organisation_id = inv.organisation_id
+    and m.user_id = inv.created_by
+  for share;
+  if inv.created_by is null
+    or v_inviter_role is null
+    or not (v_inviter_role = 'owner' or (v_inviter_role = 'admin' and inv.role <> 'admin')) then
     raise exception 'this invite is no longer valid' using errcode = '42501';
   end if;
 
@@ -435,7 +527,7 @@ returns table (
   joined_at timestamptz
 )
 language plpgsql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
@@ -622,7 +714,7 @@ returns table (
   joined_at timestamptz
 )
 language sql
-stable
+volatile
 security invoker
 set search_path = ''
 as $$
@@ -670,6 +762,7 @@ $$;
 
 revoke all on function private.team_roles() from public, anon;
 revoke all on function private.assert_team_manager(uuid, boolean) from public, anon;
+revoke all on function private.record_team_invite_send(uuid) from public, anon;
 revoke all on function private.resend_membership_invite_impl(uuid, uuid) from public, anon;
 revoke all on function private.revoke_membership_invite_impl(uuid, uuid) from public, anon;
 revoke all on function private.membership_invite_lookup_impl(text) from public, anon, authenticated;
@@ -680,6 +773,7 @@ revoke all on function private.remove_member_impl(uuid, uuid) from public, anon;
 
 grant execute on function private.team_roles() to authenticated, service_role;
 grant execute on function private.assert_team_manager(uuid, boolean) to authenticated;
+grant execute on function private.record_team_invite_send(uuid) to authenticated;
 grant execute on function private.resend_membership_invite_impl(uuid, uuid) to authenticated;
 grant execute on function private.revoke_membership_invite_impl(uuid, uuid) to authenticated;
 grant execute on function private.membership_invite_lookup_impl(text) to service_role;

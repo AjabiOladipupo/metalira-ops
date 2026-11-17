@@ -28,6 +28,20 @@ function lagosDate(at: Date): string {
   }).format(at);
 }
 
+/**
+ * Text that looks like a web address without a scheme ("verify at paypal-secure.co"). A company
+ * or person's name like that never reaches a subject or an email body from Metalira's domain:
+ * the email falls back to generic wording, so the invite can't be used for branded phishing.
+ * Names are not refused at sign-up, so a company with a dot in its name still works in the app.
+ */
+const DOMAIN_LIKE = /\b[a-z0-9-]+\.[a-z]{2,}\b/i;
+
+/** `name` when it is safe to put in an email, else null (generic wording). */
+export function emailDisplayName(name: string | null): string | null {
+  if (!name) return null;
+  return DOMAIN_LIKE.test(name) ? null : name;
+}
+
 const roleLabel = z
   .string()
   .min(1)
@@ -49,12 +63,13 @@ export async function sendTeamInviteEmail(
   input: z.input<typeof inviteSchema>,
 ): Promise<SendEmailResult> {
   const e = inviteSchema.parse(input);
+  const organisationName = emailDisplayName(e.organisationName);
   return sendEmail({
     to: e.to,
-    subject: teamInviteSubject(e.organisationName),
+    subject: teamInviteSubject(organisationName),
     react: createElement(TeamInviteEmail, {
-      organisationName: e.organisationName,
-      inviterName: e.inviterName,
+      organisationName,
+      inviterName: emailDisplayName(e.inviterName),
       roleLabel: e.roleLabel,
       email: e.to,
       inviteUrl: e.inviteUrl,
@@ -80,15 +95,16 @@ export async function sendTeamRoleChangedEmail(
   input: z.input<typeof roleChangedSchema>,
 ): Promise<SendEmailResult> {
   const e = roleChangedSchema.parse(input);
+  const organisationName = emailDisplayName(e.organisationName);
   return sendEmail({
     to: e.to,
-    subject: teamRoleChangedSubject(e.organisationName, e.newRoleLabel),
+    subject: teamRoleChangedSubject(organisationName, e.newRoleLabel),
     react: createElement(TeamRoleChangedEmail, {
-      organisationName: e.organisationName,
-      memberName: e.memberName,
+      organisationName,
+      memberName: emailDisplayName(e.memberName),
       oldRoleLabel: e.oldRoleLabel,
       newRoleLabel: e.newRoleLabel,
-      changedBy: e.changedBy,
+      changedBy: emailDisplayName(e.changedBy),
       appUrl: emailAppUrl(),
     }),
     // No idempotency key: the same change can rightly happen twice (HR to finance and back).
@@ -109,13 +125,14 @@ export async function sendTeamRemovedEmail(
   input: z.input<typeof removedSchema>,
 ): Promise<SendEmailResult> {
   const e = removedSchema.parse(input);
+  const organisationName = emailDisplayName(e.organisationName);
   return sendEmail({
     to: e.to,
-    subject: teamRemovedSubject(e.organisationName),
+    subject: teamRemovedSubject(organisationName),
     react: createElement(TeamRemovedEmail, {
-      organisationName: e.organisationName,
-      memberName: e.memberName,
-      removedBy: e.removedBy,
+      organisationName,
+      memberName: emailDisplayName(e.memberName),
+      removedBy: emailDisplayName(e.removedBy),
       appUrl: emailAppUrl(),
     }),
     tags: [{ name: "type", value: "team_removed" }],

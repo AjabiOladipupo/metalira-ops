@@ -10,6 +10,8 @@ export function PlaceholderPage({ href }: { href: string }) {
   return (
     <>
       <PageHeader
+        // The dashboard is home: no arrow there.
+        back={href === "/app" ? undefined : { href: "/app", label: "dashboard" }}
         eyebrow={group && group !== item.label ? group : undefined}
         title={item.label}
         description={item.description}

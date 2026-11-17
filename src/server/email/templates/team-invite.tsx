@@ -2,8 +2,9 @@ import { APP_NAME } from "@/lib/app";
 import { EmailButton, EmailHeading, EmailLayout, EmailLink, EmailText } from "../layout";
 
 export type TeamInviteEmailProps = {
-  organisationName: string;
-  /** Who sent the invite, or null when their profile has no name. */
+  /** The company, or null when its name can't safely go in an email (looks like a web address). */
+  organisationName: string | null;
+  /** Who sent the invite, or null when there is no name to show. */
   inviterName: string | null;
   /** "HR", "Finance", "Operations manager"… */
   roleLabel: string;
@@ -17,8 +18,10 @@ export type TeamInviteEmailProps = {
   appUrl: string;
 };
 
-export const teamInviteSubject = (organisationName: string) =>
-  `Join ${organisationName} on ${APP_NAME}`;
+export const teamInviteSubject = (organisationName: string | null) =>
+  organisationName
+    ? `Join ${organisationName} on ${APP_NAME}`
+    : `You are invited to join a team on ${APP_NAME}`;
 
 /**
  * Sent to a manager invited from Settings → Team (slice 1.12). The link opens /join/<token>,
@@ -33,16 +36,19 @@ export function TeamInviteEmail({
   expiresOn,
   appUrl,
 }: TeamInviteEmailProps) {
-  const who = inviterName ?? `Someone at ${organisationName}`;
+  const company = organisationName ?? "their company";
+  const who = inviterName ?? (organisationName ? `Someone at ${organisationName}` : "A manager");
   return (
     <EmailLayout
       appUrl={appUrl}
-      preview={`${who} invited you to join ${organisationName} as ${roleLabel}. The link works until ${expiresOn}.`}
-      reason={`You received this email because ${who} invited ${email} to ${organisationName} on ${APP_NAME}. If you don't know them, ignore this email.`}
+      preview={`${who} invited you to join ${company} as ${roleLabel}. The link works until ${expiresOn}.`}
+      reason={`You received this email because ${who} invited ${email} to ${company} on ${APP_NAME}. If you don't know them, ignore this email.`}
     >
-      <EmailHeading>Join {organisationName}</EmailHeading>
+      <EmailHeading>
+        {organisationName ? `Join ${organisationName}` : "Join your team"}
+      </EmailHeading>
       <EmailText>
-        {who} invited you to join {organisationName} on {APP_NAME} as {roleLabel}.
+        {who} invited you to join {company} on {APP_NAME} as {roleLabel}.
       </EmailText>
       <EmailButton href={inviteUrl}>Accept the invite</EmailButton>
       <EmailText>

@@ -16,6 +16,7 @@ async function ImportScreen({
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
+        back={{ href: "/app/people", label: "People" }}
         eyebrow="People"
         title="Import employees"
         description="One row per employee, with who they report to and which client and project they work on."

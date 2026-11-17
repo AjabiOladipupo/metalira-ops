@@ -242,15 +242,71 @@ export function createWorker(input: unknown): Promise<CreatedWorker> {
 // updateWorker
 // ---------------------------------------------------------------------------
 
+/** A worker's line manager: a worker or a manager-app user (membership), never both. */
+export interface LineManagerRef {
+  workerId: string | null;
+  membershipId: string | null;
+}
+
+/** Department and line manager of one worker, by id: the part of the mapping this form edits. */
+export interface EditedMapping {
+  departmentId: string | null;
+  lineManager: LineManagerRef;
+}
+
+/**
+ * A line manager change saved through "Edit details", so the new line manager can be told by
+ * email as the mapping panel does (src/server/people/mapping-notify.ts). Ids only: names are
+ * looked up after the response.
+ */
+export interface LineManagerEdit {
+  workerId: string;
+  organisationId: string;
+  /** The signed-in user who saved it. */
+  actorUserId: string;
+  before: EditedMapping;
+  after: EditedMapping;
+}
+
 export interface UpdatedWorker {
   id: string;
   changed: boolean;
+  /** Set when the save changed the line manager; null otherwise. */
+  lineManagerChange: LineManagerEdit | null;
+}
+
+/** True when two line managers are the same person (both empty counts as the same). */
+export function sameLineManager(a: LineManagerRef, b: LineManagerRef): boolean {
+  return a.workerId === b.workerId && a.membershipId === b.membershipId;
+}
+
+/** The worker's department and line manager as they stand, before an edit. */
+async function loadEditedMapping(
+  supabase: Client,
+  organisationId: string,
+  workerId: string,
+): Promise<EditedMapping | null> {
+  const { data, error } = await supabase
+    .from("workers")
+    .select("department_id, line_manager_worker_id, line_manager_membership_id")
+    .eq("organisation_id", organisationId)
+    .eq("id", workerId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the line manager: ${error.code}`);
+  if (!data) return null;
+  return {
+    departmentId: data.department_id ?? null,
+    lineManager: {
+      workerId: data.line_manager_worker_id ?? null,
+      membershipId: data.line_manager_membership_id ?? null,
+    },
+  };
 }
 
 export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWorker> = {
   schema: updateWorkerSchema,
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, userId, data }) => {
     const id = data.workerId;
     const ctx = (column: string) => piiContext(organisationId, id, column);
     const patch: WorkerUpdate = {};
@@ -296,7 +352,14 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
       patch.supervisor_clock_in = true;
     }
 
-    if (Object.keys(patch).length === 0) return { id, changed: false };
+    if (Object.keys(patch).length === 0) return { id, changed: false, lineManagerChange: null };
+
+    // The line manager before the save, so a change can be told to the new one (as the mapping
+    // panel does). Read only when the form sends a line manager.
+    const touchesLineManager = "line_manager_worker_id" in patch;
+    const before = touchesLineManager
+      ? await loadEditedMapping(supabase, organisationId, id)
+      : null;
 
     const { data: row, error } = await supabase
       .from("workers")
@@ -307,7 +370,22 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
       .maybeSingle();
     if (error) fromDbError(error);
     if (!row) throw new MutationError("invalid", "That employee wasn't found.");
-    return { id, changed: true };
+
+    let lineManagerChange: LineManagerEdit | null = null;
+    if (before) {
+      const after: EditedMapping = {
+        departmentId:
+          patch.department_id !== undefined ? (patch.department_id ?? null) : before.departmentId,
+        lineManager: {
+          workerId: patch.line_manager_worker_id ?? null,
+          membershipId: patch.line_manager_membership_id ?? null,
+        },
+      };
+      if (!sameLineManager(before.lineManager, after.lineManager)) {
+        lineManagerChange = { workerId: id, organisationId, actorUserId: userId, before, after };
+      }
+    }
+    return { id, changed: true, lineManagerChange };
   },
 };
 

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 export const SECTION_LINKS = [
   { href: "/#product", label: "Product" },
   { href: "/#how-it-works", label: "How it works" },
-  { href: "/#pricing", label: "Pricing" },
+  { href: "/#pilot", label: "Pilot" },
 ] as const;
 
 /** Header text link (prototype `.navl`). */

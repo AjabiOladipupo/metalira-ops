@@ -129,6 +129,31 @@ describe("team senders", () => {
     expect(logged).not.toContain("hauwa@coastline.ng");
   });
 
+  it("leave a company or person name that looks like a web address out of the email", async () => {
+    const { emailDisplayName } = await import("@/server/email/team");
+    expect(emailDisplayName("Coastline Facility Services")).toBe("Coastline Facility Services");
+    expect(emailDisplayName("St. Mary Cleaning Ltd.")).toBe("St. Mary Cleaning Ltd.");
+    expect(emailDisplayName("Verify at paypal-secure.co")).toBeNull();
+    expect(emailDisplayName("acme.ng")).toBeNull();
+    expect(emailDisplayName(null)).toBeNull();
+
+    expect(teamInviteSubject(null)).toBe("You are invited to join a team on Metalira Ops");
+    const { text } = await renderEmail(
+      <TeamInviteEmail
+        organisationName={null}
+        inviterName={null}
+        roleLabel="HR"
+        email="hauwa@coastline.ng"
+        inviteUrl={INVITE}
+        expiresOn="24 Nov 2026"
+        appUrl={APP_URL}
+      />,
+    );
+    expect(text).toContain("A manager invited you to join their company on Metalira Ops as HR");
+    expect(teamRemovedSubject(null)).toBe("You no longer have access to a company on Metalira Ops");
+    expect(teamRoleChangedSubject(null, "HR")).toBe("Your role on Metalira Ops is now HR");
+  });
+
   it("refuse a name with a web address", async () => {
     const { sendTeamRemovedEmail } = await import("@/server/email/team");
     await expect(

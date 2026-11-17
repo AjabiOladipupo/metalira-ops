@@ -1,9 +1,10 @@
-import { ArrowLeft, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
 
+import { BackLink } from "@/components/back-link";
 import { DataTable, type Column } from "@/components/data-table";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -201,15 +202,7 @@ function Profile({
   return (
     <>
       <div className="flex flex-col gap-4">
-        {limited ? null : (
-          <Link
-            href="/app/people"
-            className="inline-flex items-center gap-1.5 text-sm text-fg-muted no-underline hover:text-foreground"
-          >
-            <ArrowLeft strokeWidth={1.75} className="size-4" aria-hidden />
-            People
-          </Link>
-        )}
+        {limited ? null : <BackLink href="/app/people" label="People" className="-my-2" />}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
             <WorkerAvatar workerId={worker.id} name={worker.name} size={56} />

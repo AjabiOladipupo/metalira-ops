@@ -336,6 +336,7 @@ export default function DesignSystemPage() {
   return (
     <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-7 lg:px-8">
       <PageHeader
+        back={{ href: "/", label: "home" }}
         eyebrow="Metalira Ops"
         title="Design system"
         description="Tokens and components from docs/DESIGN_SYSTEM.md, shown in light and dark."

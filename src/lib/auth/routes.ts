@@ -13,6 +13,13 @@ export const WORKER_HOME_PATH = "/m";
 export const WORKER_SIGN_IN_PATH = "/m/sign-in";
 /** Invite links: /m/invite/<token>. */
 export const WORKER_INVITE_PATH = "/m/invite";
+/**
+ * user_metadata key for the path the sign-up confirmation email links back to. The template
+ * (supabase/templates/confirmation.html) reads it as `{{ .Data.next_path }}`; the confirm route
+ * still passes it through safeNextPath, so a value set through the Auth API directly can only
+ * lead inside the app.
+ */
+export const NEXT_PATH_KEY = "next_path";
 /** Team (manager) invite links: /join/<token> (slice 1.12). */
 export const TEAM_JOIN_PATH = "/join";
 

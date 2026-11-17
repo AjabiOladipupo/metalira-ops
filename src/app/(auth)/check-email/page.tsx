@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { BackLink } from "@/components/back-link";
+
 import { CheckEmailMessage } from "./check-email-message";
 
 export const metadata: Metadata = { title: "Check your email" };
@@ -10,6 +12,7 @@ export default function CheckEmailPage() {
   return (
     <>
       <div className="flex flex-col gap-1.5">
+        <BackLink href="/sign-in" label="sign in" className="-my-2" />
         <span className="type-label text-fg-muted">Almost there</span>
         <h1 className="m-0 type-h1">Check your email</h1>
       </div>

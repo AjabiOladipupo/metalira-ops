@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { workerMessages } from "@/lib/messages/worker";
 import { requireWorkerPageSession } from "@/server/identity/worker-session";
 
-import { WorkerBrand } from "./worker-brand";
+import { WorkerTopBar } from "./worker-top-bar";
 
 type SoonKey = keyof typeof workerMessages.soon;
 
@@ -24,11 +24,10 @@ export function SoonPage({ which }: { which: SoonKey }) {
       <Suspense fallback={null}>
         <Gate />
       </Suspense>
-      <div className="flex h-10 items-center">
-        <WorkerBrand />
-      </div>
+      <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }}>
+        <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
+      </WorkerTopBar>
       <div className="flex flex-col gap-2">
-        <h1 className="m-0 font-display text-[25px] leading-tight font-bold">{copy.title}</h1>
         <p className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]">{copy.body}</p>
       </div>
     </main>

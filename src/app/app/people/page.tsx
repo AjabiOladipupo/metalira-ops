@@ -7,7 +7,7 @@ import { Illustration } from "@/components/illustration";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { WorkerAvatar } from "@/components/worker-avatar";
-import { findNavItem } from "@/lib/nav";
+import { canAccessHref, findNavItem } from "@/lib/nav";
 import { initials } from "@/lib/people";
 import { canViewBankChanges, countPendingBankChanges } from "@/server/people/bank-changes";
 import {
@@ -27,6 +27,8 @@ import { PeopleActions } from "./_components/people-actions";
 import { PeopleSearch } from "./_components/people-search";
 
 export const metadata: Metadata = { title: "People" };
+
+const DASHBOARD = { href: "/app", label: "dashboard" };
 
 function MappingStatus({ row }: { row: PeopleRow }) {
   return row.mapped ? (
@@ -146,7 +148,10 @@ async function PeopleList({
   const actions = (
     <>
       <BankApprovalsLink count={pendingBankChanges} />
-      <PeopleActions canEdit={ctx.canEdit} />
+      <PeopleActions
+        canEdit={ctx.canEdit}
+        canInvite={canAccessHref(ctx.role, "/app/people/invites")}
+      />
     </>
   );
 
@@ -155,6 +160,7 @@ async function PeopleList({
     return (
       <>
         <PageHeader
+          back={DASHBOARD}
           eyebrow="Workforce"
           title={item.label}
           description={item.description}
@@ -193,6 +199,7 @@ async function PeopleList({
   return (
     <>
       <PageHeader
+        back={DASHBOARD}
         eyebrow="People and mapping"
         title={`${plural(directory.activeCount, "employee", "employees")} · ${unmapped}`}
         description="Every employee needs a department, a line manager and a site. Line managers approve their reportees' leave and timesheets; projects decide whose hours count toward which client."

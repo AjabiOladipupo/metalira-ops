@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { SECTION_LINKS } from "@/components/marketing/primitives";
 import { ROLES } from "@/components/marketing/roles";
 import { MARKETING_PATHS, siteUrl, SITE_URL_FALLBACK } from "@/lib/site";
 
@@ -113,5 +114,15 @@ describe("site URL", () => {
   it("falls back to the production domain", () => {
     expect(siteUrl({})).toBe(SITE_URL_FALLBACK);
     expect(siteUrl({ NEXT_PUBLIC_APP_URL: "not a url" })).toBe("https://ops.metaliratech.com");
+  });
+});
+
+describe("landing sections", () => {
+  it("names the pilot section Pilot, at #pilot, and shows no Pricing link", () => {
+    expect(SECTION_LINKS).toContainEqual({ href: "/#pilot", label: "Pilot" });
+    expect(SECTION_LINKS.map((l) => l.label)).not.toContain("Pricing");
+    const landing = FILES.find((f) => f.name === "src/app/(marketing)/page.tsx")!.text;
+    expect(landing).toContain('id="pilot"');
+    expect(landing).not.toContain('id="pricing"');
   });
 });

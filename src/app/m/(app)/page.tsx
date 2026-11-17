@@ -6,6 +6,7 @@ import { Suspense } from "react";
 
 import { Illustration } from "@/components/illustration";
 import { LogoMark } from "@/components/logo";
+import { ThemeButton } from "@/components/theme/theme-button";
 import { Button } from "@/components/ui/button";
 import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
@@ -32,6 +33,9 @@ async function Header() {
   if (lookup.type === "unlinked") {
     return (
       <div className="flex flex-col gap-4">
+        <div className="-mb-2 flex justify-end">
+          <ThemeButton className="-mr-2" />
+        </div>
         <div className="flex flex-col gap-1.5">
           <h1 className="m-0 font-display text-[25px] leading-tight font-bold">
             {copy.unlinkedTitle}
@@ -55,13 +59,16 @@ async function Header() {
           {copy.hello(worker.firstName)}
         </h1>
       </span>
-      <Link
-        href="/m/me"
-        aria-label={copy.myProfile}
-        className="flex size-11 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background no-underline hover:text-background"
-      >
-        {initials(worker)}
-      </Link>
+      <span className="flex shrink-0 items-center gap-1">
+        <ThemeButton />
+        <Link
+          href="/m/me"
+          aria-label={copy.myProfile}
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background no-underline hover:text-background"
+        >
+          {initials(worker)}
+        </Link>
+      </span>
     </div>
   );
 }

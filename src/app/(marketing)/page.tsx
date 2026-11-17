@@ -174,12 +174,12 @@ export default function LandingPage() {
         </ol>
       </Section>
 
-      <Section id="pricing" tone="surface" aria-labelledby="pricing-title">
+      <Section id="pilot" tone="surface" aria-labelledby="pilot-title">
         <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)] lg:gap-12">
           <div className="flex flex-col gap-6">
             <SectionHeading
-              id="pricing-title"
-              eyebrow="Pricing"
+              id="pilot-title"
+              eyebrow="Pilot"
               title="Pay for the workers who clocked in"
               intro="Pricing is per worker who clocked in at least once that month. Free during the pilot."
             />

@@ -8,6 +8,7 @@ import {
   setupStepHref,
   type SetupSlug,
 } from "@/lib/company";
+import { BackLink } from "@/components/back-link";
 import { cn } from "@/lib/utils";
 import type { Company } from "@/server/identity/company-data";
 
@@ -93,6 +94,8 @@ export function SetupFrame({
 
       <section className="flex max-w-[1040px] min-w-0 flex-1 flex-col gap-6">
         <div className="flex flex-col gap-1.5">
+          {/* Until setup is done the dashboard sends the owner back here, so no arrow yet. */}
+          {completed ? <BackLink href="/app" label="dashboard" className="-mt-2" /> : null}
           {step.number <= 5 ? (
             <span className="type-label text-fg-muted">Step {step.number}</span>
           ) : null}

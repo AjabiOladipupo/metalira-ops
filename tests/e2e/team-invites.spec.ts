@@ -8,7 +8,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
-import { adminClient, pgClient } from "../rls/helpers/supabase";
+import { adminClient, anonClient, pgClient } from "../rls/helpers/supabase";
 import {
   NEEDS_SUPABASE,
   createAccount,
@@ -49,18 +49,56 @@ async function signInHere(page: Page, email: string, password: string) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
-/** The owner invites `email` as `role` from Settings → Team; returns the link's path. */
-async function invite(page: Page, email: string, role: string, label: string): Promise<string> {
+/**
+ * The owner invites `email` as `role` from Settings → Team; returns the link's path. With email
+ * off (development) the page shows the link once. Where a send is attempted and fails (the e2e
+ * build runs as production without a Resend key) the link is never shown, so the test asks for a
+ * fresh one the way the Resend button does, through the owner's own session.
+ */
+async function invite(
+  page: Page,
+  owner: TestAccount & { orgId: string },
+  email: string,
+  role: string,
+  label: string,
+): Promise<string> {
   await page.goto("/app/settings/team");
   const form = page.getByRole("form", { name: "Invite a manager" });
   await form.getByLabel("Work email").fill(email);
   await form.getByLabel("Role").selectOption({ label });
   await form.getByRole("button", { name: "Send invite" }).click();
-  // Email is not set up in tests, so the link is shown once to copy.
   await expect(page.getByRole("status").filter({ hasText: `for ${email} as ${role}` })).toBeVisible(
     { timeout: 15_000 },
   );
-  const link = await page.getByTestId("team-invite-link").inputValue();
+  const shown = page.getByTestId("team-invite-link");
+  let link: string;
+  if ((await shown.count()) > 0) {
+    link = await shown.inputValue();
+  } else {
+    await expect(
+      page.getByRole("status").filter({ hasText: "Use Resend to try again" }),
+    ).toBeVisible();
+    const client = anonClient();
+    const signIn = await client.auth.signInWithPassword({
+      email: owner.email,
+      password: owner.password,
+    });
+    expect(signIn.error).toBeNull();
+    const { data: row } = await adminClient()
+      .from("membership_invites")
+      .select("id")
+      .eq("organisation_id", owner.orgId)
+      .eq("email", email.toLowerCase())
+      .is("accepted_at", null)
+      .is("revoked_at", null)
+      .single();
+    const { data, error } = await client.rpc("resend_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_invite_id: row!.id,
+    });
+    expect(error).toBeNull();
+    link = `http://localhost/join/${data![0]!.token}`;
+  }
   expect(link).toMatch(/\/join\/[0-9a-f]{64}$/);
   return new URL(link).pathname;
 }
@@ -108,7 +146,7 @@ test("owner invites HR, who accepts and approves the owner's bank change", async
   await expect(ownerRow).toContainText("You can't change your own role.");
   await expectNoHorizontalScroll(ownerPage);
 
-  const joinPath = await invite(ownerPage, hr.email, "HR", "HR");
+  const joinPath = await invite(ownerPage, owner, hr.email, "HR", "HR");
   const pending = ownerPage.getByRole("listitem", { name: hr.email.toLowerCase() });
   await expect(pending).toContainText("Pending until");
   await expect(ownerPage.getByText(/^1 manager · 1 pending invite/)).toBeVisible();
@@ -164,7 +202,7 @@ test("owner invites HR, who accepts and approves the owner's bank change", async
   await expect(ownerPage.getByText(/^2 managers · 0 pending invites/)).toBeVisible();
   const hrRow = ownerPage.getByRole("listitem", { name: "Hauwa Bello" });
   await expect(hrRow.getByTestId("team-member-role")).toHaveText("HR");
-  await hrRow.getByLabel("Role").selectOption({ label: "Finance" });
+  await hrRow.getByLabel("Role", { exact: true }).selectOption({ label: "Finance" });
   await hrRow.getByRole("button", { name: "Save role" }).click();
   await expect(hrRow.getByTestId("team-member-role")).toHaveText("Finance", { timeout: 15_000 });
   await expectNoHorizontalScroll(ownerPage);
@@ -204,7 +242,7 @@ test("a new manager creates their account from the invite; a wrong account is to
   const password = newPassword();
 
   const ownerPage = await signedInPage(browser, owner);
-  const joinPath = await invite(ownerPage, email, "Finance", "Finance");
+  const joinPath = await invite(ownerPage, owner, email, "Finance", "Finance");
 
   // Someone else signed in on this browser (with no company yet): told to switch account.
   const page = await (await browser.newContext()).newPage();

@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
 
-import { APP_HOME_PATH, CHECK_EMAIL_PATH, SIGN_IN_PATH } from "@/lib/auth/routes";
+import { APP_HOME_PATH, CHECK_EMAIL_PATH, NEXT_PATH_KEY, SIGN_IN_PATH } from "@/lib/auth/routes";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { ROLE_LABELS } from "@/lib/roles";
 import { isInviteToken, teamInvitePath } from "@/lib/team";
@@ -34,7 +34,6 @@ import {
 } from "./team";
 import { lookupTeamInvite } from "./team-invite-lookup";
 import type { JoinActionState, TeamActionState } from "./team-state";
-import { inviteOrigin } from "./worker-invites";
 
 /**
  * Server Actions for Settings → Team and the join page (slice 1.12). Team changes go through
@@ -107,7 +106,8 @@ async function emailInvite(
 async function inviteResult(invite: IssuedInvite, verb: "sent" | "sent again") {
   const session = await getSession();
   const organisationId = session?.active?.organisationId;
-  const url = `${(await inviteOrigin()).replace(/\/+$/, "")}${teamInvitePath(invite.token)}`;
+  // Links in emails use the configured app address (NEXT_PUBLIC_APP_URL), never the request.
+  const url = `${(await appOrigin()).replace(/\/+$/, "")}${teamInvitePath(invite.token)}`;
   const outcome = organisationId
     ? await emailInvite(invite, organisationId, session?.user.fullName ?? null, url)
     : "failed";
@@ -120,14 +120,21 @@ async function inviteResult(invite: IssuedInvite, verb: "sent" | "sent again") {
       message: `Invite ${verb} to ${invite.email} as ${role}. The link works for 7 days.`,
     } satisfies TeamActionState;
   }
+  // The link is shown to the inviter only where email is deliberately off (development and
+  // previews without a Resend key). In production a failed send never reveals the link: with it
+  // the inviter could create the invitee's account with a password of their own.
+  if (outcome === "skipped") {
+    return {
+      ok: true,
+      status: 200,
+      message: `Invite created for ${invite.email} as ${role}, but email is not set up here. Copy the link and send it to them yourself.`,
+      link: url,
+    } satisfies TeamActionState;
+  }
   return {
     ok: true,
     status: 200,
-    message:
-      outcome === "skipped"
-        ? `Invite created for ${invite.email} as ${role}, but email is not set up here. Copy the link and send it to them yourself.`
-        : `Invite created for ${invite.email} as ${role}, but the email could not be sent. Copy the link and send it to them yourself.`,
-    link: url,
+    message: `Invite created for ${invite.email} as ${role}, but the email couldn't be sent. Use Resend to try again.`,
   } satisfies TeamActionState;
 }
 
@@ -289,6 +296,8 @@ export async function acceptTeamInviteAction(
     return { ok: false, formError: message ?? FAILED };
   }
 
+  // Best effort: the invite path parked at sign-up (for the confirmation link) is spent now.
+  await supabase.auth.updateUser({ data: { [NEXT_PATH_KEY]: null } });
   (await cookies()).set(ACTIVE_ORG_COOKIE, data, ACTIVE_ORG_COOKIE_OPTIONS);
   redirect(APP_HOME_PATH);
 }
@@ -337,7 +346,8 @@ export async function signUpForInviteAction(
     password: parsed.data.password,
     options: {
       emailRedirectTo: `${await appOrigin()}/auth/callback?next=${encodeURIComponent(path)}`,
-      data: { full_name: parsed.data.fullName },
+      // next_path: where the confirmation email's link lands (supabase/templates/confirmation.html).
+      data: { full_name: parsed.data.fullName, [NEXT_PATH_KEY]: path },
     },
   });
   if (error) {
@@ -358,7 +368,7 @@ export async function signUpForInviteAction(
     if (error.code === "user_already_exists" || error.code === "email_exists") {
       return {
         ok: false,
-        formError: "There is already an account for this address. Sign in instead.",
+        formError: "If you already have an account, sign in instead.",
         values,
       };
     }
@@ -371,7 +381,7 @@ export async function signUpForInviteAction(
   if (data.user && data.user.identities?.length === 0) {
     return {
       ok: false,
-      formError: "There is already an account for this address. Sign in instead.",
+      formError: "If you already have an account, sign in instead.",
       values,
     };
   }

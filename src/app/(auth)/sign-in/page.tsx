@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { BackLink } from "@/components/back-link";
+
 import { SignInForm } from "./sign-in-form";
 
 export const metadata: Metadata = { title: "Sign in" };
@@ -9,6 +11,7 @@ export default function SignInPage() {
   return (
     <>
       <div className="flex flex-col gap-1.5">
+        <BackLink href="/" label="home" className="-my-2" />
         <span className="type-label text-fg-muted">Manager account</span>
         <h1 className="m-0 type-h1">Sign in</h1>
         <p className="m-0 type-body-lg text-fg-muted">

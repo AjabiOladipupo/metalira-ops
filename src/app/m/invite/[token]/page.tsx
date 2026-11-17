@@ -7,6 +7,7 @@ import { workerMessages } from "@/lib/messages/worker";
 import { lookupWorkerInvite } from "@/server/identity/worker-invite-lookup";
 
 import { WorkerBrand } from "../../_components/worker-brand";
+import { WorkerTopBar } from "../../_components/worker-top-bar";
 import { AcceptInviteForm } from "./accept-invite-form";
 
 // The token is in the path: keep it out of Referer headers and search engines.
@@ -77,9 +78,9 @@ function InviteSkeleton() {
 export default function InvitePage({ params }: PageProps<"/m/invite/[token]">) {
   return (
     <main className="flex flex-1 flex-col gap-6 px-4 pt-4 pb-8">
-      <div className="flex h-10 items-center">
+      <WorkerTopBar>
         <WorkerBrand />
-      </div>
+      </WorkerTopBar>
       <div className="flex flex-col gap-1.5">
         <span className="type-label text-fg-muted">{copy.eyebrow}</span>
         <h1 className="m-0 font-display text-[25px] leading-tight font-bold">{copy.title}</h1>
