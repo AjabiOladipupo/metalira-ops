@@ -11,7 +11,8 @@
 --   line_manager. Only the owner can grant admin (invite, resend or change to/from admin).
 -- * Nobody changes their own role or removes themselves. The owner can't be removed or
 --   demoted. Workers and client approvers are managed elsewhere (People), never here.
--- * A login that is a worker in the company can't also be invited (one role per company).
+-- * A worker's login (app_metadata.login = 'worker') can't be invited or accept, in any company,
+--   and a login that is a worker in the company can't also be a manager there.
 -- * Invites are never deleted: cancelling sets revoked_at, accepting sets accepted_at, and a
 --   resend issues a new token on the same row (the old link stops working).
 -- * Role changes and removals go only through the functions below: signed-in users lose their
@@ -138,6 +139,17 @@ begin
     or char_length(v_email) not between 3 and 320
     or v_email !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
     raise exception 'enter a valid email address' using errcode = '22023';
+  end if;
+
+  -- A worker's login (synthetic, PIN-protected; app_metadata.login = 'worker', set only with
+  -- the secret key) never becomes a manager, in this company or any other.
+  if v_email like '%.invalid' or exists (
+    select 1
+    from auth.users u
+    where lower(u.email) = v_email
+      and u.raw_app_meta_data ->> 'login' = 'worker'
+  ) then
+    raise exception 'this email is a worker''s sign-in' using errcode = 'MLTM2';
   end if;
 
   select m.role
@@ -329,6 +341,7 @@ declare
   inv public.membership_invites%rowtype;
   v_email text;
   v_confirmed_at timestamptz;
+  v_login text;
   v_existing public.membership_role;
 begin
   if uid is null then
@@ -360,10 +373,14 @@ begin
     raise exception 'this invite is no longer valid' using errcode = '42501';
   end if;
 
-  select lower(u.email), u.email_confirmed_at
-  into v_email, v_confirmed_at
+  select lower(u.email), u.email_confirmed_at, u.raw_app_meta_data ->> 'login'
+  into v_email, v_confirmed_at, v_login
   from auth.users u
   where u.id = uid;
+
+  if v_login = 'worker' then
+    raise exception 'a worker''s sign-in can''t join as a manager' using errcode = 'MLTM2';
+  end if;
 
   if v_email is distinct from inv.email or v_confirmed_at is null then
     raise exception 'this invite is for a different email address' using errcode = '42501';

@@ -106,7 +106,8 @@ export type ProxyDecision = { type: "next" } | { type: "redirect"; location: str
  * organisations are checked again next to the data (src/server/identity/session.ts,
  * worker-session.ts) and by row-level security.
  *
- * - Manager app (/app): signed out goes to /sign-in; a worker session goes to the worker app.
+ * - Manager app (/app) and team invites (/join): signed out goes to /sign-in (the invite page
+ *   itself is public); a worker session goes to the worker app.
  * - Worker app (/m): signed out goes to /m/sign-in, except sign-in and invite links; a worker
  *   who is already signed in skips /m/sign-in.
  */
@@ -125,7 +126,11 @@ export function proxyDecision(
     }
     return { type: "next" };
   }
-  if (hasUser && isWorker && (isProtected(pathname) || SIGNED_OUT_ONLY.has(pathname))) {
+  if (
+    hasUser &&
+    isWorker &&
+    (isProtected(pathname) || SIGNED_OUT_ONLY.has(pathname) || isTeamJoin(pathname))
+  ) {
     return { type: "redirect", location: WORKER_HOME_PATH };
   }
   if (!hasUser && isProtected(pathname)) {

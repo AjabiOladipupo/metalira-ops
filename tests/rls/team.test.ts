@@ -152,6 +152,41 @@ describe("invites", () => {
     expect(await roleOf(worker.id, owner.orgId)).toBe("worker");
   });
 
+  it("a worker's login from any company can't be invited or accept", async () => {
+    const email = `${crypto.randomUUID()}@workers.metalira.invalid`;
+    const password = `${crypto.randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: { login: "worker" },
+    });
+    expect(created.error).toBeNull();
+    const create = await owner.client.rpc("create_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_email: email,
+      p_role: "hr",
+    });
+    expect(create.error?.code).toBe(WORKER_LOGIN);
+
+    // An invite planted for that address still can't be used by the worker's session.
+    const token = (await import("node:crypto")).randomBytes(32).toString("hex");
+    const planted = await admin.from("membership_invites").insert({
+      organisation_id: owner.orgId,
+      email,
+      role: "hr",
+      token_hash: await sha256(token),
+      created_by: owner.id,
+    });
+    expect(planted.error).toBeNull();
+    const session = anonClient();
+    const signIn = await session.auth.signInWithPassword({ email, password });
+    expect(signIn.error).toBeNull();
+    const accept = await session.rpc("accept_membership_invite", { p_token: token });
+    expect(accept.error?.code).toBe(WORKER_LOGIN);
+    expect(await roleOf(created.data.user!.id, owner.orgId)).toBeNull();
+  });
+
   it("resend issues a new link for 7 more days and the old one stops working", async () => {
     const invitee = await createTestUser("t-resend");
     const { data: first } = await owner.client.rpc("create_membership_invite", {

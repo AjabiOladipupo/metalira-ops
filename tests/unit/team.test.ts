@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { safeNextPath } from "@/lib/auth/routes";
+import { proxyDecision, safeNextPath } from "@/lib/auth/routes";
 import { canAccessHref } from "@/lib/nav";
 import {
   grantableRoles,
@@ -116,6 +116,13 @@ describe("routes", () => {
     expect(safeNextPath(`/join/${token}/../../evil`)).toBe("/app");
     expect(safeNextPath("/join/not-a-token")).toBe("/app");
     expect(safeNextPath("//evil.example/join/" + token)).toBe("/app");
+  });
+
+  it("keeps worker sessions off the invite page, and lets everyone else open it", () => {
+    const path = teamInvitePath(token);
+    expect(proxyDecision(path, "", true, true)).toEqual({ type: "redirect", location: "/m" });
+    expect(proxyDecision(path, "", true, false)).toEqual({ type: "next" });
+    expect(proxyDecision(path, "", false, false)).toEqual({ type: "next" });
   });
 
   it("opens Settings → Team to owners and admins only", () => {
