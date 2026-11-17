@@ -20,7 +20,10 @@ async function expectNoHorizontalScroll(page: Page) {
 /** Opens `path` directly (as from an email) and follows its back arrow. */
 async function expectBack(page: Page, path: string, name: string, parent: RegExp) {
   await page.goto(path);
-  const back = page.getByRole("link", { name, exact: true });
+  // The arrow, by its accessible name (a page may also have a text link to the same place).
+  const back = page.getByTestId("back-link");
+  await expect(back).toHaveCount(1);
+  await expect(back).toHaveAccessibleName(name);
   await expect(back).toBeVisible();
   const box = await back.boundingBox();
   expect(box?.width).toBeGreaterThanOrEqual(44);
