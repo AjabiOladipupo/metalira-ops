@@ -185,15 +185,15 @@ export const LATER_SCENES = {
     ),
   },
   "payslip-empty": {
-    viewBox: [160, 160],
-    size: "empty",
+    viewBox: [140, 120],
+    size: "worker",
     label: "A worker in a hi-vis vest reading a payslip",
     draw: (lw) => (
       <>
         <Person
-          x={80}
-          y={157}
-          s={0.93}
+          x={70}
+          y={168}
+          s={1}
           lw={lw}
           hair="short"
           top="vest"
@@ -201,10 +201,10 @@ export const LATER_SCENES = {
           right="chest"
           face="calm"
           held={
-            <g transform="translate(0 -92)">
-              <Slip w={28} h={36} naira />
+            <g transform="translate(0 -97)">
+              <Slip w={28} h={36} />
               <Accent>
-                <path d="M-3.5 10.5 L-1 13 L4 8" fill="none" />
+                <path d="M-4 5 L-1.5 7.5 L4 2" fill="none" />
               </Accent>
             </g>
           }
