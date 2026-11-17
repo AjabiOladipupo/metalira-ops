@@ -22,6 +22,7 @@ async function Invites() {
   return (
     <>
       <PageHeader
+        back={{ href: "/app/people", label: "People" }}
         eyebrow="People"
         title="Worker invites"
         description={`${plural(summary.total, "employee")} · ${summary.signedUp.toLocaleString("en-NG")} signed up · ${summary.invited.toLocaleString("en-NG")} invited · ${summary.notInvited.toLocaleString("en-NG")} not invited`}

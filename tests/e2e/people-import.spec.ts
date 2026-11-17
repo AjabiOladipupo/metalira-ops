@@ -208,4 +208,5 @@ test("an ops manager can't open the import or download from it", async ({ page }
   await page.goto("/app/people");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("People");
   await expect(page.getByRole("link", { name: "Import", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Invite", exact: true })).toHaveCount(0);
 });

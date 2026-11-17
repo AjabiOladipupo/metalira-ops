@@ -166,6 +166,9 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await expect(nav.getByRole("link")).toHaveText(["Home", "Clock", "Leave", "Payslips", "Me"]);
   await expect(nav.getByRole("link", { name: "Home" })).toHaveAttribute("aria-current", "page");
   await expect(w.getByLabel("Language")).toHaveCount(0);
+  // Home has the theme switcher and no back arrow.
+  await expect(w.getByRole("button", { name: /^Theme: / })).toBeVisible();
+  await expect(w.getByTestId("back-link")).toHaveCount(0);
   await expectNoHorizontalScroll(w);
 
   // It can be added to the home screen.
@@ -177,6 +180,9 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   // A later-phase tab says what is coming, inside the app.
   await nav.getByRole("link", { name: "Payslips" }).click();
   await expect(w.getByRole("heading", { level: 1 })).toHaveText("Payslips");
+  await expect(w.getByRole("button", { name: /^Theme: / })).toBeVisible();
+  await w.getByRole("link", { name: "Back to home" }).click();
+  await expect(w).toHaveURL(/\/m$/);
 
   // Me, per the WkProfile board: the worker's own details, masked.
   await w.goto("/m");
@@ -221,8 +227,10 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await expectNoHorizontalScroll(w);
 
   // Request a change: new bank details.
+  await expect(w.getByRole("link", { name: "Back to home" })).toHaveAttribute("href", "/m");
   await w.getByRole("link", { name: "Request a change" }).click();
   await expect(w.getByRole("heading", { level: 1 })).toHaveText("Request a change");
+  await expect(w.getByRole("link", { name: "Back to Me" })).toHaveAttribute("href", "/m/me");
   await w.getByRole("radio", { name: "Bank details" }).check();
   const bank = w.getByRole("form", { name: "Bank details" });
   await bank.getByLabel("Bank name").fill("Access Bank");

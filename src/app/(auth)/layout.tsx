@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/logo";
+import { ThemeButton } from "@/components/theme/theme-button";
 
 const TOOLS = [
   { name: "Workforce Ops", body: "Rosters, clock-in, timesheets, leave and payroll." },
@@ -10,11 +11,13 @@ const TOOLS = [
 
 /**
  * Split layout from the Setup board: grey aside with the logo, white main with the form.
- * The aside wraps above the form on small screens and keeps only the logo there.
+ * The aside wraps above the form on small screens and keeps only the logo there. The theme
+ * switcher sits top right; each page puts its own back arrow above its heading.
  */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-dvh flex-wrap bg-background text-foreground">
+    <div className="relative flex min-h-dvh flex-wrap bg-background text-foreground">
+      <ThemeButton className="absolute top-3 right-3 sm:top-4 sm:right-4" />
       <aside className="flex flex-[1_1_260px] flex-col gap-6 bg-surface px-4 py-6 sm:px-5 lg:max-w-[420px] lg:px-8 lg:py-10">
         <Link
           href="/"

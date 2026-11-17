@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { BackLink } from "@/components/back-link";
 import { Button } from "@/components/ui/button";
 import { ROLE_LABELS } from "@/lib/roles";
 import { signOut } from "@/server/identity/actions";
@@ -18,6 +19,7 @@ export default function NoAccessPage() {
   return (
     <>
       <div className="flex flex-col gap-1.5">
+        <BackLink href="/" label="Metalira Ops home" className="-my-2" />
         <span className="type-label text-fg-muted">No access</span>
         <h1 className="m-0 type-h1">You can&apos;t open this page</h1>
         <p className="m-0 type-body-lg text-fg-muted">

@@ -1,11 +1,10 @@
-import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { after } from "next/server";
 
 import { EmptyState } from "@/components/empty-state";
 import { Illustration } from "@/components/illustration";
 import { PageHeader } from "@/components/page-header";
+import { canAccessHref } from "@/lib/nav";
 import { sendAppliedBankChangeNotices } from "@/server/people/bank-change-notices";
 import {
   applyDueBankChanges,
@@ -84,14 +83,13 @@ async function Approvals() {
   return (
     <>
       <div className="flex flex-col gap-4">
-        <Link
-          href="/app/people"
-          className="inline-flex items-center gap-1.5 text-sm text-fg-muted no-underline hover:text-foreground"
-        >
-          <ArrowLeft strokeWidth={1.75} className="size-4" aria-hidden />
-          People
-        </Link>
         <PageHeader
+          // Finance approves bank changes but can't open People: their parent is the dashboard.
+          back={
+            canAccessHref(ctx.role, "/app/people")
+              ? { href: "/app/people", label: "People" }
+              : { href: "/app", label: "dashboard" }
+          }
           eyebrow="Bank-detail approvals"
           title={title}
           description={`Bank details change only when someone other than the requester approves, then wait 72 hours before payouts use them. ${

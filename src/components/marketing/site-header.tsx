@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/logo";
+import { ThemeButton } from "@/components/theme/theme-button";
 import { cn } from "@/lib/utils";
 
 import { ForMenu } from "./for-menu";
@@ -17,7 +18,7 @@ const roleLinks = ROLES.map(({ href, nav }) => ({ href, nav }));
 export function SiteHeader() {
   return (
     <header className="relative border-b border-line bg-background">
-      <div className="mx-auto flex max-w-[1200px] items-center gap-6 px-4 py-4 lg:px-6">
+      <div className="mx-auto flex max-w-[1200px] items-center gap-3 px-4 py-4 lg:gap-6 lg:px-6">
         <Link href="/" aria-label="Metalira Ops home" className="shrink-0 no-underline">
           <Logo size={28} />
         </Link>
@@ -29,14 +30,17 @@ export function SiteHeader() {
           ))}
           <ForMenu roles={roleLinks} />
         </nav>
-        <div className="ml-auto flex items-center gap-3 lg:ml-0 lg:gap-6">
+        <div className="ml-auto flex items-center gap-2 lg:ml-0 lg:gap-6">
           <Link href="/sign-in" className={cn(navLinkClass, "hidden lg:inline")}>
             Sign in
           </Link>
-          <CtaLink href="/sign-up" className="h-10 px-4">
+          <CtaLink href="/sign-up" className="h-10 px-3 sm:px-4">
             Start setup
           </CtaLink>
-          <MobileMenu roles={roleLinks} className="lg:hidden" />
+          <span className="flex items-center lg:-mx-3">
+            <ThemeButton />
+            <MobileMenu roles={roleLinks} className="lg:hidden" />
+          </span>
         </div>
       </div>
     </header>
