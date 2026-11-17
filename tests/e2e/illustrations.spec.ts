@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const SCENE_COUNT = 21;
+// Later phases add scenes, so check the floor and that both panels match, not an exact count.
+const MIN_SCENES = 22;
 
 for (const scheme of ["light", "dark"] as const) {
   test(`illustration gallery renders with the system set to ${scheme}`, async ({ page }) => {
@@ -9,9 +10,15 @@ for (const scheme of ["light", "dark"] as const) {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Design system");
     if (scheme === "dark") await expect(page.locator("html")).toHaveClass(/dark/);
 
+    const sceneCount = await page
+      .getByTestId("illustrations-light")
+      .locator("svg[data-illustration]")
+      .count();
+    expect(sceneCount).toBeGreaterThanOrEqual(MIN_SCENES);
+
     for (const mode of ["light", "dark"] as const) {
       const scenes = page.getByTestId(`illustrations-${mode}`).locator("svg[data-illustration]");
-      await expect(scenes).toHaveCount(SCENE_COUNT);
+      await expect(scenes).toHaveCount(sceneCount);
       await expect(scenes.first()).toBeVisible();
       await expect(
         page.getByTestId(`illustrations-${mode}`).getByRole("img", { name: /security guard/ }),

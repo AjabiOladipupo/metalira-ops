@@ -58,12 +58,15 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 **Source**
 - The scenes are original drawings in the Open Peeps style (Open Peeps by Pablo Stanley, openpeeps.com, CC0), drawn for Metalira in code. No artwork is copied or downloaded from the internet (owner decision, 17 Nov 2026).
 - People look like Metalira's users: Nigerian workers and managers, with workwear where it fits (guard's cap, cleaner's apron, hi-vis vest, rider's helmet).
+- Worker avatars are the exception to "nothing copied": unlike the scenes, they use the packaged CC0 Open Peeps artwork by Pablo Stanley that ships inside the DiceBear npm package, not drawings made for Metalira. This follows the earlier design decision that prescribed DiceBear; it is waiting on owner confirmation against the 17 Nov 2026 decision. If the owner says no, generate avatars from the kit's own `Head` (seeded hair, face, glasses) instead.
 - Worker avatars before a photo is uploaded use the DiceBear `open-peeps` style seeded by worker id, so every worker keeps the same face (`src/lib/avatar.ts`, rendered on the server, no network calls; `<WorkerAvatar workerId name size>`). Black ink on white, inverted in dark mode. An avatar is not an illustration: 24–40px in table rows and up to 56px in headers is fine.
 - Licences: DiceBear code (`@dicebear/core`, `@dicebear/collection`) is MIT; the Open Peeps artwork in the `open-peeps` style is CC0 1.0, free for commercial use, no attribution required (see the licence file in `@dicebear/open-peeps`).
 - Only use images you have the rights to. Do not copy illustrations found online without a licence.
 
 **How they are built**
 - Scenes are React components, not files in `public/illustrations/`: inline SVG, so `currentColor` and CSS variables follow the theme. Render with `<Illustration name size decorative>` (`src/components/illustration.tsx`); the scenes live in `src/components/illustrations/` and share one drawing kit (`ink.tsx`).
+- People come from the kit's `<Person>`: give each person in a scene their own `build` (regular, slim, wide, tall, short), `stance` (together, apart, lean-left, lean-right) and, where it helps, a three-quarter `turn`. Every outline is redrawn by `sketch()` with a seeded wobble and a slight shoulder and hip tilt, so no two people are the same drawing.
+- Mouths are outlines, never solid shapes: a filled mouth turns into a bright white grin on a dark face in dark mode.
 - `IllustrationName` is the union of every scene name. Add a scene to the kit's files and a row to the slot table below in the same pull request.
 - The gallery at `/design-system` shows every scene at its size, in light and dark, plus sample avatars.
 
@@ -86,9 +89,10 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 | roster-empty | Empty roster week | 3 | 160 |
 | all-covered | No uncovered shifts | 3 | 160 |
 | offline | Worker app offline state (person, phone, crossed-out cloud) | 3 | 160 |
-| leave-empty | No leave requests (HR and line managers) | 4 | 160 |
+| leave-empty | No leave requests (HR and line managers): manager beside an empty in-tray | 4 | 160 |
+| leave-approved | Leave approved success screen (person heading off with a suitcase) | 4 | 240 |
 | payroll-ready | Payroll run ready for approval | 5 | 160 |
-| payslip-empty | Worker app payslips, none yet | 5 | 96 |
+| payslip-empty | Worker app payslips, none yet (cropped to head and shoulders) | 5 | 96 |
 | no-invoices | Empty Invoices | 6 | 160 |
 | all-collected | Collections, nothing outstanding | 6 | 160 |
 | no-projects | Empty Projects | 8 | 160 |

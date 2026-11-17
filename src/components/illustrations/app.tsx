@@ -9,7 +9,18 @@ export const APP_SCENES = {
     label: "Two people shaking hands under a speech bubble with an office building",
     draw: (lw) => (
       <>
-        <Person x={42} y={156} s={0.88} lw={lw} hair="beard" top="jacket" right="reach" />
+        <Person
+          x={42}
+          y={156}
+          s={0.88}
+          lw={lw}
+          hair="beard"
+          top="jacket"
+          build="wide"
+          stance="lean-left"
+          turn={1}
+          right="reach"
+        />
         <Person
           x={119}
           y={156}
@@ -18,6 +29,8 @@ export const APP_SCENES = {
           hair="wrap"
           top="blouse"
           bottom="skirt"
+          build="slim"
+          turn={-1}
           left="reach"
           face="grin"
         />
@@ -40,6 +53,8 @@ export const APP_SCENES = {
           lw={lw}
           hair="puff"
           top="shirt"
+          build="short"
+          stance="apart"
           left="chest"
           right="chest"
           held={
@@ -92,7 +107,18 @@ export const APP_SCENES = {
     label: "A security guard in uniform waving, with a clock in a speech bubble",
     draw: (lw) => (
       <>
-        <Person x={82} y={168} s={1} lw={lw} hair="cap" top="guard" right="wave" face="grin" />
+        <Person
+          x={82}
+          y={168}
+          s={1}
+          lw={lw}
+          hair="cap"
+          top="guard"
+          build="wide"
+          turn={-1}
+          right="wave"
+          face="grin"
+        />
         <Bubble cx={30} cy={38} r={17} toward={[64, 40]} lw={lw}>
           <Icon.clock />
         </Bubble>
@@ -112,6 +138,8 @@ export const APP_SCENES = {
           lw={lw}
           hair="braids"
           top="vest"
+          build="slim"
+          turn={1}
           left="hip"
           right="reach"
           held={
