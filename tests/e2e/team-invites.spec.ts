@@ -164,7 +164,7 @@ test("owner invites HR, who accepts and approves the owner's bank change", async
   await expect(ownerPage.getByText(/^2 managers · 0 pending invites/)).toBeVisible();
   const hrRow = ownerPage.getByRole("listitem", { name: "Hauwa Bello" });
   await expect(hrRow.getByTestId("team-member-role")).toHaveText("HR");
-  await hrRow.getByLabel("Role").selectOption({ label: "Finance" });
+  await hrRow.getByLabel("Role", { exact: true }).selectOption({ label: "Finance" });
   await hrRow.getByRole("button", { name: "Save role" }).click();
   await expect(hrRow.getByTestId("team-member-role")).toHaveText("Finance", { timeout: 15_000 });
   await expectNoHorizontalScroll(ownerPage);
