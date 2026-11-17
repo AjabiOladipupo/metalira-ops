@@ -25,5 +25,5 @@ export async function proxy(request: NextRequest) {
 export const config = {
   // Only routes that read the session. Server Functions post to these same paths, so they are
   // covered too. /auth/* route handlers manage their own cookies.
-  matcher: ["/app/:path*", "/m", "/m/:path*", "/sign-in", "/sign-up", "/no-access"],
+  matcher: ["/app/:path*", "/m", "/m/:path*", "/sign-in", "/sign-up", "/no-access", "/join/:path*"],
 };

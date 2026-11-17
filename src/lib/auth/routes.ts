@@ -13,6 +13,15 @@ export const WORKER_HOME_PATH = "/m";
 export const WORKER_SIGN_IN_PATH = "/m/sign-in";
 /** Invite links: /m/invite/<token>. */
 export const WORKER_INVITE_PATH = "/m/invite";
+/**
+ * user_metadata key for the path the sign-up confirmation email links back to. The template
+ * (supabase/templates/confirmation.html) reads it as `{{ .Data.next_path }}`; the confirm route
+ * still passes it through safeNextPath, so a value set through the Auth API directly can only
+ * lead inside the app.
+ */
+export const NEXT_PATH_KEY = "next_path";
+/** Team (manager) invite links: /join/<token> (slice 1.12). */
+export const TEAM_JOIN_PATH = "/join";
 
 /**
  * A worker's login is a Supabase Auth user marked in `app_metadata` (which only the server's
@@ -37,6 +46,11 @@ function isProtected(pathname: string): boolean {
   return pathname === APP_HOME_PATH || pathname.startsWith(`${APP_HOME_PATH}/`);
 }
 
+/** A team invite page, /join/<64 hex characters>: where an invited manager signs in or up. */
+function isTeamJoin(pathname: string): boolean {
+  return /^\/join\/[0-9a-f]{64}$/.test(pathname);
+}
+
 function isWorkerApp(pathname: string): boolean {
   return pathname === WORKER_HOME_PATH || pathname.startsWith(`${WORKER_HOME_PATH}/`);
 }
@@ -49,7 +63,8 @@ function isWorkerPublic(pathname: string): boolean {
 /**
  * A same-site path to send the user to after signing in, or `fallback`. Blocks open redirects:
  * only a single leading slash is allowed (no `//host`, `/\host` or scheme), no control
- * characters, and the path must stay inside the manager app.
+ * characters, and the path must stay inside the manager app (or be a team invite page, so an
+ * invited manager comes back to their invite after signing in or confirming their email).
  */
 export function safeNextPath(
   value: string | null | undefined,
@@ -66,7 +81,7 @@ export function safeNextPath(
     return fallback;
   }
   if (url.origin !== "http://n.invalid") return fallback;
-  if (!isProtected(url.pathname)) return fallback;
+  if (!isProtected(url.pathname) && !isTeamJoin(url.pathname)) return fallback;
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -98,7 +113,8 @@ export type ProxyDecision = { type: "next" } | { type: "redirect"; location: str
  * organisations are checked again next to the data (src/server/identity/session.ts,
  * worker-session.ts) and by row-level security.
  *
- * - Manager app (/app): signed out goes to /sign-in; a worker session goes to the worker app.
+ * - Manager app (/app) and team invites (/join): signed out goes to /sign-in (the invite page
+ *   itself is public); a worker session goes to the worker app.
  * - Worker app (/m): signed out goes to /m/sign-in, except sign-in and invite links; a worker
  *   who is already signed in skips /m/sign-in.
  */
@@ -117,7 +133,11 @@ export function proxyDecision(
     }
     return { type: "next" };
   }
-  if (hasUser && isWorker && (isProtected(pathname) || SIGNED_OUT_ONLY.has(pathname))) {
+  if (
+    hasUser &&
+    isWorker &&
+    (isProtected(pathname) || SIGNED_OUT_ONLY.has(pathname) || isTeamJoin(pathname))
+  ) {
     return { type: "redirect", location: WORKER_HOME_PATH };
   }
   if (!hasUser && isProtected(pathname)) {

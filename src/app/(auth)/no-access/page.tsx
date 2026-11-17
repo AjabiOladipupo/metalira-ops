@@ -45,6 +45,11 @@ async function NoAccessActions() {
           Signed in as {session.user.email} ({roles.map((r) => ROLE_LABELS[r]).join(", ")}).
         </p>
       ) : null}
+      {session && session.memberships.length === 0 ? (
+        <p className="m-0 text-sm text-fg-muted" data-testid="no-access-invited">
+          Invited to join a company? Open the invite link in your email again and accept it.
+        </p>
+      ) : null}
       <div className="flex flex-wrap gap-3">
         {active ? (
           <Button asChild className="h-11 rounded-lg">
