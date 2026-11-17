@@ -1,9 +1,10 @@
 /**
  * Membership management inside one organisation: people join only through an
- * email invite they accept themselves (never a direct insert), admins manage
- * every role except owner, only owners manage owner rows, and every
- * organisation keeps at least one owner (last-owner guard), even for the
- * secret-key client.
+ * email invite they accept themselves (never a direct insert); roles change and
+ * members leave only through change_member_role and remove_member (slice 1.12:
+ * only the owner grants or changes admin, nobody changes their own role, the
+ * owner can't be changed or removed); and every organisation keeps at least one
+ * owner (last-owner guard), even for the secret-key client.
  */
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -19,8 +20,23 @@ import {
 const LAST_OWNER = /at least one owner/;
 const PERMISSION_DENIED = "42501";
 const INVALID = "22023";
+// Slice 1.12 refusals (supabase/migrations/20261117120000_team_invites.sql).
+const ALREADY_MEMBER = "MLTM1";
+const USED = "MLTM3";
+const EXPIRED = "MLTM4";
+const CANCELLED = "MLTM5";
+const OWN_MEMBERSHIP = "MLTM6";
+const OWNER_PROTECTED = "MLTM7";
 
-type Role = "owner" | "admin" | "hr" | "finance" | "ops_manager" | "line_manager" | "worker";
+type Role =
+  | "owner"
+  | "admin"
+  | "hr"
+  | "finance"
+  | "ops_manager"
+  | "line_manager"
+  | "worker"
+  | "client_approver";
 
 let admin: Client;
 let owner: TenantUser;
@@ -35,6 +51,17 @@ async function roleOf(userId: string, orgId: string) {
     .eq("organisation_id", orgId)
     .maybeSingle();
   return data?.role ?? null;
+}
+
+async function membershipId(userId: string, orgId: string): Promise<string> {
+  const { data, error } = await admin
+    .from("memberships")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("organisation_id", orgId)
+    .single();
+  if (error) throw new Error(error.message);
+  return data.id;
 }
 
 async function invite(by: TestUser, orgId: string, email: string, role: Role) {
@@ -107,7 +134,7 @@ describe("memberships", () => {
 
   it("an invite works only for its own confirmed email, once", async () => {
     const outsider = await createTestUser("m-intruder");
-    const token = await inviteToken(orgAdmin, owner.orgId, staff.email, "worker");
+    const token = await inviteToken(orgAdmin, owner.orgId, staff.email, "line_manager");
 
     const stolen = await outsider.client.rpc("accept_membership_invite", { p_token: token });
     expect(stolen.error?.code).toBe(PERMISSION_DENIED);
@@ -118,10 +145,10 @@ describe("memberships", () => {
 
     const accept = await staff.client.rpc("accept_membership_invite", { p_token: token });
     expect(accept.error).toBeNull();
-    expect(await roleOf(staff.id, owner.orgId)).toBe("worker");
+    expect(await roleOf(staff.id, owner.orgId)).toBe("line_manager");
 
     const again = await staff.client.rpc("accept_membership_invite", { p_token: token });
-    expect(again.error?.code).toBe(INVALID);
+    expect(again.error?.code).toBe(USED);
   });
 
   it("an expired invite cannot be accepted", async () => {
@@ -135,7 +162,7 @@ describe("memberships", () => {
     expect(error).toBeNull();
 
     const accept = await late.client.rpc("accept_membership_invite", { p_token: token });
-    expect(accept.error?.code).toBe(INVALID);
+    expect(accept.error?.code).toBe(EXPIRED);
     expect(await roleOf(late.id, owner.orgId)).toBeNull();
   });
 
@@ -145,7 +172,7 @@ describe("memberships", () => {
     const second = await inviteToken(owner, owner.orgId, twice.email, "ops_manager");
 
     const old = await twice.client.rpc("accept_membership_invite", { p_token: first });
-    expect(old.error?.code).toBe(INVALID);
+    expect(old.error?.code).toBe(CANCELLED);
     const accept = await twice.client.rpc("accept_membership_invite", { p_token: second });
     expect(accept.error).toBeNull();
     expect(await roleOf(twice.id, owner.orgId)).toBe("ops_manager");
@@ -153,25 +180,33 @@ describe("memberships", () => {
 
   it("an invite for an existing member is refused", async () => {
     const { error } = await invite(owner, owner.orgId, staff.email, "hr");
-    expect(error?.code).toBe("23505");
+    expect(error?.code).toBe(ALREADY_MEMBER);
   });
 
-  it("an admin changes a member's role", async () => {
-    const update = await orgAdmin.client
+  it("an admin changes a member's role through change_member_role only", async () => {
+    const direct = await orgAdmin.client
       .from("memberships")
       .update({ role: "hr" })
       .eq("organisation_id", owner.orgId)
-      .eq("user_id", staff.id)
-      .select("role");
-    expect(update.error).toBeNull();
-    expect(update.data).toEqual([{ role: "hr" }]);
+      .eq("user_id", staff.id);
+    expect(direct.error?.code).toBe(PERMISSION_DENIED);
+
+    const { data, error } = await orgAdmin.client.rpc("change_member_role", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: await membershipId(staff.id, owner.orgId),
+      p_role: "hr",
+    });
+    expect(error).toBeNull();
+    expect(data?.[0]).toMatchObject({ old_role: "line_manager", new_role: "hr" });
+    expect(await roleOf(staff.id, owner.orgId)).toBe("hr");
   });
 
-  it("an admin cannot invite an owner", async () => {
+  it("an admin cannot invite an owner or an admin", async () => {
     const outsider = await createTestUser("m-outsider");
-    const { data, error } = await invite(orgAdmin, owner.orgId, outsider.email, "owner");
-    expect(error?.code).toBe(PERMISSION_DENIED);
-    expect(data).toBeNull();
+    const asOwner = await invite(orgAdmin, owner.orgId, outsider.email, "owner");
+    expect(asOwner.error?.code).toBe(INVALID);
+    const asAdmin = await invite(orgAdmin, owner.orgId, outsider.email, "admin");
+    expect(asAdmin.error?.code).toBe(PERMISSION_DENIED);
     const { count } = await admin
       .from("membership_invites")
       .select("id", { count: "exact", head: true })
@@ -179,87 +214,116 @@ describe("memberships", () => {
     expect(count).toBe(0);
   });
 
+  it("nobody invites owners, workers or client approvers from the team page", async () => {
+    const outsider = await createTestUser("m-worker-invitee");
+    for (const role of ["worker", "client_approver", "owner"] as const) {
+      const { error } = await invite(owner, owner.orgId, outsider.email, role);
+      expect(error?.code).toBe(INVALID);
+    }
+  });
+
   it("members below admin cannot invite anyone", async () => {
     const outsider = await createTestUser("m-hr-invitee");
-    const { error } = await invite(staff, owner.orgId, outsider.email, "worker");
+    const { error } = await invite(staff, owner.orgId, outsider.email, "hr");
     expect(error?.code).toBe(PERMISSION_DENIED);
   });
 
-  it("an owner invite stops working if the inviter is no longer an owner", async () => {
+  it("an invite stops working once its inviter leaves the company", async () => {
     const second = await createTenantUser("m-owner2", "Second Owner Org");
-    const coOwner = await createTestUser("m-coowner");
-    const invitee = await createTestUser("m-owner-invitee");
-    const coOwnerToken = await inviteToken(second, second.orgId, coOwner.email, "owner");
+    const coAdmin = await createTestUser("m-coadmin");
+    const invitee = await createTestUser("m-left-invitee");
+    const adminToken = await inviteToken(second, second.orgId, coAdmin.email, "admin");
     expect(
-      (await coOwner.client.rpc("accept_membership_invite", { p_token: coOwnerToken })).error,
+      (await coAdmin.client.rpc("accept_membership_invite", { p_token: adminToken })).error,
     ).toBeNull();
 
-    const token = await inviteToken(coOwner, second.orgId, invitee.email, "owner");
-    const demote = await second.client
-      .from("memberships")
-      .update({ role: "admin" })
-      .eq("organisation_id", second.orgId)
-      .eq("user_id", coOwner.id);
-    expect(demote.error).toBeNull();
+    const token = await inviteToken(coAdmin, second.orgId, invitee.email, "finance");
+    const removed = await second.client.rpc("remove_member", {
+      p_organisation_id: second.orgId,
+      p_membership_id: await membershipId(coAdmin.id, second.orgId),
+    });
+    expect(removed.error).toBeNull();
 
     const accept = await invitee.client.rpc("accept_membership_invite", { p_token: token });
     expect(accept.error?.code).toBe(PERMISSION_DENIED);
     expect(await roleOf(invitee.id, second.orgId)).toBeNull();
   });
 
-  it("an admin can revoke a pending invite but not an owner invite", async () => {
+  it("an admin cancels a pending invite but not an admin invite, and nobody deletes invites", async () => {
     const a = await createTestUser("m-revoke-a");
     const b = await createTestUser("m-revoke-b");
-    await inviteToken(owner, owner.orgId, a.email, "worker");
-    await inviteToken(owner, owner.orgId, b.email, "owner");
+    const tokenA = await inviteToken(owner, owner.orgId, a.email, "hr");
+    await inviteToken(owner, owner.orgId, b.email, "admin");
+    const idOf = async (email: string) => {
+      const { data } = await admin
+        .from("membership_invites")
+        .select("id")
+        .eq("organisation_id", owner.orgId)
+        .eq("email", email.toLowerCase())
+        .is("revoked_at", null)
+        .single();
+      return data!.id;
+    };
 
-    const revokeA = await orgAdmin.client
+    const del = await orgAdmin.client
       .from("membership_invites")
       .delete()
       .eq("organisation_id", owner.orgId)
-      .eq("email", a.email.toLowerCase())
-      .select("id");
+      .eq("email", a.email.toLowerCase());
+    expect(del.error?.code).toBe(PERMISSION_DENIED);
+
+    const revokeA = await orgAdmin.client.rpc("revoke_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_invite_id: await idOf(a.email),
+    });
     expect(revokeA.error).toBeNull();
-    expect(revokeA.data).toHaveLength(1);
+    const accept = await a.client.rpc("accept_membership_invite", { p_token: tokenA });
+    expect(accept.error?.code).toBe(CANCELLED);
 
-    const revokeB = await orgAdmin.client
-      .from("membership_invites")
-      .delete()
-      .eq("organisation_id", owner.orgId)
-      .eq("email", b.email.toLowerCase())
-      .select("id");
-    expect(revokeB.error).toBeNull();
-    expect(revokeB.data).toEqual([]);
+    const revokeB = await orgAdmin.client.rpc("revoke_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_invite_id: await idOf(b.email),
+    });
+    expect(revokeB.error?.code).toBe(PERMISSION_DENIED);
   });
 
   it("an admin cannot promote anyone to owner", async () => {
-    const { error } = await orgAdmin.client
+    const direct = await orgAdmin.client
       .from("memberships")
       .update({ role: "owner" })
       .eq("organisation_id", owner.orgId)
       .eq("user_id", staff.id);
-    expect(error?.code).toBe(PERMISSION_DENIED);
+    expect(direct.error?.code).toBe(PERMISSION_DENIED);
+    const viaRpc = await orgAdmin.client.rpc("change_member_role", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: await membershipId(staff.id, owner.orgId),
+      p_role: "owner",
+    });
+    expect(viaRpc.error?.code).toBe(INVALID);
     expect(await roleOf(staff.id, owner.orgId)).toBe("hr");
   });
 
-  it("an admin cannot change or remove an owner", async () => {
+  it("nobody can change or remove the owner", async () => {
+    const ownerMembership = await membershipId(owner.id, owner.orgId);
     const update = await orgAdmin.client
       .from("memberships")
       .update({ role: "worker" })
-      .eq("organisation_id", owner.orgId)
-      .eq("user_id", owner.id)
-      .select();
-    expect(update.error).toBeNull();
-    expect(update.data).toEqual([]);
+      .eq("id", ownerMembership);
+    expect(update.error?.code).toBe(PERMISSION_DENIED);
+    const del = await orgAdmin.client.from("memberships").delete().eq("id", ownerMembership);
+    expect(del.error?.code).toBe(PERMISSION_DENIED);
 
-    const del = await orgAdmin.client
-      .from("memberships")
-      .delete()
-      .eq("organisation_id", owner.orgId)
-      .eq("user_id", owner.id)
-      .select();
-    expect(del.error).toBeNull();
-    expect(del.data).toEqual([]);
+    const demote = await orgAdmin.client.rpc("change_member_role", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: ownerMembership,
+      p_role: "hr",
+    });
+    expect(demote.error?.code).toBe(OWNER_PROTECTED);
+    const remove = await orgAdmin.client.rpc("remove_member", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: ownerMembership,
+    });
+    expect(remove.error?.code).toBe(OWNER_PROTECTED);
     expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
   });
 
@@ -272,20 +336,19 @@ describe("memberships", () => {
     expect(error?.code).toBe(PERMISSION_DENIED);
   });
 
-  it("the last owner cannot demote or remove themselves", async () => {
-    const demote = await owner.client
-      .from("memberships")
-      .update({ role: "admin" })
-      .eq("organisation_id", owner.orgId)
-      .eq("user_id", owner.id);
-    expect(demote.error?.message).toMatch(LAST_OWNER);
-
-    const leave = await owner.client
-      .from("memberships")
-      .delete()
-      .eq("organisation_id", owner.orgId)
-      .eq("user_id", owner.id);
-    expect(leave.error?.message).toMatch(LAST_OWNER);
+  it("the owner cannot demote or remove themselves", async () => {
+    const own = await membershipId(owner.id, owner.orgId);
+    const demote = await owner.client.rpc("change_member_role", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: own,
+      p_role: "admin",
+    });
+    expect(demote.error?.code).toBe(OWN_MEMBERSHIP);
+    const leave = await owner.client.rpc("remove_member", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: own,
+    });
+    expect(leave.error?.code).toBe(OWN_MEMBERSHIP);
     expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
   });
 
@@ -299,32 +362,20 @@ describe("memberships", () => {
     expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
   });
 
-  it("an owner can hand over to a second owner and then step down", async () => {
-    const promote = await owner.client
+  it("removing every owner in one statement still trips the guard", async () => {
+    const coOwner = await createTestUser("m-co-owner");
+    const added = await admin
       .from("memberships")
-      .update({ role: "owner" })
-      .eq("organisation_id", owner.orgId)
-      .eq("user_id", orgAdmin.id)
-      .select("role");
-    expect(promote.error).toBeNull();
-    expect(promote.data).toEqual([{ role: "owner" }]);
+      .insert({ organisation_id: owner.orgId, user_id: coOwner.id, role: "owner" });
+    expect(added.error).toBeNull();
 
-    const stepDown = await owner.client
-      .from("memberships")
-      .update({ role: "admin" })
-      .eq("organisation_id", owner.orgId)
-      .eq("user_id", owner.id)
-      .select("role");
-    expect(stepDown.error).toBeNull();
-    expect(stepDown.data).toEqual([{ role: "admin" }]);
-
-    // Removing every owner in one statement still trips the guard.
     const both = await admin
       .from("memberships")
       .delete()
       .eq("organisation_id", owner.orgId)
       .eq("role", "owner");
     expect(both.error?.message).toMatch(LAST_OWNER);
-    expect(await roleOf(orgAdmin.id, owner.orgId)).toBe("owner");
+    expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
+    expect(await roleOf(coOwner.id, owner.orgId)).toBe("owner");
   });
 });

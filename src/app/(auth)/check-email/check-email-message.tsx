@@ -13,6 +13,15 @@ export function CheckEmailMessage() {
       </p>
     );
   }
+  if (sent === "invite") {
+    return (
+      <p className="m-0 type-body-lg">
+        We sent a link to confirm your email address. Open it to finish creating your account, then
+        accept the invite. If it doesn&apos;t take you back to the invite, open the invite email
+        again.
+      </p>
+    );
+  }
   return (
     <p className="m-0 type-body-lg">
       If that email address has an account, we sent it a sign-in link.

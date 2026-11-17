@@ -173,8 +173,8 @@ export const NAV: NavGroup[] = [
         href: "/app/settings",
         roles: ["owner", "admin", "hr", "finance"],
         icon: "settings",
-        description: "Company details, pay cycle, users and connections.",
-        empty: "Users and connections arrive in a later phase.",
+        description: "Company details, pay cycle, team and connections.",
+        empty: "Connections arrive in a later phase.",
       },
     ],
   },
@@ -213,6 +213,8 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
   { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },
+  // Slice 1.12: inviting, re-roling and removing managers.
+  { href: "/app/settings/team", roles: ["owner", "admin"] },
   { href: "/app/people/new", roles: ["owner", "admin", "hr"] },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.

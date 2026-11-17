@@ -299,6 +299,67 @@ describe("cross-tenant membership attacks", () => {
       .eq("organisation_id", a.orgId);
     expect(data).toEqual([{ user_id: a.id }]);
   });
+
+  // Slice 1.12: the team functions take an organisation id; none reaches the other company.
+  it.each([
+    { label: "A acts on B's team", attackerKey: "a" as const, victimKey: "b" as const },
+    { label: "B acts on A's team", attackerKey: "b" as const, victimKey: "a" as const },
+  ])("$label: list, role change, removal, resend and cancel are refused", async (keys) => {
+    const attacker = user(keys.attackerKey);
+    const victim = user(keys.victimKey);
+    const { data: member } = await admin
+      .from("memberships")
+      .select("id")
+      .eq("organisation_id", victim.orgId)
+      .eq("user_id", victim.id)
+      .single();
+    const { data: invite } = await admin
+      .from("membership_invites")
+      .select("id, revoked_at, expires_at")
+      .eq("organisation_id", victim.orgId)
+      .limit(1)
+      .single();
+    for (const org of [victim.orgId, attacker.orgId]) {
+      const calls = [
+        attacker.client.rpc("team_members", { p_organisation_id: org }),
+        attacker.client.rpc("change_member_role", {
+          p_organisation_id: org,
+          p_membership_id: member!.id,
+          p_role: "hr",
+        }),
+        attacker.client.rpc("remove_member", {
+          p_organisation_id: org,
+          p_membership_id: member!.id,
+        }),
+        attacker.client.rpc("resend_membership_invite", {
+          p_organisation_id: org,
+          p_invite_id: invite!.id,
+        }),
+        attacker.client.rpc("revoke_membership_invite", {
+          p_organisation_id: org,
+          p_invite_id: invite!.id,
+        }),
+      ];
+      const results = await Promise.all(calls);
+      // team_members on the attacker's own company is allowed; it never lists the victim.
+      const [list, ...writes] = results;
+      if (org === victim.orgId) expect(list?.error?.code).toBe(PERMISSION_DENIED);
+      else expect(JSON.stringify(list?.data)).not.toContain(victim.id);
+      for (const write of writes) expect(write.error).not.toBeNull();
+    }
+    const { data: still } = await admin
+      .from("memberships")
+      .select("role")
+      .eq("id", member!.id)
+      .single();
+    expect(still?.role).toBe("owner");
+    const { data: inviteAfter } = await admin
+      .from("membership_invites")
+      .select("id, revoked_at, expires_at")
+      .eq("id", invite!.id)
+      .single();
+    expect(inviteAfter).toEqual(invite);
+  });
 });
 
 describe("anonymous RPC", () => {

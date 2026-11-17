@@ -18,13 +18,21 @@ const SECTIONS = [
     body: "Business details, logo, pay cycle, invoices and plan.",
   },
   {
+    href: "/app/settings/team",
+    title: "Team",
+    body: "Invite managers, change their roles and remove access.",
+  },
+  {
     href: "/app/settings/departments",
     title: "Departments",
     body: "Add and rename departments and set who heads each one.",
   },
 ] as const;
 
-/** Settings sections the viewer's role may open (company: owner and admin; departments: also hr). */
+/**
+ * Settings sections the viewer's role may open (company and team: owner and admin; departments:
+ * also hr).
+ */
 async function SettingsSections() {
   const session = await getPageSession();
   const role = session?.active?.role;

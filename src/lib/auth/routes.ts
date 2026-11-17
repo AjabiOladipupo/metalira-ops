@@ -13,6 +13,8 @@ export const WORKER_HOME_PATH = "/m";
 export const WORKER_SIGN_IN_PATH = "/m/sign-in";
 /** Invite links: /m/invite/<token>. */
 export const WORKER_INVITE_PATH = "/m/invite";
+/** Team (manager) invite links: /join/<token> (slice 1.12). */
+export const TEAM_JOIN_PATH = "/join";
 
 /**
  * A worker's login is a Supabase Auth user marked in `app_metadata` (which only the server's
@@ -37,6 +39,11 @@ function isProtected(pathname: string): boolean {
   return pathname === APP_HOME_PATH || pathname.startsWith(`${APP_HOME_PATH}/`);
 }
 
+/** A team invite page, /join/<64 hex characters>: where an invited manager signs in or up. */
+function isTeamJoin(pathname: string): boolean {
+  return /^\/join\/[0-9a-f]{64}$/.test(pathname);
+}
+
 function isWorkerApp(pathname: string): boolean {
   return pathname === WORKER_HOME_PATH || pathname.startsWith(`${WORKER_HOME_PATH}/`);
 }
@@ -49,7 +56,8 @@ function isWorkerPublic(pathname: string): boolean {
 /**
  * A same-site path to send the user to after signing in, or `fallback`. Blocks open redirects:
  * only a single leading slash is allowed (no `//host`, `/\host` or scheme), no control
- * characters, and the path must stay inside the manager app.
+ * characters, and the path must stay inside the manager app (or be a team invite page, so an
+ * invited manager comes back to their invite after signing in or confirming their email).
  */
 export function safeNextPath(
   value: string | null | undefined,
@@ -66,7 +74,7 @@ export function safeNextPath(
     return fallback;
   }
   if (url.origin !== "http://n.invalid") return fallback;
-  if (!isProtected(url.pathname)) return fallback;
+  if (!isProtected(url.pathname) && !isTeamJoin(url.pathname)) return fallback;
   return `${url.pathname}${url.search}${url.hash}`;
 }
 

@@ -151,14 +151,14 @@ isOneToOne: false
                   ]
                 },"membership_invites": {
                   Row: {
-                    "accepted_at": string | null,"accepted_by": string | null,"created_at": string,"created_by": string | null,"email": string,"expires_at": string,"id": string,"organisation_id": string,"role": Database["public"]['Enums']["membership_role"],"token_hash": string
+                    "accepted_at": string | null,"accepted_by": string | null,"created_at": string,"created_by": string | null,"email": string,"expires_at": string,"id": string,"organisation_id": string,"revoked_at": string | null,"revoked_by": string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at": string,"token_hash": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email": string,"expires_at"?: string,"id"?: string,"organisation_id": string,"role": Database["public"]['Enums']["membership_role"],"token_hash": string
+                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email": string,"expires_at"?: string,"id"?: string,"organisation_id": string,"revoked_at"?: string | null,"revoked_by"?: string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at"?: string,"token_hash": string
                   }
                   Update: {
-                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email"?: string,"expires_at"?: string,"id"?: string,"organisation_id"?: string,"role"?: Database["public"]['Enums']["membership_role"],"token_hash"?: string
+                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email"?: string,"expires_at"?: string,"id"?: string,"organisation_id"?: string,"revoked_at"?: string | null,"revoked_by"?: string | null,"role"?: Database["public"]['Enums']["membership_role"],"sent_at"?: string,"token_hash"?: string
                   }
                   Relationships: [
                     {
@@ -487,6 +487,11 @@ isOneToOne: false
 "cancel_pay_rate":
 { Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
                            },
+"change_member_role":
+{ Args: { "p_membership_id": string,"p_organisation_id": string,"p_role": Database["public"]['Enums']["membership_role"] }; Returns: {
+              "member_email": string,"member_name": string,"member_user_id": string,"new_role": Database["public"]['Enums']["membership_role"],"old_role": Database["public"]['Enums']["membership_role"]
+            }[]
+                           },
 "choose_company_plan":
 { Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
                            },
@@ -524,16 +529,39 @@ isOneToOne: false
 "log_audit":
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
                            },
+"membership_invite_lookup":
+{ Args: { "p_token": string }; Returns: {
+              "email": string,"expires_at": string,"invite_id": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
+            }[]
+                           },
 "my_line_manager":
 { Args: { "p_organisation_id": string }; Returns: {
               "has_line_manager": boolean,"name": string
             }[]
+                           },
+"remove_member":
+{ Args: { "p_membership_id": string,"p_organisation_id": string }; Returns: {
+              "member_email": string,"member_name": string,"member_user_id": string,"old_role": Database["public"]['Enums']["membership_role"]
+            }[]
+                           },
+"resend_membership_invite":
+{ Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: {
+              "invite_email": string,"invite_expires_at": string,"invite_role": Database["public"]['Enums']["membership_role"],"token": string
+            }[]
+                           },
+"revoke_membership_invite":
+{ Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
                            },
 "save_import_check":
 { Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            },
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
+                           },
+"team_members":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "email": string,"full_name": string,"joined_at": string,"membership_id": string,"role": Database["public"]['Enums']["membership_role"],"user_id": string
+            }[]
                            },
 "worker_bank_details_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string,"p_worker_id": string }; Returns: {
