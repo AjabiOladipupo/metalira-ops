@@ -80,7 +80,7 @@ Rules that apply to every slice here:
 - Workers can raise the same request from their phone (wired in 1.10).
 - Unit and RLS tests: requester cannot approve own request, a worker cannot approve anything, rejected requests leave `workers` unchanged.
 
-- Bank details on a new worker (recorded from the 1.3 review): one HR user could otherwise add a worker with their own account number and pay it without a second person seeing it. In 1.7, bank details entered when a worker is added one at a time (or by any import after setup) are held as a pending `bank_detail_changes` request and the worker keeps `needs_pay_details` until a second approver confirms; `create_worker` stops writing `workers.bank_*` directly for those paths. Staff IDs already can't be changed or reused (1.3), so a new row can't take over an existing worker's ID. **Owner to confirm:** whether the first bulk import at onboarding may stay single-approver. Until the owner confirms, every path holds them, setup finished or not: Add employee, the import (which creates each worker through `create_worker`), and direct database calls; signed-in users have no insert grant on the `workers` bank columns. If the owner allows the exception, it is limited to `commit_import_batch` during onboarding, run by the owner role, and recorded here.
+- Bank details on a new worker (recorded from the 1.3 review): one HR user could otherwise add a worker with their own account number and pay it without a second person seeing it. In 1.7, bank details entered when a worker is added one at a time (or by any import after setup) are held as a pending `bank_detail_changes` request and the worker keeps `needs_pay_details` until a second approver confirms; `create_worker` stops writing `workers.bank_*` directly for those paths. Staff IDs already can't be changed or reused (1.3), so a new row can't take over an existing worker's ID. **Owner confirmed 17 Nov 2026 (decision 20):** the first bulk import at onboarding may stay single-approver, built in 1.11. Until 1.11 lands, every path holds them, setup finished or not: Add employee, the import (which creates each worker through `create_worker`), and direct database calls; signed-in users have no insert grant on the `workers` bank columns.
 - Approval checks the number (from the 1.7 review): the database has no key, so it can't check that a request's last four digits match its encrypted number. On approval the server decrypts the request and refuses a mismatch, or a request that changes nothing, so the last four digits on the card and in the emails are the account that will be paid.
 - Worker notices (from the 1.7 review): any people editor can change a worker's email alone, so the approved and applied emails also go to every address the worker record held from 90 days before the request (from the audit log). An applied email that fails is retried by the next sweep for 7 days.
 
@@ -116,12 +116,6 @@ Rules that apply to every slice here:
 
 **Accept:** a signed-in worker sees their own profile with masked values at 390px, raises a bank change that appears in HR approvals, and cannot load any other worker's data.
 
-## Open questions for the owner
-
-- Backdated pay changes (from the 1.3 review): 1.3 refuses a new pay version that starts before today once the worker has a rate, so a raise effective from the start of the current pay cycle (20th to 19th) can't be recorded after that day, even though the cycle's payroll hasn't run. Should arrears or backdated raises be allowed back to the start of the earliest unposted pay period (wired up when payroll lands)? Versions already in force stay unchangeable either way.
-- PIN lockout limits (from the 1.9 review): decision 6 (5 wrong tries lock for 15 minutes) is built as stated, plus a cap of 100 tries per network address per 15 minutes. The lock never escalates, which leaves two gaps. Anyone who knows the printed company code and a staff ID (often sequential) can keep that worker locked out by sending 5 tries every 15 minutes, so a few addresses could lock a whole site at shift start. In the other direction, a guesser spread over many addresses gets about 480 tries per worker per day; across 1,000 workers that is roughly a 40% daily chance of getting into some account. Options: (a) a daily cap per worker after repeated lockouts (for example, locked until HR resets the PIN after 3 lockouts in 24 hours), (b) a manager "unlock" action on the worker page, (c) a cap on tries per company per window, (d) a longer PIN. None is built until you choose.
-- Staff ID typos (from the 1.3 review): a staff ID can't be changed once saved, so a mistyped ID is fixed by ending that record and adding the worker again. Confirm, or ask for an audited correction flow with a second approver.
-
 ## Phase 1 done when
 - `fixtures/people-import-162.csv` imports with its 4 bad rows held back and each one explained, in CI (Playwright) and on the Vercel preview.
 - An invited worker signs in on a phone with company code, staff ID and PIN, and sees their own profile.
@@ -145,3 +139,16 @@ Rules that apply to every slice here:
 14. Rows missing pay or bank details import with a "needs pay details before payroll" flag.
 15. Duplicate phone numbers import and are marked for supervisor clock-in.
 16. Worker app is English only; copy goes through a messages module; the language picker is hidden.
+
+## Answered questions (owner, 17 Nov 2026)
+
+These came out of the slice reviews. Each is built in the follow-up slice 1.11 (planned and approved before work starts), except backdated pay, which lands with payroll.
+
+17. Backdated pay changes (1.3 review): allowed. A new pay version may start as far back as the start of the earliest pay period that has not been posted. Versions already used by a posted payroll stay unchangeable. Wired up when payroll lands (Phase 4); until then 1.3's "not before today" rule stays.
+18. PIN lockout limits (1.9 review): add three protections on top of decision 6.
+    - After 3 lockouts in 24 hours, the worker stays locked until HR resets their PIN.
+    - A manager unlock action on the worker page, for owner, admin, hr and the worker's line manager, audited.
+    - A cap on wrong tries per company per 15-minute window, so a whole site can't be locked or guessed at once.
+    - The PIN stays 6 digits.
+19. Staff ID typos (1.3 review): an audited correction flow. A staff ID can be corrected with a reason and a second approver, only while the worker has no punches, timesheets or pay records. The new ID must be unused and never-used in the company. The audit log keeps before and after.
+20. First bulk import at onboarding (1.7 review): may stay single-approver, limited to `commit_import_batch` run by the owner role while company setup is unfinished. The exception is recorded in the audit log for each worker. Every other path (Add employee, imports after setup, direct calls) keeps the two-person hold.
