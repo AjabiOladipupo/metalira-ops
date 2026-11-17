@@ -36,6 +36,6 @@ Ten phases, about 24 weeks for one person building with Claude Code. Do not star
 ## Open decisions
 
 - Monnify: sandbox keys before Phase 9 starts, live keys before subscription billing goes live.
-- Lawyer: whether hosting in Supabase London is acceptable under NDPA.
+- Lawyer: whether hosting in Supabase West EU (Ireland, eu-west-1; per DNS, confirm in the dashboard) is acceptable under NDPA. The plan first named London (eu-west-2). Vercel functions run in Dublin (`dub1`).
 - Tax adviser: confirm 2026 PAYE, pension and NHF settings before Phase 5 ends; WHT base (VAT-exclusive subtotal or total) and rate per service type before Phase 6; whether VAT applies to Metalira's own subscription before Phase 9.
 - Collect each pilot customer's bank bulk-payment template and a sample bank statement export before Phase 5 ends.

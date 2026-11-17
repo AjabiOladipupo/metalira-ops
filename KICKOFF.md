@@ -5,7 +5,7 @@
 1. **Tools on your computer:** Node.js 20+ LTS, pnpm (`npm i -g pnpm`), Git, Docker Desktop (needed for local Supabase), Supabase CLI, Vercel CLI (optional).
 2. **Claude Code in VS Code:** install the Claude Code extension from the VS Code marketplace and sign in.
 3. **GitHub:** create a private repo `metalira-ops`, clone it, and copy everything in this kit into it (including the hidden `.claude/` folder). Commit: "Add project brief and Claude Code setup".
-4. **Supabase:** create a project named `metalira-ops` in the London (eu-west-2) region on the free plan. Keep the database password in your password manager.
+4. **Supabase:** create a project named `metalira-ops` on the free plan. The live project is in West EU (Ireland, eu-west-1) per DNS (confirm in the dashboard); the plan said London (eu-west-2). Vercel functions are pinned to the matching region, Dublin (`dub1`), in `vercel.json`. Keep the database password in your password manager.
 5. **Vercel:** import the GitHub repo as a new project (Hobby while building).
 6. **Resend:** add and verify a sending domain (e.g. `mail.yourdomain`) with the SPF and DKIM records it gives you.
 7. **Monnify** (Metalira's own subscription billing only): from the dashboard (sandbox), note the API key, secret key and contract code. Needed from Phase 9. Customers connect only their own bank account, so there are no customer payment-provider keys. Never paste these into a chat; they go into `.env.local` and Vercel environment variables only.

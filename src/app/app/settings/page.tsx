@@ -5,7 +5,7 @@ import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { canAccessHref, findNavItem } from "@/lib/nav";
-import { getSession } from "@/server/identity/session";
+import { getPageSession } from "@/server/identity/session";
 
 import { RouteGate } from "../_shell/slots";
 
@@ -26,7 +26,7 @@ const SECTIONS = [
 
 /** Settings sections the viewer's role may open (company: owner and admin; departments: also hr). */
 async function SettingsSections() {
-  const session = await getSession();
+  const session = await getPageSession();
   const role = session?.active?.role;
   const sections = role ? SECTIONS.filter((s) => canAccessHref(role, s.href)) : [];
   if (sections.length === 0) return null;

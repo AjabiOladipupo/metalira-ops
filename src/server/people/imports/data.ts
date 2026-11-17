@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { formatNaira, toKobo } from "@/lib/money";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { getSession } from "@/server/identity/session";
+import { getPageSession } from "@/server/identity/session";
 import type { Database, Json } from "@/types/db";
 
 /**
@@ -179,11 +179,14 @@ function toAttentionRow(row: AttentionSource): AttentionRow {
 
 const PAGE = 1000;
 
-/** The batch and its rows for review, or null when it isn't in the active organisation. */
+/**
+ * The batch and its rows for review, or null when it isn't in the active organisation. Render
+ * only (it reads getPageSession); actions and routes use the verified lookups.
+ */
 export const getImportBatchView = cache(
   async (batchId: string): Promise<ImportBatchView | null> => {
     if (!z.uuid().safeParse(batchId).success) return null;
-    const session = await getSession();
+    const session = await getPageSession();
     if (!session?.active) return null;
     const organisationId = session.active.organisationId;
     const supabase = await createServerSupabase();

@@ -7,7 +7,7 @@ import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { lagosDate, plural } from "@/lib/worker-invites";
 import { createServerSupabase } from "@/lib/supabase/server";
 
-import { getActiveCompany } from "./company-data";
+import { getCompany } from "./company-data";
 import { MutationError, mutate } from "./mutate";
 import { getSession } from "./session";
 import type { InviteActionState } from "./worker-invite-state";
@@ -65,9 +65,9 @@ function refusal(error: unknown): InviteActionState {
 async function inviterCompany() {
   const session = await getSession();
   if (!session) redirect(SIGN_IN_PATH);
-  const role = session.active?.role;
-  if (!role || !(INVITERS as readonly string[]).includes(role)) return null;
-  return getActiveCompany();
+  const active = session.active;
+  if (!active || !(INVITERS as readonly string[]).includes(active.role)) return null;
+  return getCompany(active.organisationId);
 }
 
 function selectedIds(formData: FormData): string[] {
