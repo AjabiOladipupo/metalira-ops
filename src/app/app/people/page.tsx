@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Illustration } from "@/components/illustration";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
+import { WorkerAvatar } from "@/components/worker-avatar";
 import { findNavItem } from "@/lib/nav";
 import { initials } from "@/lib/people";
 import { canViewBankChanges, countPendingBankChanges } from "@/server/people/bank-changes";
@@ -49,12 +50,15 @@ function columns(mapHref: ((row: PeopleRow) => string) | null): Column<PeopleRow
       cell: (row) => (
         <Link
           href={`/app/people/${row.id}`}
-          className="flex flex-col text-foreground no-underline hover:underline"
+          className="flex items-center gap-3 text-foreground no-underline hover:underline"
         >
-          <span className="font-semibold">{row.name}</span>
-          <span className="text-xs text-fg-muted">
-            {row.jobTitle ? `${row.jobTitle} · ` : ""}
-            {row.staffId}
+          <WorkerAvatar workerId={row.id} name={row.name} size={32} />
+          <span className="flex flex-col">
+            <span className="font-semibold">{row.name}</span>
+            <span className="text-xs text-fg-muted">
+              {row.jobTitle ? `${row.jobTitle} · ` : ""}
+              {row.staffId}
+            </span>
           </span>
         </Link>
       ),
@@ -156,7 +160,10 @@ async function PeopleList({
           description={item.description}
           actions={actions}
         />
-        <EmptyState illustration={<Illustration name="import-people" />} message={item.empty} />
+        <EmptyState
+          illustration={<Illustration name="import-people" decorative />}
+          message={item.empty}
+        />
       </>
     );
   }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { after } from "next/server";
 
 import { EmptyState } from "@/components/empty-state";
+import { Illustration } from "@/components/illustration";
 import { PageHeader } from "@/components/page-header";
 import { sendAppliedBankChangeNotices } from "@/server/people/bank-change-notices";
 import {
@@ -102,7 +103,10 @@ async function Approvals() {
       </div>
 
       {changes.length === 0 ? (
-        <EmptyState message="No bank changes yet. Changes raised on an employee's page appear here for a second person to approve." />
+        <EmptyState
+          illustration={<Illustration name="no-approvals" decorative />}
+          message="No bank changes yet. Changes raised on an employee's page appear here for a second person to approve."
+        />
       ) : null}
 
       <Group

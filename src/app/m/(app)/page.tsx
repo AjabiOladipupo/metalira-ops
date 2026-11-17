@@ -4,6 +4,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
+import { Illustration } from "@/components/illustration";
 import { LogoMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
@@ -86,13 +87,16 @@ export default function WorkerHomePage() {
 
       <section
         aria-labelledby="shift-today"
-        className="flex flex-col gap-1.5 rounded-xl border border-line px-4 py-3.5"
+        className="flex items-center gap-3 rounded-xl border border-line px-4 py-3.5"
       >
-        <h2 id="shift-today" className="m-0 type-label text-fg-muted">
-          {copy.shiftLabel}
-        </h2>
-        <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
-        <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <h2 id="shift-today" className="m-0 type-label text-fg-muted">
+            {copy.shiftLabel}
+          </h2>
+          <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
+          <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
+        </div>
+        <Illustration name="clock-in" size="worker" decorative />
       </section>
 
       <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">

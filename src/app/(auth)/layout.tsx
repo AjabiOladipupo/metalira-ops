@@ -42,7 +42,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </p>
       </aside>
       <main className="flex min-w-0 flex-[999_1_640px] flex-col px-4 pt-8 pb-14 sm:px-12 sm:pt-10 lg:justify-center">
-        <div className="flex w-full max-w-[440px] flex-col gap-6">{children}</div>
+        <div className="flex w-full max-w-[440px] flex-col gap-6 xl:has-[[data-auth-wide]]:max-w-[720px]">
+          {children}
+        </div>
       </main>
     </div>
   );
