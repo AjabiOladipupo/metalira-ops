@@ -11,6 +11,7 @@ import {
   anonClient,
   createTenantUser,
   createTestUser,
+  pgClient,
   type Client,
   type TenantUser,
   type TestUser,
@@ -23,6 +24,8 @@ const WORKER_LOGIN = "MLTM2";
 const CANCELLED = "MLTM5";
 const OWN_MEMBERSHIP = "MLTM6";
 const NOT_A_MANAGER = "MLTM8";
+const USED = "MLTM3";
+const TOO_MANY = "MLTM9";
 
 let admin: Client;
 let owner: TenantUser;
@@ -446,6 +449,200 @@ describe("another company", () => {
       .eq("id", inviteId)
       .single();
     expect(data?.revoked_at).toBeNull();
+  });
+});
+
+describe("security review follow-ups", () => {
+  async function inviteToken(by: TestUser, orgId: string, email: string, role: "admin" | "hr") {
+    const { data, error } = await by.client.rpc("create_membership_invite", {
+      p_organisation_id: orgId,
+      p_email: email,
+      p_role: role,
+    });
+    expect(error).toBeNull();
+    return data!;
+  }
+
+  it("an admin can't replace (cancel or downgrade) the owner's pending admin invite", async () => {
+    const invitee = await createTestUser("t-replace-admin");
+    await inviteToken(owner, owner.orgId, invitee.email, "admin");
+    const original = await pendingInviteId(owner.orgId, invitee.email);
+    const { error } = await orgAdmin.client.rpc("create_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_email: invitee.email,
+      p_role: "hr",
+    });
+    expect(error?.code).toBe(PERMISSION_DENIED);
+    expect(await pendingInviteId(owner.orgId, invitee.email)).toBe(original);
+  });
+
+  it("caps invite emails per inviter and per company in 24 hours", async () => {
+    const capped = await createTenantUser("t-cap", "Cap Org");
+    for (let i = 0; i < 20; i += 1) {
+      await inviteToken(capped, capped.orgId, `cap-${i}-${crypto.randomUUID()}@example.test`, "hr");
+    }
+    const over = await capped.client.rpc("create_membership_invite", {
+      p_organisation_id: capped.orgId,
+      p_email: `cap-over-${crypto.randomUUID()}@example.test`,
+      p_role: "hr",
+    });
+    expect(over.error?.code).toBe(TOO_MANY);
+    // A resend is a send too.
+    const anyInvite = await admin
+      .from("membership_invites")
+      .select("id")
+      .eq("organisation_id", capped.orgId)
+      .limit(1)
+      .single();
+    const resend = await capped.client.rpc("resend_membership_invite", {
+      p_organisation_id: capped.orgId,
+      p_invite_id: anyInvite.data!.id,
+    });
+    expect(resend.error?.code).toBe(TOO_MANY);
+
+    // The company cap: 50 sends in 24 hours across everyone.
+    const busy = await createTenantUser("t-cap-org", "Busy Org");
+    const db = await pgClient();
+    try {
+      await db.query(
+        `insert into private.team_invite_sends (organisation_id, sent_by)
+         select $1, gen_random_uuid() from generate_series(1, 50)`,
+        [busy.orgId],
+      );
+    } finally {
+      await db.end();
+    }
+    const orgOver = await busy.client.rpc("create_membership_invite", {
+      p_organisation_id: busy.orgId,
+      p_email: `cap-org-${crypto.randomUUID()}@example.test`,
+      p_role: "hr",
+    });
+    expect(orgOver.error?.code).toBe(TOO_MANY);
+  });
+
+  it("a pending invite always carries a manager role", async () => {
+    const { error } = await admin.from("membership_invites").insert({
+      organisation_id: owner.orgId,
+      email: `legacy-${crypto.randomUUID()}@example.test`,
+      role: "owner",
+      token_hash: await sha256(crypto.randomUUID()),
+      created_by: owner.id,
+    });
+    expect(error?.code).toBe("23514");
+  });
+
+  it("owners and admins can't write invites directly", async () => {
+    const invitee = await createTestUser("t-direct");
+    await inviteToken(owner, owner.orgId, invitee.email, "hr");
+    const id = await pendingInviteId(owner.orgId, invitee.email);
+    for (const who of [owner, orgAdmin]) {
+      const insert = await who.client.from("membership_invites").insert({
+        organisation_id: owner.orgId,
+        email: `direct-${crypto.randomUUID()}@example.test`,
+        role: "hr",
+        token_hash: await sha256(crypto.randomUUID()),
+      });
+      expect(insert.error?.code).toBe(PERMISSION_DENIED);
+      for (const patch of [
+        { revoked_at: null },
+        { expires_at: new Date(Date.now() + 365 * 86_400_000).toISOString() },
+        { accepted_at: new Date().toISOString(), accepted_by: who.id },
+        { role: "admin" as const },
+      ]) {
+        const update = await who.client.from("membership_invites").update(patch).eq("id", id);
+        expect(update.error?.code).toBe(PERMISSION_DENIED);
+      }
+    }
+    expect(await pendingInviteId(owner.orgId, invitee.email)).toBe(id);
+  });
+
+  it("an account whose email is not confirmed can't accept", async () => {
+    const invitee = await createTestUser("t-unconfirmed");
+    const token = await inviteToken(owner, owner.orgId, invitee.email, "hr");
+    const db = await pgClient();
+    try {
+      await db.query("update auth.users set email_confirmed_at = null where id = $1", [invitee.id]);
+    } finally {
+      await db.end();
+    }
+    const accept = await invitee.client.rpc("accept_membership_invite", { p_token: token });
+    expect(accept.error?.code).toBe(PERMISSION_DENIED);
+    expect(await roleOf(invitee.id, owner.orgId)).toBeNull();
+  });
+
+  it("an admin can't remove themselves", async () => {
+    const leave = await orgAdmin.client.rpc("remove_member", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: await membershipId(orgAdmin.id, owner.orgId),
+    });
+    expect(leave.error?.code).toBe(OWN_MEMBERSHIP);
+    expect(await roleOf(orgAdmin.id, owner.orgId)).toBe("admin");
+  });
+
+  it("an invite dies when its admin inviter is demoted", async () => {
+    const tempAdmin = await createTestUser("t-temp-admin");
+    await join(owner, tempAdmin, "admin");
+    const invitee = await createTestUser("t-demoted-invitee");
+    const token = await inviteToken(tempAdmin, owner.orgId, invitee.email, "hr");
+    const demote = await owner.client.rpc("change_member_role", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: await membershipId(tempAdmin.id, owner.orgId),
+      p_role: "hr",
+    });
+    expect(demote.error).toBeNull();
+    const accept = await invitee.client.rpc("accept_membership_invite", { p_token: token });
+    expect(accept.error?.code).toBe(PERMISSION_DENIED);
+    expect(await roleOf(invitee.id, owner.orgId)).toBeNull();
+  });
+
+  it("a removed member can't come back with their old invite", async () => {
+    const member = await createTestUser("t-comeback");
+    const token = await inviteToken(owner, owner.orgId, member.email, "hr");
+    expect(
+      (await member.client.rpc("accept_membership_invite", { p_token: token })).error,
+    ).toBeNull();
+    const removed = await owner.client.rpc("remove_member", {
+      p_organisation_id: owner.orgId,
+      p_membership_id: await membershipId(member.id, owner.orgId),
+    });
+    expect(removed.error).toBeNull();
+    const again = await member.client.rpc("accept_membership_invite", { p_token: token });
+    expect(again.error?.code).toBe(USED);
+    expect(await roleOf(member.id, owner.orgId)).toBeNull();
+  });
+
+  it("a worker of one company can't accept a manager invite in another", async () => {
+    const email = `${crypto.randomUUID()}@workers.metalira.invalid`;
+    const password = `${crypto.randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      app_metadata: { login: "worker" },
+    });
+    expect(created.error).toBeNull();
+    const workerId = created.data.user!.id;
+    expect(
+      (
+        await admin
+          .from("memberships")
+          .insert({ organisation_id: other.orgId, user_id: workerId, role: "worker" })
+      ).error,
+    ).toBeNull();
+    const token = crypto.randomUUID().replaceAll("-", "").repeat(2);
+    const planted = await admin.from("membership_invites").insert({
+      organisation_id: owner.orgId,
+      email,
+      role: "finance",
+      token_hash: await sha256(token),
+      created_by: owner.id,
+    });
+    expect(planted.error).toBeNull();
+    const session = anonClient();
+    expect((await session.auth.signInWithPassword({ email, password })).error).toBeNull();
+    const accept = await session.rpc("accept_membership_invite", { p_token: token });
+    expect(accept.error?.code).toBe(WORKER_LOGIN);
+    expect(await roleOf(workerId, owner.orgId)).toBeNull();
   });
 });
 

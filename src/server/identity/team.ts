@@ -122,17 +122,23 @@ export async function loadTeam(supabase: Client, organisationId: string): Promis
 
 const DB_MESSAGES: Record<string, { code: "invalid" | "forbidden"; message: string }> = {
   MLTM1: { code: "invalid", message: "This person is already a member of your company." },
-  MLTM2: {
-    code: "invalid",
-    message:
-      "This email is a worker's sign-in at your company. A worker can't also be a manager here.",
-  },
+  MLTM2: { code: "invalid", message: "This address can't be invited as a manager." },
   MLTM3: { code: "invalid", message: "This invite has already been used." },
   MLTM4: { code: "invalid", message: "This invite has expired. Send a new one." },
   MLTM5: { code: "invalid", message: "This invite was cancelled." },
   MLTM6: { code: "forbidden", message: TEAM_REFUSAL_MESSAGES.own_membership },
   MLTM7: { code: "forbidden", message: TEAM_REFUSAL_MESSAGES.owner_protected },
   MLTM8: { code: "forbidden", message: TEAM_REFUSAL_MESSAGES.not_a_manager },
+  MLTM9: {
+    code: "invalid",
+    message:
+      "Your company has sent the most invites allowed in 24 hours. Try again tomorrow, or ask the people already invited to use their links.",
+  },
+  // Two invites for one address at the same moment: the other one won.
+  "23505": {
+    code: "invalid",
+    message: "An invite for this address was just sent. Refresh the page to see it.",
+  },
   P0002: {
     code: "invalid",
     message: "That is no longer on your team page. Refresh and try again.",

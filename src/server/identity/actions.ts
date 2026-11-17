@@ -6,7 +6,13 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import type { z } from "zod";
 
-import { APP_HOME_PATH, CHECK_EMAIL_PATH, SIGN_IN_PATH, safeNextPath } from "@/lib/auth/routes";
+import {
+  APP_HOME_PATH,
+  CHECK_EMAIL_PATH,
+  NEXT_PATH_KEY,
+  SIGN_IN_PATH,
+  safeNextPath,
+} from "@/lib/auth/routes";
 import { getSupabasePublicEnv } from "@/lib/supabase/env";
 import { createServerSupabase } from "@/lib/supabase/server";
 
@@ -153,7 +159,8 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
       emailRedirectTo: `${await appOrigin()}/auth/callback?next=${APP_HOME_PATH}`,
       // full_name fills profiles.full_name (private.handle_new_user); company_name waits for
       // the confirmed sign-in (ensureOrganisationForNewUser).
-      data: { full_name: fullName, company_name: companyName },
+      // next_path is where the confirmation email's link lands (confirmation.html).
+      data: { full_name: fullName, company_name: companyName, [NEXT_PATH_KEY]: APP_HOME_PATH },
     },
   });
 
