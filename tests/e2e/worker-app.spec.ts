@@ -197,8 +197,22 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await expect(w.getByTestId("me-phone")).toHaveText("0803 ••• 4410");
   await expect(w.getByTestId("me-next-of-kin")).toHaveText("Aisha Ibrahim");
   expect(await w.content()).not.toContain("08031234410");
-  await expect(w.getByRole("tab", { name: "Queries" })).toBeDisabled();
-  await expect(w.getByRole("tab", { name: "Profile" })).toHaveAttribute("aria-selected", "true");
+  const profileTab = w.getByRole("tab", { name: "Profile" });
+  const queriesTab = w.getByRole("tab", { name: "Queries" });
+  await expect(profileTab).toHaveAttribute("aria-selected", "true");
+  // Queries opens on tap (it used to be a disabled button phones could not tap) with an empty
+  // state, and the arrow keys move back to Profile.
+  await queriesTab.click();
+  await expect(queriesTab).toHaveAttribute("aria-selected", "true");
+  await expect(w.getByTestId("me-queries-empty")).toHaveText(
+    "No queries yet. Queries from HR will show here once your company turns them on.",
+  );
+  await expect(w.getByTestId("me-bank")).toBeHidden();
+  await queriesTab.press("ArrowLeft");
+  await expect(profileTab).toHaveAttribute("aria-selected", "true");
+  await expect(profileTab).toBeFocused();
+  await expect(w.getByTestId("me-queries-empty")).toBeHidden();
+  await expect(w.getByTestId("me-bank")).toBeVisible();
   await expect(
     w.getByText(
       "Bank changes need HR approval and wait 72 hours before your pay goes to the new account.",

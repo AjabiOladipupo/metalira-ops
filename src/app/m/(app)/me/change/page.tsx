@@ -5,7 +5,7 @@ import { Suspense } from "react";
 
 import { workerMessages } from "@/lib/messages/worker";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { requireWorkerSession } from "@/server/identity/worker-session";
+import { requireWorkerPageSession } from "@/server/identity/worker-session";
 import { hasOpenBankChange, loadMyBankChanges } from "@/server/people/my-profile";
 
 import { ChangeForms } from "./change-forms";
@@ -15,7 +15,7 @@ export const metadata: Metadata = { title: "Request a change" };
 const copy = workerMessages.change;
 
 async function Forms() {
-  const session = await requireWorkerSession();
+  const session = await requireWorkerPageSession();
   const changes = await loadMyBankChanges(await createServerSupabase(), session);
   return <ChangeForms bankOpen={hasOpenBankChange(changes)} />;
 }

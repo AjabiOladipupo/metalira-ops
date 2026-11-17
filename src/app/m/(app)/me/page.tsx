@@ -1,7 +1,7 @@
 import { ChevronLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Suspense } from "react";
+import { cache, Suspense } from "react";
 
 import { Illustration } from "@/components/illustration";
 import { Status, type StatusTone } from "@/components/status";
@@ -13,9 +13,11 @@ import { workerMessages } from "@/lib/messages/worker";
 import { myProfileSections, type ProfileSection } from "@/lib/worker-profile";
 import type { WorkerChangeRequestStatus } from "@/lib/worker-requests";
 import { signOutWorker } from "@/server/identity/worker-actions";
-import { requireWorkerSession } from "@/server/identity/worker-session";
+import { requireWorkerPageSession } from "@/server/identity/worker-session";
 import type { BankChangeStatus } from "@/server/people/bank-changes";
 import { loadMyProfile, type MyBankChange, type MyChangeRequest } from "@/server/people/my-profile";
+
+import { MeTabs } from "./me-tabs";
 
 export const metadata: Metadata = { title: "Me" };
 
@@ -160,12 +162,38 @@ function Requests({
   );
 }
 
-async function MeContent() {
-  const session = await requireWorkerSession();
-  const me = await loadMyProfile(session);
+/** The signed-in worker and their profile, read once per request for the header and panel. */
+const loadMe = cache(async () => {
+  const session = await requireWorkerPageSession();
+  return { session, me: await loadMyProfile(session) };
+});
+
+/** Avatar, name and "job title · staff ID". */
+async function MeHeader() {
+  const { session, me } = await loadMe();
   if (!me) {
     return <p className="m-0 px-4 text-[15px] text-fg-muted">{workerMessages.home.unlinked}</p>;
   }
+  const { profile } = me;
+  return (
+    <div className="flex items-center gap-3.5 px-4 pt-2 pb-3">
+      <WorkerAvatar workerId={session.workerId} name={profile.name} size={56} />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-display text-[22px] leading-tight font-bold break-words">
+          {profile.name}
+        </span>
+        <span className="text-sm text-fg-muted">
+          {copy.jobLine(profile.jobTitle, profile.staffId)}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/** The Profile tab's rows, requests, "Request a change" and sign out. */
+async function ProfilePanel() {
+  const { me } = await loadMe();
+  if (!me) return null;
   const { profile } = me;
   const sections = myProfileSections({
     departmentName: profile.departmentName,
@@ -189,72 +217,28 @@ async function MeContent() {
 
   return (
     <>
-      <div className="flex items-center gap-3.5 px-4 pt-2 pb-3">
-        <WorkerAvatar workerId={session.workerId} name={profile.name} size={56} />
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="font-display text-[22px] leading-tight font-bold break-words">
-            {profile.name}
-          </span>
-          <span className="text-sm text-fg-muted">
-            {copy.jobLine(profile.jobTitle, profile.staffId)}
-          </span>
-        </span>
-      </div>
-
-      <div role="tablist" aria-label={copy.tabs} className="flex border-b border-line px-4">
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          aria-controls="me-profile-panel"
-          id="me-profile-tab"
-          className="-mb-px h-12 flex-1 border-b-2 border-foreground bg-transparent text-[15px] font-semibold text-foreground"
-        >
-          {copy.profileTab}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected="false"
-          disabled
-          title={copy.queriesSoon}
-          aria-describedby="me-queries-soon"
-          className="-mb-px h-12 flex-1 cursor-not-allowed border-b-2 border-transparent bg-transparent text-[15px] font-semibold text-fg-muted opacity-60"
-        >
-          {copy.queriesTab}
-        </button>
-        <span id="me-queries-soon" className="sr-only">
-          {copy.queriesSoon}
-        </span>
-      </div>
-
-      <div
-        role="tabpanel"
-        id="me-profile-panel"
-        aria-labelledby="me-profile-tab"
-        className="flex flex-col gap-[18px] px-4 pt-3 pb-4"
-      >
-        {sections.map((section) => (
-          <Rows key={section.id} section={section} />
-        ))}
-        <Requests bankChanges={me.bankChanges} requests={me.requests} />
-        <Button asChild variant="outline" className="h-[52px] rounded-xl text-base">
-          <Link href="/m/me/change">{copy.requestChange}</Link>
+      {sections.map((section) => (
+        <Rows key={section.id} section={section} />
+      ))}
+      <Requests bankChanges={me.bankChanges} requests={me.requests} />
+      <Button asChild variant="outline" className="h-[52px] rounded-xl text-base">
+        <Link href="/m/me/change">{copy.requestChange}</Link>
+      </Button>
+      <p className="m-0 text-[13px] text-fg-muted">{copy.bankNote}</p>
+      <form action={signOutWorker} className="pt-2">
+        <Button type="submit" variant="ghost" className="h-11 w-full rounded-lg">
+          {copy.signOut}
         </Button>
-        <p className="m-0 text-[13px] text-fg-muted">{copy.bankNote}</p>
-        <form action={signOutWorker} className="pt-2">
-          <Button type="submit" variant="ghost" className="h-11 w-full rounded-lg">
-            {copy.signOut}
-          </Button>
-        </form>
-      </div>
+      </form>
     </>
   );
 }
 
 /**
  * Me, from the WkProfile board (slice 1.10): work, pay and pension, identity and contact, all
- * read with the worker's own session and shown masked. Queries open in Phase 4.
+ * read with the worker's own session and shown masked. Queries open in Phase 4; until then the
+ * tab shows an empty state. The tab bar is static, so it is part of the prerendered shell; only
+ * the header and the profile panel wait for the session.
  */
 export default function MePage() {
   return (
@@ -271,14 +255,19 @@ export default function MePage() {
       </div>
       <Suspense
         fallback={
-          <div aria-hidden className="flex flex-col gap-3 px-4 pt-2">
-            <span className="h-14 w-56 rounded bg-surface" />
-            <span className="h-64 w-full rounded bg-surface" />
+          <div aria-hidden className="flex items-center gap-3.5 px-4 pt-2 pb-3">
+            <span className="size-14 rounded-full bg-surface" />
+            <span className="h-6 w-44 rounded bg-surface" />
           </div>
         }
       >
-        <MeContent />
+        <MeHeader />
       </Suspense>
+      <MeTabs>
+        <Suspense fallback={<span aria-hidden className="h-64 w-full rounded bg-surface" />}>
+          <ProfilePanel />
+        </Suspense>
+      </MeTabs>
     </main>
   );
 }

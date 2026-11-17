@@ -107,7 +107,7 @@ export const workerMessages = {
     tabs: "Profile",
     profileTab: "Profile",
     queriesTab: "Queries",
-    queriesSoon: "Queries open soon.",
+    queriesEmpty: "No queries yet. Queries from HR will show here once your company turns them on.",
     jobLine: (jobTitle: string | null, staffId: string) =>
       jobTitle ? `${jobTitle} · ${staffId}` : `Staff ID ${staffId}`,
     notSet: "Not set",
