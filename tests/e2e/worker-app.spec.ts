@@ -205,7 +205,7 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await queriesTab.click();
   await expect(queriesTab).toHaveAttribute("aria-selected", "true");
   await expect(w.getByTestId("me-queries-empty")).toHaveText(
-    "No queries yet. Queries from HR will show here once your company turns them on.",
+    "No queries. When your line manager sends you a query, it shows here.",
   );
   await expect(w.getByTestId("me-bank")).toBeHidden();
   await queriesTab.press("ArrowLeft");

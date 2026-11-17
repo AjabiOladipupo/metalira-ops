@@ -87,7 +87,9 @@ export function MeTabs({ children }: { children: ReactNode }) {
         id="me-queries-panel"
         aria-labelledby="me-queries-tab"
         hidden={selected !== "queries"}
-        className="px-4 pt-3 pb-4"
+        // No focusable content yet, so the panel itself takes focus (WAI-ARIA tabs pattern).
+        tabIndex={0}
+        className="px-4 pt-3 pb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
       >
         <p
           data-testid="me-queries-empty"

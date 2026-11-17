@@ -110,7 +110,7 @@ Rules that apply to every slice here:
 - `/m` layout for the worker PWA: bottom nav Home · Clock · Leave · Payslips · Me, 390px first, web app manifest and icons so it can be added to the home screen (service worker and offline queue come in Phase 3).
 - English only. All worker copy goes through one messages module so languages can be added later; the board's language picker is hidden.
 - Home per the WkHome board: "Hello, Musa", today's shift card shows "No shift today" until rosters exist, tiles for My shifts, Leave, Payslips, Help as placeholders, and the line "Your location is used only while you are clocked in."
-- Me per the WkProfile board, Profile tab: Work (department, line manager, site, project, start date and type), Pay and pension (bank masked, pension masked, tax state, rent declared), Identity and contact (NIN on file or missing, phone masked, next of kin). Queries tab is shown disabled until Phase 4.
+- Me per the WkProfile board, Profile tab: Work (department, line manager, site, project, start date and type), Pay and pension (bank masked, pension masked, tax state, rent declared), Identity and contact (NIN on file or missing, phone masked, next of kin). Queries tab opens to an empty state until Phase 4.
 - "Request a change": bank details go through 1.7 with the copy from the board; other fields create a request HR sees on the worker page.
 - All reads use the worker's own session (publishable key + RLS), never the secret key.
 
