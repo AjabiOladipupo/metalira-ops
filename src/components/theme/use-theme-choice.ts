@@ -20,11 +20,16 @@ export function useThemeChoice(): [ThemeChoice, (choice: ThemeChoice) => void] {
   const [choice, setChoice] = useState<ThemeChoice>("system");
 
   useEffect(() => {
-    // Sync with the value the pre-paint script already applied, and with other controls.
-    const sync = () => setChoice(readThemeChoice());
-    sync();
-    window.addEventListener(THEME_CHANGE_EVENT, sync);
-    return () => window.removeEventListener(THEME_CHANGE_EVENT, sync);
+    // Sync once with the value the pre-paint script already applied (storage is read only
+    // here), then follow other controls from the event, which carries the choice itself.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setChoice(readThemeChoice());
+    const onChange = (event: Event) => {
+      const next = (event as CustomEvent<ThemeChoice>).detail;
+      if (next === "light" || next === "dark" || next === "system") setChoice(next);
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, onChange);
+    return () => window.removeEventListener(THEME_CHANGE_EVENT, onChange);
   }, []);
 
   useEffect(() => {

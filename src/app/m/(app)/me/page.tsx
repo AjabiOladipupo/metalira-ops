@@ -244,7 +244,7 @@ export default function MePage() {
   return (
     <main className="flex flex-1 flex-col">
       <div className="px-4 pt-3 pb-1">
-        <WorkerTopBar back={{ href: "/m", label: copy.back }}>
+        <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }}>
           <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
         </WorkerTopBar>
       </div>

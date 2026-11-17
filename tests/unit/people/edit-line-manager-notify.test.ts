@@ -43,6 +43,8 @@ vi.mock(import("@/server/email"), async (importOriginal) => ({
 type Row = Record<string, unknown>;
 const tables: Record<string, Row[]> = {};
 let contact: { email: string | null; name: string | null; user_id: string | null } | null = null;
+/** A table whose list reads fail (a query error), to test the name lookup failing. */
+let failingTable: string | null = null;
 
 /** A client double: reads answer from `tables`, filtered by `in`/`eq`; the update succeeds. */
 function fakeClient(): SupabaseClient<Database> {
@@ -70,7 +72,11 @@ function fakeClient(): SupabaseClient<Database> {
       },
       maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
       then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) {
-        return Promise.resolve({ data: rows(), error: null }).then(resolve, reject);
+        const answer =
+          table === failingTable
+            ? { data: null, error: { code: "57014", message: "canceling statement" } }
+            : { data: rows(), error: null };
+        return Promise.resolve(answer).then(resolve, reject);
       },
     };
     return builder;
@@ -117,6 +123,7 @@ beforeEach(() => {
   sendMappingChangedEmail.mockClear();
   client = fakeClient();
   contact = { email: "tunde@example.com", name: "Tunde Bakare", user_id: null };
+  failingTable = null;
   tables.workers = [
     {
       id: WORKER,
@@ -173,6 +180,19 @@ describe("updateWorkerAction: a new line manager", () => {
     await save({ workerId: WORKER, firstName: "Musa", lineManager: `m:${OLD_MEMBERSHIP}` });
 
     expect(sendMappingChangedEmail).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the name lookup fails, and logs the worker id only", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    failingTable = "memberships";
+    await save({ workerId: WORKER, firstName: "Musa", lineManager: `w:${NEW_MANAGER}` });
+    expect(sendMappingChangedEmail).not.toHaveBeenCalled();
+    const logged = JSON.stringify(error.mock.calls);
+    expect(logged).toContain(WORKER);
+    for (const secret of ["tunde@example.com", "Tunde", "Kola", "Musa", "Security services"]) {
+      expect(logged).not.toContain(secret);
+    }
+    error.mockRestore();
   });
 
   it("logs a failed send by worker only, never the address", async () => {

@@ -1,7 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { adminClient } from "../rls/helpers/supabase";
-import { NEEDS_SUPABASE, supabaseReady, uniqueSuffix } from "./helpers/auth";
+import {
+  NEEDS_SUPABASE,
+  addMembership,
+  createAccount,
+  createOwner,
+  signInViaUi,
+  supabaseReady,
+  uniqueSuffix,
+} from "./helpers/auth";
 import { test as ownerTest } from "./helpers/signed-in";
 
 /**
@@ -71,6 +79,8 @@ test.describe("public pages", () => {
     await expectBack(page, "/sign-in", "Back to home", /\/$/);
     await expectBack(page, "/sign-up", "Back to home", /\/$/);
     await expectBack(page, "/check-email", "Back to sign in", /\/sign-in$/);
+    await expectBack(page, "/design-system", "Back to home", /\/$/);
+    await expectBack(page, "/m/sign-in", "Back to Metalira Ops for workers", /\/for\/workers$/);
   });
 });
 
@@ -131,4 +141,19 @@ ownerTest.describe("manager app", () => {
     await invite.click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Worker invites");
   });
+});
+
+test("finance goes back from bank-detail approvals to the dashboard, not People", async ({
+  page,
+}) => {
+  test.skip(!supabaseReady, NEEDS_SUPABASE);
+  const owner = await createOwner("nav-owner", `Nav Finance Co ${uniqueSuffix()}`);
+  const finance = await createAccount("nav-finance", "Funmi Ade");
+  await addMembership(owner.orgId, finance.userId, "finance");
+  await signInViaUi(page, finance.email, finance.password);
+  await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });
+  await expectBack(page, "/app/people/approvals", "Back to dashboard", /\/app$/);
+  // One back link only: the old text link to People is gone.
+  await page.goto("/app/people/approvals");
+  await expect(page.getByRole("link", { name: "People", exact: true })).toHaveCount(0);
 });

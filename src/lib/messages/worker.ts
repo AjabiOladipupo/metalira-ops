@@ -4,6 +4,12 @@
  * Sentence case, plain words a site worker reads easily, no emoji or exclamation marks.
  */
 export const workerMessages = {
+  /** Parent page names for back arrows, read as "Back to <name>". */
+  back: {
+    home: "home",
+    me: "Me",
+    workersPage: "Metalira Ops for workers",
+  },
   signIn: {
     title: "Sign in",
     intro: "Use the company code and staff ID on your invite, and your PIN.",
@@ -103,8 +109,6 @@ export const workerMessages = {
   },
   me: {
     title: "Me",
-    /** The parent of Me, read as "Back to home". */
-    back: "home",
     tabs: "Me sections",
     profileTab: "Profile",
     queriesTab: "Queries",

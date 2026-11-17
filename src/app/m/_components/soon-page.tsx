@@ -24,7 +24,7 @@ export function SoonPage({ which }: { which: SoonKey }) {
       <Suspense fallback={null}>
         <Gate />
       </Suspense>
-      <WorkerTopBar back={{ href: "/m", label: "home" }}>
+      <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }}>
         <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
       </WorkerTopBar>
       <div className="flex flex-col gap-2">
