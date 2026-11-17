@@ -33,7 +33,19 @@ export const LATER_SCENES = {
     label: "A person pointing at a map pin",
     draw: (lw) => (
       <>
-        <Person x={48} y={157} s={0.9} lw={lw} hair="short" top="polo" left="hip" right="point" />
+        <Person
+          x={48}
+          y={157}
+          s={0.9}
+          lw={lw}
+          hair="short"
+          top="polo"
+          build="tall"
+          stance="lean-left"
+          turn={1}
+          left="hip"
+          right="point"
+        />
         <g transform="translate(124 124)">
           <FoldedMap />
         </g>
@@ -59,6 +71,8 @@ export const LATER_SCENES = {
           lw={lw}
           hair="wrap"
           top="shirt"
+          build="short"
+          stance="lean-right"
           left="chest"
           right="low"
           held={
@@ -79,8 +93,32 @@ export const LATER_SCENES = {
     label: "A guard, a cleaner and a rider standing together, with a thumbs up in a speech bubble",
     draw: (lw) => (
       <>
-        <Person x={30} y={157} s={0.62} lw={lw} hair="cap" top="guard" left="down" right="down" />
-        <Person x={130} y={157} s={0.62} lw={lw} hair="helmet" top="vest" left="down" right="hip" />
+        <Person
+          x={30}
+          y={157}
+          s={0.62}
+          lw={lw}
+          hair="cap"
+          top="guard"
+          build="wide"
+          stance="apart"
+          turn={1}
+          left="down"
+          right="down"
+        />
+        <Person
+          x={130}
+          y={157}
+          s={0.62}
+          lw={lw}
+          hair="helmet"
+          top="vest"
+          build="tall"
+          stance="lean-right"
+          turn={-1}
+          left="down"
+          right="hip"
+        />
         <Person
           x={80}
           y={157}
@@ -88,6 +126,8 @@ export const LATER_SCENES = {
           lw={lw}
           hair="wrap"
           top="apron"
+          build="slim"
+          stance="lean-left"
           left="down"
           right="thumb"
           face="grin"
@@ -111,6 +151,7 @@ export const LATER_SCENES = {
           lw={lw}
           hair="beard"
           top="shirt"
+          build="short"
           left="chest"
           right="chest"
           face="calm"
@@ -129,7 +170,38 @@ export const LATER_SCENES = {
   "leave-empty": {
     viewBox: [160, 160],
     size: "empty",
-    label: "A person carrying a suitcase, and a sun in a speech bubble",
+    label: "A manager beside an empty in-tray, and a calendar in a speech bubble",
+    draw: (lw) => (
+      <>
+        <path d="M92 101 H152 V107 H92 Z" fill={PAPER} />
+        <path d="M98 107 V156 M146 107 V156" fill="none" />
+        <path d="M104 101 L100 89 H144 L140 101 Z" fill={PAPER} />
+        <path d="M103.5 93 H140.5" fill="none" />
+        <Person
+          x={52}
+          y={157}
+          s={0.9}
+          lw={lw}
+          hair="short"
+          top="shirt"
+          glasses
+          build="wide"
+          stance="lean-left"
+          turn={1}
+          left="hip"
+          right="down"
+          face="calm"
+        />
+        <Bubble cx={118} cy={42} r={16} toward={[76, 40]} lw={lw}>
+          <Icon.calendar />
+        </Bubble>
+      </>
+    ),
+  },
+  "leave-approved": {
+    viewBox: [160, 160],
+    size: "onboarding",
+    label: "A person heading off with a suitcase, and a sun in a speech bubble",
     draw: (lw) => (
       <>
         <Person
@@ -139,6 +211,8 @@ export const LATER_SCENES = {
           lw={lw}
           hair="puff"
           top="polo"
+          build="slim"
+          stance="apart"
           left="wave"
           right="down"
           face="grin"
@@ -187,24 +261,26 @@ export const LATER_SCENES = {
   "payslip-empty": {
     viewBox: [140, 120],
     size: "worker",
-    label: "A worker in a hi-vis vest reading a payslip",
+    label: "A worker in a hi-vis vest holding up a payslip",
     draw: (lw) => (
       <>
+        {/* Cropped to head and shoulders so the slip still reads at 96px. */}
         <Person
-          x={70}
-          y={168}
-          s={1}
+          x={46}
+          y={226}
+          s={1.45}
           lw={lw}
           hair="short"
           top="vest"
-          left="chest"
-          right="chest"
-          face="calm"
+          turn={1}
+          left="down"
+          right="wave"
+          face="smile"
           held={
-            <g transform="translate(0 -97)">
-              <Slip w={28} h={36} />
+            <g transform="translate(40 -117) rotate(6)">
+              <Slip w={30} h={38} naira />
               <Accent>
-                <path d="M-4 5 L-1.5 7.5 L4 2" fill="none" />
+                <path d="M3 9.5 L5.5 12 L10 7" fill="none" />
               </Accent>
             </g>
           }
@@ -226,6 +302,8 @@ export const LATER_SCENES = {
           hair="braids"
           top="blouse"
           bottom="skirt"
+          build="slim"
+          turn={1}
           left="hip"
           right="reach"
           held={
@@ -253,6 +331,8 @@ export const LATER_SCENES = {
           lw={lw}
           hair="beard"
           top="polo"
+          build="wide"
+          stance="apart"
           left="hip"
           right="reach"
           face="grin"
@@ -282,7 +362,19 @@ export const LATER_SCENES = {
         <Accent>
           <rect x={86} y={36} width={16} height={12} rx={1} fill={INK} stroke="none" />
         </Accent>
-        <Person x={26} y={157} s={0.8} lw={lw} hair="afro" top="shirt" left="down" right="point" />
+        <Person
+          x={26}
+          y={157}
+          s={0.8}
+          lw={lw}
+          hair="afro"
+          top="shirt"
+          build="short"
+          stance="lean-left"
+          turn={1}
+          left="down"
+          right="point"
+        />
         <Person
           x={136}
           y={157}
@@ -290,6 +382,8 @@ export const LATER_SCENES = {
           lw={lw}
           hair="wrap"
           top="jacket"
+          build="tall"
+          turn={-1}
           left="reach"
           right="hip"
           face="grin"

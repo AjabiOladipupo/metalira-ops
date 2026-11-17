@@ -15,26 +15,40 @@ import {
 import { FoldedMap } from "./later";
 import type { Scene } from "./types";
 
-/** A mop, handle top at 0,0, standing `h` tall. Person coordinates of whoever holds it. */
+/**
+ * A wet mop, handle top at 0,0, standing `h` tall: a short head bar with a tangle of strands
+ * hanging from it in loops to the floor. Person coordinates of whoever holds it.
+ */
 function Mop({ h }: { h: number }) {
+  const bar = h - 17;
+  const top = bar + 3.5;
+  // The tangle: straight sides, a bottom edge of five loops lying on the floor.
+  const tangle = `M-8 ${top} C-10 ${top + 5} -11 ${h - 5} -11.5 ${h - 1.5} C-10 ${h + 1} -7.5 ${h + 1} -6.8 ${h - 1.5} C-5.6 ${h + 1} -2.6 ${h + 1} -2.2 ${h - 1.5} C-1 ${h + 1} 2 ${h + 1} 2.4 ${h - 1.5} C3.6 ${h + 1} 6.4 ${h + 1} 7 ${h - 1.5} C8 ${h + 1} 10.6 ${h + 1} 11.5 ${h - 1.5} C11 ${h - 5} 10 ${top + 5} 8 ${top} Z`;
+  const strands = `M-4.5 ${top} C-5.5 ${top + 4} -4 ${top + 8} -6.8 ${h - 1.5} M0 ${top} C1 ${top + 4} -1.5 ${top + 8} -0.2 ${h - 1.5} M4.5 ${top} C3.5 ${top + 4} 6 ${top + 8} 4.8 ${h - 1.5}`;
   return (
     <g>
-      <path d={`M0 0 L0 ${h - 12}`} fill="none" />
-      <path
-        d={`M-3 ${h - 13} H3 L9 ${h} H-9 Z M-5 ${h - 7} L-6 ${h} M0 ${h - 7} V${h} M5 ${h - 7} L6 ${h}`}
-        fill={PAPER}
-      />
+      <path d={`M0 0 L0 ${bar}`} fill="none" />
+      <path d={tangle} fill={PAPER} />
+      <path d={strands} fill="none" />
+      <rect x={-9} y={bar} width={18} height={3.5} rx={1.5} fill={PAPER} />
     </g>
   );
 }
 
-/** A taped parcel, centred on 0,0. */
+/**
+ * A taped parcel seen from a little above: front face centred on 0,0, the top face behind it
+ * with a tape cross, a tape strip down the front and a label.
+ */
 function Parcel({ w = 34, h = 24 }: { w?: number; h?: number }) {
+  const x = w / 2;
+  const t = -h / 2;
   return (
     <g>
-      <rect x={-w / 2} y={-h / 2} width={w} height={h} rx={1.5} fill={PAPER} />
-      <path d={`M-4 ${-h / 2} V${-h / 2 + 8} M4 ${-h / 2} V${-h / 2 + 8}`} fill="none" />
-      <path d={`M${w / 2 - 12} ${h / 2 - 5} H${w / 2 - 4}`} fill="none" />
+      <path d={`M${-x} ${t} L${-x + 4} ${t - 7} H${x - 4} L${x} ${t} Z`} fill={PAPER} />
+      <path d={`M0 ${t - 7} V${t} M${-x + 2} ${t - 3.5} H${x - 2}`} fill="none" />
+      <rect x={-x} y={t} width={w} height={h} rx={1} fill={PAPER} />
+      <path d={`M0 ${t} V${t + 8}`} fill="none" />
+      <path d={`M${x - 13} ${h / 2 - 9} H${x - 4} V${h / 2 - 4} H${x - 13} Z`} fill="none" />
     </g>
   );
 }
@@ -55,6 +69,8 @@ export const LANDING_SCENES = {
           lw={lw}
           hair="cap"
           top="guard"
+          build="wide"
+          stance="apart"
           left="down"
           right="wave"
           face="grin"
@@ -66,11 +82,14 @@ export const LANDING_SCENES = {
           lw={lw}
           hair="wrap"
           top="apron"
+          build="slim"
+          stance="lean-right"
+          turn={1}
           left="down"
           right="down"
           held={
-            <g transform="translate(25 -112)">
-              <Mop h={112} />
+            <g transform="translate(16 -112) rotate(-8)">
+              <Mop h={113} />
             </g>
           }
         />
@@ -82,6 +101,8 @@ export const LANDING_SCENES = {
           hair="short"
           top="polo"
           glasses
+          build="tall"
+          turn={-1}
           left="chest"
           right="low"
           held={
@@ -97,11 +118,13 @@ export const LANDING_SCENES = {
           lw={lw}
           hair="helmet"
           top="vest"
-          left="low"
-          right="low"
+          build="short"
+          stance="lean-left"
+          left="carry"
+          right="carry"
           held={
-            <g transform="translate(0 -66)">
-              <Parcel w={36} h={24} />
+            <g transform="translate(-2.5 -66) rotate(4)">
+              <Parcel w={38} h={22} />
             </g>
           }
         />
@@ -133,6 +156,9 @@ export const LANDING_SCENES = {
           hair="short"
           top="jacket"
           glasses
+          build="wide"
+          stance="lean-left"
+          turn={1}
           left="hip"
           right="point"
         />
@@ -159,6 +185,7 @@ export const LANDING_SCENES = {
           hair="afro"
           top="blouse"
           bottom="skirt"
+          build="tall"
           left="chest"
           right="chest"
           face="grin"
@@ -190,6 +217,9 @@ export const LANDING_SCENES = {
           lw={lw}
           hair="wrap"
           top="jacket"
+          build="short"
+          stance="apart"
+          turn={1}
           left="chest"
           right="point"
           face="grin"
@@ -231,6 +261,9 @@ export const LANDING_SCENES = {
           lw={lw}
           hair="beard"
           top="vest"
+          build="wide"
+          stance="lean-left"
+          turn={1}
           left="chest"
           right="point"
           held={
@@ -255,6 +288,8 @@ export const LANDING_SCENES = {
           lw={lw}
           hair="puff"
           top="vest"
+          build="slim"
+          stance="lean-right"
           left="chest"
           right="chest"
           held={
