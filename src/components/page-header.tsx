@@ -1,3 +1,4 @@
+import { BackLink, type BackTarget } from "@/components/back-link";
 import { cn } from "@/lib/utils";
 
 type PageHeaderProps = {
@@ -10,6 +11,8 @@ type PageHeaderProps = {
   actions?: React.ReactNode;
   /** Defaults to h1. Use 2 only when showing a header inside another page (e.g. /design-system). */
   headingLevel?: 1 | 2;
+  /** Back arrow to the logical parent page, above the title. None on the dashboard. */
+  back?: BackTarget;
   className?: string;
 };
 
@@ -19,12 +22,14 @@ export function PageHeader({
   description,
   actions,
   headingLevel = 1,
+  back,
   className,
 }: PageHeaderProps) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   return (
     <div className={cn("flex flex-wrap items-end justify-between gap-4", className)}>
       <div className="flex min-w-0 flex-col gap-1.5">
+        {back ? <BackLink {...back} className="-mt-2" /> : null}
         {eyebrow ? <span className="type-label text-fg-muted">{eyebrow}</span> : null}
         <Heading className="m-0 type-h1">{title}</Heading>
         {description ? <p className="m-0 type-body-lg text-fg-muted">{description}</p> : null}

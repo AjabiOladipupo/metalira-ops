@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { LogoMark } from "@/components/logo";
+import { ThemeButton } from "@/components/theme/theme-button";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -16,7 +17,7 @@ import {
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 /**
- * Company switcher, site filter, search, notifications and user menu. The session-dependent
+ * Company switcher, site filter, search, theme, notifications and user menu. The session-dependent
  * parts (`menuNav`, `orgSwitcher`, `userMenu`) are server-rendered slots that stream in behind
  * their own Suspense boundaries, so the bar itself stays in the static shell.
  */
@@ -89,6 +90,7 @@ export function TopBar({
       </label>
 
       <div className="ml-auto flex items-center gap-3 md:ml-0">
+        <ThemeButton className="-mx-1.5" />
         <Button variant="outline" size="icon" aria-label="Notifications">
           <Bell strokeWidth={1.75} className="size-[18px]" />
         </Button>

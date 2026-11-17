@@ -15,6 +15,7 @@ async function NewWorker() {
   return (
     <>
       <PageHeader
+        back={{ href: "/app/people", label: "People" }}
         eyebrow="People"
         title="Add employee"
         description="One person at a time. To add a whole staff list, import a file instead."

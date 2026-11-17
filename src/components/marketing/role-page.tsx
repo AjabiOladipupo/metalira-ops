@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { BackLink } from "@/components/back-link";
 import { Illustration } from "@/components/illustration";
 
 import { Container, CtaLink, DotList, Section, SectionHeading } from "./primitives";
@@ -29,6 +30,7 @@ export function RolePage({ slug }: { slug: RoleSlug }) {
       <section aria-labelledby="role-title">
         <Container className="grid items-center gap-8 pt-12 pb-14 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-16 lg:pt-[72px] lg:pb-16">
           <div className="flex flex-col gap-5">
+            <BackLink href="/" label="home" className="-my-3" />
             <span className="type-label text-fg-muted">{role.eyebrow}</span>
             <h1 id="role-title" className="m-0 max-w-[760px] type-mkt-h2 lg:type-mkt-h1">
               {role.headline}

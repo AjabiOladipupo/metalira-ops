@@ -23,6 +23,7 @@ async function Departments() {
   return (
     <>
       <PageHeader
+        back={{ href: "/app/settings", label: "Settings" }}
         eyebrow="Settings"
         title="Departments"
         description={`${departments.length} ${departments.length === 1 ? "department" : "departments"} · every employee belongs to one, and each can have a head.`}

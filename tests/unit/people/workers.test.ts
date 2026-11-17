@@ -287,7 +287,18 @@ describe("updateWorker", () => {
       lineManagerMembershipId: MANAGER,
       jobTitle: "",
     });
-    expect(result).toEqual({ id: WORKER, changed: true });
+    // The line manager changed (none before), so the new one can be told by email.
+    expect(result).toEqual({
+      id: WORKER,
+      changed: true,
+      lineManagerChange: {
+        workerId: WORKER,
+        organisationId: ORG,
+        actorUserId: "user-1",
+        before: { departmentId: null, lineManager: { workerId: null, membershipId: null } },
+        after: { departmentId: null, lineManager: { workerId: null, membershipId: MANAGER } },
+      },
+    });
     const [patch] = fake.updates;
     expect(patch).toMatchObject({
       job_title: null,
@@ -348,7 +359,7 @@ describe("updateWorker", () => {
   it("writes nothing when nothing changed, and reports a worker it can't see", async () => {
     const fake = fakeSupabase();
     expect(await runMutation(context(fake.client), updateWorkerSpec, { workerId: WORKER })).toEqual(
-      { id: WORKER, changed: false },
+      { id: WORKER, changed: false, lineManagerChange: null },
     );
     expect(fake.updates).toEqual([]);
 

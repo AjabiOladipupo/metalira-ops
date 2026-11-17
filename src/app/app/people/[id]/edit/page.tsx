@@ -29,6 +29,7 @@ async function EditWorker({ params }: { params: PageProps<"/app/people/[id]/edit
   return (
     <>
       <PageHeader
+        back={{ href: `/app/people/${worker.id}`, label: worker.name }}
         eyebrow="Edit employee"
         title={worker.name}
         description={`${worker.jobTitle ? `${worker.jobTitle} · ` : ""}${worker.staffId}`}
