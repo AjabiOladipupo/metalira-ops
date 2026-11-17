@@ -103,7 +103,8 @@ export const workerMessages = {
   },
   me: {
     title: "Me",
-    back: "Back",
+    /** The parent of Me, read as "Back to home". */
+    back: "home",
     tabs: "Me sections",
     profileTab: "Profile",
     queriesTab: "Queries",

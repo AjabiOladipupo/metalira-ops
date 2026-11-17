@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Logo } from "@/components/logo";
+import { ThemeButton } from "@/components/theme/theme-button";
 import { cn } from "@/lib/utils";
 
 import { ForMenu } from "./for-menu";
@@ -36,7 +37,10 @@ export function SiteHeader() {
           <CtaLink href="/sign-up" className="h-10 px-4">
             Start setup
           </CtaLink>
-          <MobileMenu roles={roleLinks} className="lg:hidden" />
+          <span className="flex items-center gap-1 lg:-mx-3">
+            <ThemeButton />
+            <MobileMenu roles={roleLinks} className="lg:hidden" />
+          </span>
         </div>
       </div>
     </header>

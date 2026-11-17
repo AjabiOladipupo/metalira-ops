@@ -19,7 +19,11 @@ import { notifyApproversOfNewWorkerBankDetails } from "./bank-change-notices";
 import { createDepartment, updateDepartment } from "./departments";
 import { echoableValues, mappingFormInput, workerFormErrors, workerFormInput } from "./form-input";
 import { saveMapping } from "./mapping";
-import { notifyLineManager, shouldNotifyLineManager } from "./mapping-notify";
+import {
+  notifyLineManager,
+  notifyLineManagerOfEdit,
+  shouldNotifyLineManager,
+} from "./mapping-notify";
 import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "./pii-access";
 import { addPayRate, cancelPayRate, createWorker, endEmployment, updateWorker } from "./workers";
 
@@ -94,14 +98,20 @@ export async function updateWorkerAction(
   formData: FormData,
 ): Promise<PeopleFormState> {
   const fields = formFields(formData);
-  let id: string;
+  let updated: Awaited<ReturnType<typeof updateWorker>>;
   try {
-    ({ id } = await updateWorker(workerFormInput(fields, "update")));
+    updated = await updateWorker(workerFormInput(fields, "update"));
   } catch (error) {
     return refusal(error, echoableValues(fields), workerFormErrors);
   }
+  // A new line manager is told by email after the response, as from the mapping panel.
+  const change = updated.lineManagerChange;
+  if (change) {
+    const supabase = await createServerSupabase();
+    after(() => notifyLineManagerOfEdit(supabase, change));
+  }
   refreshPeople();
-  redirect(`/app/people/${id}`);
+  redirect(`/app/people/${updated.id}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -46,6 +46,7 @@ async function CompanySettings() {
   return (
     <>
       <PageHeader
+        back={{ href: "/app/settings", label: "Settings" }}
         eyebrow="Settings"
         title="Company"
         description={`${planName(company.plan)} plan · company code ${company.companyCode}`}

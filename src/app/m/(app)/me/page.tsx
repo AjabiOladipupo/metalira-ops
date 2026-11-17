@@ -1,4 +1,3 @@
-import { ChevronLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cache, Suspense } from "react";
@@ -17,6 +16,7 @@ import { requireWorkerPageSession } from "@/server/identity/worker-session";
 import type { BankChangeStatus } from "@/server/people/bank-changes";
 import { loadMyProfile, type MyBankChange, type MyChangeRequest } from "@/server/people/my-profile";
 
+import { WorkerTopBar } from "../../_components/worker-top-bar";
 import { MeTabs } from "./me-tabs";
 
 export const metadata: Metadata = { title: "Me" };
@@ -243,15 +243,10 @@ async function ProfilePanel() {
 export default function MePage() {
   return (
     <main className="flex flex-1 flex-col">
-      <div className="flex items-center gap-2 px-2 pt-3 pb-1">
-        <Link
-          href="/m"
-          aria-label={copy.back}
-          className="flex size-11 items-center justify-center text-foreground"
-        >
-          <ChevronLeft strokeWidth={1.75} className="size-[22px]" aria-hidden />
-        </Link>
-        <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
+      <div className="px-4 pt-3 pb-1">
+        <WorkerTopBar back={{ href: "/m", label: copy.back }}>
+          <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
+        </WorkerTopBar>
       </div>
       <Suspense
         fallback={

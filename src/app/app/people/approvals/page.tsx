@@ -92,6 +92,7 @@ async function Approvals() {
           People
         </Link>
         <PageHeader
+          back={{ href: "/app/people", label: "People" }}
           eyebrow="Bank-detail approvals"
           title={title}
           description={`Bank details change only when someone other than the requester approves, then wait 72 hours before payouts use them. ${

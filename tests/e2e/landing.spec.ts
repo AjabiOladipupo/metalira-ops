@@ -58,14 +58,31 @@ test("every Start setup and Set up your business link goes to sign-up", async ({
   await expect(page).toHaveURL(/\/sign-up$/);
 });
 
-test("the pricing section shows no prices", async ({ page }) => {
+test("the pilot section shows no prices and the header links to it", async ({ page }, testInfo) => {
   await page.goto("/");
-  const pricing = page.locator("#pricing");
-  await expect(pricing.getByRole("heading", { level: 2 })).toHaveText(
+  const pilot = page.locator("#pilot");
+  await expect(pilot.getByText("Pilot", { exact: true })).toBeVisible();
+  await expect(pilot.getByRole("heading", { level: 2 })).toHaveText(
     "Pay for the workers who clocked in",
   );
-  await expect(pricing).toContainText("Free during the pilot.");
-  expect(await pricing.innerText()).not.toMatch(/₦\s?\d|NGN\s?\d|\d+\s?naira/i);
+  await expect(pilot).toContainText("Free during the pilot.");
+  expect(await pilot.innerText()).not.toMatch(/₦\s?\d|NGN\s?\d|\d+\s?naira/i);
+  await expect(page.locator("#pricing")).toHaveCount(0);
+
+  if (testInfo.project.name === "mobile-390") {
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page
+      .getByRole("navigation", { name: "Menu" })
+      .getByRole("link", { name: "Pilot" })
+      .click();
+  } else {
+    await page
+      .getByRole("navigation", { name: "Site" })
+      .getByRole("link", { name: "Pilot" })
+      .click();
+  }
+  await expect(page).toHaveURL(/\/#pilot$/);
+  await expect(page.getByRole("link", { name: "Pricing" })).toHaveCount(0);
 });
 
 test("the workers page sends workers to their employer and to worker sign-in", async ({ page }) => {

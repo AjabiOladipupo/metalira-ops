@@ -1,6 +1,4 @@
-import { ChevronLeft } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Suspense } from "react";
 
 import { workerMessages } from "@/lib/messages/worker";
@@ -8,6 +6,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { requireWorkerPageSession } from "@/server/identity/worker-session";
 import { hasOpenBankChange, loadMyBankChanges } from "@/server/people/my-profile";
 
+import { WorkerTopBar } from "../../../_components/worker-top-bar";
 import { ChangeForms } from "./change-forms";
 
 export const metadata: Metadata = { title: "Request a change" };
@@ -28,15 +27,10 @@ async function Forms() {
 export default function ChangePage() {
   return (
     <main className="flex flex-1 flex-col">
-      <div className="flex items-center gap-2 px-2 pt-3 pb-1">
-        <Link
-          href="/m/me"
-          aria-label={workerMessages.me.back}
-          className="flex size-11 items-center justify-center text-foreground"
-        >
-          <ChevronLeft strokeWidth={1.75} className="size-[22px]" aria-hidden />
-        </Link>
-        <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
+      <div className="px-4 pt-3 pb-1">
+        <WorkerTopBar back={{ href: "/m/me", label: workerMessages.me.title }}>
+          <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
+        </WorkerTopBar>
       </div>
       <div className="flex flex-col gap-5 px-4 pt-2 pb-4">
         <p className="m-0 text-[15px] text-fg-muted">{copy.intro}</p>

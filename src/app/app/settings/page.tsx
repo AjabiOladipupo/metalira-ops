@@ -58,7 +58,11 @@ export default function Page() {
   const item = findNavItem("/app/settings");
   return (
     <RouteGate href="/app/settings">
-      <PageHeader title={item.label} description={item.description} />
+      <PageHeader
+        back={{ href: "/app", label: "dashboard" }}
+        title={item.label}
+        description={item.description}
+      />
       <SettingsSections />
       <EmptyState message={item.empty} />
     </RouteGate>
