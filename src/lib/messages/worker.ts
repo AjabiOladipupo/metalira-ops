@@ -104,10 +104,10 @@ export const workerMessages = {
   me: {
     title: "Me",
     back: "Back",
-    tabs: "Profile",
+    tabs: "Me sections",
     profileTab: "Profile",
     queriesTab: "Queries",
-    queriesSoon: "Queries open soon.",
+    queriesEmpty: "No queries. When your line manager sends you a query, it shows here.",
     jobLine: (jobTitle: string | null, staffId: string) =>
       jobTitle ? `${jobTitle} · ${staffId}` : `Staff ID ${staffId}`,
     notSet: "Not set",

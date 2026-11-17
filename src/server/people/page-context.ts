@@ -7,7 +7,7 @@ import { lagosToday } from "@/lib/dates";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
 import type { ManagerRole } from "@/lib/roles";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { getSession } from "@/server/identity/session";
+import { getPageSession } from "@/server/identity/session";
 import type { Database } from "@/types/db";
 
 import { PEOPLE_EDITORS } from "./workers";
@@ -30,7 +30,7 @@ export interface PeoplePageContext {
  * the page); reads cookies, so it sits behind that Suspense boundary.
  */
 export async function peoplePageContext(): Promise<PeoplePageContext> {
-  const session = await getSession();
+  const session = await getPageSession();
   if (!session?.active) redirect(NO_ACCESS_PATH);
   const { organisationId, role } = session.active;
   return {

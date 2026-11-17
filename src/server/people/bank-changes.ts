@@ -5,6 +5,7 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import type { ManagerRole } from "@/lib/roles";
 import { PiiDecryptError, decryptPii, last4, sealPii, type PiiContext } from "@/server/crypto/pii";
 import { MutationError, mutate, type MutationSpec } from "@/server/identity/mutate";
+import { getSession } from "@/server/identity/session";
 import type { Database } from "@/types/db";
 
 import {
@@ -303,11 +304,17 @@ export function withdrawBankChange(input: unknown): Promise<{ id: string; worker
  * the same every 5 minutes). Called before a page shows bank details, so what it shows is never
  * behind the hold. Safe to call any number of times; a failure is logged, not thrown, because
  * the page can still show the request as approved and due.
+ *
+ * It writes, so it re-checks the user with the verified getSession (auth.getUser) even though
+ * the page itself rendered from the claims-only page session: a revoked session that still
+ * holds an unexpired token leaves the apply to pg_cron instead.
  */
 export async function applyDueBankChanges(
   supabase: Client,
   organisationId: string,
 ): Promise<number> {
+  const session = await getSession();
+  if (session?.active?.organisationId !== organisationId) return 0;
   const { data, error } = await supabase.rpc("apply_due_bank_detail_changes", {
     p_organisation_id: organisationId,
   });

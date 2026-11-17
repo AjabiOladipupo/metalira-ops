@@ -6,7 +6,7 @@ import { resumeSetupSlug, setupStepHref } from "@/lib/company";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 import { LOGO_SIGNED_URL_OPTIONS, ORG_ASSETS_BUCKET } from "./company";
-import { getSession } from "./session";
+import { getPageSession } from "./session";
 
 /** What the setup wizard, company settings and the shell read about the active company. */
 export interface Company {
@@ -39,19 +39,17 @@ const COLUMNS =
   "id, name, legal_name, trading_name, rc_number, tin, industry, head_office_state, address, phone, logo_path, invoice_email, invoice_number_start, payment_terms_days, vat_registered, auto_email_receipts, plan, expected_workers, pay_cycle_start_day, pay_day, company_code, setup_step, setup_completed_at";
 
 /**
- * The active organisation's company details, read under RLS as the signed-in user, or null when
- * signed out or managing no organisation. Cached per request. Reads cookies: call it inside a
- * <Suspense> boundary, a Server Function or a Route Handler.
+ * An organisation's company details, read under RLS as the signed-in user (so only a member gets
+ * a row), or null. Cached per request and organisation. The caller has already resolved the
+ * organisation from its own session: a Server Action from getSession, a page from
+ * getActiveCompany below.
  */
-export const getActiveCompany = cache(async (): Promise<Company | null> => {
-  const session = await getSession();
-  if (!session?.active) return null;
-
+export const getCompany = cache(async (organisationId: string): Promise<Company | null> => {
   const supabase = await createServerSupabase();
   const { data, error } = await supabase
     .from("organisations")
     .select(COLUMNS)
-    .eq("id", session.active.organisationId)
+    .eq("id", organisationId)
     .maybeSingle();
   if (error) throw new Error(`Could not load the company: ${error.message}`);
   if (!data) return null;
@@ -83,6 +81,17 @@ export const getActiveCompany = cache(async (): Promise<Company | null> => {
   };
 });
 
+/**
+ * The active organisation's company details for rendering a page or the shell, or null when
+ * signed out or managing no organisation. Cached per request. Reads cookies: call it inside a
+ * <Suspense> boundary. Server Actions call getCompany with their verified session instead.
+ */
+export const getActiveCompany = cache(async (): Promise<Company | null> => {
+  const session = await getPageSession();
+  if (!session?.active) return null;
+  return getCompany(session.active.organisationId);
+});
+
 /** Signed URLs for the logo last an hour; the shell asks for a fresh one on each request. */
 const LOGO_URL_SECONDS = 60 * 60;
 
@@ -110,7 +119,7 @@ export const getActiveCompanyLogoUrl = cache(async (): Promise<string | null> =>
  * step, so landing on /app takes one redirect, not two.
  */
 export async function pendingSetupHref(): Promise<string | null> {
-  const session = await getSession();
+  const session = await getPageSession();
   const role = session?.active?.role;
   if (role !== "owner" && role !== "admin") return null;
   const company = await getActiveCompany();
