@@ -10,16 +10,16 @@ import { navForRole } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { signOut, switchOrganisation } from "@/server/identity/actions";
 import { getActiveCompany, getActiveCompanyLogoUrl } from "@/server/identity/company-data";
-import { getSession, requireAppAccess } from "@/server/identity/session";
+import { getPageSession, requireAppAccess } from "@/server/identity/session";
 
 /**
  * Session-dependent parts of the manager shell. Each reads the session (cookies), so each sits
  * behind its own Suspense boundary and the rest of the shell stays in the static prerender.
- * getSession() is cached per request, so they share one lookup.
+ * getPageSession() is cached per request, so they share one lookup.
  */
 
 async function RoleNavInner() {
-  const session = await getSession();
+  const session = await getPageSession();
   if (!session?.active) return null;
   return <NavLinks groups={navForRole(session.active.role)} />;
 }
@@ -33,7 +33,7 @@ export function RoleNav() {
 }
 
 async function OrgSwitcherInner() {
-  const session = await getSession();
+  const session = await getPageSession();
   if (!session?.active) return null;
   const logoUrl = await getActiveCompanyLogoUrl();
   return (
@@ -73,7 +73,7 @@ export function PlanCardSlot() {
 }
 
 async function UserMenuInner() {
-  const session = await getSession();
+  const session = await getPageSession();
   if (!session) return <UserMenuFallback />;
   return (
     <UserMenu

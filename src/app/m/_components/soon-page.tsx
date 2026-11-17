@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 
 import { workerMessages } from "@/lib/messages/worker";
-import { requireWorkerSession } from "@/server/identity/worker-session";
+import { requireWorkerPageSession } from "@/server/identity/worker-session";
 
 import { WorkerBrand } from "./worker-brand";
 
@@ -9,7 +9,7 @@ type SoonKey = keyof typeof workerMessages.soon;
 
 /** Checks the worker session (signed out goes to sign-in). Renders nothing. */
 async function Gate() {
-  await requireWorkerSession();
+  await requireWorkerPageSession();
   return null;
 }
 

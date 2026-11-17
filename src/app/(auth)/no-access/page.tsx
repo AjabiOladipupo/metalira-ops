@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { ROLE_LABELS } from "@/lib/roles";
 import { signOut } from "@/server/identity/actions";
-import { getSession } from "@/server/identity/session";
+import { getPageSession } from "@/server/identity/session";
 
 export const metadata: Metadata = { title: "No access" };
 
@@ -32,7 +32,7 @@ export default function NoAccessPage() {
 }
 
 async function NoAccessActions() {
-  const session = await getSession();
+  const session = await getPageSession();
   const active = session?.active;
   // Without a manager membership every membership is a worker or client approver role.
   const roles = !active && session ? session.memberships.map((m) => m.role) : [];

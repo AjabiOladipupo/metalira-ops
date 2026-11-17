@@ -11,7 +11,7 @@ import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { initials } from "@/lib/people";
 import { signOutWorker } from "@/server/identity/worker-actions";
-import { lookupWorkerSession } from "@/server/identity/worker-session";
+import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 
 export const metadata: Metadata = { title: "Home" };
 
@@ -26,7 +26,7 @@ const TILES = [
 
 /** "Hello, Musa" and the avatar that opens Me, or the explanation for an unlinked login. */
 async function Header() {
-  const lookup = await lookupWorkerSession();
+  const lookup = await lookupWorkerPageSession();
   if (lookup.type === "signed_out") redirect(WORKER_SIGN_IN_PATH);
   if (lookup.type === "not_worker") redirect(APP_HOME_PATH);
   if (lookup.type === "unlinked") {
