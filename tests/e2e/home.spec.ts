@@ -1,9 +1,19 @@
 import { expect, test } from "@playwright/test";
 
-test("landing page links to sign-up and sign-in", async ({ page }) => {
+test("landing page links to sign-in and sign-up", async ({ page }, testInfo) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Metalira Ops");
-  await page.getByRole("link", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Every shift, accounted for.");
+
+  // Sign in sits in the header on desktop and in the menu on phones.
+  if (testInfo.project.name === "mobile-390") {
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page
+      .getByRole("navigation", { name: "Menu" })
+      .getByRole("link", { name: "Sign in" })
+      .click();
+  } else {
+    await page.getByRole("banner").getByRole("link", { name: "Sign in" }).click();
+  }
   await expect(page).toHaveURL(/\/sign-in$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sign in");
   await page.getByRole("link", { name: "Create an account" }).click();

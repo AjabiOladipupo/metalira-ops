@@ -29,7 +29,7 @@ test("app renders with no Sentry DSN and logs no console errors", async ({ page 
   page.on("pageerror", (error) => errors.push(error.message));
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Metalira Ops");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Every shift, accounted for.");
   await page.waitForLoadState("networkidle");
   expect(errors).toEqual([]);
 });
