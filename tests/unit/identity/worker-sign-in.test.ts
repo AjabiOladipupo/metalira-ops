@@ -46,6 +46,7 @@ function fakeStore(known: Record<string, string>) {
         login: isKnown ? LOGIN : null,
         pinHash: isKnown ? (known[key] ?? null) : null,
         locksOnFailure: c.lockedUntil !== null,
+        holdsOnFailure: false,
       } satisfies BeginResult;
     },
     async finish(workerId, ok) {

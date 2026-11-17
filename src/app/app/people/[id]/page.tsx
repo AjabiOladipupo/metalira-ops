@@ -19,7 +19,8 @@ import {
   payHeadline,
   payVersionState,
 } from "@/lib/people";
-import { ROLE_LABELS } from "@/lib/roles";
+import type { SignInCredential } from "@/lib/pin-lockout";
+import { ROLE_LABELS, type ManagerRole } from "@/lib/roles";
 import { sendAppliedBankChangeNotices } from "@/server/people/bank-change-notices";
 import {
   applyDueBankChanges,
@@ -34,6 +35,16 @@ import type { PayRateVersion } from "@/server/people/pay-rates";
 import { loadWorkerProfile, type WorkerProfile } from "@/server/people/people-data";
 import { peoplePageContext } from "@/server/people/page-context";
 import { canSeePii } from "@/server/people/pii-access";
+import {
+  NEW_PIN_ROLES,
+  SIGN_IN_UNLOCKERS,
+  loadSignInCredential,
+} from "@/server/people/sign-in-status";
+import {
+  isStaffIdCorrector,
+  loadStaffIdCorrections,
+  type StaffIdCorrectionView,
+} from "@/server/people/staff-id-corrections";
 
 import { RouteGate } from "../../_shell/slots";
 import { BankChangeCard } from "../_components/bank-change-card";
@@ -44,8 +55,19 @@ import { DetailList, NotSet, Section } from "../_components/display";
 import { EndEmploymentForm } from "../_components/end-employment-form";
 import { PayChangeForm } from "../_components/pay-change-form";
 import { RevealValue } from "../_components/reveal-value";
+import { SignInPanel } from "../_components/sign-in-panel";
+import {
+  StaffIdCorrectionCard,
+  type StaffIdViewer,
+} from "../_components/staff-id-correction-card";
+import { StaffIdCorrectionForm } from "../_components/staff-id-forms";
 
 export const metadata: Metadata = { title: "Employee" };
+
+/** Roles that see the worker's phone sign-in status (RLS narrows line managers to reportees). */
+const SIGN_IN_VIEWERS: readonly ManagerRole[] = SIGN_IN_UNLOCKERS;
+
+const has = (roles: readonly ManagerRole[], role: ManagerRole) => roles.includes(role);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -146,6 +168,9 @@ function Profile({
   bankChanges,
   viewer,
   changeRequests,
+  credential,
+  corrections,
+  staffIdViewer,
 }: {
   worker: WorkerProfile;
   ctx: Awaited<ReturnType<typeof peoplePageContext>>;
@@ -154,9 +179,17 @@ function Profile({
   viewer: BankChangeViewer;
   /** Changes the employee asked for from the worker app (empty for roles that can't see them). */
   changeRequests: ChangeRequestView[];
+  /** The worker's phone login, for roles that see it (null otherwise or when none). */
+  credential: SignInCredential | null;
+  /** Staff ID corrections for this worker, newest first (owner, admin and hr only). */
+  corrections: StaffIdCorrectionView[];
+  staffIdViewer: StaffIdViewer;
 }) {
   const { today, canEdit, role } = ctx;
   const active = worker.status === "active";
+  // Line managers see their own reportees (slice 1.11): job, contact and sign-in, no pay.
+  const limited = role === "line_manager";
+  const pendingCorrection = corrections.find((c) => c.status === "pending") ?? null;
   const current = currentPayVersion(worker.payRates, today);
   const latest = worker.payRates.at(-1) ?? null;
   // A new version starts after the latest one, and never in the past.
@@ -168,19 +201,21 @@ function Profile({
   return (
     <>
       <div className="flex flex-col gap-4">
-        <Link
-          href="/app/people"
-          className="inline-flex items-center gap-1.5 text-sm text-fg-muted no-underline hover:text-foreground"
-        >
-          <ArrowLeft strokeWidth={1.75} className="size-4" aria-hidden />
-          People
-        </Link>
+        {limited ? null : (
+          <Link
+            href="/app/people"
+            className="inline-flex items-center gap-1.5 text-sm text-fg-muted no-underline hover:text-foreground"
+          >
+            <ArrowLeft strokeWidth={1.75} className="size-4" aria-hidden />
+            People
+          </Link>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
             <WorkerAvatar workerId={worker.id} name={worker.name} size={56} />
             <div className="flex min-w-0 flex-col gap-1">
               <h1 className="m-0 type-h1 break-words">{worker.name}</h1>
-              <p className="m-0 type-body-lg text-fg-muted">
+              <p className="m-0 type-body-lg text-fg-muted" data-testid="worker-staff-id">
                 {worker.jobTitle ? `${worker.jobTitle} · ` : ""}
                 {worker.staffId}
               </p>
@@ -210,7 +245,7 @@ function Profile({
               Mapping incomplete
             </Status>
           )}
-          {worker.needsPayDetails ? (
+          {worker.needsPayDetails && !limited ? (
             <Status tone="action">Needs pay details before payroll</Status>
           ) : null}
           {worker.supervisorClockIn ? <Status tone="pending">Supervisor clock-in</Status> : null}
@@ -246,12 +281,42 @@ function Profile({
       <Section id="contact" title="Identity and contact">
         <DetailList
           items={[
-            { label: "Staff ID", value: worker.staffId },
+            { label: "Staff ID", value: worker.staffId, testId: "staff-id" },
             { label: "Phone", value: worker.phone },
             { label: "Email", value: worker.email },
           ]}
         />
+        {corrections.map((correction) => (
+          <StaffIdCorrectionCard
+            key={correction.id}
+            correction={correction}
+            viewer={staffIdViewer}
+            showWorker={false}
+          />
+        ))}
+        {canEdit && active && !pendingCorrection ? (
+          <StaffIdCorrectionForm workerId={worker.id} currentStaffId={worker.staffId} />
+        ) : null}
       </Section>
+
+      {has(SIGN_IN_VIEWERS, role) ? (
+        <Section
+          id="sign-in"
+          title="Phone sign-in"
+          description="Company code, staff ID and a 6-digit PIN."
+        >
+          <SignInPanel
+            workerId={worker.id}
+            credential={credential}
+            canUnlock={active && has(SIGN_IN_UNLOCKERS, role)}
+            canSendInvite={active && has(NEW_PIN_ROLES, role)}
+            now={new Date()}
+          />
+        </Section>
+      ) : null}
+
+      {limited ? null : (
+        <>
 
       <Section
         id="pay"
@@ -397,6 +462,9 @@ function Profile({
         />
       </Section>
 
+        </>
+      )}
+
       {canEdit && active ? (
         <Section
           id="end"
@@ -427,7 +495,7 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   after(() => sendAppliedBankChangeNotices(ctx.organisationId));
   const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today);
   if (!worker) notFound();
-  const [bankChanges, viewer, changeRequests] = await Promise.all([
+  const [bankChanges, viewer, changeRequests, credential, corrections] = await Promise.all([
     canViewBankChanges(ctx.role)
       ? loadBankChanges(ctx.supabase, ctx.organisationId, { workerId: id, limit: 5 })
       : Promise.resolve([]),
@@ -439,6 +507,12 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
       canSeePii(ctx.role, "bank_account"),
     ),
     ctx.canEdit ? loadChangeRequests(ctx.supabase, ctx.organisationId, id) : Promise.resolve([]),
+    has(SIGN_IN_VIEWERS, ctx.role)
+      ? loadSignInCredential(ctx.supabase, ctx.organisationId, id)
+      : Promise.resolve(null),
+    isStaffIdCorrector(ctx.role)
+      ? loadStaffIdCorrections(ctx.supabase, ctx.organisationId, { workerId: id, limit: 10 })
+      : Promise.resolve([]),
   ]);
   return (
     <Profile
@@ -447,13 +521,20 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
       bankChanges={bankChanges}
       viewer={viewer}
       changeRequests={changeRequests}
+      credential={credential}
+      corrections={corrections}
+      staffIdViewer={{
+        userId: ctx.userId,
+        canDecide: isStaffIdCorrector(ctx.role),
+        ownWorkerIds: viewer.ownWorkerIds,
+      }}
     />
   );
 }
 
 export default function Page({ params }: PageProps<"/app/people/[id]">) {
   return (
-    <RouteGate href="/app/people">
+    <RouteGate href="/app/people/[id]">
       <WorkerPage params={params} />
     </RouteGate>
   );

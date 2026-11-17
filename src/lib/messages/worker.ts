@@ -20,8 +20,13 @@ export const workerMessages = {
     /** Wrong PIN, or an unknown company code or staff ID: never say which. */
     invalid: "Those details don't match. Check the company code, staff ID and PIN.",
     locked:
-      "Too many wrong tries. Sign-in is locked for 15 minutes. Ask HR for a new invite if you've forgotten your PIN.",
+      "Too many wrong tries. Sign-in is locked for 15 minutes. Your manager or HR can unlock it sooner, or send a new invite if you've forgotten your PIN.",
+    /** The 3rd lockout in 24 hours (owner decision 18). */
+    held: "Sign-in is locked after too many wrong tries today. Ask HR for a new invite to set a new PIN.",
     ipBlocked: "Too many tries from this network. Wait 15 minutes and try again.",
+    /** The company cap on wrong PINs (owner decision 18). */
+    companyThrottled:
+      "Too many wrong PINs at your company in the last few minutes. Wait 15 minutes and try again.",
     unavailable: "Sign-in isn't working right now. Try again in a minute.",
     notConfigured: "Phone sign-in is not set up on this deployment yet.",
   },

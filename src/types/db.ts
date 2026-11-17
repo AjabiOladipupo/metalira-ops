@@ -301,6 +301,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"staff_id_corrections": {
+                  Row: {
+                    "approved_by": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"new_staff_id": string,"old_staff_id": string,"organisation_id": string,"reason": string,"rejected_by": string | null,"requested_by": string,"status": Database["public"]['Enums']["staff_id_correction_status"],"updated_at": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "approved_by"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"new_staff_id": string,"old_staff_id": string,"organisation_id": string,"reason": string,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["staff_id_correction_status"],"updated_at"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "approved_by"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"new_staff_id"?: string,"old_staff_id"?: string,"organisation_id"?: string,"reason"?: string,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["staff_id_correction_status"],"updated_at"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "staff_id_corrections_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "staff_id_corrections_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"worker_assignments": {
                   Row: {
                     "client_id": string | null,"created_at": string,"created_by": string | null,"effective_from": string,"effective_to": string | null,"id": string,"organisation_id": string,"project_id": string | null,"site_id": string | null,"updated_at": string,"worker_id": string
@@ -373,14 +399,14 @@ isOneToOne: false
                   ]
                 },"worker_credentials": {
                   Row: {
-                    "auth_user_id": string,"created_at": string,"failed_attempts": number,"id": string,"last_sign_in_at": string | null,"locked_until": string | null,"organisation_id": string,"pin_set_at": string,"privacy_notice_accepted_at": string,"updated_at": string,"worker_id": string
+                    "auth_user_id": string,"created_at": string,"failed_attempts": number,"held_at": string | null,"id": string,"last_sign_in_at": string | null,"locked_until": string | null,"organisation_id": string,"pin_set_at": string,"privacy_notice_accepted_at": string,"updated_at": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "auth_user_id": string,"created_at"?: string,"failed_attempts"?: number,"id"?: string,"last_sign_in_at"?: string | null,"locked_until"?: string | null,"organisation_id": string,"pin_set_at"?: string,"privacy_notice_accepted_at": string,"updated_at"?: string,"worker_id": string
+                    "auth_user_id": string,"created_at"?: string,"failed_attempts"?: number,"held_at"?: string | null,"id"?: string,"last_sign_in_at"?: string | null,"locked_until"?: string | null,"organisation_id": string,"pin_set_at"?: string,"privacy_notice_accepted_at": string,"updated_at"?: string,"worker_id": string
                   }
                   Update: {
-                    "auth_user_id"?: string,"created_at"?: string,"failed_attempts"?: number,"id"?: string,"last_sign_in_at"?: string | null,"locked_until"?: string | null,"organisation_id"?: string,"pin_set_at"?: string,"privacy_notice_accepted_at"?: string,"updated_at"?: string,"worker_id"?: string
+                    "auth_user_id"?: string,"created_at"?: string,"failed_attempts"?: number,"held_at"?: string | null,"id"?: string,"last_sign_in_at"?: string | null,"locked_until"?: string | null,"organisation_id"?: string,"pin_set_at"?: string,"privacy_notice_accepted_at"?: string,"updated_at"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -563,6 +589,9 @@ isOneToOne: false
               "email": string,"full_name": string,"joined_at": string,"membership_id": string,"role": Database["public"]['Enums']["membership_role"],"user_id": string
             }[]
                            },
+"unlock_worker_sign_in":
+{ Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: string
+                           },
 "worker_bank_details_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string,"p_worker_id": string }; Returns: {
               "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_detail_change_id": string,"bank_name": string
@@ -580,7 +609,7 @@ isOneToOne: false
                            },
 "worker_sign_in_begin":
 { Args: { "p_company_code": string,"p_ip_key": string,"p_staff_id": string }; Returns: {
-              "auth_user_id": string,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
+              "auth_user_id": string,"holds_on_failure": boolean,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
             }[]
                            },
 "worker_sign_in_finish":
@@ -588,7 +617,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
+            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","staff_id_correction_status": "pending"|"approved"|"rejected"|"cancelled","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -704,7 +733,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
+            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
           }
         }
 } as const

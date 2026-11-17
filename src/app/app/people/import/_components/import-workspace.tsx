@@ -4,6 +4,8 @@ import { DataTable, type Column } from "@/components/data-table";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { IMPORT_TEMPLATE_HREF, importProblemsHref, type ImportPath } from "@/lib/people-import";
+import { getActiveCompany } from "@/server/identity/company-data";
+import { getPageSession } from "@/server/identity/session";
 import {
   getImportBatchView,
   PREVIEW_ROWS,
@@ -26,7 +28,14 @@ export async function ImportWorkspace({
   path: ImportPath;
   batchId: string | undefined;
 }) {
-  const view = batchId ? await getImportBatchView(batchId) : null;
+  const [view, session, company] = await Promise.all([
+    batchId ? getImportBatchView(batchId) : Promise.resolve(null),
+    getPageSession(),
+    getActiveCompany(),
+  ]);
+  // Owner decision 20 (slice 1.11): the owner's import before setup is finished saves bank
+  // details without a second approver. The database decides; this only explains it.
+  const bankSavedDirectly = session?.active?.role === "owner" && company?.setupCompletedAt === null;
   const live = view && view.status !== "cancelled" ? view : null;
   return (
     <div className="flex flex-col gap-6">
@@ -36,8 +45,10 @@ export async function ImportWorkspace({
           <span className="text-sm text-fg-muted">
             32 columns: identity, job, department, line manager ID, client, project, site, shift,
             pay, bank, tax, pension and next of kin. The first 15 are enough to start; pay and bank
-            columns are needed before the first payroll. Bank details wait for a second person to
-            approve them in Bank-detail approvals.
+            columns are needed before the first payroll.{" "}
+            {bankSavedDirectly
+              ? "While you finish setup, bank details in your import are saved straight away. After setup, each one waits for a second person to approve it."
+              : "Bank details wait for a second person to approve them in Bank-detail approvals."}
           </span>
           <Button asChild variant="outline" className="h-11 self-start rounded-lg px-4">
             <a href={IMPORT_TEMPLATE_HREF} download>

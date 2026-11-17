@@ -113,9 +113,13 @@ export async function commitImport(
     if (result.created === 0) {
       return { ok: true, message: "These employees are already imported." };
     }
+    const imported = `${result.created} ${result.created === 1 ? "employee" : "employees"} imported`;
     return {
       ok: true,
-      message: `${result.created} ${result.created === 1 ? "employee" : "employees"} imported`,
+      message:
+        result.bankDetailsSaved > 0
+          ? `${imported}. Bank details for ${result.bankDetailsSaved} saved without a second approver, as allowed for the owner's import before setup is finished.`
+          : imported,
     };
   } catch (error) {
     return refusal(error);

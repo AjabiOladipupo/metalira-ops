@@ -81,6 +81,10 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
   }
 
   if (result.status === "locked") return { ok: false, formError: copy.signIn.locked, values };
+  if (result.status === "held") return { ok: false, formError: copy.signIn.held, values };
+  if (result.status === "company_throttled") {
+    return { ok: false, formError: copy.signIn.companyThrottled, values };
+  }
   if (result.status === "ip_blocked")
     return { ok: false, formError: copy.signIn.ipBlocked, values };
   if (result.status === "invalid") return { ok: false, formError: copy.signIn.invalid, values };

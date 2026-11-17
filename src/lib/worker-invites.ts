@@ -17,6 +17,8 @@ export interface RosterWorker {
   pinSetAt: string | null;
   lastSignInAt: string | null;
   lockedUntil: string | null;
+  /** Locked 3 times in 24 hours: held until a new PIN is set (owner decision 18). */
+  heldAt?: string | null;
   /** The open (unused, unrevoked) invite, if any. */
   openInvite: { sentVia: InviteChannel; createdAt: string; expiresAt: string } | null;
 }
@@ -52,6 +54,9 @@ export function lagosTime(iso: string): string {
 
 export function inviteStatus(worker: RosterWorker, now: Date = new Date()): InviteStatus {
   if (worker.pinSetAt) {
+    if (worker.heldAt) {
+      return { kind: "locked", label: "Locked until a new PIN", tone: "action" };
+    }
     if (worker.lockedUntil && new Date(worker.lockedUntil) > now) {
       return {
         kind: "locked",

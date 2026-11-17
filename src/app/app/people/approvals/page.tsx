@@ -16,10 +16,12 @@ import {
 } from "@/server/people/bank-changes";
 import { peoplePageContext } from "@/server/people/page-context";
 import { canSeePii } from "@/server/people/pii-access";
+import { isStaffIdCorrector, loadStaffIdCorrections } from "@/server/people/staff-id-corrections";
 
 import { RouteGate } from "../../_shell/slots";
 import { BankChangeCard } from "../_components/bank-change-card";
 import { plural } from "../_components/display";
+import { StaffIdCorrectionCard } from "../_components/staff-id-correction-card";
 
 export const metadata: Metadata = { title: "Bank-detail approvals" };
 
@@ -60,7 +62,7 @@ async function Approvals() {
   await applyDueBankChanges(ctx.supabase, ctx.organisationId);
   after(() => sendAppliedBankChangeNotices(ctx.organisationId));
 
-  const [changes, viewer] = await Promise.all([
+  const [changes, viewer, corrections] = await Promise.all([
     loadBankChanges(ctx.supabase, ctx.organisationId, { limit: 100 }),
     loadBankChangeViewer(
       ctx.supabase,
@@ -69,6 +71,10 @@ async function Approvals() {
       ctx.role,
       canSeePii(ctx.role, "bank_account"),
     ),
+    // Staff ID corrections waiting for a second person (slice 1.11): owner, admin and hr.
+    isStaffIdCorrector(ctx.role)
+      ? loadStaffIdCorrections(ctx.supabase, ctx.organisationId, { status: "pending" })
+      : Promise.resolve([]),
   ]);
   const pending = changes.filter((c) => c.status === "pending");
   const onHold = changes.filter((c) => c.status === "approved");
@@ -101,6 +107,37 @@ async function Approvals() {
           }`}
         />
       </div>
+
+      {corrections.length > 0 ? (
+        <section
+          aria-labelledby="staff-id-corrections"
+          className="flex min-w-0 flex-col gap-4 border-t border-line pt-6"
+        >
+          <div className="flex flex-col gap-1">
+            <h2 id="staff-id-corrections" className="m-0 type-h3">
+              Staff ID corrections ({corrections.length})
+            </h2>
+            <p className="m-0 text-sm text-fg-muted">
+              A typo fix to an employee&apos;s staff ID, before any clock-ins or pay. Someone other
+              than the requester approves it.
+            </p>
+          </div>
+          <div className="flex flex-col gap-3">
+            {corrections.map((correction) => (
+              <StaffIdCorrectionCard
+                key={correction.id}
+                correction={correction}
+                viewer={{
+                  userId: ctx.userId,
+                  canDecide: true,
+                  ownWorkerIds: viewer.ownWorkerIds,
+                }}
+                showWorker
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {changes.length === 0 ? (
         <EmptyState

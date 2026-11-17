@@ -9,7 +9,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type pg from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { Database } from "@/types/db";
 
@@ -163,6 +163,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db?.end();
+});
+
+// The company cap on wrong PINs (slice 1.11, tests/rls/pin-lockout.test.ts) would otherwise
+// stop these tests after 50 tries against one company code.
+beforeEach(async () => {
+  await db.query("delete from private.auth_throttle where key like 'company:%'");
 });
 
 describe("creating invites", () => {
@@ -549,6 +555,7 @@ describe("PIN sign-in counter", () => {
           auth_user_id: null,
           pin_hash: null,
           locks_on_failure: false,
+          holds_on_failure: false,
         });
         expect(await finish(null, false)).toBe("failed");
       }
@@ -606,7 +613,8 @@ describe("PIN sign-in counter", () => {
   it("caps tries per network address at 100 in 15 minutes", async () => {
     const ip = ipKey();
     for (let i = 1; i <= 100; i += 1) {
-      const r = await begin(`NET-${i}`, ip);
+      // A different code each time, so the per-company cap stays out of the way.
+      const r = await begin(`NET-${i}`, ip, `NET${i}`);
       expect(r.outcome, `try ${i}`).toBe("proceed");
     }
     expect((await begin("NET-101", ip)).outcome).toBe("ip_blocked");

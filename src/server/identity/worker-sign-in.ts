@@ -11,11 +11,14 @@ import type { Database } from "@/types/db";
 import { pinSchema, verifyPin } from "./pin";
 
 /**
- * Worker PIN sign-in (owner decision 6), apart from the session itself so it can be unit
- * tested. The database counts attempts and holds the lock (public.worker_sign_in_begin and
- * worker_sign_in_finish); this module checks the PIN in between and turns the result into one
- * of a few answers. The answers never say whether the company code or staff ID exists: an
- * unknown pair is checked against a dummy hash, counted and locked exactly like a real one.
+ * Worker PIN sign-in (owner decisions 6 and 18), apart from the session itself so it can be
+ * unit tested. The database counts attempts and holds the locks (public.worker_sign_in_begin
+ * and worker_sign_in_finish): 5 wrong PINs in a row lock for 15 minutes, the 3rd lockout in 24
+ * hours holds sign-in until a new PIN, and a company code past its cap of wrong PINs is refused
+ * for the rest of the window (limits in src/lib/pin-lockout.ts). This module checks the PIN in
+ * between and turns the result into one of a few answers. The answers never say whether the
+ * company code or staff ID exists: an unknown pair is checked against a dummy hash, counted,
+ * locked and held exactly like a real one.
  */
 
 export const workerSignInSchema = z.object({
@@ -31,8 +34,11 @@ export const workerSignInSchema = z.object({
 
 export type WorkerSignInInput = z.output<typeof workerSignInSchema>;
 
+/** Refusals decided before any PIN is checked. */
+export type RefusedOutcome = "ip_blocked" | "locked" | "held" | "company_throttled";
+
 export type BeginResult =
-  | { outcome: "ip_blocked" | "locked" }
+  | { outcome: RefusedOutcome }
   | {
       outcome: "proceed";
       /** The worker with a login, or null for a company code and staff ID with none. */
@@ -40,7 +46,11 @@ export type BeginResult =
       pinHash: string | null;
       /** True when a wrong PIN now locks sign-in (the 5th try in a row). */
       locksOnFailure: boolean;
+      /** True when that lock is the 3rd in 24 hours and holds sign-in until a new PIN. */
+      holdsOnFailure: boolean;
     };
+
+export type FinishOutcome = "signed_in" | "failed" | "locked" | "held";
 
 export interface WorkerSignInStore {
   begin(companyCode: string, staffId: string, ipKey: string): Promise<BeginResult>;
@@ -48,7 +58,7 @@ export interface WorkerSignInStore {
     workerId: string | null,
     ok: boolean,
     ipKey: string,
-  ): Promise<"signed_in" | "failed" | "locked">;
+  ): Promise<FinishOutcome>;
 }
 
 export type WorkerSignInResult =
@@ -56,7 +66,11 @@ export type WorkerSignInResult =
   /** Wrong PIN, or an unknown company code or staff ID. Never say which. */
   | { status: "invalid" }
   | { status: "locked" }
-  | { status: "ip_blocked" };
+  /** Locked 3 times in 24 hours: only a new PIN from an HR invite opens it. */
+  | { status: "held" }
+  | { status: "ip_blocked" }
+  /** Too many wrong PINs for this company code just now; no worker was counted. */
+  | { status: "company_throttled" };
 
 /**
  * The network address as a counter key: an HMAC with a server-side key, so the stored value
@@ -98,6 +112,9 @@ export async function checkWorkerPin(
   if (login && ok && finished === "signed_in") {
     return { status: "signed_in", ...login };
   }
+  if (finished === "held" || (begun.locksOnFailure && begun.holdsOnFailure)) {
+    return { status: "held" };
+  }
   if (finished === "locked" || begun.locksOnFailure) return { status: "locked" };
   return { status: "invalid" };
 }
@@ -116,7 +133,12 @@ export function databaseSignInStore(admin: Admin): WorkerSignInStore {
         })
         .single();
       if (error || !data) throw new Error(`Sign-in check failed: ${error?.code ?? "no row"}`);
-      if (data.outcome === "ip_blocked" || data.outcome === "locked") {
+      if (
+        data.outcome === "ip_blocked" ||
+        data.outcome === "locked" ||
+        data.outcome === "held" ||
+        data.outcome === "company_throttled"
+      ) {
         return { outcome: data.outcome };
       }
       if (data.outcome !== "proceed") throw new Error("Sign-in check returned an unknown outcome.");
@@ -132,6 +154,7 @@ export function databaseSignInStore(admin: Admin): WorkerSignInStore {
             : null,
         pinHash: data.pin_hash ?? null,
         locksOnFailure: data.locks_on_failure === true,
+        holdsOnFailure: data.holds_on_failure === true,
       };
     },
     async finish(workerId, ok, network) {
@@ -142,7 +165,9 @@ export function databaseSignInStore(admin: Admin): WorkerSignInStore {
         p_ip_key: network,
       });
       if (error) throw new Error(`Sign-in result was not saved: ${error.code}`);
-      if (data === "signed_in" || data === "failed" || data === "locked") return data;
+      if (data === "signed_in" || data === "failed" || data === "locked" || data === "held") {
+        return data;
+      }
       throw new Error("Sign-in result returned an unknown outcome.");
     },
   };
