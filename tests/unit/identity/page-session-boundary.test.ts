@@ -36,7 +36,9 @@ const isRouteHandler = (file: string) => /\/route\.[cm]?[jt]sx?$/.test(file);
 
 const files = sourceFiles();
 const byPath = new Map(files.map((f) => [f.file, f]));
-const writers = files.filter(({ file, text }) => isServerActionModule(text) || isRouteHandler(file));
+const writers = files.filter(
+  ({ file, text }) => isServerActionModule(text) || isRouteHandler(file),
+);
 
 const EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.tsx"];
 
