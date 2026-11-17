@@ -22,7 +22,7 @@ export function ForMenu({ roles }: { roles: readonly { href: string; nav: string
           type="button"
           className={cn(navLinkClass, "inline-flex items-center gap-1 bg-transparent p-0")}
         >
-          For
+          For<span className="sr-only"> each role</span>
           <ChevronDown className="size-4" strokeWidth={1.75} aria-hidden />
         </button>
       </DropdownMenuTrigger>

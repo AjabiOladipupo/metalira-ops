@@ -66,14 +66,14 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 **How they are built**
 - Scenes are React components, not files in `public/illustrations/`: inline SVG, so `currentColor` and CSS variables follow the theme. Render with `<Illustration name size decorative>` (`src/components/illustration.tsx`); the scenes live in `src/components/illustrations/` and share one drawing kit (`ink.tsx`).
 - People come from the kit's `<Person>`: give each person in a scene their own `build` (regular, slim, wide, tall, short), `stance` (together, apart, lean-left, lean-right) and, where it helps, a three-quarter `turn`. Every outline is redrawn by `sketch()` with a seeded wobble and a slight shoulder and hip tilt, so no two people are the same drawing.
-- Mouths are outlines, never solid shapes: a filled mouth turns into a bright white grin on a dark face in dark mode.
+- Mouths are outlines, never solid shapes: a filled mouth turns into a bright white grin on a dark face in dark mode. A `grin` on a person drawn small (the 160px scenes) is drawn as an open `smile`, because its outline and teeth close into a blob at that line weight.
 - `IllustrationName` is the union of every scene name. Add a scene to the kit's files and a row to the slot table below in the same pull request.
 - The gallery at `/design-system` shows every scene at its size, in light and dark, plus sample avatars.
 
 **Rules**
 - Lines and solid fills in `currentColor` (`fg`: #0A0A0A light, #FAFAFA dark). The "white" areas use `var(--bg)`, so the whole drawing inverts in dark mode. No hex values, no grey shading, no gradients, no opacity.
 - At most one small accent in `var(--signal)` per scene (a bubble icon or a single small object), wrapped in the kit's `<Accent>`.
-- Stroke looks 2–2.5px at display size; `<Illustration>` works out the stroke width for the slot size.
+- Stroke looks 2–2.5px at display size; `<Illustration>` works out the stroke width for the slot size. When CSS shrinks a scene below its slot (the landing hero on phones, through `max-w-full`), pass `lineAt` with the height the lines are set for: the hero uses `lineAt={280}`, about 2px at 390px wide and about 2.5px at full size.
 - Sizes (height): 160px in empty states, 240px in onboarding and success screens, 96px in the worker app, 320px for the landing hero. Never in tables, forms, payslips, invoices or PDFs.
 - One illustration per screen at most. Always beside a sentence of copy; never decorative filler. Pass `decorative` (`aria-hidden`, the `alt=""` case) when the copy already says it; otherwise the scene's own description is its accessible name.
 

@@ -14,6 +14,7 @@ export const metadata: Metadata = {
   title: { absolute: "Metalira Ops · Every shift, accounted for" },
   description:
     "Rosters, clock-ins, payroll and client invoices in one record for Nigerian businesses that run shift-based teams. See what each site earns after the people who staffed it are paid.",
+  alternates: { canonical: "/" },
 };
 
 const WORKFORCE = [
@@ -54,7 +55,7 @@ const PROMISES = [
   },
   {
     title: "Your data, exportable",
-    body: "Download everything at any time. Built for Nigeria's data protection rules.",
+    body: "Download everything at any time. Personal data is encrypted and masked.",
   },
 ];
 
@@ -112,7 +113,9 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="flex justify-center lg:justify-end">
-              <Illustration name="hero-crew" className="w-full max-w-[480px]" />
+              {/* About 239px tall at 390px wide: lines are set for 280px so they stay about 2px
+                  on phones and about 2.5px at the full 320px. */}
+              <Illustration name="hero-crew" lineAt={280} className="w-full max-w-[480px]" />
             </div>
           </div>
           <SampleDashboard />

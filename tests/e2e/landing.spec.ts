@@ -89,7 +89,10 @@ test("the role pages are reachable from the header", async ({ page }, testInfo) 
       .getByRole("link", { name: "For HR" })
       .click();
   } else {
-    await page.getByRole("banner").getByRole("button", { name: "For", exact: true }).click();
+    await page
+      .getByRole("banner")
+      .getByRole("button", { name: "For each role", exact: true })
+      .click();
     await page.getByRole("menuitem", { name: "For HR" }).click();
   }
   await expect(page).toHaveURL(/\/for\/hr$/);
@@ -117,6 +120,7 @@ test("sitemap and robots list the public pages", async ({ request }) => {
   const robots = await (await request.get("/robots.txt")).text();
   expect(robots).toContain("Disallow: /app/");
   expect(robots).toContain("Disallow: /m/");
+  expect(robots).toContain("Disallow: /design-system");
   expect(robots).toContain("Sitemap: ");
   const og = await request.get("/opengraph-image");
   expect(og.status()).toBe(200);

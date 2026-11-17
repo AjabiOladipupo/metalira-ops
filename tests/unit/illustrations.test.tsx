@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { Illustration, ILLUSTRATION_NAMES, SCENES } from "@/components/illustration";
-import { Person, sketch } from "@/components/illustrations/ink";
+import { GRIN_MAX_LINE, Person, sketch } from "@/components/illustrations/ink";
 import { ILLUSTRATION_SIZES } from "@/components/illustrations/types";
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -96,6 +96,18 @@ describe("illustrations", () => {
     expect(at("worker")).toBeCloseTo(3.75);
   });
 
+  it("sets the landing hero lines for the height it shows at on phones and desktops", () => {
+    // The hero is 480 x 320 at full size and shrinks with max-w-full to about 358 x 239 at a
+    // 390px viewport. lineAt={280} keeps lines between about 1.9px and 2.6px across that range.
+    const units = Number(
+      /stroke-width="([\d.]+)"/.exec(render(<Illustration name="hero-crew" lineAt={280} />))![1],
+    );
+    const px = (shownHeight: number) => (units * shownHeight) / 320;
+    expect(px(320)).toBeGreaterThanOrEqual(2.25);
+    expect(px(320)).toBeLessThanOrEqual(2.6);
+    expect(px(239)).toBeGreaterThanOrEqual(1.9);
+  });
+
   describe("hand-drawn kit", () => {
     const same = (x: number, y: number) => [x, y] as const;
 
@@ -122,13 +134,27 @@ describe("illustrations", () => {
       expect(person({ seed: 1, turn: 1 })).not.toBe(a);
     });
 
-    it("never fills a mouth with ink", () => {
-      const grin = render(
+    const GRIN = 'd="M-5 9 C-2 13.8 2 13.8 5 9 Z" fill="var(--bg)"';
+    const SMILE = 'd="M-4.5 9.5 C-2 12.5 2 12.5 4.5 9.5"';
+    const face = (lw: number, s = 1) =>
+      render(
         <svg>
-          <Person x={0} y={0} lw={2} hair="short" top="shirt" face="grin" seed={1} />
+          <Person x={0} y={0} s={s} lw={lw} hair="short" top="shirt" face="grin" seed={1} />
         </svg>,
       );
-      expect(grin).toContain('d="M-5 9 C-2 13.8 2 13.8 5 9 Z" fill="var(--bg)"');
+
+    it("never fills a mouth with ink", () => {
+      expect(face(1.5)).toContain(GRIN);
+    });
+
+    it("draws a grin as an open smile once the line is too heavy for it", () => {
+      // A person drawn at s=0.93 in a 160px role scene: lw 2.25 becomes 2.42 in head units.
+      expect(2.25 / 0.93).toBeGreaterThan(GRIN_MAX_LINE);
+      const small = face(2.25, 0.93);
+      expect(small).not.toContain(GRIN);
+      expect(small).toContain(SMILE);
+      // The hero crew (s=1.66) keeps its grin.
+      expect(face(2.57, 1.66)).toContain(GRIN);
     });
   });
 });

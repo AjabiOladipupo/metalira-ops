@@ -79,7 +79,7 @@ export const ROLES: readonly Role[] = [
       {
         problem: "New workers wait days before they can use any system.",
         outcome:
-          "Send an invite by email, or print invite codes for workers with no email. They sign in on their own phone.",
+          "Send an invite by email, or print a sheet of invite QR codes for workers with no email. They sign in on their own phone.",
       },
       {
         problem: "One changed account number can send a salary to the wrong person.",

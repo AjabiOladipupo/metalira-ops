@@ -29,6 +29,7 @@ export function Illustration({
   size,
   decorative = false,
   label,
+  lineAt,
   className,
 }: {
   name: IllustrationName;
@@ -38,13 +39,18 @@ export function Illustration({
   decorative?: boolean;
   /** Overrides the scene's own description. */
   label?: string;
+  /**
+   * The display height (px) the line width is set for, when CSS shows the scene at another
+   * height (a hero shrunk by `max-w-full` on phones). Defaults to the slot height.
+   */
+  lineAt?: number;
   className?: string;
 }) {
   const scene: Scene = SCENES[name];
   const [vw, vh] = scene.viewBox;
   const height = ILLUSTRATION_SIZES[size ?? scene.size];
   const width = Math.round((height * vw) / vh);
-  const lw = (DISPLAY_LINE * vh) / height;
+  const lw = (DISPLAY_LINE * vh) / (lineAt ?? height);
   const a11y = decorative
     ? ({ "aria-hidden": true } as const)
     : ({ role: "img", "aria-label": label ?? scene.label } as const);

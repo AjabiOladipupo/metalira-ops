@@ -186,13 +186,12 @@ export const LANDING_SCENES = {
           top="blouse"
           bottom="skirt"
           build="tall"
-          left="chest"
-          right="chest"
-          face="grin"
+          left="hold"
+          right="hold"
           held={
             <g>
-              <g transform="translate(0 -86)">
-                <CardStack w={36} h={25} />
+              <g transform="translate(0 -84)">
+                <CardStack w={34} h={24} />
               </g>
               <Accent>
                 <circle cx={24} cy={-106} r={6} fill={PAPER} />
@@ -222,7 +221,6 @@ export const LANDING_SCENES = {
           turn={1}
           left="chest"
           right="point"
-          face="grin"
           held={
             <g>
               <g transform="translate(-6 -88)">

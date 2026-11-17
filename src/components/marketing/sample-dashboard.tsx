@@ -13,7 +13,7 @@ const TILES: { label: string; value: string; emphasis?: boolean }[] = [
 const SITES = [
   { name: "Apapa Warehouse 3", margin: "−1.8%" },
   { name: "Lekki Estate Gate B", margin: "18.2%" },
-  { name: "Ikeja City Mall", margin: "34.5%" },
+  { name: "Ikeja Retail Park", margin: "34.5%" },
 ];
 
 /**

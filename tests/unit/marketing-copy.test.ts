@@ -25,6 +25,22 @@ function marketingFiles(): string[] {
   ];
 }
 
+/**
+ * Copy in a source file that breaks the voice: an exclamation mark ending a word or standing
+ * alone, or an emoji. Reads double-, single- and back-quoted strings (with any `${…}` taken out)
+ * and JSX text, so `!` in code (`!ok`, `!==`) is not flagged.
+ */
+function copyProblems(text: string): string[] {
+  const STRING = /"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`|>([^<>{}\n]+)</g;
+  return [...text.matchAll(STRING)]
+    .map((m) => (m[1] ?? m[2] ?? m[3] ?? m[4] ?? "").replace(/\$\{[^}]*\}/g, ""))
+    .filter(
+      (s) =>
+        /[\p{L}\p{N}][\p{Pe}\p{Pf}"']?!(?!=)|(?:^|\s)!(?:\s|$)|,\s*!/u.test(s) ||
+        /\p{Extended_Pictographic}/u.test(s),
+    );
+}
+
 const FILES = marketingFiles().map((path) => ({
   name: relative(ROOT, path).replaceAll("\\", "/"),
   text: readFileSync(path, "utf8"),
@@ -54,13 +70,21 @@ describe("marketing copy", () => {
     });
 
     it("has no exclamation marks or emoji in copy", () => {
-      // Only string literals and JSX text: `!` is fine in code.
-      const strings = [...text.matchAll(/"([^"\n]*)"|>([^<>{}\n]+)</g)].map((m) => m[1] ?? m[2]);
-      for (const s of strings) {
-        expect(s).not.toMatch(/\p{Extended_Pictographic}/u);
-        if (s && /\s/.test(s)) expect(s, s).not.toMatch(/!/);
-      }
+      expect(copyProblems(text)).toEqual([]);
     });
+  });
+
+  it("the copy scan reads every kind of string literal and JSX text", () => {
+    expect(copyProblems('const a = "Done!";')).toEqual(["Done!"]);
+    expect(copyProblems("const a = 'Saved!';")).toEqual(["Saved!"]);
+    expect(copyProblems("const a = `Welcome, ${name}!`;")).toEqual(["Welcome, !"]);
+    expect(copyProblems("const a = `All set\nfor today!`;")).toEqual(["All set\nfor today!"]);
+    expect(copyProblems("<p>Great!</p>")).toEqual(["Great!"]);
+    expect(copyProblems('const b = "Paid \u{1F389}";')).toEqual(["Paid \u{1F389}"]);
+    // `!` in code is fine.
+    expect(copyProblems('if (!ok && a !== "x") return <p>{!done ? "Saved" : "Not"}</p>;')).toEqual(
+      [],
+    );
   });
 
   it("gives every role three problem-to-outcome blocks and a task list", () => {

@@ -216,6 +216,8 @@ const ARMS = {
   wave: { d: "M17 -104 C27 -106 32 -116 33 -128", hand: [34, -133] },
   chest: { d: "M17 -104 C25 -94 22 -84 11 -82", hand: [8, -82] },
   low: { d: "M17 -104 C24 -92 22 -78 12 -72", hand: [9, -71] },
+  /** Both hands on the bottom corners of something held in front of the chest. */
+  hold: { d: "M17 -104 C25 -94 26 -82 18 -73", hand: [16, -72] },
   carry: { d: "M17 -104 C25 -92 27 -72 21 -58", hand: [19.5, -55.5] },
   point: { d: "M17 -104 C28 -104 38 -110 45 -118", hand: [48, -121] },
   reach: { d: "M17 -104 C24 -92 30 -86 40 -84", hand: [44, -84] },
@@ -231,6 +233,9 @@ function ovalPath(rx: number, ry: number): string {
   const k = 0.5523;
   return `M0 ${-ry} C${k * rx} ${-ry} ${rx} ${-k * ry} ${rx} 0 C${rx} ${k * ry} ${k * rx} ${ry} 0 ${ry} C${-k * rx} ${ry} ${-rx} ${k * ry} ${-rx} 0 C${-rx} ${-k * ry} ${-k * rx} ${-ry} 0 ${-ry} Z`;
 }
+
+/** Heaviest line (in head units) at which a grin still reads as an open mouth. */
+export const GRIN_MAX_LINE = 1.9;
 
 /** A head centred on 0,0 (face about 24 wide, 29 tall). */
 export function Head({
@@ -256,6 +261,10 @@ export function Head({
   const fx = turn * 3;
   const eye = turn === 0 ? 4.6 : 3.8;
   const chin = (x: number, y: number): Pt => [x + (y > 0 ? (turn * 1.6 * y) / ry : 0), y];
+  // A grin is 10 units wide and under 5 tall. Once the line is heavy for the face (a person drawn
+  // small, as in the 160px scenes), its outline and teeth close into a dark blob, so it is drawn
+  // as an open smile instead.
+  const grin = face === "grin" && lw <= GRIN_MAX_LINE;
   return (
     <g>
       {/* Hair that sits behind the face */}
@@ -309,17 +318,22 @@ export function Head({
       ) : null}
       {hair === "wrap" ? (
         <g>
-          <path d="M3 -19 C6 -29 15 -27 11 -18 Z" fill={INK} />
-          <path d="M-2 -19 C-8 -27 -15 -22 -9 -16 Z" fill={INK} />
+          {/* A snug wrap tied off centre at the front-top: one twisted knot, a long end flaring
+              up and out to one side and a short end lying back over the crown */}
+          <path d="M6 -25 C9.5 -31.5 15.5 -33.5 18.5 -30.5 C15 -29.5 12 -27 9 -22 Z" fill={INK} />
+          <path d="M3 -25 C0.5 -29 -3.5 -30 -6 -28 C-3 -27.5 -0.5 -25.5 1.5 -22.5 Z" fill={INK} />
           <path
             d={sketch(
-              "M-13.2 -1 C-16 -15 -8 -22 0 -22 C8 -22 16 -15 13.2 -1 C8 -8 -8 -8 -13.2 -1 Z",
+              "M-13.2 -1 C-16 -16 -9 -23.5 0 -23.5 C9 -23.5 16 -16 13.2 -1 C8 -8 -8 -8 -13.2 -1 Z",
               SAME,
               seed + 5,
               0.4,
             )}
             fill={INK}
           />
+          <circle cx={4.5} cy={-24.5} r={3.6} fill={INK} />
+          <path d="M1 -21.5 C2.5 -19.6 6.5 -19.6 8 -21.5" fill="none" stroke={PAPER} />
+          <path d="M0.5 -19 C-3.5 -17.5 -8 -14.5 -10.5 -9.5" fill="none" stroke={PAPER} />
           <path d="M-9 -10 C-4 -14.5 4 -14.5 9 -10" fill="none" stroke={PAPER} />
         </g>
       ) : null}
@@ -380,7 +394,7 @@ export function Head({
             fill="none"
           />
         )}
-        {face === "grin" ? (
+        {grin ? (
           // An open mouth drawn as an outline, never a solid shape: in dark mode a filled mouth
           // would turn into a bright white grin on a dark face.
           <g>
@@ -498,16 +512,11 @@ function TopDetails({ top, lw }: { top: Top; lw: number }) {
       return (
         <g>
           <path d="M-8.5 -110.5 C-5 -104 5 -104 8.5 -110.5" fill="none" />
-          <circle cx={-11} cy={-96} r={2.4} fill="none" />
-          <circle cx={9} cy={-88} r={2.4} fill="none" />
-          <circle cx={-6} cy={-74} r={2.4} fill="none" />
-          <circle cx={13} cy={-63} r={2.4} fill="none" />
-          <circle cx={-14} cy={-58} r={2.4} fill="none" />
-          <Dot x={2} y={-97} r={1.1} />
-          <Dot x={-12} y={-83} r={1.1} />
-          <Dot x={6} y={-72} r={1.1} />
-          <Dot x={-2} y={-58} r={1.1} />
-          <Dot x={15} y={-79} r={1.1} />
+          {/* Print: short slanted strokes scattered unevenly, so no two marks pair up as eyes */}
+          <path
+            d="M-14 -99 l3 -3 M4 -100 l3 -3 M-6 -92 l3 -3 M12 -91 l3 -3 M-16 -84 l3 -3 M1 -84 l3 -3 M15 -76 l3 -3 M-18 -64 l3 -3 M14 -55 l3 -3"
+            fill="none"
+          />
         </g>
       );
   }
