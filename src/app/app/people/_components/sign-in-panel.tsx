@@ -70,7 +70,9 @@ export function SignInPanel({
           Sign-in locked {PIN_HOLD_AFTER_LOCKOUTS} times in {PIN_HOLD_WINDOW_HOURS} hours, so it
           stays locked until they set a new PIN from a new invite. Nobody can unlock it.
         </p>
-        <DetailList items={[...details, { label: "Held since", value: formatDateTime(state.since) }]} />
+        <DetailList
+          items={[...details, { label: "Held since", value: formatDateTime(state.since) }]}
+        />
         {inviteLink ?? (
           <p className="m-0 text-sm text-fg-muted">Ask HR to send them a new invite.</p>
         )}
@@ -85,8 +87,8 @@ export function SignInPanel({
           Locked until {formatDateTime(state.until)}
         </Status>
         <p className="m-0 text-sm">
-          {PIN_MAX_ATTEMPTS} wrong PINs in a row lock sign-in for {PIN_LOCK_MINUTES} minutes. If
-          you know it was them, unlock it now. The {PIN_HOLD_AFTER_LOCKOUTS}rd lock in{" "}
+          {PIN_MAX_ATTEMPTS} wrong PINs in a row lock sign-in for {PIN_LOCK_MINUTES} minutes. If you
+          know it was them, unlock it now. The {PIN_HOLD_AFTER_LOCKOUTS}rd lock in{" "}
           {PIN_HOLD_WINDOW_HOURS} hours can only be lifted with a new PIN.
         </p>
         <DetailList items={details} />

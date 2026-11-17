@@ -217,9 +217,9 @@ describe("IDs are never used twice in a company", () => {
       const { error } = await raise(staff.hr.client, worker.id, taken);
       expect(error?.code, taken).toBe("MLSI3");
     }
-    expect((await raise(staff.hr.client, worker.id, worker.staffId.toLowerCase())).error?.code).toBe(
-      "MLSI3",
-    );
+    expect(
+      (await raise(staff.hr.client, worker.id, worker.staffId.toLowerCase())).error?.code,
+    ).toBe("MLSI3");
   });
 
   it("retires the old ID for good: no correction and no new worker can take it", async () => {

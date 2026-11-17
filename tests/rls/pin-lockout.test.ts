@@ -31,7 +31,10 @@ let db: pg.Client;
 let owner: TenantUser;
 let other: TenantUser;
 let companyCode: string;
-const staff = {} as Record<"admin" | "hr" | "finance" | "ops" | "lineManager" | "otherLm", TestUser>;
+const staff = {} as Record<
+  "admin" | "hr" | "finance" | "ops" | "lineManager" | "otherLm",
+  TestUser
+>;
 let lineManagerMembership: string;
 let counter = 0;
 

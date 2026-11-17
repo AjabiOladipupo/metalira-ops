@@ -57,10 +57,7 @@ import { EndEmploymentForm } from "../_components/end-employment-form";
 import { PayChangeForm } from "../_components/pay-change-form";
 import { RevealValue } from "../_components/reveal-value";
 import { SignInPanel } from "../_components/sign-in-panel";
-import {
-  StaffIdCorrectionCard,
-  type StaffIdViewer,
-} from "../_components/staff-id-correction-card";
+import { StaffIdCorrectionCard, type StaffIdViewer } from "../_components/staff-id-correction-card";
 import { StaffIdCorrectionForm } from "../_components/staff-id-forms";
 
 export const metadata: Metadata = { title: "Employee" };
@@ -310,151 +307,149 @@ function Profile({
 
       {limited ? null : (
         <>
+          <Section
+            id="pay"
+            title="Pay"
+            description="Each change is a dated version. Versions already in force are never edited."
+          >
+            {worker.payRates.length === 0 ? (
+              <p className="m-0 text-sm text-fg-muted">
+                No pay on record yet. Payroll skips this employee until pay is added.
+              </p>
+            ) : (
+              <>
+                <DetailList
+                  items={[
+                    {
+                      label: "Current pay",
+                      value: current
+                        ? `${formatNaira(payHeadline(current))} ${PAY_PERIOD[current.payType]}`
+                        : "None in force today",
+                      testId: "current-pay",
+                    },
+                    {
+                      label: "Pay type",
+                      value: current ? PAY_TYPE_LABELS[current.payType] : null,
+                    },
+                    {
+                      label: "In force since",
+                      value: current ? formatDate(current.effectiveFrom) : null,
+                    },
+                  ]}
+                />
+                <PayHistory versions={worker.payRates} today={today} canEdit={canEdit && active} />
+              </>
+            )}
+            {canEdit && active ? (
+              <PayChangeForm
+                workerId={worker.id}
+                defaultPayType={(current ?? latest)?.payType ?? "monthly"}
+                defaultAmounts={amountsForForm(current ?? latest)}
+                defaultFrom={
+                  worker.payRates.length === 0 && worker.startDate > today
+                    ? worker.startDate
+                    : defaultFrom
+                }
+                minFrom={worker.payRates.length === 0 ? worker.startDate : minFrom}
+              />
+            ) : null}
+          </Section>
 
-      <Section
-        id="pay"
-        title="Pay"
-        description="Each change is a dated version. Versions already in force are never edited."
-      >
-        {worker.payRates.length === 0 ? (
-          <p className="m-0 text-sm text-fg-muted">
-            No pay on record yet. Payroll skips this employee until pay is added.
-          </p>
-        ) : (
-          <>
+          <Section
+            id="bank"
+            title="Bank details"
+            description="Changes need a second person to approve, then wait 72 hours before payouts use them."
+            actions={
+              canViewBankChanges(role) ? (
+                <Link href="/app/people/approvals" className="text-sm">
+                  All bank changes
+                </Link>
+              ) : null
+            }
+          >
             <DetailList
               items={[
+                { label: "Bank", value: worker.bankName },
+                { label: "Account name", value: worker.accountName },
                 {
-                  label: "Current pay",
-                  value: current
-                    ? `${formatNaira(payHeadline(current))} ${PAY_PERIOD[current.payType]}`
-                    : "None in force today",
-                  testId: "current-pay",
-                },
-                {
-                  label: "Pay type",
-                  value: current ? PAY_TYPE_LABELS[current.payType] : null,
-                },
-                {
-                  label: "In force since",
-                  value: current ? formatDate(current.effectiveFrom) : null,
+                  label: "Account number",
+                  value: worker.bankAccountLast4 ? (
+                    <RevealValue
+                      workerId={worker.id}
+                      field="bank_account"
+                      masked={maskAccount(worker.bankAccountLast4)}
+                      canReveal={canSeePii(role, "bank_account")}
+                      testId="bank-account"
+                    />
+                  ) : null,
                 },
               ]}
             />
-            <PayHistory versions={worker.payRates} today={today} canEdit={canEdit && active} />
-          </>
-        )}
-        {canEdit && active ? (
-          <PayChangeForm
-            workerId={worker.id}
-            defaultPayType={(current ?? latest)?.payType ?? "monthly"}
-            defaultAmounts={amountsForForm(current ?? latest)}
-            defaultFrom={
-              worker.payRates.length === 0 && worker.startDate > today
-                ? worker.startDate
-                : defaultFrom
-            }
-            minFrom={worker.payRates.length === 0 ? worker.startDate : minFrom}
-          />
-        ) : null}
-      </Section>
+            {bankChanges.map((change) => (
+              <BankChangeCard key={change.id} change={change} viewer={viewer} showWorker={false} />
+            ))}
+            {canEdit && active ? (
+              bankChanges.some((c) => c.status === "pending" || c.status === "approved") ? (
+                <p className="m-0 text-sm text-fg-muted">
+                  A new change can be raised once this one is applied, rejected or withdrawn.
+                </p>
+              ) : (
+                <BankChangeRequestForm workerId={worker.id} />
+              )
+            ) : null}
+          </Section>
 
-      <Section
-        id="bank"
-        title="Bank details"
-        description="Changes need a second person to approve, then wait 72 hours before payouts use them."
-        actions={
-          canViewBankChanges(role) ? (
-            <Link href="/app/people/approvals" className="text-sm">
-              All bank changes
-            </Link>
-          ) : null
-        }
-      >
-        <DetailList
-          items={[
-            { label: "Bank", value: worker.bankName },
-            { label: "Account name", value: worker.accountName },
-            {
-              label: "Account number",
-              value: worker.bankAccountLast4 ? (
-                <RevealValue
-                  workerId={worker.id}
-                  field="bank_account"
-                  masked={maskAccount(worker.bankAccountLast4)}
-                  canReveal={canSeePii(role, "bank_account")}
-                  testId="bank-account"
-                />
-              ) : null,
-            },
-          ]}
-        />
-        {bankChanges.map((change) => (
-          <BankChangeCard key={change.id} change={change} viewer={viewer} showWorker={false} />
-        ))}
-        {canEdit && active ? (
-          bankChanges.some((c) => c.status === "pending" || c.status === "approved") ? (
-            <p className="m-0 text-sm text-fg-muted">
-              A new change can be raised once this one is applied, rejected or withdrawn.
-            </p>
-          ) : (
-            <BankChangeRequestForm workerId={worker.id} />
-          )
-        ) : null}
-      </Section>
-
-      <Section id="tax" title="Tax and pension">
-        <DetailList
-          items={[
-            {
-              label: "NIN",
-              value: worker.ninOnFile ? (
-                <span className="inline-flex flex-wrap items-center gap-x-3">
-                  <span>{ninStatus(true)}</span>
-                  {canSeePii(role, "nin") ? (
+          <Section id="tax" title="Tax and pension">
+            <DetailList
+              items={[
+                {
+                  label: "NIN",
+                  value: worker.ninOnFile ? (
+                    <span className="inline-flex flex-wrap items-center gap-x-3">
+                      <span>{ninStatus(true)}</span>
+                      {canSeePii(role, "nin") ? (
+                        <RevealValue
+                          workerId={worker.id}
+                          field="nin"
+                          masked=""
+                          canReveal
+                          testId="nin"
+                        />
+                      ) : null}
+                    </span>
+                  ) : (
+                    ninStatus(false)
+                  ),
+                },
+                { label: "TIN", value: worker.tin },
+                { label: "Tax state", value: worker.taxState },
+                { label: "Pension fund (PFA)", value: worker.pfaName },
+                {
+                  label: "RSA PIN",
+                  value: worker.rsaPinOnFile ? (
                     <RevealValue
                       workerId={worker.id}
-                      field="nin"
-                      masked=""
-                      canReveal
-                      testId="nin"
+                      field="rsa_pin"
+                      masked={maskRsaPin(worker.rsaPinLast4) || "On file"}
+                      canReveal={canSeePii(role, "rsa_pin")}
+                      testId="rsa-pin"
                     />
-                  ) : null}
-                </span>
-              ) : (
-                ninStatus(false)
-              ),
-            },
-            { label: "TIN", value: worker.tin },
-            { label: "Tax state", value: worker.taxState },
-            { label: "Pension fund (PFA)", value: worker.pfaName },
-            {
-              label: "RSA PIN",
-              value: worker.rsaPinOnFile ? (
-                <RevealValue
-                  workerId={worker.id}
-                  field="rsa_pin"
-                  masked={maskRsaPin(worker.rsaPinLast4) || "On file"}
-                  canReveal={canSeePii(role, "rsa_pin")}
-                  testId="rsa-pin"
-                />
-              ) : null,
-            },
-            { label: "National Housing Fund", value: worker.nhfOptIn ? "Contributes" : "No" },
-            { label: "Annual rent declared", value: money(worker.annualRentDeclared) },
-          ]}
-        />
-      </Section>
+                  ) : null,
+                },
+                { label: "National Housing Fund", value: worker.nhfOptIn ? "Contributes" : "No" },
+                { label: "Annual rent declared", value: money(worker.annualRentDeclared) },
+              ]}
+            />
+          </Section>
 
-      <Section id="next-of-kin" title="Next of kin">
-        <DetailList
-          items={[
-            { label: "Name", value: worker.nextOfKinName },
-            { label: "Phone", value: worker.nextOfKinPhone },
-          ]}
-        />
-      </Section>
-
+          <Section id="next-of-kin" title="Next of kin">
+            <DetailList
+              items={[
+                { label: "Name", value: worker.nextOfKinName },
+                { label: "Phone", value: worker.nextOfKinPhone },
+              ]}
+            />
+          </Section>
         </>
       )}
 

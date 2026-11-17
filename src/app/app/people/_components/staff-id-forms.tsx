@@ -51,8 +51,8 @@ export function StaffIdCorrectionForm({
       >
         <input type="hidden" name="workerId" value={workerId} />
         <p className="m-0 text-sm text-fg-muted">
-          Someone other than you approves the change. After that the employee signs in with the
-          new ID, and {currentStaffId} can never be given to anyone else in your company.
+          Someone other than you approves the change. After that the employee signs in with the new
+          ID, and {currentStaffId} can never be given to anyone else in your company.
         </p>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-4">
           <Field

@@ -54,11 +54,7 @@ export type FinishOutcome = "signed_in" | "failed" | "locked" | "held";
 
 export interface WorkerSignInStore {
   begin(companyCode: string, staffId: string, ipKey: string): Promise<BeginResult>;
-  finish(
-    workerId: string | null,
-    ok: boolean,
-    ipKey: string,
-  ): Promise<FinishOutcome>;
+  finish(workerId: string | null, ok: boolean, ipKey: string): Promise<FinishOutcome>;
 }
 
 export type WorkerSignInResult =

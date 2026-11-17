@@ -21,7 +21,11 @@ import { normaliseStaffId } from "./import/staff-id";
  * after. The worker sees the new ID on Me and signs in with it.
  */
 
-export const STAFF_ID_CORRECTORS = ["owner", "admin", "hr"] as const satisfies readonly ManagerRole[];
+export const STAFF_ID_CORRECTORS = [
+  "owner",
+  "admin",
+  "hr",
+] as const satisfies readonly ManagerRole[];
 
 export function isStaffIdCorrector(role: ManagerRole): boolean {
   return (STAFF_ID_CORRECTORS as readonly ManagerRole[]).includes(role);
@@ -35,20 +39,18 @@ type Client = SupabaseClient<Database>;
  * A corrected staff ID: the strict token every staff ID must be to sign in and to appear in
  * emails and on printed invite sheets (people/import/staff-id.ts), after NFKC.
  */
-export const newStaffIdSchema = z
-  .string()
-  .transform((value, ctx) => {
-    const id = normaliseStaffId(value);
-    if (id === null) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Use up to 40 letters, digits, dots, dashes, slashes or underscores, starting with a letter or digit.",
-      });
-      return z.NEVER;
-    }
-    return id;
-  });
+export const newStaffIdSchema = z.string().transform((value, ctx) => {
+  const id = normaliseStaffId(value);
+  if (id === null) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "Use up to 40 letters, digits, dots, dashes, slashes or underscores, starting with a letter or digit.",
+    });
+    return z.NEVER;
+  }
+  return id;
+});
 
 const reasonSchema = z
   .string()

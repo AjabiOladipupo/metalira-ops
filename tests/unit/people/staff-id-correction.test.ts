@@ -85,9 +85,9 @@ describe("who corrects staff IDs", () => {
       role,
     });
     const input = { workerId: WORKER, newStaffId: "AFS-0142", reason: "Typo at import" };
-    await expect(runMutation(ctx("finance"), requestStaffIdCorrectionSpec, input)).rejects.toMatchObject(
-      { code: "forbidden" },
-    );
+    await expect(
+      runMutation(ctx("finance"), requestStaffIdCorrectionSpec, input),
+    ).rejects.toMatchObject({ code: "forbidden" });
     await expect(
       runMutation(ctx("line_manager"), decideStaffIdCorrectionSpec, {
         correctionId: WORKER,
@@ -97,7 +97,8 @@ describe("who corrects staff IDs", () => {
   });
 
   it("turns the database's never-used refusal into a field error", async () => {
-    const message = "Staff ID AFS-0001 has been used before in this company. Choose one nobody has had.";
+    const message =
+      "Staff ID AFS-0001 has been used before in this company. Choose one nobody has had.";
     const supabase = {
       from: () => ({
         insert: () => ({
@@ -153,7 +154,10 @@ describe("retired staff IDs are never handed out again", () => {
     expect(nextStaffId(["AFS-0001", "AFS-0002", "AFS-0004", "AFS-0003"])).toBe("AFS-0005");
   });
 
-  const BASE = Object.fromEntries(TEMPLATE_COLUMNS.map((c) => [c, ""])) as Record<ColumnKey, string>;
+  const BASE = Object.fromEntries(TEMPLATE_COLUMNS.map((c) => [c, ""])) as Record<
+    ColumnKey,
+    string
+  >;
   const record = (employeeId: string): Record<ColumnKey, string> => ({
     ...BASE,
     employee_id: employeeId,

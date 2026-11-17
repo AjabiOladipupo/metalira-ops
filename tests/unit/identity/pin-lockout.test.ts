@@ -101,7 +101,9 @@ function companyStore(known: Record<string, string>) {
       }
       return {
         outcome: "proceed",
-        login: isKnown ? { workerId: staff, organisationId: "o-1", authUserId: `u-${staff}` } : null,
+        login: isKnown
+          ? { workerId: staff, organisationId: "o-1", authUserId: `u-${staff}` }
+          : null,
         pinHash: isKnown ? (known[staff] ?? null) : null,
         locksOnFailure: locks,
         holdsOnFailure: holds,
@@ -168,9 +170,7 @@ describe("lockout counting and the hold (decision 18)", () => {
     s.advance(25 * HOUR);
     expect((await checkWorkerPin(s.store, input(RIGHT), NETWORK, verify)).status).toBe("held");
     s.newPin("emp-0001");
-    expect((await checkWorkerPin(s.store, input(RIGHT), NETWORK, verify)).status).toBe(
-      "signed_in",
-    );
+    expect((await checkWorkerPin(s.store, input(RIGHT), NETWORK, verify)).status).toBe("signed_in");
   });
 
   it("forgets lockouts older than 24 hours", async () => {
@@ -224,7 +224,12 @@ describe("company cap on wrong PINs (decision 18)", () => {
     const s = companyStore({ "emp-0001": RIGHT });
     // A spray: one wrong PIN for each of many staff IDs.
     for (let i = 0; i < COMPANY_WRONG_PIN_CAP; i += 1) {
-      const result = await checkWorkerPin(s.store, input(WRONG, `EMP-${1000 + i}`), NETWORK, verify);
+      const result = await checkWorkerPin(
+        s.store,
+        input(WRONG, `EMP-${1000 + i}`),
+        NETWORK,
+        verify,
+      );
       expect(result.status).toBe("invalid");
     }
     const refused = await checkWorkerPin(s.store, input(RIGHT), NETWORK, verify);
@@ -232,9 +237,7 @@ describe("company cap on wrong PINs (decision 18)", () => {
     // Nobody was locked by the refusals: after the window the real worker signs in.
     for (let i = 0; i < 20; i += 1) await checkWorkerPin(s.store, input(WRONG), NETWORK, verify);
     s.advance(COMPANY_WINDOW_MINUTES * MINUTE);
-    expect((await checkWorkerPin(s.store, input(RIGHT), NETWORK, verify)).status).toBe(
-      "signed_in",
-    );
+    expect((await checkWorkerPin(s.store, input(RIGHT), NETWORK, verify)).status).toBe("signed_in");
   });
 
   it("gives a successful sign-in its try back", async () => {
@@ -281,7 +284,10 @@ describe("signInState", () => {
       until: "2026-11-17T10:10:00Z",
     });
     expect(
-      signInState({ ...base, lockedUntil: "2026-11-17T10:10:00Z", heldAt: "2026-11-17T09:55:00Z" }, now),
+      signInState(
+        { ...base, lockedUntil: "2026-11-17T10:10:00Z", heldAt: "2026-11-17T09:55:00Z" },
+        now,
+      ),
     ).toEqual({ kind: "held", since: "2026-11-17T09:55:00Z" });
   });
 
