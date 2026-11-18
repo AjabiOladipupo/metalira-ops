@@ -31,8 +31,9 @@ for (const { path, heading, scene } of PAGES) {
   test(`${path} renders with its scene and no horizontal scroll`, async ({ page }) => {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(heading);
+    // One scene per screen: the landing's second scene sits far below the hero, in #lira.
     const illustrations = page.locator("main svg[data-illustration]");
-    await expect(illustrations).toHaveCount(1);
+    await expect(illustrations).toHaveCount(path === "/" ? 2 : 1);
     await expect(page.locator(`svg[data-illustration="${scene}"]`)).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 
@@ -42,6 +43,61 @@ for (const { path, heading, scene } of PAGES) {
     await expect(page.getByRole("link", { name: /^(privacy|terms)/i })).toHaveCount(0);
   });
 }
+
+test("the Lira section says coming soon and fits the page", async ({ page }, testInfo) => {
+  await page.goto("/");
+  const lira = page.locator("#lira");
+  await lira.scrollIntoViewIfNeeded();
+  await expect(lira.getByRole("heading", { level: 2 })).toHaveText("Meet Lira");
+  await expect(lira.getByText("Coming soon", { exact: true })).toBeVisible();
+  await expect(lira.locator('svg[data-illustration="lira-chat"]')).toBeVisible();
+  for (const request of [
+    "Add these 162 people from my spreadsheet.",
+    "Who hasn't clocked in at Lekki today?",
+    "Prepare November payroll for my approval.",
+    "Which clients are overdue?",
+  ]) {
+    await expect(lira.locator("q").filter({ hasText: request })).toBeVisible();
+  }
+  await expect(lira).toContainText("waits for you to confirm");
+  await expect(lira).toContainText("It never moves money.");
+  const text = await lira.innerText();
+  expect(text).not.toMatch(/₦\s?\d|NGN|\b20\d\d\b|\bsms\b|whatsapp/i);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+
+  // The section's own width never exceeds the viewport, with the 16px gutter on phones.
+  const box = (await lira.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+  if (testInfo.project.name === "mobile-390") {
+    await page.getByRole("button", { name: "Open menu" }).click();
+    await page
+      .getByRole("navigation", { name: "Menu" })
+      .getByRole("link", { name: "Lira" })
+      .click();
+  } else {
+    await page
+      .getByRole("navigation", { name: "Site" })
+      .getByRole("link", { name: "Lira" })
+      .click();
+  }
+  await expect(page).toHaveURL(/\/#lira$/);
+});
+
+test("manager role pages carry a Lira card; the workers page does not", async ({ page }) => {
+  for (const { path } of PAGES.slice(1, 5)) {
+    await page.goto(path);
+    const card = page.getByTestId("lira-card");
+    await expect(card, path).toBeVisible();
+    await expect(card.getByText("Coming soon", { exact: true })).toBeVisible();
+    await expect(card.getByRole("link", { name: "Meet Lira" })).toHaveAttribute("href", "/#lira");
+    expect(await horizontalOverflow(page), path).toBeLessThanOrEqual(0);
+  }
+  await page.goto("/for/workers");
+  await expect(page.getByTestId("lira-card")).toHaveCount(0);
+  await expect(page.getByRole("main")).not.toContainText("Lira");
+});
 
 test("every Start setup and Set up your business link goes to sign-up", async ({ page }) => {
   for (const { path } of PAGES) {

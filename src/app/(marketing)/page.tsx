@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 
 import { Illustration } from "@/components/illustration";
+import { LIRA } from "@/components/marketing/lira";
 import {
+  ComingSoonChip,
   Container,
   CtaLink,
   DotList,
@@ -172,6 +174,34 @@ export default function LandingPage() {
             </li>
           ))}
         </ol>
+      </Section>
+
+      <Section id="lira" aria-labelledby="lira-title" className="pt-0 lg:pt-0">
+        <div className="flex flex-col gap-8 rounded-lg bg-surface p-6 lg:p-10">
+          <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-12">
+            <div className="flex max-w-[720px] flex-col gap-4">
+              <ComingSoonChip />
+              <h2 id="lira-title" className="m-0 type-mkt-h3 lg:type-mkt-h2">
+                {LIRA.title}
+              </h2>
+              <p className="m-0 text-[17px] leading-[1.55] text-fg-muted">{LIRA.intro}</p>
+            </div>
+            <Illustration name="lira-chat" className="justify-self-center" />
+          </div>
+          <ul className="m-0 grid list-none gap-4 p-0 sm:grid-cols-2 lg:grid-cols-4">
+            {LIRA.capabilities.map((item) => (
+              <li key={item.title} className="flex flex-col gap-2.5 rounded-lg bg-background p-5">
+                <span className="text-[17px] font-semibold">{item.title}</span>
+                <q className="text-[15px] leading-normal font-medium">{item.request}</q>
+                <span className="text-[15px] leading-normal text-fg-muted">{item.body}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex flex-col gap-3.5 border-t border-line pt-6">
+            <h3 className="m-0 text-[17px] font-semibold">{LIRA.safetyTitle}</h3>
+            <DotList items={LIRA.safety} className="grid gap-x-8 sm:grid-cols-2" />
+          </div>
+        </div>
       </Section>
 
       <Section id="pilot" tone="surface" aria-labelledby="pilot-title">

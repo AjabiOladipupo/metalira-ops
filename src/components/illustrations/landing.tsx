@@ -273,6 +273,50 @@ export const LANDING_SCENES = {
       </>
     ),
   },
+  "lira-chat": {
+    viewBox: [200, 160],
+    size: "empty",
+    label:
+      "A manager typing on a phone, her chat message beside her and a reply card with a confirm button",
+    draw: (lw) => (
+      <>
+        {/* Her message: a rounded bubble with two lines of text, its tail toward her. */}
+        <path
+          d="M118 14 H178 C183 14 186 17 186 22 V36 C186 41 183 44 178 44 H122 L106 52 L113 42 C110.5 40.5 110 38.5 110 36 V22 C110 17 113 14 118 14 Z"
+          fill={PAPER}
+        />
+        <path d="M120 25 H176 M120 33 H158" fill="none" />
+        {/* The reply: what will change, a cancel button and the confirm button (the accent). */}
+        <rect x={100} y={60} width={90} height={62} rx={6} fill={PAPER} />
+        <path d="M110 72 H146" fill="none" />
+        <path d="M110 82 l1.6 1.6 l3 -3.2 M120 82 H178" fill="none" />
+        <path d="M110 92 l1.6 1.6 l3 -3.2 M120 92 H168" fill="none" />
+        <rect x={150} y={102} width={30} height={12} rx={3} fill="none" />
+        <path d="M159 108 H171" fill="none" />
+        <Accent>
+          <rect x={108} y={102} width={36} height={12} rx={3} fill={PAPER} />
+          <path d="M121 108.2 L124.5 111.6 L131 104.8" fill="none" />
+        </Accent>
+        <Person
+          x={58}
+          y={157}
+          s={0.93}
+          lw={lw}
+          hair="braids"
+          top="jacket"
+          stance="lean-left"
+          turn={1}
+          left="chest"
+          right="chest"
+          held={
+            <g transform="translate(-3 -99) rotate(-6)">
+              <Phone w={19} h={31} />
+            </g>
+          }
+        />
+      </>
+    ),
+  },
   "role-worker": {
     viewBox: [200, 160],
     size: "empty",

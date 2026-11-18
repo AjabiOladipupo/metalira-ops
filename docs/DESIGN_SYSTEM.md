@@ -102,5 +102,6 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 | role-finance | Landing, for finance: calculator and naira note | Landing | 160 |
 | role-operations | Landing, for operations: clipboard and map pin | Landing | 160 |
 | role-worker | Landing, for workers: hi-vis worker tapping a phone | Landing | 160 |
+| lira-chat | Landing, "Meet Lira" (coming soon): manager on a phone, her message and a reply card with a confirm button (the accent). Far below the hero, so never on screen with it | Landing | 160 |
 
 Still to draw when their phase needs them: an error page scene, search with no results, and an empty inbox. Add the slot here first.

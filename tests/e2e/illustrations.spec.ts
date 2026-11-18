@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // Later phases add scenes, so check the floor and that both panels match, not an exact count.
-const MIN_SCENES = 22;
+const MIN_SCENES = 23;
 
 for (const scheme of ["light", "dark"] as const) {
   test(`illustration gallery renders with the system set to ${scheme}`, async ({ page }) => {
