@@ -5,10 +5,12 @@ import { NO_DEPARTMENT, type DepartmentSummary } from "@/server/people/people-da
 
 import { plural } from "./display";
 
-function hrefFor(departmentId: string, query: string): string {
+/** A department filter link. Keeps the search and page size; drops the page, so it starts at 1. */
+function hrefFor(departmentId: string, query: string, size: number | undefined): string {
   const params = new URLSearchParams();
-  if (departmentId) params.set("dept", departmentId);
   if (query) params.set("q", query);
+  if (departmentId) params.set("dept", departmentId);
+  if (size) params.set("size", String(size));
   const search = params.toString();
   return search ? `/app/people?${search}` : "/app/people";
 }
@@ -55,18 +57,21 @@ export function DepartmentTiles({
   noDepartmentCount,
   selected,
   query,
+  size,
 }: {
   departments: DepartmentSummary[];
   activeCount: number;
   noDepartmentCount: number;
   selected: string;
   query: string;
+  /** A non-default page size to keep in the links. */
+  size?: number;
 }) {
   return (
     <nav aria-label="Departments">
       <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,150px),1fr))] gap-3 p-0">
         <Tile
-          href={hrefFor("", query)}
+          href={hrefFor("", query, size)}
           label="All"
           count={activeCount}
           note={plural(departments.length, "department", "departments")}
@@ -75,7 +80,7 @@ export function DepartmentTiles({
         {departments.map((d) => (
           <Tile
             key={d.id}
-            href={hrefFor(d.id, query)}
+            href={hrefFor(d.id, query, size)}
             label={d.name}
             count={d.count}
             note={d.headName ? `Head: ${d.headName}` : "No head set"}
@@ -84,7 +89,7 @@ export function DepartmentTiles({
         ))}
         {noDepartmentCount > 0 ? (
           <Tile
-            href={hrefFor(NO_DEPARTMENT, query)}
+            href={hrefFor(NO_DEPARTMENT, query, size)}
             label="No department"
             count={noDepartmentCount}
             note="Needs a department"
