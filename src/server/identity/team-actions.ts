@@ -20,8 +20,16 @@ import { ACTIVE_ORG_COOKIE, ACTIVE_ORG_COOKIE_OPTIONS } from "./active-org";
 import { getCompany } from "./company-data";
 import { MutationError, mutate } from "./mutate";
 import { fullNameSchema } from "./names";
+import { invitePasswordStepFor, markPasswordChosen } from "./invite-password";
 import { appOrigin } from "./origin";
 import { formFields } from "./schemas";
+import { notifyOwnerChange, notifyOwnerJoined } from "./owner-notices";
+import {
+  decideOwnerChangeSpec,
+  requestOwnerChangeSpec,
+  type DecidedOwnerChange,
+  type RequestedOwnerChange,
+} from "./owners";
 import { getSession } from "./session";
 import {
   cancelSpec,
@@ -138,13 +146,16 @@ async function inviteResult(invite: IssuedInvite, verb: "sent" | "sent again") {
   } satisfies TeamActionState;
 }
 
-/** Invites a manager by email with one role. */
+/** Invites a manager by email with one role, or (owners only) someone as an owner. */
 export async function inviteManagerAction(
   _prev: TeamActionState,
   formData: FormData,
 ): Promise<TeamActionState> {
   const fields = formFields(formData);
   const values = { email: fields.email ?? "", role: fields.role ?? "" };
+  if (fields.role === "owner") {
+    return ownerChangeResult({ kind: "invite", email: fields.email ?? "" }, values);
+  }
   let invite: IssuedInvite;
   try {
     invite = await mutate(inviteSpec, fields);
@@ -152,6 +163,117 @@ export async function inviteManagerAction(
     return refusal(error, values);
   }
   return inviteResult(invite, "sent");
+}
+
+// ---------------------------------------------------------------------------
+// Owner changes (slice 1.13)
+// ---------------------------------------------------------------------------
+
+/** The owner invite a request or an approval just issued, ready to email. */
+async function issuedOwnerInvite(changeId: string, token: string): Promise<IssuedInvite | null> {
+  const supabase = await createServerSupabase();
+  const { data } = await supabase
+    .from("membership_invites")
+    .select("id, email, expires_at")
+    .eq("owner_change_id", changeId)
+    .is("accepted_at", null)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    inviteId: data.id,
+    token,
+    email: data.email,
+    role: "owner",
+    expiresAt: new Date(data.expires_at),
+  };
+}
+
+function ownerNoticeAfter(
+  changeId: string,
+  event: "requested" | "done" | "rejected" | "withdrawn",
+  actorId: string,
+) {
+  after(() => notifyOwnerChange(changeId, event, actorId).then(() => undefined));
+}
+
+const OWNER_PENDING =
+  "Waiting for another owner to approve. Every owner has been emailed; nothing changes until a different owner approves.";
+
+async function ownerChangeResult(
+  input: Record<string, string>,
+  values?: Record<string, string>,
+): Promise<TeamActionState> {
+  let change: RequestedOwnerChange;
+  try {
+    change = await mutate(requestOwnerChangeSpec, input);
+  } catch (error) {
+    return refusal(error, values);
+  }
+  const session = await getSession();
+  if (session) {
+    ownerNoticeAfter(
+      change.changeId,
+      change.status === "pending" ? "requested" : "done",
+      session.user.id,
+    );
+  }
+  revalidatePath(TEAM_PATH);
+  if (change.status === "pending") {
+    return { ok: true, status: 200, message: OWNER_PENDING };
+  }
+  if (change.inviteToken) {
+    const invite = await issuedOwnerInvite(change.changeId, change.inviteToken);
+    if (invite) return inviteResult(invite, "sent");
+  }
+  const done: Record<string, string> = {
+    add: "They are now an owner. Every owner has been emailed.",
+    invite: "Owner invite created.",
+    remove: "Done.",
+    demote: "Done.",
+  };
+  return { ok: true, status: 200, message: done[change.kind] };
+}
+
+/** Asks for an owner change from a member row: make owner, remove as owner, step down. */
+export async function requestOwnerChangeAction(
+  _prev: TeamActionState,
+  formData: FormData,
+): Promise<TeamActionState> {
+  return ownerChangeResult(formFields(formData));
+}
+
+/** Approves, rejects or withdraws a pending owner change. */
+export async function decideOwnerChangeAction(
+  _prev: TeamActionState,
+  formData: FormData,
+): Promise<TeamActionState> {
+  let decided: DecidedOwnerChange;
+  try {
+    decided = await mutate(decideOwnerChangeSpec, formFields(formData));
+  } catch (error) {
+    return refusal(error);
+  }
+  const session = await getSession();
+  const event =
+    decided.status === "approved"
+      ? "done"
+      : decided.status === "rejected"
+        ? "rejected"
+        : "withdrawn";
+  if (session) ownerNoticeAfter(decided.changeId, event, session.user.id);
+  revalidatePath(TEAM_PATH);
+  if (decided.status === "approved" && decided.inviteToken) {
+    const invite = await issuedOwnerInvite(decided.changeId, decided.inviteToken);
+    if (invite) return inviteResult(invite, "sent");
+  }
+  const messages = {
+    approved: "Approved. The change has happened and every owner has been emailed.",
+    rejected: "Rejected. Nothing changed.",
+    cancelled: "Withdrawn. Nothing changed.",
+    pending: "Saved.",
+  } as const;
+  return { ok: true, status: 200, message: messages[decided.status] };
 }
 
 /** Sends a pending or expired invite again with a new link. */
@@ -271,24 +393,81 @@ const ACCEPT_MESSAGES: Record<string, string> = {
   MLTM3: "This invite has already been used.",
   MLTM4: "This invite has expired. Ask the person who invited you to send it again.",
   MLTM5: "This invite was cancelled. Ask the person who invited you for a new one.",
+  MLPW1:
+    'For your safety, open the sign-in link we emailed you, choose your password there, then accept. On the sign-in page, choose "Email link" to get a new one.',
+  MLOW6:
+    "This owner invite now needs a second owner's approval. Ask an owner of the company to send a new one.",
   "42501":
     "This invite is for a different email address, or is no longer valid. Sign in with the address it was sent to, or ask for a new invite.",
   "22023": "This invite link is not valid.",
 };
 
-/** Accepts the invite as the signed-in user, then opens the app in that company. */
+const passwordSchema = z
+  .string()
+  .min(8, "Use at least 8 characters")
+  .max(72, "Use 72 characters or fewer")
+  .regex(/[A-Za-z]/, "Use at least one letter")
+  .regex(/[0-9]/, "Use at least one number");
+
+/**
+ * Accepts the invite as the signed-in user, then opens the app in that company. Someone who
+ * arrived through an email link (an invited manager confirming their address, slice 1.13) sets
+ * their own password first, so no password chosen by anyone else survives.
+ */
 export async function acceptTeamInviteAction(
   _prev: JoinActionState,
   formData: FormData,
 ): Promise<JoinActionState> {
-  const token = tokenSchema.safeParse(formFields(formData).token);
+  const fields = formFields(formData);
+  const token = tokenSchema.safeParse(fields.token);
   if (!token.success) return { ok: false, formError: ACCEPT_MESSAGES["22023"] };
   const session = await getSession();
   if (!session) {
     redirect(`${SIGN_IN_PATH}?next=${encodeURIComponent(teamInvitePath(token.data))}`);
   }
 
+  const invite = await lookupTeamInvite(token.data);
   const supabase = await createServerSupabase();
+
+  const step =
+    invite.state === "pending" ? await invitePasswordStepFor(supabase, invite.invitedAt) : "ready";
+  if (step === "use_email_link") return { ok: false, formError: ACCEPT_MESSAGES.MLPW1 };
+  if (step === "set_password") {
+    const password = passwordSchema.safeParse(fields.password ?? "");
+    if (!password.success) {
+      return {
+        ok: false,
+        fieldErrors: { password: password.error.issues[0]?.message ?? "Choose a password." },
+      };
+    }
+    // Only once the invite is still open and for this account: never change a password for an
+    // invite that can't be accepted.
+    if (invite.state !== "pending" || invite.email !== session.user.email.toLowerCase()) {
+      return { ok: false, formError: ACCEPT_MESSAGES["42501"] };
+    }
+    const { error: passwordError } = await supabase.auth.updateUser({
+      password: password.data,
+    });
+    if (passwordError && passwordError.code !== "same_password") {
+      if (passwordError.code === "weak_password") {
+        return {
+          ok: false,
+          fieldErrors: { password: "Choose a stronger password with letters and numbers." },
+        };
+      }
+      logFailure("team.join_password_failed", new Error(passwordError.code ?? "unknown"));
+      return { ok: false, formError: FAILED };
+    }
+    try {
+      await markPasswordChosen(session.user.id);
+    } catch (markError) {
+      logFailure("team.join_password_mark_failed", markError);
+      return { ok: false, formError: FAILED };
+    }
+    // Any other session on this account (someone who signed the address up before the invitee
+    // confirmed it) ends here. Best effort: acceptance still checks the password marker.
+    await supabase.auth.signOut({ scope: "others" });
+  }
   const { data, error } = await supabase.rpc("accept_membership_invite", { p_token: token.data });
   if (error || !data) {
     const message = error ? ACCEPT_MESSAGES[error.code] : undefined;
@@ -296,6 +475,10 @@ export async function acceptTeamInviteAction(
     return { ok: false, formError: message ?? FAILED };
   }
 
+  if (invite.state === "pending" && invite.role === "owner") {
+    const organisationId = data;
+    after(() => notifyOwnerJoined(organisationId, session.user.id).then(() => undefined));
+  }
   // Best effort: the invite path parked at sign-up (for the confirmation link) is spent now.
   await supabase.auth.updateUser({ data: { [NEXT_PATH_KEY]: null } });
   (await cookies()).set(ACTIVE_ORG_COOKIE, data, ACTIVE_ORG_COOKIE_OPTIONS);
@@ -305,18 +488,15 @@ export async function acceptTeamInviteAction(
 const joinSignUpSchema = z.object({
   token: tokenSchema,
   fullName: fullNameSchema,
-  password: z
-    .string()
-    .min(8, "Use at least 8 characters")
-    .max(72, "Use 72 characters or fewer")
-    .regex(/[A-Za-z]/, "Use at least one letter")
-    .regex(/[0-9]/, "Use at least one number"),
 });
 
 /**
- * Creates an account for the invited address. The address comes from the invite, never from
- * the form, so this can only ever sign up the person the owner or admin invited. No company is
- * created (no pending company name); the confirmation link brings them back to the invite.
+ * Starts an account for the invited address (slice 1.13: no password here). The address comes
+ * from the invite, never from the form, so this can only ever email the person the owner or
+ * admin invited. Supabase emails them a confirmation link (or, for an address that already has
+ * an account, a sign-in link); it brings them back to the invite signed in, where they choose
+ * their password and accept. Whoever holds the invite link can't pick the invitee's password.
+ * No company is created (no pending company name).
  */
 export async function signUpForInviteAction(
   _prev: JoinActionState,
@@ -341,52 +521,34 @@ export async function signUpForInviteAction(
 
   const path = teamInvitePath(parsed.data.token);
   const supabase = await createServerSupabase();
-  const { data, error } = await supabase.auth.signUp({
+  const { error } = await supabase.auth.signInWithOtp({
     email: invite.email,
-    password: parsed.data.password,
     options: {
+      shouldCreateUser: true,
       emailRedirectTo: `${await appOrigin()}/auth/callback?next=${encodeURIComponent(path)}`,
-      // next_path: where the confirmation email's link lands (supabase/templates/confirmation.html).
+      // Used only when the account is new. next_path: where the confirmation email's link lands
+      // (supabase/templates/confirmation.html).
       data: { full_name: parsed.data.fullName, [NEXT_PATH_KEY]: path },
     },
   });
   if (error) {
-    if (error.status === 429 || error.code === "over_request_rate_limit") {
+    if (
+      error.status === 429 ||
+      error.code === "over_request_rate_limit" ||
+      error.code === "over_email_send_rate_limit"
+    ) {
       return {
         ok: false,
         formError: "Too many attempts. Wait a few minutes and try again.",
         values,
       };
     }
-    if (error.code === "weak_password") {
-      return {
-        ok: false,
-        fieldErrors: { password: "Choose a stronger password with letters and numbers." },
-        values,
-      };
-    }
-    if (error.code === "user_already_exists" || error.code === "email_exists") {
-      return {
-        ok: false,
-        formError: "If you already have an account, sign in instead.",
-        values,
-      };
+    if (error.code === "signup_disabled" || error.code === "otp_disabled") {
+      return { ok: false, formError: "New accounts are closed for now.", values };
     }
     logFailure("team.join_sign_up_failed", new Error(error.code ?? "unknown"));
     return { ok: false, formError: FAILED, values };
   }
-
-  // With confirmation on, Supabase answers a sign-up for an existing address with a user that
-  // has no identities and sends nothing. The visitor holds the invite, so say so.
-  if (data.user && data.user.identities?.length === 0) {
-    return {
-      ok: false,
-      formError: "If you already have an account, sign in instead.",
-      values,
-    };
-  }
-  // Email confirmation off: signed in already, so back to the invite to accept it.
-  if (data.session) redirect(path);
   redirect(`${CHECK_EMAIL_PATH}?sent=invite`);
 }
 

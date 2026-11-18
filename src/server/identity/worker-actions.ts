@@ -82,7 +82,7 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
     return { ok: false, formError: copy.signIn.unavailable, values };
   }
 
-  // Once after a company reached its cap on wrong PINs: tell the owner and HR, after the response.
+  // Once after a company reached its cap on wrong PINs: tell every owner and HR user, after the response.
   const alertOrganisationId = result.alertOrganisationId;
   if (alertOrganisationId) after(() => notifyCompanyThrottled(alertOrganisationId));
 

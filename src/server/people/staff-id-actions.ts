@@ -72,7 +72,7 @@ export async function requestStaffIdCorrectionAction(
   try {
     raised = await requestStaffIdCorrection(fields);
   } catch (error) {
-    return refusal(error, "Only the owner, an admin or HR can correct a staff ID.", values);
+    return refusal(error, "Only an owner, an admin or HR can correct a staff ID.", values);
   }
   const session = await getSession();
   const organisationId = session?.active?.organisationId;
@@ -96,7 +96,7 @@ export async function decideStaffIdCorrectionAction(
   try {
     decided = await decideStaffIdCorrection(formFields(formData));
   } catch (error) {
-    return refusal(error, "Only the owner, an admin or HR can decide staff ID corrections.");
+    return refusal(error, "Only an owner, an admin or HR can decide staff ID corrections.");
   }
   if (decided.status === "approved") {
     const session = await getSession();
@@ -137,7 +137,7 @@ export async function unlockSignInAction(_prev: FormState, formData: FormData): 
   } catch (error) {
     return refusal(
       error,
-      "Only the owner, an admin, HR or the employee's line manager can unlock sign-in.",
+      "Only an owner, an admin, HR or the employee's line manager can unlock sign-in.",
     );
   }
   refresh(unlocked.workerId);

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { emailAppUrl } from "./config";
 import { emailSafeName } from "./index";
 import { sendEmail, type SendEmailResult } from "./send";
+import { OwnerChangeEmail, ownerChangeSubject } from "./templates/owner-change";
 import { TeamInviteEmail, teamInviteSubject } from "./templates/team-invite";
 import { TeamRemovedEmail, teamRemovedSubject } from "./templates/team-removed";
 import { TeamRoleChangedEmail, teamRoleChangedSubject } from "./templates/team-role-changed";
@@ -137,5 +138,45 @@ export async function sendTeamRemovedEmail(
     }),
     tags: [{ name: "type", value: "team_removed" }],
     idempotencyKey: `team-removed/${e.membershipId}`,
+  });
+}
+
+const ownerChangeSchema = z.object({
+  to: z.email(),
+  /** changeId/event/recipient: a retry never sends the same notice twice. */
+  idempotencyKey: z.string().min(1).max(256),
+  organisationName: emailSafeName,
+  event: z.enum(["requested", "done", "rejected", "withdrawn", "joined"]),
+  summary: z
+    .string()
+    .min(1)
+    .max(400)
+    .regex(/^[^\p{Cc}<>]*$/u),
+  actorName: emailSafeName.nullable(),
+  singleOwner: z.boolean(),
+});
+
+/**
+ * To an owner (slice 1.13): the owners changed, or a change was asked for, rejected or withdrawn.
+ * The summary is built from names already passed through emailDisplayName.
+ */
+export async function sendOwnerChangeEmail(
+  input: z.input<typeof ownerChangeSchema>,
+): Promise<SendEmailResult> {
+  const e = ownerChangeSchema.parse(input);
+  const organisationName = emailDisplayName(e.organisationName);
+  return sendEmail({
+    to: e.to,
+    subject: ownerChangeSubject(organisationName, e.event),
+    react: createElement(OwnerChangeEmail, {
+      organisationName,
+      event: e.event,
+      summary: e.summary,
+      actorName: emailDisplayName(e.actorName),
+      singleOwner: e.singleOwner,
+      appUrl: emailAppUrl(),
+    }),
+    tags: [{ name: "type", value: `owner_change_${e.event}` }],
+    idempotencyKey: e.idempotencyKey,
   });
 }

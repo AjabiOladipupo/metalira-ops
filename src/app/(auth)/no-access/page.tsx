@@ -23,7 +23,7 @@ export default function NoAccessPage() {
         <span className="type-label text-fg-muted">No access</span>
         <h1 className="m-0 type-h1">You can&apos;t open this page</h1>
         <p className="m-0 type-body-lg text-fg-muted">
-          Your role doesn&apos;t include it. Ask your company owner or an admin for access.
+          Your role doesn&apos;t include it. Ask an owner or an admin of your company for access.
         </p>
       </div>
       <Suspense fallback={<SignOutButton />}>

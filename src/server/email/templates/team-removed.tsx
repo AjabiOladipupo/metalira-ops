@@ -42,7 +42,7 @@ export function TeamRemovedEmail({
         {who} removed you from {company} on {APP_NAME}. You can no longer open its people, pay or
         settings. Your account and any other companies you belong to are not affected.
       </EmailText>
-      <EmailText muted>If you think this is a mistake, ask the owner of {company}.</EmailText>
+      <EmailText muted>If you think this is a mistake, ask an owner of {company}.</EmailText>
     </EmailLayout>
   );
 }

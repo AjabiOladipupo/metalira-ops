@@ -7,6 +7,8 @@ import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { ROLE_LABELS } from "@/lib/roles";
 import { teamInvitePath } from "@/lib/team";
 import { lagosDate } from "@/lib/worker-invites";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { invitePasswordStepFor } from "@/server/identity/invite-password";
 import { getPageSession } from "@/server/identity/session";
 import { signOutForInviteAction } from "@/server/identity/team-actions";
 import { lookupTeamInvite } from "@/server/identity/team-invite-lookup";
@@ -142,10 +144,38 @@ async function Join({ token }: { token: string }) {
     );
   }
 
+  // After an email link (no password yet, or one somebody else may have chosen): set one first.
+  const step = await invitePasswordStepFor(await createServerSupabase(), invite.invitedAt);
+  if (step === "use_email_link") {
+    return (
+      <>
+        {intro}
+        <p
+          role="alert"
+          className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm"
+        >
+          Your email address was confirmed after this invite was sent. For your safety, sign in with
+          the link we email you and choose your password there, then accept.
+        </p>
+        <form action={signOutForInviteAction}>
+          <input type="hidden" name="token" value={token} />
+          <Button type="submit" className="h-11 rounded-lg px-5">
+            Sign out and use an email link
+          </Button>
+        </form>
+      </>
+    );
+  }
+  const needsPassword = step === "set_password";
   return (
     <>
       {intro}
-      <AcceptForm token={token} organisationName={invite.organisationName} role={role} />
+      <AcceptForm
+        token={token}
+        organisationName={invite.organisationName}
+        role={role}
+        needsPassword={needsPassword}
+      />
     </>
   );
 }
@@ -162,8 +192,9 @@ function JoinSkeleton() {
 }
 
 /**
- * /join/[token]: a manager invited from Settings → Team signs in or creates an account with the
- * invited address, then accepts and joins the company with the invited role (slice 1.12).
+ * /join/[token]: a manager (or owner) invited from Settings → Team signs in, or confirms the
+ * invited address by email link and then chooses a password, then accepts and joins the company
+ * with the invited role (slices 1.12, 1.13).
  */
 export default function JoinPage({ params }: PageProps<"/join/[token]">) {
   return (
