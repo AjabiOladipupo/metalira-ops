@@ -9,7 +9,7 @@ import { setPasswordAction } from "@/server/identity/password-actions";
 export function SetPasswordForm({ next }: { next: string }) {
   const [state, action] = useActionState(setPasswordAction, null);
   return (
-    <form action={action} className="flex flex-col gap-4" noValidate aria-label="Choose a password">
+    <form action={action} className="flex flex-col gap-4" noValidate aria-label="Set your password">
       <input type="hidden" name="next" value={next} />
       <Field
         label="Choose a password"

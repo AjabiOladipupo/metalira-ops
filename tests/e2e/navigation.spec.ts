@@ -93,47 +93,50 @@ ownerTest.describe("manager app", () => {
     await expectThemeButton(page);
   });
 
-  ownerTest(
-    "back arrows go to the logical parent; the dashboard has none",
-    async ({ page, owner }) => {
-      await page.goto("/app");
-      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-      await expect(page.getByTestId("back-link")).toHaveCount(0);
+  ownerTest("back arrows go to the logical parent; the dashboard has none", async ({ browser }) => {
+    const page = await (await browser.newContext()).newPage();
+    // Its own company: it adds an employee, which would change the shared owner's empty People
+    // page that shell.spec.ts checks in the same worker.
+    const owner = await createOwner("nav-back", `Nav Back Co ${uniqueSuffix()}`);
+    await signInViaUi(page, owner.email, owner.password);
+    await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });
+    await page.goto("/app");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page.getByTestId("back-link")).toHaveCount(0);
 
-      await expectBack(page, "/app/payroll", "Back to dashboard", /\/app$/);
-      await expectBack(page, "/app/settings", "Back to dashboard", /\/app$/);
-      await expectBack(page, "/app/settings/company", "Back to Settings", /\/app\/settings$/);
-      await expectBack(page, "/app/settings/departments", "Back to Settings", /\/app\/settings$/);
-      await expectBack(page, "/app/settings/team", "Back to Settings", /\/app\/settings$/);
-      await expectBack(page, "/app/people", "Back to dashboard", /\/app$/);
-      await expectBack(page, "/app/people/invites", "Back to People", /\/app\/people$/);
-      await expectBack(page, "/app/people/import", "Back to People", /\/app\/people$/);
-      await expectBack(page, "/app/people/approvals", "Back to People", /\/app\/people$/);
-      await expectBack(page, "/app/people/new", "Back to People", /\/app\/people$/);
+    await expectBack(page, "/app/payroll", "Back to dashboard", /\/app$/);
+    await expectBack(page, "/app/settings", "Back to dashboard", /\/app$/);
+    await expectBack(page, "/app/settings/company", "Back to Settings", /\/app\/settings$/);
+    await expectBack(page, "/app/settings/departments", "Back to Settings", /\/app\/settings$/);
+    await expectBack(page, "/app/settings/team", "Back to Settings", /\/app\/settings$/);
+    await expectBack(page, "/app/people", "Back to dashboard", /\/app$/);
+    await expectBack(page, "/app/people/invites", "Back to People", /\/app\/people$/);
+    await expectBack(page, "/app/people/import", "Back to People", /\/app\/people$/);
+    await expectBack(page, "/app/people/approvals", "Back to People", /\/app\/people$/);
+    await expectBack(page, "/app/people/new", "Back to People", /\/app\/people$/);
 
-      const { data: worker, error } = await adminClient()
-        .from("workers")
-        .insert({
-          organisation_id: owner.orgId,
-          staff_id: `NAV-${uniqueSuffix()}`,
-          first_name: "Bisi",
-          last_name: "Nav",
-          employment_type: "permanent",
-          start_date: "2025-01-06",
-        })
-        .select("id")
-        .single();
-      if (error || !worker) throw new Error(`Seeding failed: ${error?.message ?? "no data"}`);
-      await expectBack(page, `/app/people/${worker.id}`, "Back to People", /\/app\/people$/);
-      await expectBack(
-        page,
-        `/app/people/${worker.id}/edit`,
-        "Back to Bisi Nav",
-        new RegExp(`/app/people/${worker.id}$`),
-      );
-      await expectNoHorizontalScroll(page);
-    },
-  );
+    const { data: worker, error } = await adminClient()
+      .from("workers")
+      .insert({
+        organisation_id: owner.orgId,
+        staff_id: `NAV-${uniqueSuffix()}`,
+        first_name: "Bisi",
+        last_name: "Nav",
+        employment_type: "permanent",
+        start_date: "2025-01-06",
+      })
+      .select("id")
+      .single();
+    if (error || !worker) throw new Error(`Seeding failed: ${error?.message ?? "no data"}`);
+    await expectBack(page, `/app/people/${worker.id}`, "Back to People", /\/app\/people$/);
+    await expectBack(
+      page,
+      `/app/people/${worker.id}/edit`,
+      "Back to Bisi Nav",
+      new RegExp(`/app/people/${worker.id}$`),
+    );
+    await expectNoHorizontalScroll(page);
+  });
 
   ownerTest("People has Invite next to Import, going to worker invites", async ({ page }) => {
     await page.goto("/app/people");

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { FormAlert } from "@/components/form";
@@ -28,6 +29,8 @@ function Heading({ body }: { body: string }) {
 }
 
 async function SetPassword({ next }: { next: string }) {
+  // Request-time only: reads the session (and the Auth client reads the clock).
+  await connection();
   const supabase = await createServerSupabase();
   const { data } = await supabase.auth.getUser();
   const user = data.user;
