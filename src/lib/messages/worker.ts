@@ -4,6 +4,8 @@
  * Sentence case, plain words a site worker reads easily, no emoji or exclamation marks.
  */
 export const workerMessages = {
+  /** Between two facts on one line: "Security guard · MO-0114". */
+  separator: " · ",
   /** Parent page names for back arrows, read as "Back to <name>". */
   back: {
     home: "home",
@@ -122,7 +124,6 @@ export const workerMessages = {
     queriesTab: "Queries",
     queriesEmpty: "No queries. When your line manager sends you a query, it shows here.",
     /** "Security guard · MO-0114", or "Staff ID MO-0114" with no job title; the ID never wraps. */
-    jobLineSeparator: " · ",
     staffIdOnly: (staffId: string) => `Staff ID ${staffId}`,
     notSet: "Not set",
     work: "Work",

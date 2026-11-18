@@ -186,7 +186,7 @@ async function MeHeader() {
           {profile.jobTitle ? (
             <>
               {profile.jobTitle}
-              {copy.jobLineSeparator}
+              {workerMessages.separator}
               <span className="whitespace-nowrap">{profile.staffId}</span>
             </>
           ) : (

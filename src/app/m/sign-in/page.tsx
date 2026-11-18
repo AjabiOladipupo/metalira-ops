@@ -16,7 +16,7 @@ const copy = workerMessages.signIn;
  */
 export default function WorkerSignInPage() {
   return (
-    <main className="flex flex-1 flex-col gap-6 px-4 pt-4 pb-8">
+    <main className="flex flex-1 flex-col gap-6 px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
       {/* /m sends a signed-out worker back here, so the parent is the public workers page. */}
       <WorkerTopBar back={{ href: "/for/workers", label: workerMessages.back.workersPage }}>
         <WorkerBrand />

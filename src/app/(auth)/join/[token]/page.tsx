@@ -33,7 +33,6 @@ const STATE_MESSAGES = {
 function Heading({ eyebrow, title, body }: { eyebrow: string; title: string; body?: string }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <BackLink href="/" label="home" className="-my-2" />
       <span className="type-label text-fg-muted">{eyebrow}</span>
       <h1 className="m-0 type-h1">{title}</h1>
       {body ? <p className="m-0 type-body-lg text-fg-muted">{body}</p> : null}
@@ -51,7 +50,9 @@ async function Join({ token }: { token: string }) {
           title={
             "organisationName" in invite
               ? `Join ${invite.organisationName}`
-              : "This invite can't be used"
+              : invite.state === "unavailable"
+                ? "We couldn't check this invite"
+                : "This invite can't be used"
           }
         />
         <FormAlert message={STATE_MESSAGES[invite.state]} />
@@ -164,10 +165,15 @@ function JoinSkeleton() {
  */
 export default function JoinPage({ params }: PageProps<"/join/[token]">) {
   return (
-    <Suspense fallback={<JoinSkeleton />}>
-      {params.then(({ token }) => (
-        <Join token={token} />
-      ))}
-    </Suspense>
+    <>
+      {/* Outside Suspense so it is in the first paint and nothing shifts when the invite loads.
+          The negative bottom margin keeps it 6px above the eyebrow despite the column's gap. */}
+      <BackLink href="/" label="home" className="-mt-2 -mb-[26px]" />
+      <Suspense fallback={<JoinSkeleton />}>
+        {params.then(({ token }) => (
+          <Join token={token} />
+        ))}
+      </Suspense>
+    </>
   );
 }
