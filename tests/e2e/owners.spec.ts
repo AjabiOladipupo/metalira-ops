@@ -151,9 +151,9 @@ test("an owner invites a second owner, who sets their password after confirming;
   await expect(waiting).toContainText("Waiting for your approval");
   await expectNoHorizontalScroll(secondPage);
   await waiting.getByRole("button", { name: "Approve" }).click();
-  await expect(secondPage.getByRole("status").filter({ hasText: "Approved" })).toBeVisible({
-    timeout: 15_000,
-  });
+  // Approved: the request leaves the waiting list and the first owner is now an admin.
+  await expect(secondPage.getByTestId("owner-change")).toHaveCount(0, { timeout: 15_000 });
+  await expect.poll(() => roleOf(owner.orgId, owner.userId), { timeout: 15_000 }).toBe("admin");
   expect(await roleOf(owner.orgId, owner.userId)).toBe("admin");
   expect(await roleOf(owner.orgId, secondId)).toBe("owner");
 
