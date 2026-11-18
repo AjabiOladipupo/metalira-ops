@@ -11,10 +11,12 @@ export function SiteFooter() {
     <footer className="border-t border-line">
       <Container className="flex flex-col gap-6 py-8 text-sm text-fg-muted">
         <nav aria-label="Who it is for">
-          <ul className="m-0 flex list-none flex-wrap gap-x-6 gap-y-2 p-0">
+          <ul className="m-0 flex list-none flex-wrap gap-x-6 p-0">
             {ROLES.map((role) => (
               <li key={role.href}>
-                <Link href={role.href}>{role.nav}</Link>
+                <Link href={role.href} className="inline-flex min-h-11 items-center">
+                  {role.nav}
+                </Link>
               </li>
             ))}
           </ul>

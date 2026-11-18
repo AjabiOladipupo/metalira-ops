@@ -181,6 +181,10 @@ test("invite link → set PIN → sign out → sign in with company code, staff 
   // The link worked once.
   await w.goto(invitePath);
   await expect(formAlert(w)).toContainText("This invite has already been used");
+  // A full-width 52px button back to sign-in, not a small text link.
+  const toSignIn = w.getByRole("link", { name: "Go to sign in" });
+  await expect(toSignIn).toHaveAttribute("href", "/m/sign-in");
+  expect((await toSignIn.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 
   // Sign out (on Me), then sign in with company code, staff ID and PIN (any case).
   await w.goto("/m/me");

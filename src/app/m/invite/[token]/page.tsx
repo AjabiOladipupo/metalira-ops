@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { Button } from "@/components/ui/button";
 import { WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { lookupWorkerInvite } from "@/server/identity/worker-invite-lookup";
@@ -36,9 +37,9 @@ async function Invite({ token }: { token: string }) {
         <p role="alert" className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]">
           {STATE_MESSAGES[invite.state]}
         </p>
-        <Link href={WORKER_SIGN_IN_PATH} className="text-[15px]">
-          Go to sign-in
-        </Link>
+        <Button asChild variant="outline" className="h-[52px] rounded-xl text-base">
+          <Link href={WORKER_SIGN_IN_PATH}>{copy.goToSignIn}</Link>
+        </Button>
       </div>
     );
   }
@@ -49,7 +50,9 @@ async function Invite({ token }: { token: string }) {
       <div className="flex flex-col gap-3 rounded-xl bg-surface p-4">
         <p className="m-0 text-[15px]">{copy.company(invite.organisationName)}</p>
         <p className="m-0 text-[17px] font-semibold" data-testid="invite-identity">
-          {copy.confirmName(name, invite.staffId)}
+          {copy.confirmName(name)}
+          {workerMessages.separator}
+          <span className="whitespace-nowrap">{copy.confirmStaffId(invite.staffId)}</span>
         </p>
         <p className="m-0 text-sm text-fg-muted">{copy.notYou}</p>
       </div>
@@ -77,7 +80,7 @@ function InviteSkeleton() {
  */
 export default function InvitePage({ params }: PageProps<"/m/invite/[token]">) {
   return (
-    <main className="flex flex-1 flex-col gap-6 px-4 pt-4 pb-8">
+    <main className="flex flex-1 flex-col gap-6 px-4 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))]">
       <WorkerTopBar>
         <WorkerBrand />
       </WorkerTopBar>
