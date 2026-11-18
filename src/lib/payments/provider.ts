@@ -15,9 +15,10 @@
  *
  * Phase 9 webhook route contract (read before building it, rule 7):
  * 1. Source IP: pass only the platform-set client IP (`ipAddress()` from `@vercel/functions` or
- *    `x-real-ip`) to `isTrustedWebhookSource()`. Never `x-forwarded-for`, and never reuse
- *    `clientIp()` from src/server/identity (it falls back to `x-forwarded-for`). Fail closed when
- *    not running on Vercel unless a test flag is set explicitly.
+ *    `x-real-ip`) to `isTrustedWebhookSource()`. Never `x-forwarded-for`. `clientIp()` in
+ *    src/server/identity reads `x-real-ip` only, but it is a sign-in counter key, not a trust
+ *    check: don't reuse it here. Fail closed when not running on Vercel unless a test flag is set
+ *    explicitly.
  * 2. `verifyWebhook()` on the raw body exactly as received. A webhook is a hint, never proof.
  * 3. Re-fetch with `verifyTransaction()` by the event's `transactionId`, and require the returned
  *    `transactionId` to equal it.

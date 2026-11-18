@@ -75,6 +75,7 @@ function companyStore(known: Record<string, string>) {
   const cappedWindows: [number, number][] = [];
   const networks = new Map<string, Counter>();
   let alerts = 0;
+  let alertPending = false;
 
   const cred = (staff: string): Cred => {
     let c = creds.get(staff);
@@ -102,24 +103,36 @@ function companyStore(known: Record<string, string>) {
       company = { wrong: 0, windowStart: now, cappedAt: null };
     company.wrong += 1;
     network(key).wrong += 1;
+    // The window is marked capped the moment it reaches the cap, and the alert queued.
+    if (company.wrong >= COMPANY_WRONG_PIN_CAP && company.cappedAt === null) {
+      company.cappedAt = now;
+      cappedWindows.push([company.windowStart, company.windowStart + WINDOW]);
+      alerts += 1;
+      alertPending = true;
+    }
   };
 
   const store: WorkerSignInStore = {
-    async begin(_code, staffId, key): Promise<BeginResult> {
+    async begin(code, staffId, key): Promise<BeginResult> {
+      // As in the database: begin reads (and clears) the queued alert before counting anything.
+      const pending = alertPending;
+      alertPending = false;
+      const result = await beginInner(code, staffId, key);
+      return pending ? { ...result, alertOrganisationId: "o-1" } : result;
+    },
+    async finish(workerId, ok, key): Promise<FinishOutcome> {
+      return finishInner(workerId, ok, key);
+    },
+  };
+
+  async function beginInner(_code: string, staffId: string, key: string): Promise<BeginResult> {
+    {
       // Every try takes a moment, as in the database (now() moves between transactions).
       now += 1;
       if (network(key).wrong >= IP_WRONG_PIN_CAP) return { outcome: "ip_blocked" };
       if (now - company.windowStart >= WINDOW)
         company = { wrong: 0, windowStart: now, cappedAt: null };
-      if (company.wrong >= COMPANY_WRONG_PIN_CAP) {
-        const first = company.cappedAt === null;
-        if (first) {
-          company.cappedAt = now;
-          cappedWindows.push([company.windowStart, company.windowStart + WINDOW]);
-          alerts += 1;
-        }
-        return { outcome: "company_throttled", alertOrganisationId: first ? "o-1" : null };
-      }
+      if (company.wrong >= COMPANY_WRONG_PIN_CAP) return { outcome: "company_throttled" };
       const staff = staffId.toLowerCase();
       const c = cred(staff);
       if (c.heldAt !== null) return { outcome: "held" };
@@ -147,8 +160,15 @@ function companyStore(known: Record<string, string>) {
         locksOnFailure: locks,
         holdsOnFailure: holds,
       };
-    },
-    async finish(workerId, ok, key): Promise<FinishOutcome> {
+    }
+  }
+
+  async function finishInner(
+    workerId: string | null,
+    ok: boolean,
+    key: string,
+  ): Promise<FinishOutcome> {
+    {
       if (workerId === null) return "failed";
       const c = cred(workerId);
       if (ok) {
@@ -166,8 +186,8 @@ function companyStore(known: Record<string, string>) {
         return "locked";
       }
       return "failed";
-    },
-  };
+    }
+  }
   return {
     store,
     advance: (ms: number) => {
@@ -284,12 +304,13 @@ describe("caps on wrong PINs (decision 18)", () => {
       expect(result.status).toBe("invalid");
     }
     const refused = await checkWorkerPin(s.store, input(RIGHT), freshNetwork(), verify);
+    // The cap was reached on the 50th wrong PIN; the next sign-in asks for the owner and HR alert.
     expect(refused).toEqual({ status: "company_throttled", alertOrganisationId: "o-1" });
     // Nobody was locked by the refusals: after the window the real worker signs in.
     for (let i = 0; i < 20; i += 1) {
       const again = await checkWorkerPin(s.store, input(WRONG), freshNetwork(), verify);
       // Only the first refusal of the window asks for the owner and HR alert.
-      expect(again).toEqual({ status: "company_throttled", alertOrganisationId: null });
+      expect(again).toEqual({ status: "company_throttled" });
     }
     expect(s.alerts()).toBe(1);
     s.advance(WINDOW);

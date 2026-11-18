@@ -82,12 +82,13 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
     return { ok: false, formError: copy.signIn.unavailable, values };
   }
 
+  // Once after a company reached its cap on wrong PINs: tell the owner and HR, after the response.
+  const alertOrganisationId = result.alertOrganisationId;
+  if (alertOrganisationId) after(() => notifyCompanyThrottled(alertOrganisationId));
+
   if (result.status === "locked") return { ok: false, formError: copy.signIn.locked, values };
   if (result.status === "held") return { ok: false, formError: copy.signIn.held, values };
   if (result.status === "company_throttled") {
-    // The first refusal of the window tells the owner and HR, after the response.
-    const alertOrganisationId = result.alertOrganisationId;
-    if (alertOrganisationId) after(() => notifyCompanyThrottled(alertOrganisationId));
     return { ok: false, formError: copy.signIn.companyThrottled, values };
   }
   if (result.status === "ip_blocked")

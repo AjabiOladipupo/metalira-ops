@@ -35,28 +35,30 @@ export const workerSignInSchema = z.object({
 export type WorkerSignInInput = z.output<typeof workerSignInSchema>;
 
 /** Refusals decided before any PIN is checked. */
-export type RefusedOutcome = "ip_blocked" | "locked" | "held";
+export type RefusedOutcome = "ip_blocked" | "locked" | "held" | "company_throttled";
 
-export type BeginResult =
-  | { outcome: RefusedOutcome }
-  | {
-      outcome: "company_throttled";
-      /**
-       * Set only on the first refusal of the window for a real company: the server emails its
-       * owner and HR once. Never shown to the person signing in.
-       */
-      alertOrganisationId: string | null;
-    }
-  | {
-      outcome: "proceed";
-      /** The worker with a login, or null for a company code and staff ID with none. */
-      login: { workerId: string; organisationId: string; authUserId: string } | null;
-      pinHash: string | null;
-      /** True when a wrong PIN now locks sign-in (the 5th try in a row). */
-      locksOnFailure: boolean;
-      /** True when that lock is the 3rd in 24 hours and holds sign-in until a new PIN. */
-      holdsOnFailure: boolean;
-    };
+/**
+ * Set once after a real company reached its cap on wrong PINs, whatever the outcome: the server
+ * emails its owner and HR (one alert per capped window). Never shown to the person signing in.
+ */
+export interface SignInAlert {
+  alertOrganisationId?: string | null;
+}
+
+export type BeginResult = SignInAlert &
+  (
+    | { outcome: RefusedOutcome }
+    | {
+        outcome: "proceed";
+        /** The worker with a login, or null for a company code and staff ID with none. */
+        login: { workerId: string; organisationId: string; authUserId: string } | null;
+        pinHash: string | null;
+        /** True when a wrong PIN now locks sign-in (the 5th try in a row). */
+        locksOnFailure: boolean;
+        /** True when that lock is the 3rd in 24 hours and holds sign-in until a new PIN. */
+        holdsOnFailure: boolean;
+      }
+  );
 
 export type FinishOutcome = "signed_in" | "failed" | "locked" | "held";
 
@@ -65,16 +67,18 @@ export interface WorkerSignInStore {
   finish(workerId: string | null, ok: boolean, ipKey: string): Promise<FinishOutcome>;
 }
 
-export type WorkerSignInResult =
-  | { status: "signed_in"; workerId: string; organisationId: string; authUserId: string }
-  /** Wrong PIN, or an unknown company code or staff ID. Never say which. */
-  | { status: "invalid" }
-  | { status: "locked" }
-  /** Locked 3 times in 24 hours: only a new PIN from an HR invite opens it. */
-  | { status: "held" }
-  | { status: "ip_blocked" }
-  /** Too many wrong PINs for this company code just now; no worker was counted. */
-  | { status: "company_throttled"; alertOrganisationId: string | null };
+export type WorkerSignInResult = SignInAlert &
+  (
+    | { status: "signed_in"; workerId: string; organisationId: string; authUserId: string }
+    /** Wrong PIN, or an unknown company code or staff ID. Never say which. */
+    | { status: "invalid" }
+    | { status: "locked" }
+    /** Locked 3 times in 24 hours: only a new PIN from an HR invite opens it. */
+    | { status: "held" }
+    | { status: "ip_blocked" }
+    /** Too many wrong PINs for this company code just now; no worker was counted. */
+    | { status: "company_throttled" }
+  );
 
 /**
  * The network address as a counter key: an HMAC with a server-side key, so the stored value
@@ -103,9 +107,20 @@ export async function checkWorkerPin(
   verify: (pin: string, hash: string | null) => Promise<boolean> = verifyPin,
 ): Promise<WorkerSignInResult> {
   const begun = await store.begin(input.companyCode, input.staffId, network);
-  if (begun.outcome === "company_throttled") {
-    return { status: "company_throttled", alertOrganisationId: begun.alertOrganisationId };
-  }
+  const alert: SignInAlert = begun.alertOrganisationId
+    ? { alertOrganisationId: begun.alertOrganisationId }
+    : {};
+  const result = await checkBegun(store, begun, input, network, verify);
+  return { ...result, ...alert };
+}
+
+async function checkBegun(
+  store: WorkerSignInStore,
+  begun: BeginResult,
+  input: WorkerSignInInput,
+  network: string,
+  verify: (pin: string, hash: string | null) => Promise<boolean>,
+): Promise<WorkerSignInResult> {
   if (begun.outcome !== "proceed") return { status: begun.outcome };
 
   const login = begun.login;
@@ -145,14 +160,20 @@ export function databaseSignInStore(admin: Admin): WorkerSignInStore {
         })
         .single();
       if (error || !data) throw new Error(`Sign-in check failed: ${error?.code ?? "no row"}`);
-      if (data.outcome === "ip_blocked" || data.outcome === "locked" || data.outcome === "held") {
-        return { outcome: data.outcome };
-      }
-      if (data.outcome === "company_throttled") {
-        return { outcome: "company_throttled", alertOrganisationId: data.organisation_id ?? null };
+      const alert: SignInAlert = data.alert_organisation_id
+        ? { alertOrganisationId: data.alert_organisation_id }
+        : {};
+      if (
+        data.outcome === "ip_blocked" ||
+        data.outcome === "locked" ||
+        data.outcome === "held" ||
+        data.outcome === "company_throttled"
+      ) {
+        return { outcome: data.outcome, ...alert };
       }
       if (data.outcome !== "proceed") throw new Error("Sign-in check returned an unknown outcome.");
       return {
+        ...alert,
         outcome: "proceed",
         login:
           data.worker_id && data.organisation_id && data.auth_user_id

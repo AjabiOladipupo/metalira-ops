@@ -609,7 +609,7 @@ isOneToOne: false
                            },
 "worker_sign_in_begin":
 { Args: { "p_company_code": string,"p_ip_key": string,"p_staff_id": string }; Returns: {
-              "auth_user_id": string,"holds_on_failure": boolean,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
+              "alert_organisation_id": string,"auth_user_id": string,"holds_on_failure": boolean,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
             }[]
                            },
 "worker_sign_in_finish":

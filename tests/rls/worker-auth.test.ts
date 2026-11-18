@@ -556,6 +556,7 @@ describe("PIN sign-in counter", () => {
           pin_hash: null,
           locks_on_failure: false,
           holds_on_failure: false,
+          alert_organisation_id: null,
         });
         expect(await finish(null, false)).toBe("failed");
       }

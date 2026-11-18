@@ -466,12 +466,87 @@ describe("the company cap on wrong PINs", () => {
     expect(wrong).toBe(CAP);
   });
 
-  it("returns the organisation for the owner and HR alert on the first refusal only", async () => {
+  it("marks the window capped the moment it reaches the cap, and asks for one alert", async () => {
+    // An attacker who stops at exactly the cap still leaves the window marked.
     for (let i = 1; i <= CAP; i += 1) await begin(`ALERT-${counter}-${i}`);
-    const first = await begin("ALERT-X");
-    expect(first).toMatchObject({ outcome: "company_throttled", organisation_id: owner.orgId });
-    const second = await begin("ALERT-Y");
-    expect(second).toMatchObject({ outcome: "company_throttled", organisation_id: null });
+    const { rows: marked } = await db.query<{ capped: boolean; windows: number }>(
+      "select locked_until is not null as capped, cardinality(capped_until) as windows from private.auth_throttle where key like 'company:%' and alert_pending",
+    );
+    expect(marked).toEqual([{ capped: true, windows: 1 }]);
+    const { rows: audit } = await db.query(
+      "select 1 from public.audit_log where organisation_id = $1 and action = 'worker_auth.company_throttled' and at > now() - interval '1 minute'",
+      [owner.orgId],
+    );
+    expect(audit.length).toBeGreaterThanOrEqual(1);
+    // The next begin, whatever its outcome, carries the alert once.
+    expect(await begin("ALERT-X")).toMatchObject({
+      outcome: "company_throttled",
+      alert_organisation_id: owner.orgId,
+    });
+    expect(await begin("ALERT-Y")).toMatchObject({
+      outcome: "company_throttled",
+      alert_organisation_id: null,
+    });
+  });
+
+  it("holds both caps against a burst of tries begun before any finishes", async () => {
+    // Real workers: a wrong PIN is counted in finish, so the burst relies on reservations.
+    const workers: Awaited<ReturnType<typeof signedUpWorker>>[] = [];
+    for (let i = 0; i < 25; i += 1) workers.push(await signedUpWorker());
+
+    // One network address, many staff IDs, all begun at once: at most 15 get to a PIN check.
+    const ip = randomBytes(32).toString("hex");
+    const fromOneIp = await Promise.all(
+      workers.map((w) =>
+        admin
+          .rpc("worker_sign_in_begin", {
+            p_company_code: companyCode,
+            p_staff_id: w.staffId,
+            p_ip_key: ip,
+          })
+          .single()
+          .then(({ data }) => data!),
+      ),
+    );
+    expect(fromOneIp.filter((r) => r.outcome === "proceed")).toHaveLength(15);
+    expect(fromOneIp.filter((r) => r.outcome === "ip_blocked")).toHaveLength(10);
+    for (const r of fromOneIp.filter((x) => x.outcome === "proceed")) {
+      const { error } = await admin.rpc("worker_sign_in_finish", {
+        p_worker_id: r.worker_id!,
+        p_ok: false,
+        p_ip_key: ip,
+      });
+      expect(error).toBeNull();
+    }
+    const { rows: ipRow } = await db.query(
+      "select attempts, in_flight from private.auth_throttle where key = $1",
+      [`ipwrong:${ip}`],
+    );
+    expect(ipRow).toEqual([{ attempts: 15, in_flight: 0 }]);
+
+    // Many addresses at once against the company: at most 50 in total, wrong PINs included.
+    await db.query(
+      "delete from private.auth_throttle where key like 'company:%' or key like 'ipwrong:%'",
+    );
+    const burst = await Promise.all(
+      Array.from({ length: 80 }, (_, k) =>
+        begin(workers[k % workers.length]!.staffId).then((r) => ({ ...r })),
+      ),
+    );
+    const through = burst.filter((r) => r.outcome === "proceed");
+    expect(through.length).toBeLessThanOrEqual(CAP);
+    expect(burst.filter((r) => r.outcome === "company_throttled").length).toBeGreaterThan(0);
+  });
+
+  it("a success releases its reservation but never lowers the wrong-PIN count", async () => {
+    const worker = await signedUpWorker();
+    for (let i = 1; i <= 3; i += 1) await begin(`LOW-${counter}-${i}`);
+    await begin(worker.staffId);
+    expect(await finish(worker.id, true)).toBe("signed_in");
+    const { rows } = await db.query(
+      "select attempts, in_flight from private.auth_throttle where key like 'company:%'",
+    );
+    expect(rows).toEqual([{ attempts: 3, in_flight: 0 }]);
   });
 
   it("caps wrong PINs from one network address at 15, well below the company cap", async () => {
@@ -507,10 +582,12 @@ describe("the company cap on wrong PINs", () => {
     await endLock(worker.id);
     for (let i = 1; i <= CAP; i += 1) await begin(`FLOOD-${counter}-${i}`);
     expect((await begin("FLOOD-X")).outcome).toBe("company_throttled");
-    // The window ends; the third lockout of the day is the first that counts.
+    // The window ends (the company row keeps its capped windows); the third lockout of the
+    // day is the first that counts.
     await db.query(
-      "delete from private.auth_throttle where key like 'company:%' or key like 'ipwrong:%'",
+      "update private.auth_throttle set window_started_at = now() - interval '16 minutes' where key like 'company:%'",
     );
+    await db.query("delete from private.auth_throttle where key like 'ipwrong:%'");
     expect(await lockOnce(worker.id, worker.staffId)).toBe("locked");
   });
 });
