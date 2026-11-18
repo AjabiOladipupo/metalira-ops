@@ -94,7 +94,9 @@ ownerTest.describe("manager app", () => {
   });
 
   ownerTest("back arrows go to the logical parent; the dashboard has none", async ({ browser }) => {
-    const page = await (await browser.newContext()).newPage();
+    // Signed out: the fixture's saved session would otherwise come along.
+    const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+    const page = await context.newPage();
     // Its own company: it adds an employee, which would change the shared owner's empty People
     // page that shell.spec.ts checks in the same worker.
     const owner = await createOwner("nav-back", `Nav Back Co ${uniqueSuffix()}`);

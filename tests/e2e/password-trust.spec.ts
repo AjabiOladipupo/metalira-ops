@@ -51,7 +51,9 @@ test("a password set before the address was confirmed opens nothing", async ({ b
 
   const again = await (await browser.newContext()).newPage();
   await signInViaUi(again, email, attackerPassword);
-  await expect(again.getByRole("alert")).toContainText("don't match an account");
+  await expect(
+    again.getByRole("alert").filter({ hasText: "don't match an account" }),
+  ).toBeVisible();
 
   const { data: user } = await adminClient().auth.admin.getUserById(created.user!.id);
   expect(typeof user.user?.app_metadata?.password_set_at).toBe("string");
