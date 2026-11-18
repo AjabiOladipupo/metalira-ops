@@ -26,6 +26,7 @@ async function TeamSettings() {
   return (
     <>
       <PageHeader
+        back={{ href: "/app/settings", label: "Settings" }}
         eyebrow="Settings"
         title="Team"
         description={`${plural(team.members.length, "manager")} · ${plural(team.invites.length, "pending invite")} · workers sign in on their phones and are managed in People.`}

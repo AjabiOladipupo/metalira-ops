@@ -103,6 +103,7 @@ ownerTest.describe("manager app", () => {
       await expectBack(page, "/app/settings", "Back to dashboard", /\/app$/);
       await expectBack(page, "/app/settings/company", "Back to Settings", /\/app\/settings$/);
       await expectBack(page, "/app/settings/departments", "Back to Settings", /\/app\/settings$/);
+      await expectBack(page, "/app/settings/team", "Back to Settings", /\/app\/settings$/);
       await expectBack(page, "/app/people", "Back to dashboard", /\/app$/);
       await expectBack(page, "/app/people/invites", "Back to People", /\/app\/people$/);
       await expectBack(page, "/app/people/import", "Back to People", /\/app\/people$/);

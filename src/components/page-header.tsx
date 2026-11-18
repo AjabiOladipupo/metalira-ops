@@ -28,13 +28,17 @@ export function PageHeader({
   const Heading = headingLevel === 1 ? "h1" : "h2";
   return (
     <div className={cn("flex flex-wrap items-end justify-between gap-4", className)}>
-      <div className="flex min-w-0 flex-col gap-1.5">
+      {/* Grows beside the actions and wraps its own text, so a long description does not push
+          the actions onto their own row on desktop. */}
+      <div className="flex min-w-0 flex-[1_1_20rem] flex-col gap-1.5">
         {back ? <BackLink {...back} className="-mt-2" /> : null}
         {eyebrow ? <span className="type-label text-fg-muted">{eyebrow}</span> : null}
         <Heading className="m-0 type-h1">{title}</Heading>
         {description ? <p className="m-0 type-body-lg text-fg-muted">{description}</p> : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>
+      ) : null}
     </div>
   );
 }

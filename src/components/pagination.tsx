@@ -73,23 +73,23 @@ export function Pagination({
       aria-label={label}
       className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-3", className)}
     >
-      <p className="m-0 text-sm text-fg-muted tabular-nums" data-testid="page-range">
-        {formatPageRange(pages)}
-      </p>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <p className="m-0 text-sm text-fg-muted tabular-nums" data-testid="page-range">
+          {formatPageRange(pages)}
+        </p>
         {sizePicker}
-        <div className="flex items-center gap-2">
-          <PageLink
-            direction="previous"
-            label="Previous"
-            href={pages.hasPrevious ? hrefFor(pages.page - 1) : null}
-          />
-          <PageLink
-            direction="next"
-            label="Next"
-            href={pages.hasNext ? hrefFor(pages.page + 1) : null}
-          />
-        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <PageLink
+          direction="previous"
+          label="Previous"
+          href={pages.hasPrevious ? hrefFor(pages.page - 1) : null}
+        />
+        <PageLink
+          direction="next"
+          label="Next"
+          href={pages.hasNext ? hrefFor(pages.page + 1) : null}
+        />
       </div>
     </nav>
   );

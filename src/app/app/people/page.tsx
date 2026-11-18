@@ -98,7 +98,7 @@ function columns(mapHref: ((row: PeopleRow) => string) | null): Column<PeopleRow
           <Link
             href={mapHref(row)}
             scroll={false}
-            className="relative inline-flex min-h-9 items-center text-foreground no-underline hover:underline"
+            className="relative -my-1 inline-flex min-h-11 items-center text-foreground no-underline hover:underline"
           >
             <MappingStatus row={row} />
             <span className="sr-only">, change mapping for {row.name}</span>
@@ -303,6 +303,11 @@ async function PeopleList({
         {ctx.canEdit && formOptions && targets ? (
           <MappingPanel
             worker={panelRow ? toMappingWorker(panelRow) : null}
+            avatar={
+              panelRow ? (
+                <WorkerAvatar workerId={panelRow.id} name={panelRow.name} size={48} />
+              ) : undefined
+            }
             options={{ ...formOptions, ...targets }}
             open={picked !== null}
             closeHref={peopleHref(here)}

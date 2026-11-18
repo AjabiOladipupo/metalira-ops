@@ -201,7 +201,7 @@ function Profile({
       <div className="flex flex-col gap-4">
         {limited ? null : <BackLink href="/app/people" label="People" className="-my-2" />}
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-4">
+          <div className="flex min-w-0 items-start gap-4 sm:items-center">
             <WorkerAvatar workerId={worker.id} name={worker.name} size={56} />
             <div className="flex min-w-0 flex-col gap-1">
               <h1 className="m-0 type-h1 break-words">{worker.name}</h1>

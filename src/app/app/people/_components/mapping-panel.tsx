@@ -62,9 +62,12 @@ export function MappingPanel({
   options,
   open,
   closeHref,
+  avatar,
 }: {
   worker: MappingWorker | null;
   options: MappingOptions;
+  /** The worker's avatar, rendered on the server (the same face as in the table). */
+  avatar?: React.ReactNode;
   /** True when an employee was picked (`?map=`), so phones show the sheet. */
   open: boolean;
   closeHref: string;
@@ -93,7 +96,7 @@ export function MappingPanel({
         aria-label="Mapping"
         className="hidden flex-[1_1_340px] flex-col rounded-xl border border-line p-5 lg:flex"
       >
-        <MappingForm key={worker.id} worker={worker} options={options} />
+        <MappingForm key={worker.id} worker={worker} options={options} avatar={avatar} />
       </aside>
       <Sheet
         open={open && !isDesktop}
@@ -106,7 +109,7 @@ export function MappingPanel({
           aria-describedby={undefined}
           className="max-h-[88dvh] gap-0 overflow-y-auto rounded-t-xl p-5 pt-6"
         >
-          <MappingForm key={worker.id} worker={worker} options={options} inSheet />
+          <MappingForm key={worker.id} worker={worker} options={options} avatar={avatar} inSheet />
         </SheetContent>
       </Sheet>
     </>
@@ -116,10 +119,12 @@ export function MappingPanel({
 function MappingForm({
   worker,
   options,
+  avatar,
   inSheet = false,
 }: {
   worker: MappingWorker;
   options: MappingOptions;
+  avatar?: React.ReactNode;
   inSheet?: boolean;
 }) {
   const [state, action] = useActionState(saveMappingAction, null);
@@ -161,12 +166,14 @@ function MappingForm({
     >
       <input type="hidden" name="workerId" value={worker.id} />
       <div className="flex items-center gap-3 pr-8 lg:pr-0">
-        <span
-          aria-hidden
-          className="flex size-12 shrink-0 items-center justify-center rounded-full bg-surface text-[15px] font-semibold"
-        >
-          {worker.initials}
-        </span>
+        {avatar ?? (
+          <span
+            aria-hidden
+            className="flex size-12 shrink-0 items-center justify-center rounded-full bg-surface text-[15px] font-semibold"
+          >
+            {worker.initials}
+          </span>
+        )}
         <div className="flex min-w-0 flex-col">
           {inSheet ? <SheetTitle asChild>{title}</SheetTitle> : title}
           <span className="text-[13px] text-fg-muted">
