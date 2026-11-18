@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { LIRA, LIRA_FOR_ROLE } from "@/components/marketing/lira";
 import { SECTION_LINKS } from "@/components/marketing/primitives";
 import { ROLES } from "@/components/marketing/roles";
 import { MARKETING_PATHS, siteUrl, SITE_URL_FALLBACK } from "@/lib/site";
@@ -124,5 +125,75 @@ describe("landing sections", () => {
     const landing = FILES.find((f) => f.name === "src/app/(marketing)/page.tsx")!.text;
     expect(landing).toContain('id="pilot"');
     expect(landing).not.toContain('id="pricing"');
+  });
+});
+
+describe("Lira (coming soon)", () => {
+  const strings = (value: unknown): string[] =>
+    typeof value === "string"
+      ? [value]
+      : Array.isArray(value)
+        ? value.flatMap(strings)
+        : value && typeof value === "object"
+          ? Object.values(value).flatMap(strings)
+          : [];
+  const COPY = [...strings(LIRA), ...strings(LIRA_FOR_ROLE)];
+  const MONTHS =
+    "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+
+  it("has copy to check", () => {
+    expect(COPY.length).toBeGreaterThan(10);
+    expect(LIRA.capabilities).toHaveLength(4);
+    expect(LIRA.safety).toHaveLength(4);
+  });
+
+  it("says Coming soon, on the landing section and the role pages", () => {
+    expect(LIRA.status).toBe("Coming soon");
+    const landing = FILES.find((f) => f.name === "src/app/(marketing)/page.tsx")!.text;
+    expect(landing).toContain('id="lira"');
+    expect(landing).toContain("<ComingSoonChip ");
+    const rolePage = FILES.find((f) => f.name === "src/components/marketing/role-page.tsx")!.text;
+    expect(rolePage).toContain("<ComingSoonChip ");
+    expect(SECTION_LINKS).toContainEqual({ href: "/#lira", label: "Lira" });
+  });
+
+  it("is on every manager role page and not on the workers page", () => {
+    expect(Object.keys(LIRA_FOR_ROLE).sort()).toEqual(["finance", "hr", "operations", "owners"]);
+    expect(ROLES.map((r) => r.slug).filter((s) => !(s in LIRA_FOR_ROLE))).toEqual(["workers"]);
+  });
+
+  describe.each(COPY)("%s", (text) => {
+    it("shows no price", () => {
+      expect(text).not.toMatch(/₦|\bNGN\b|naira|\bprice|\bpric(e|ing)|\bfree\b|\bcost\b/i);
+    });
+
+    it("gives no launch date", () => {
+      expect(text).not.toMatch(/\b20\d\d\b|\bQ[1-4]\b/);
+      expect(text).not.toMatch(
+        new RegExp(String.raw`\b\d{1,2}(st|nd|rd|th)?\s+(${MONTHS})\b`, "i"),
+      );
+      expect(text).not.toMatch(
+        /\b(launch|launches|launching|release|beta|soon after|next month|next year)\b/i,
+      );
+    });
+
+    it("names no AI vendor or model, and does not oversell", () => {
+      expect(text).not.toMatch(
+        /openai|chatgpt|\bgpt|anthropic|claude|gemini|google|llama|\bmeta ai|mistral|copilot|deepseek|grok|\bllm\b|model/i,
+      );
+      expect(text).not.toMatch(/\bAI\b|artificial intelligence|magic|revolution/i);
+    });
+
+    it("promises email and in-app only: no SMS or WhatsApp", () => {
+      expect(text).not.toMatch(/\bsms\b|whatsapp|text message/i);
+    });
+  });
+
+  it("states the four safety promises", () => {
+    const safety = LIRA.safety.join(" ");
+    expect(safety).toMatch(/only does what your role allows/);
+    expect(safety).toMatch(/waits for you to confirm/);
+    expect(safety).toMatch(/never approves its own work/);
+    expect(safety).toMatch(/never moves money/);
   });
 });

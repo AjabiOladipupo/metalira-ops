@@ -7,8 +7,27 @@ import { cn } from "@/lib/utils";
 export const SECTION_LINKS = [
   { href: "/#product", label: "Product" },
   { href: "/#how-it-works", label: "How it works" },
+  { href: "/#lira", label: "Lira" },
   { href: "/#pilot", label: "Pilot" },
 ] as const;
+
+/** A "Coming soon" chip: a word and a hollow (pending) dot, never colour alone. */
+export function ComingSoonChip({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 self-start rounded-[4px] border border-line bg-background px-2 py-1 type-label whitespace-nowrap text-foreground",
+        className,
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className="inline-block size-2 shrink-0 rounded-full border-[1.5px] border-current"
+      />
+      Coming soon
+    </span>
+  );
+}
 
 /** Header text link (prototype `.navl`). */
 export const navLinkClass =

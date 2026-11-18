@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 import { BackLink } from "@/components/back-link";
 import { Illustration } from "@/components/illustration";
 
-import { Container, CtaLink, DotList, Section, SectionHeading } from "./primitives";
+import { LIRA_FOR_ROLE } from "./lira";
+import { ComingSoonChip, Container, CtaLink, DotList, Section, SectionHeading } from "./primitives";
 import { roleBySlug, type RoleSlug } from "./roles";
 
 export function roleMetadata(slug: RoleSlug): Metadata {
@@ -23,6 +25,8 @@ export function roleMetadata(slug: RoleSlug): Metadata {
 export function RolePage({ slug }: { slug: RoleSlug }) {
   const role = roleBySlug(slug);
   const isWorker = slug === "workers";
+  // Workers do not use Lira, so their page has no Lira card.
+  const lira = slug === "workers" ? undefined : LIRA_FOR_ROLE[slug];
 
   return (
     <>
@@ -84,6 +88,27 @@ export function RolePage({ slug }: { slug: RoleSlug }) {
           <SectionHeading id="tasks-title" eyebrow="Your day" title="What you do in Metalira Ops" />
           <DotList items={role.tasks} className="text-base" />
         </div>
+        {lira ? (
+          <aside
+            aria-labelledby="lira-title"
+            data-testid="lira-card"
+            className="flex flex-col gap-3 rounded-lg border border-line p-5 lg:flex-row lg:items-center lg:gap-6 lg:p-6"
+          >
+            <ComingSoonChip className="lg:self-center" />
+            <div className="flex flex-1 flex-col gap-1">
+              <h3 id="lira-title" className="m-0 text-[17px] font-semibold">
+                Lira, your operations assistant
+              </h3>
+              <p className="m-0 text-[15px] leading-normal text-fg-muted">{lira}</p>
+            </div>
+            <Link
+              href="/#lira"
+              className="inline-flex min-h-11 shrink-0 items-center self-start text-[15px] font-medium text-foreground underline underline-offset-4 hover:text-signal lg:self-auto"
+            >
+              Meet Lira
+            </Link>
+          </aside>
+        ) : null}
       </Section>
 
       <Section

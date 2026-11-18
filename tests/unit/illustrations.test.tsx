@@ -42,6 +42,7 @@ describe("illustrations", () => {
         "role-finance",
         "role-operations",
         "role-worker",
+        "lira-chat",
       ]),
     );
   });
