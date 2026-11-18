@@ -148,13 +148,7 @@ async function Join({ token }: { token: string }) {
     return (
       <>
         {intro}
-        <p
-          role="alert"
-          className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm"
-        >
-          Your email address was confirmed after this invite was sent. For your safety, sign in with
-          the link we email you and choose your password there, then accept.
-        </p>
+        <FormAlert message="Your email address was confirmed after this invite was sent. For your safety, sign in with the link we email you and choose your password there, then accept." />
         <form action={signOutForInviteAction}>
           <input type="hidden" name="token" value={token} />
           <Button type="submit" className="h-11 rounded-lg px-5">
