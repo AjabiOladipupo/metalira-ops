@@ -1,13 +1,26 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { Illustration } from "@/components/illustration";
 import { PageHeader } from "@/components/page-header";
+import { PageSizeSelect } from "@/components/page-size-select";
+import { Pagination } from "@/components/pagination";
 import { Status } from "@/components/status";
 import { WorkerAvatar } from "@/components/worker-avatar";
 import { canAccessHref, findNavItem } from "@/lib/nav";
+import {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZES,
+  PEOPLE_PAGE_SIZE_COOKIE,
+  pageWindow,
+  parsePage,
+  linkPageSize,
+  parsePageSize,
+  type PageSize,
+} from "@/lib/pagination";
 import { initials } from "@/lib/people";
 import { canViewBankChanges, countPendingBankChanges } from "@/server/people/bank-changes";
 import {
@@ -86,7 +99,7 @@ function columns(mapHref: ((row: PeopleRow) => string) | null): Column<PeopleRow
           <Link
             href={mapHref(row)}
             scroll={false}
-            className="relative inline-flex min-h-9 items-center text-foreground no-underline hover:underline"
+            className="relative -my-1 inline-flex min-h-11 items-center text-foreground no-underline hover:underline"
           >
             <MappingStatus row={row} />
             <span className="sr-only">, change mapping for {row.name}</span>
@@ -102,10 +115,25 @@ function firstParam(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
 }
 
-/** /app/people with the given filters, leaving out blanks. */
-function peopleHref(params: { q?: string; dept?: string; map?: string }): string {
+interface PeopleParams {
+  q?: string;
+  dept?: string;
+  map?: string;
+  page?: number;
+  size?: PageSize;
+}
+
+/**
+ * /app/people with the given filters, leaving out blanks and page 1. `size` is written whenever
+ * it is given: callers pass `linkPageSize(...)`, and the size picker passes its own size.
+ */
+function peopleHref(params: PeopleParams): string {
   const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) if (value) search.set(key, value);
+  if (params.q) search.set("q", params.q);
+  if (params.dept) search.set("dept", params.dept);
+  if (params.size) search.set("size", String(params.size));
+  if (params.page && params.page > 1) search.set("page", String(params.page));
+  if (params.map) search.set("map", params.map);
   const text = search.toString();
   return text ? `/app/people?${text}` : "/app/people";
 }
@@ -134,6 +162,14 @@ async function PeopleList({
   const query = firstParam(params.q).slice(0, 100);
   const departmentId = firstParam(params.dept).slice(0, 64);
   const mapId = firstParam(params.map).slice(0, 64);
+  // Page size: the URL first (shareable links), then the choice remembered on this device.
+  const urlSize = parsePageSize(firstParam(params.size));
+  const size =
+    urlSize ??
+    parsePageSize((await cookies()).get(PEOPLE_PAGE_SIZE_COOKIE)?.value) ??
+    DEFAULT_PAGE_SIZE;
+  const sizeInLinks = linkPageSize(urlSize, size) ?? undefined;
+  const requestedPage = parsePage(firstParam(params.page));
   const ctx = await peoplePageContext();
   const [directory, pendingBankChanges] = await Promise.all([
     loadPeopleDirectory(ctx.supabase, ctx.organisationId, ctx.today, {
@@ -192,9 +228,17 @@ async function PeopleList({
       ? "all mapped"
       : `${directory.unmappedCount.toLocaleString("en-NG")} not fully mapped`;
   const filtered = Boolean(query || departmentId);
-  const mapHref = ctx.canEdit
-    ? (row: PeopleRow) => peopleHref({ q: query, dept: departmentId, map: row.id })
-    : null;
+  // Only the page being shown is rendered and sent to the browser. Search and the department
+  // filter run first (and their links drop `page`), so changing either starts on page 1.
+  const pages = pageWindow(directory.rows.length, requestedPage, size);
+  const pageRows = directory.rows.slice(pages.from, pages.to);
+  const here: PeopleParams = {
+    q: query,
+    dept: departmentId,
+    size: sizeInLinks,
+    page: pages.page,
+  };
+  const mapHref = ctx.canEdit ? (row: PeopleRow) => peopleHref({ ...here, map: row.id }) : null;
 
   return (
     <>
@@ -212,6 +256,7 @@ async function PeopleList({
         noDepartmentCount={directory.noDepartmentCount}
         selected={departmentId}
         query={query}
+        size={sizeInLinks}
       />
 
       <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:flex-wrap lg:items-start">
@@ -219,16 +264,17 @@ async function PeopleList({
           aria-label="Employees"
           className="flex min-w-0 flex-col gap-3 lg:flex-[999_1_560px]"
         >
-          <PeopleSearch query={query} departmentId={departmentId} />
-          <p role="status" className="m-0 text-sm text-fg-muted">
-            {filtered
-              ? `${plural(directory.rows.length, "employee", "employees")} found`
-              : `Showing all ${plural(directory.rows.length, "employee", "employees")}`}
+          <PeopleSearch query={query} departmentId={departmentId} size={sizeInLinks} />
+          {/* Search results are announced (the live region stays in the page, hidden while empty,
+              so updates are read out); the full count is in the title and under the
+              table ("1–25 of 162"). */}
+          <p role="status" className="m-0 text-sm text-fg-muted empty:sr-only">
+            {filtered ? `${plural(directory.rows.length, "employee", "employees")} found` : ""}
           </p>
           <DataTable
             caption="Employees"
             columns={columns(mapHref)}
-            rows={directory.rows}
+            rows={pageRows}
             getRowId={(row) => row.id}
             selectedIds={picked ? [picked.id] : []}
             empty={
@@ -237,14 +283,37 @@ async function PeopleList({
               </p>
             }
           />
+          {directory.rows.length > 0 ? (
+            <Pagination
+              label="Employee pages"
+              pages={pages}
+              hrefFor={(page) => peopleHref({ ...here, page })}
+              sizePicker={
+                <PageSizeSelect
+                  value={size}
+                  cookieName={PEOPLE_PAGE_SIZE_COOKIE}
+                  cookiePath="/app"
+                  options={PAGE_SIZES.map((option) => ({
+                    size: option,
+                    href: peopleHref({ ...here, size: option, page: 1 }),
+                  }))}
+                />
+              }
+            />
+          ) : null}
         </section>
 
         {ctx.canEdit && formOptions && targets ? (
           <MappingPanel
             worker={panelRow ? toMappingWorker(panelRow) : null}
+            avatar={
+              panelRow ? (
+                <WorkerAvatar workerId={panelRow.id} name={panelRow.name} size={48} />
+              ) : undefined
+            }
             options={{ ...formOptions, ...targets }}
             open={picked !== null}
-            closeHref={peopleHref({ q: query, dept: departmentId })}
+            closeHref={peopleHref(here)}
           />
         ) : null}
       </div>

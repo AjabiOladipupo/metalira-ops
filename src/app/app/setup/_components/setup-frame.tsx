@@ -36,14 +36,19 @@ export function SetupFrame({
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
-      <aside className="flex shrink-0 flex-col gap-5 rounded-xl bg-surface p-5 lg:sticky lg:top-6 lg:w-[260px]">
+      <aside className="flex shrink-0 flex-col gap-3 rounded-xl bg-surface p-4 lg:sticky lg:top-6 lg:w-[260px] lg:gap-5 lg:p-5">
         <div className="flex flex-col gap-1">
           <span className="type-label text-fg-muted">Setup</span>
           <span className="font-display text-[22px] font-bold" data-testid="setup-progress">
             {setupDoneCount(company.setupStep, completed)} of 5 done
           </span>
         </div>
-        <ol aria-label="Setup steps" className="m-0 flex list-none flex-col gap-1 p-0">
+        {/* On phones the steps are a row of numbered badges with only the current step named, so
+            the step's own form starts on the first screen. */}
+        <ol
+          aria-label="Setup steps"
+          className="m-0 flex list-none flex-wrap gap-1 p-0 lg:flex-col lg:flex-nowrap"
+        >
           {SETUP_STEPS.map((s) => {
             const isCurrent = s.slug === current;
             const done = completed ? s.number <= 5 : s.number < furthest;
@@ -62,7 +67,7 @@ export function SetupFrame({
               </span>
             );
             const rowClass = cn(
-              "flex h-11 w-full items-center gap-3 rounded-lg px-2.5 text-[15px] font-medium text-foreground no-underline",
+              "flex h-11 items-center gap-3 rounded-lg px-2.5 text-[15px] font-medium text-foreground no-underline lg:w-full",
               isCurrent ? "bg-background ring-1 ring-line" : "hover:bg-background/60",
             );
             return (
@@ -74,13 +79,17 @@ export function SetupFrame({
                     className={rowClass}
                   >
                     {badge}
-                    {s.label}
+                    <span className={isCurrent ? undefined : "sr-only lg:not-sr-only"}>
+                      {s.label}
+                    </span>
                     {done ? <span className="sr-only">, done</span> : null}
                   </Link>
                 ) : (
                   <span className={cn(rowClass, "text-fg-muted")}>
                     {badge}
-                    {s.label}
+                    <span className={isCurrent ? undefined : "sr-only lg:not-sr-only"}>
+                      {s.label}
+                    </span>
                   </span>
                 )}
               </li>

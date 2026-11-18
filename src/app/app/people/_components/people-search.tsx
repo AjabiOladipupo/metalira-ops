@@ -4,8 +4,24 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-/** Search by name or staff ID. A plain GET form, so the result is a shareable URL. */
-export function PeopleSearch({ query, departmentId }: { query: string; departmentId: string }) {
+/**
+ * Search by name or staff ID. A plain GET form, so the result is a shareable URL. It keeps the
+ * department filter and page size and leaves out the page, so a new search starts on page 1.
+ */
+export function PeopleSearch({
+  query,
+  departmentId,
+  size,
+}: {
+  query: string;
+  departmentId: string;
+  /** A non-default page size to keep. */
+  size?: number;
+}) {
+  const clear = new URLSearchParams();
+  if (departmentId) clear.set("dept", departmentId);
+  if (size) clear.set("size", String(size));
+  const clearHref = clear.size ? `/app/people?${clear.toString()}` : "/app/people";
   return (
     <form
       role="search"
@@ -14,6 +30,7 @@ export function PeopleSearch({ query, departmentId }: { query: string; departmen
       className="flex flex-wrap items-center gap-2"
     >
       {departmentId ? <input type="hidden" name="dept" value={departmentId} /> : null}
+      {size ? <input type="hidden" name="size" value={size} /> : null}
       <label htmlFor="people-search" className="sr-only">
         Search by name or staff ID
       </label>
@@ -38,13 +55,7 @@ export function PeopleSearch({ query, departmentId }: { query: string; departmen
       </Button>
       {query ? (
         <Button asChild variant="ghost" className="h-10 rounded-lg">
-          <Link
-            href={
-              departmentId ? `/app/people?dept=${encodeURIComponent(departmentId)}` : "/app/people"
-            }
-          >
-            Clear
-          </Link>
+          <Link href={clearHref}>Clear</Link>
         </Button>
       ) : null}
     </form>

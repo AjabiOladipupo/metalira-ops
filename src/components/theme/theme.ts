@@ -1,6 +1,13 @@
 export const THEME_STORAGE_KEY = "metalira-theme";
 
 /**
+ * Browser chrome colours (the installed worker app's status bar): the `bg` token, light and
+ * dark. Shared by the worker app's viewport export and the pre-paint theme script.
+ */
+export const THEME_COLOR_LIGHT = "#FFFFFF";
+export const THEME_COLOR_DARK = "#0A0A0A";
+
+/**
  * Fired on window when the choice changes, so every theme control on the page shows it. The
  * choice travels in `detail`: storage may be blocked, so listeners must not re-read it.
  */
