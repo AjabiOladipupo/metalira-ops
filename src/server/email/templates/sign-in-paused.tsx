@@ -20,7 +20,7 @@ export const signInPausedSubject = (organisationName: string | null) =>
     : "Phone sign-ins paused after many wrong PINs";
 
 /**
- * Sent to the owner and HR when the company reaches its cap on wrong PINs (owner decision 18):
+ * Sent to every owner and HR user when the company reaches its cap on wrong PINs (owner decision 18):
  * at most once per company per window, at the first refused sign-in.
  */
 export function SignInPausedEmail({
@@ -35,7 +35,7 @@ export function SignInPausedEmail({
     <EmailLayout
       appUrl={appUrl}
       preview={`${cap} wrong PINs in ${minutes} minutes: new phone sign-ins are paused until ${until}.`}
-      reason={`You received this email because you are the owner or in HR at ${company} on ${APP_NAME}.`}
+      reason={`You received this email because you are an owner or in HR at ${company} on ${APP_NAME}.`}
     >
       <EmailHeading>Phone sign-ins are paused for {minutes} minutes</EmailHeading>
       <EmailText>

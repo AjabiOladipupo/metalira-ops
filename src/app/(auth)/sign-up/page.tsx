@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: "Create an account" };
 /**
  * Sign-up. On wide screens (xl and up) the welcome scene sits beside the form copy; the auth
  * layout widens its column for pages marked `data-auth-wide`. Below xl the scene is hidden: on a
- * 390 x 844 phone it would push the four fields and the button below the fold.
+ * 390 x 844 phone it would push the three fields and the button below the fold.
  */
 export default function SignUpPage() {
   return (

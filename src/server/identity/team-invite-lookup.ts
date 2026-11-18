@@ -19,9 +19,12 @@ export type TeamInviteView =
       organisationId: string;
       organisationName: string;
       email: string;
-      role: TeamRole;
+      /** A manager role, or owner for an owner invite (slice 1.13). */
+      role: TeamRole | "owner";
       inviterName: string | null;
       expiresAt: string;
+      /** When the invite was made (slice 1.13: an address confirmed after it sets a password). */
+      invitedAt: string;
     }
   | {
       state: "accepted" | "revoked" | "expired";
@@ -41,16 +44,18 @@ export async function lookupTeamInvite(token: string): Promise<TeamInviteView> {
     if (!data) return { state: "invalid" };
     if (data.state === "pending") {
       // An invite from before slice 1.12 with a role this page can't grant.
-      if (!isTeamRole(data.role)) return { state: "invalid" };
+      if (!isTeamRole(data.role) && data.role !== "owner") return { state: "invalid" };
+      const role: TeamRole | "owner" = data.role === "owner" ? "owner" : data.role;
       return {
         state: "pending",
         inviteId: data.invite_id,
         organisationId: data.organisation_id,
         organisationName: data.organisation_name,
         email: data.email,
-        role: data.role,
+        role,
         inviterName: data.inviter_name,
         expiresAt: data.expires_at,
+        invitedAt: data.invited_at,
       };
     }
     if (data.state === "accepted" || data.state === "revoked" || data.state === "expired") {

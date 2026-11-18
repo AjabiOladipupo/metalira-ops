@@ -1,7 +1,7 @@
 import { ROLE_LABELS, type Role } from "@/lib/roles";
 
 /**
- * Team rules (slice 1.12), shared by the Team page (which buttons to show) and the server
+ * Team rules (slice 1.12; "the owner" became "an owner" in slice 1.13), shared by the Team page (which buttons to show) and the server
  * (which refusals to explain). The database enforces the same rules for every client
  * (supabase/migrations/20261117120000_team_invites.sql); these never replace that check.
  */
@@ -31,7 +31,7 @@ export const TEAM_ROLE_HINTS: Record<TeamRole, string> = {
   line_manager: "Their own team's timesheets and leave.",
 };
 
-/** The roles `actor` may offer in an invite or a role change: only the owner grants admin. */
+/** The roles `actor` may offer in an invite or a role change: only owners grant admin. */
 export function grantableRoles(actor: Role): TeamRole[] {
   if (actor === "owner") return [...TEAM_ROLES];
   if (actor === "admin") return TEAM_ROLES.filter((r) => r !== "admin");
@@ -92,10 +92,11 @@ export function roleChangeRefusal(
 }
 
 export const TEAM_REFUSAL_MESSAGES: Record<TeamRefusal, string> = {
-  not_allowed: "Only the owner or an admin can manage the team.",
-  owner_only: "Only the owner can make someone an admin or change an admin.",
+  not_allowed: "Only an owner or an admin can manage the team.",
+  owner_only: "Only an owner can make someone an admin or change an admin.",
   own_membership: "You can't change your own role or remove yourself.",
-  owner_protected: "The owner can't be removed or have their role changed.",
+  owner_protected:
+    "Owners are changed with an owner request: make someone an owner, or ask another owner to approve a removal.",
   not_a_manager: "Workers are managed from People, not here.",
   same_role: "They already have that role.",
   bad_role: "Choose admin, HR, finance, operations manager or line manager.",

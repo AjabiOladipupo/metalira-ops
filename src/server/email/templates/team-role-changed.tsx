@@ -43,7 +43,7 @@ export function TeamRoleChangedEmail({
         to {newRoleLabel}. What you can see and do in {APP_NAME} follows the new role from now on.
       </EmailText>
       <EmailButton href={`${appUrl}/app`}>Open {APP_NAME}</EmailButton>
-      <EmailText muted>If you did not expect this, ask the owner of {company}.</EmailText>
+      <EmailText muted>If you did not expect this, ask an owner of {company}.</EmailText>
     </EmailLayout>
   );
 }

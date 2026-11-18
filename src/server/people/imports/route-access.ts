@@ -19,7 +19,7 @@ export async function importRouteAccess(): Promise<
   if (!session.active || !role || !(PEOPLE_EDITORS as readonly string[]).includes(role)) {
     return {
       ok: false,
-      response: new Response("Only the owner, an admin or HR can download this file.", {
+      response: new Response("Only an owner, an admin or HR can download this file.", {
         status: 403,
       }),
     };

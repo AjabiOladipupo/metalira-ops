@@ -27,7 +27,7 @@ import { formFields } from "./schemas";
  * change to audit_log. A refused role gets a "forbidden" result, never a partial save.
  */
 
-const FORBIDDEN = "Only the owner or an admin can change company settings.";
+const FORBIDDEN = "Only an owner or an admin can change company settings.";
 const FAILED = "That was not saved. Try again in a minute.";
 
 function refusal(error: unknown, values?: Record<string, string>): CompanyFormState {

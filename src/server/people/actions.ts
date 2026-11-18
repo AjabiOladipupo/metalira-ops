@@ -35,7 +35,7 @@ import { addPayRate, cancelPayRate, createWorker, endEmployment, updateWorker } 
  * apply again and the audit triggers log the change.
  */
 
-const FORBIDDEN = "Only the owner, an admin or HR can change employee records.";
+const FORBIDDEN = "Only an owner, an admin or HR can change employee records.";
 const FAILED = "That was not saved. Try again in a minute.";
 
 function refusal(

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
+import { passwordTrusted, PASSWORD_SET_AT_KEY } from "@/lib/auth/amr";
 import type { Database } from "@/types/db";
 
 import { companyNameSchema } from "./names";
@@ -35,6 +36,13 @@ export async function ensureOrganisationForNewUser(
   user: User,
 ): Promise<CreatedOrganisation | null> {
   if (!user.email_confirmed_at) return null;
+  // Slice 1.13: only once the account's password is trusted (chosen after confirming, from an
+  // email link). Before that, the pending name may be someone else's: they could have signed the
+  // address up first with a company name of their choosing. /set-password asks for the company
+  // name and creates it with createOwnerCompany instead.
+  if (!passwordTrusted(user.app_metadata?.[PASSWORD_SET_AT_KEY], user.email_confirmed_at)) {
+    return null;
+  }
 
   const parsed = companyNameSchema.safeParse(user.user_metadata?.[PENDING_COMPANY_KEY]);
   if (!parsed.success) return null;
@@ -51,4 +59,22 @@ export async function ensureOrganisationForNewUser(
   await supabase.auth.updateUser({ data: { [PENDING_COMPANY_KEY]: null } });
 
   return { organisationId, organisationName: parsed.data };
+}
+
+/**
+ * Creates the owner's company from the name they typed on /set-password (slice 1.13), right after
+ * they chose their password there. Same database step as above (public.create_first_organisation:
+ * confirmed address, no membership yet, one per user). Clears the pending name parked at sign-up.
+ * Returns null when the user already belongs to a company.
+ */
+export async function createOwnerCompany(
+  supabase: SupabaseClient<Database>,
+  companyName: string,
+): Promise<CreatedOrganisation | null> {
+  const { data, error } = await supabase.rpc("create_first_organisation", { p_name: companyName });
+  if (error) throw new Error(`Could not create the organisation: ${error.code}`);
+  const organisationId: string | null = data ?? null;
+  await supabase.auth.updateUser({ data: { [PENDING_COMPANY_KEY]: null } });
+  if (!organisationId) return null;
+  return { organisationId, organisationName: companyName };
 }

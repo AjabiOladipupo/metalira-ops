@@ -14,7 +14,8 @@ const email = z
 
 // Supabase Auth caps bcrypt input at 72 bytes. The project also needs letters and digits
 // (supabase/config.toml `password_requirements = "letters_digits"`).
-const newPassword = z
+/** A new password: chosen after an email link (slice 1.13), on /set-password or the join page. */
+export const newPasswordSchema = z
   .string()
   .min(8, "Use at least 8 characters")
   .max(72, "Use 72 characters or fewer")
@@ -37,11 +38,11 @@ export const signInPasswordSchema = z.object({
 
 export const magicLinkSchema = z.object({ email, next });
 
+/** Owner sign-up (slice 1.13): no password here; it is chosen after the email link. */
 export const signUpSchema = z.object({
   fullName: fullNameSchema,
   companyName: companyNameSchema,
   email,
-  password: newPassword,
 });
 
 export const switchOrganisationSchema = z.object({

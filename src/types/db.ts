@@ -151,14 +151,14 @@ isOneToOne: false
                   ]
                 },"membership_invites": {
                   Row: {
-                    "accepted_at": string | null,"accepted_by": string | null,"created_at": string,"created_by": string | null,"email": string,"expires_at": string,"id": string,"organisation_id": string,"revoked_at": string | null,"revoked_by": string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at": string,"token_hash": string
+                    "accepted_at": string | null,"accepted_by": string | null,"created_at": string,"created_by": string | null,"email": string,"expires_at": string,"id": string,"organisation_id": string,"owner_change_id": string | null,"revoked_at": string | null,"revoked_by": string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at": string,"token_hash": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email": string,"expires_at"?: string,"id"?: string,"organisation_id": string,"revoked_at"?: string | null,"revoked_by"?: string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at"?: string,"token_hash": string
+                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email": string,"expires_at"?: string,"id"?: string,"organisation_id": string,"owner_change_id"?: string | null,"revoked_at"?: string | null,"revoked_by"?: string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at"?: string,"token_hash": string
                   }
                   Update: {
-                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email"?: string,"expires_at"?: string,"id"?: string,"organisation_id"?: string,"revoked_at"?: string | null,"revoked_by"?: string | null,"role"?: Database["public"]['Enums']["membership_role"],"sent_at"?: string,"token_hash"?: string
+                    "accepted_at"?: string | null,"accepted_by"?: string | null,"created_at"?: string,"created_by"?: string | null,"email"?: string,"expires_at"?: string,"id"?: string,"organisation_id"?: string,"owner_change_id"?: string | null,"revoked_at"?: string | null,"revoked_by"?: string | null,"role"?: Database["public"]['Enums']["membership_role"],"sent_at"?: string,"token_hash"?: string
                   }
                   Relationships: [
                     {
@@ -166,6 +166,12 @@ isOneToOne: false
       columns: ["organisation_id"]
 isOneToOne: false
       referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "membership_invites_owner_change_id_fkey"
+      columns: ["owner_change_id"]
+isOneToOne: false
+      referencedRelation: "owner_changes"
       referencedColumns: ["id"]
     }
                   ]
@@ -208,6 +214,26 @@ isOneToOne: false
                   }
                   Relationships: [
                     
+                  ]
+                },"owner_changes": {
+                  Row: {
+                    "approved_by": string | null,"cancel_reason": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"id": string,"invite_email": string | null,"kind": Database["public"]['Enums']["owner_change_kind"],"new_role": Database["public"]['Enums']["membership_role"] | null,"organisation_id": string,"owners_at_request": number,"reason": string | null,"rejected_by": string | null,"requested_by": string,"single_owner": boolean,"status": Database["public"]['Enums']["owner_change_status"],"target_membership_id": string | null,"target_user_id": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "approved_by"?: string | null,"cancel_reason"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"id"?: string,"invite_email"?: string | null,"kind": Database["public"]['Enums']["owner_change_kind"],"new_role"?: Database["public"]['Enums']["membership_role"] | null,"organisation_id": string,"owners_at_request": number,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"single_owner"?: boolean,"status"?: Database["public"]['Enums']["owner_change_status"],"target_membership_id"?: string | null,"target_user_id"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "approved_by"?: string | null,"cancel_reason"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"id"?: string,"invite_email"?: string | null,"kind"?: Database["public"]['Enums']["owner_change_kind"],"new_role"?: Database["public"]['Enums']["membership_role"] | null,"organisation_id"?: string,"owners_at_request"?: number,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"single_owner"?: boolean,"status"?: Database["public"]['Enums']["owner_change_status"],"target_membership_id"?: string | null,"target_user_id"?: string | null,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "owner_changes_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
                   ]
                 },"pay_rates": {
                   Row: {
@@ -544,8 +570,19 @@ isOneToOne: false
               "invite_expires_at": string,"invite_id": string,"invite_worker_id": string,"token": string
             }[]
                            },
+"decide_owner_change":
+{ Args: { "p_change_id": string,"p_decision": string,"p_organisation_id": string }; Returns: {
+              "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
+            }[]
+                           },
+"email_link_allowed":
+{ Args: { "p_keys": (string)[] }; Returns: boolean
+                           },
 "end_employment":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_id": string }; Returns: undefined
+                           },
+"end_other_sessions":
+{ Args: Record<PropertyKey, never>; Returns: number
                            },
 "list_import_managers":
 { Args: { "p_organisation_id": string }; Returns: {
@@ -557,7 +594,7 @@ isOneToOne: false
                            },
 "membership_invite_lookup":
 { Args: { "p_token": string }; Returns: {
-              "email": string,"expires_at": string,"invite_id": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
+              "email": string,"expires_at": string,"invite_id": string,"invited_at": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
             }[]
                            },
 "my_line_manager":
@@ -568,6 +605,11 @@ isOneToOne: false
 "remove_member":
 { Args: { "p_membership_id": string,"p_organisation_id": string }; Returns: {
               "member_email": string,"member_name": string,"member_user_id": string,"old_role": Database["public"]['Enums']["membership_role"]
+            }[]
+                           },
+"request_owner_change":
+{ Args: { "p_email"?: string,"p_kind": Database["public"]['Enums']["owner_change_kind"],"p_membership_id"?: string,"p_new_role"?: Database["public"]['Enums']["membership_role"],"p_organisation_id": string,"p_reason"?: string }; Returns: {
+              "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
             }[]
                            },
 "resend_membership_invite":
@@ -624,7 +666,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","pay_type": "monthly"|"daily"|"hourly","staff_id_correction_status": "pending"|"approved"|"rejected"|"cancelled","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
+            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","owner_change_kind": "add"|"invite"|"remove"|"demote","owner_change_status": "pending"|"approved"|"rejected"|"cancelled","pay_type": "monthly"|"daily"|"hourly","staff_id_correction_status": "pending"|"approved"|"rejected"|"cancelled","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -740,7 +782,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
+            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"owner_change_kind": ["add", "invite", "remove", "demote"],"owner_change_status": ["pending", "approved", "rejected", "cancelled"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
           }
         }
 } as const

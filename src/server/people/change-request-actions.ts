@@ -26,7 +26,7 @@ export async function resolveChangeRequestAction(
         return {
           ok: false,
           status: 403,
-          formError: "Only the owner, an admin or HR can deal with change requests.",
+          formError: "Only an owner, an admin or HR can deal with change requests.",
         };
       }
       if (error.code === "invalid") {

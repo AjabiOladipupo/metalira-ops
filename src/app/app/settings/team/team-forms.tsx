@@ -18,7 +18,10 @@ import {
 } from "@/server/identity/team-actions";
 import type { TeamActionState } from "@/server/identity/team-state";
 
-type Option = { value: TeamRole; label: string };
+type Option = { value: TeamRole | "owner"; label: string };
+
+const OWNER_HINT =
+  "Everything, including changing the owners. With two or more owners, another owner approves.";
 
 const ROW =
   "flex flex-col gap-3 border-t border-line py-4 first:border-t-0 lg:grid lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,2fr)] lg:items-center lg:gap-6";
@@ -74,7 +77,7 @@ export function InviteForm({ options }: { options: Option[] }) {
   const [state, action] = useActionState(inviteManagerAction, null);
   const failed = state && !state.ok ? state : null;
   const [role, setRole] = useState<string>(failed?.values?.role ?? "hr");
-  const hint = isTeamRole(role) ? TEAM_ROLE_HINTS[role] : undefined;
+  const hint = isTeamRole(role) ? TEAM_ROLE_HINTS[role] : role === "owner" ? OWNER_HINT : undefined;
   return (
     <form
       key={state?.ok ? state.message : "invite"}
@@ -127,6 +130,8 @@ function displayName(member: TeamMember): string {
 
 /** Change role: a select of the roles the viewer may grant, then Save. */
 function ChangeRoleForm({ member, options }: { member: TeamMember; options: Option[] }) {
+  // Owners are made through "Make owner", never a role change.
+  const roles = options.filter((o) => o.value !== "owner");
   const [state, action] = useActionState(changeRoleAction, null);
   const name = displayName(member);
   return (
@@ -141,7 +146,7 @@ function ChangeRoleForm({ member, options }: { member: TeamMember; options: Opti
         <SelectField
           label="Role"
           name="role"
-          options={options}
+          options={roles}
           defaultValue={member.role}
           className="min-w-0 flex-[1_1_180px]"
         />
@@ -201,10 +206,13 @@ export function MemberRow({
   member,
   actor,
   options,
+  ownerActions,
 }: {
   member: TeamMember;
   actor: { userId: string; role: Role };
   options: Option[];
+  /** Owner changes the viewer may ask for on this row (slice 1.13), from owner-forms.tsx. */
+  ownerActions?: React.ReactNode;
 }) {
   const name = displayName(member);
   const isYou = member.userId === actor.userId;
@@ -213,9 +221,9 @@ export function MemberRow({
     refusal === "own_membership"
       ? "You can't change your own role."
       : refusal === "owner_protected"
-        ? "The owner can't be removed or changed."
+        ? "Only an owner can ask to change an owner."
         : refusal === "owner_only"
-          ? "Only the owner can change an admin."
+          ? "Only an owner can change an admin."
           : null;
   return (
     <li aria-label={name} data-testid="team-member" className={ROW}>
@@ -235,9 +243,17 @@ export function MemberRow({
         <span className="text-fg-muted">Joined {lagosDate(member.joinedAt)}</span>
       </div>
       {refusal === null ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:gap-4">
           <ChangeRoleForm member={member} options={options} />
           <RemoveForm member={member} />
+          {ownerActions}
+        </div>
+      ) : ownerActions ? (
+        <div className="flex flex-col gap-2">
+          {refusal === "own_membership" ? (
+            <p className="m-0 text-sm text-fg-muted">{note}</p>
+          ) : null}
+          {ownerActions}
         </div>
       ) : (
         <p className="m-0 text-sm text-fg-muted">{note}</p>
@@ -315,7 +331,9 @@ export function InviteRow({
           <CancelForm invite={invite} />
         </div>
       ) : (
-        <p className="m-0 text-sm text-fg-muted">Only the owner can change an admin invite.</p>
+        <p className="m-0 text-sm text-fg-muted">
+          Only an owner can change an admin or owner invite.
+        </p>
       )}
     </li>
   );

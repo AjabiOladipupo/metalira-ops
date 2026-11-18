@@ -2,7 +2,8 @@
  * Slice 1.12: team invites for managers. The owner invites an HR manager from Settings → Team,
  * the HR manager signs in from the invite link and accepts, then approves a bank-detail change
  * the owner raised: the two-person rule working with two real managers. A second test covers a
- * new manager who creates their account from the invite, and a signed-in wrong account.
+ * new manager who creates their account from the invite (confirming their address before they
+ * choose a password, slice 1.13), and a signed-in wrong account.
  */
 import { randomBytes, randomUUID } from "node:crypto";
 
@@ -264,15 +265,18 @@ test("a new manager creates their account from the invite; a wrong account is to
   await page.goto(joinPath);
   const signUp = page.getByRole("form", { name: "Create your account" });
   await expect(signUp.getByLabel("Work email")).toHaveValue(email.toLowerCase());
-  await signUp.getByLabel("Your full name").fill("Femi Adeyemi");
-  await signUp.getByLabel("Password").fill(password);
-  await signUp.getByRole("button", { name: "Create account" }).click();
+  // Slice 1.13: no password (or name) until the address is confirmed.
+  await expect(signUp.getByLabel("Password")).toHaveCount(0);
+  await signUp.getByRole("button", { name: "Email me a link" }).click();
   await expect(page).toHaveURL(/\/check-email\?sent=invite$/, { timeout: 15_000 });
 
-  // The confirmation link signs them in and brings them back to the invite.
+  // The confirmation link signs them in and brings them back to the invite, where they choose
+  // their password and accept.
   await followEmailLink(page, await latestEmailTo(email));
   await expect(page).toHaveURL(new RegExp(`${joinPath}$`), { timeout: 15_000 });
-  await page.getByRole("button", { name: "Accept and join" }).click();
+  await page.getByLabel("Your full name").fill("Femi Adeyemi");
+  await page.getByLabel("Choose a password").fill(password);
+  await page.getByRole("button", { name: "Set password and join" }).click();
   await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });
 
   // No company was created for them: they joined the owner's, as finance.

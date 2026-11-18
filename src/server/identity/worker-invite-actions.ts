@@ -36,7 +36,7 @@ function refusal(error: unknown): InviteActionState {
       return {
         ok: false,
         status: 403,
-        message: "Only the owner, an admin or HR can invite workers.",
+        message: "Only an owner, an admin or HR can invite workers.",
       };
     }
     if (error.code === "invalid") {

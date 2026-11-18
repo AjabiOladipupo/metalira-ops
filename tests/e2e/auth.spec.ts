@@ -47,18 +47,20 @@ test("a new owner signs up, signs out, signs back in and sees only their own com
   await page.goto("/app/people");
   await expect(page).toHaveURL(/\/sign-in\?next=%2Fapp%2Fpeople$/);
 
-  // 2. Sign up. With email confirmation on (the default), finish through the emailed link.
+  // 2. Sign up: name, company and email only (slice 1.13). The emailed link signs them in, and
+  // they choose their password before the app opens.
   await page.getByRole("link", { name: "Create an account" }).click();
   await page.getByRole("textbox", { name: "Your full name" }).fill("Ada Okafor");
   await page.getByRole("textbox", { name: "Company name" }).fill(alphaName);
   await page.getByRole("textbox", { name: "Work email" }).fill(email);
-  await page.getByRole("textbox", { name: "Password" }).fill(password);
+  await expect(page.getByRole("textbox", { name: "Password" })).toHaveCount(0);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(/\/(app|check-email\?sent=signup)$/);
-  if (page.url().includes("/check-email")) {
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Check your email");
-    await followEmailLink(page, await latestEmailTo(email));
-  }
+  await expect(page).toHaveURL(/\/check-email\?sent=signup$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Check your email");
+  await followEmailLink(page, await latestEmailTo(email));
+  await expect(page).toHaveURL(/\/set-password\?next=/, { timeout: 15_000 });
+  await page.getByLabel("Choose a password").fill(password);
+  await page.getByRole("button", { name: "Save password" }).click();
   // A new owner has not set up the company yet, so the app opens the setup wizard.
   await expect(page).toHaveURL(/\/app\/setup\/plan$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your plan");

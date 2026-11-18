@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { signedInWithEmailLink } from "@/lib/auth/amr";
 import type { Database } from "@/types/db";
 
 export interface ClaimsUser {
@@ -22,4 +23,15 @@ export async function claimsUser(supabase: SupabaseClient<Database>): Promise<Cl
   const { sub, email } = data.claims;
   if (typeof sub !== "string" || !sub) return null;
   return { id: sub, email: typeof email === "string" ? email : "" };
+}
+
+/**
+ * True only when the session was opened from an email link (the token's `amr`, checked by
+ * getClaims). False for a password sign-in, no session, a bad token or an unreadable claim, so
+ * every caller fails closed (slice 1.13).
+ */
+export async function sessionFromEmailLink(supabase: SupabaseClient<Database>): Promise<boolean> {
+  const { data, error } = await supabase.auth.getClaims();
+  if (error || !data?.claims) return false;
+  return signedInWithEmailLink((data.claims as { amr?: unknown }).amr);
 }

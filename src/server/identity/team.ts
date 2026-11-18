@@ -12,6 +12,7 @@ import {
   TEAM_ROLES,
   type TeamRole,
 } from "@/lib/team";
+import { OWNER_DB_MESSAGES } from "@/lib/owners";
 import type { Database } from "@/types/db";
 
 import { MutationError, type MutationSpec } from "./mutate";
@@ -149,10 +150,12 @@ const DB_MESSAGES: Record<string, { code: "invalid" | "forbidden"; message: stri
 export function teamDbError(error: PostgrestError, what: string): MutationError {
   const known = DB_MESSAGES[error.code];
   if (known) return new MutationError(known.code, known.message);
+  const owner = OWNER_DB_MESSAGES[error.code];
+  if (owner) return new MutationError("invalid", owner);
   if (error.code === "42501") {
     return new MutationError(
       "forbidden",
-      /only the owner can/i.test(error.message)
+      /only an owner can/i.test(error.message)
         ? TEAM_REFUSAL_MESSAGES.owner_only
         : TEAM_REFUSAL_MESSAGES.not_allowed,
     );
@@ -187,7 +190,8 @@ export interface IssuedInvite {
   inviteId: string;
   token: string;
   email: string;
-  role: TeamRole;
+  /** A manager role, or owner for an owner invite (slice 1.13). */
+  role: TeamRole | "owner";
   expiresAt: Date;
 }
 
@@ -238,7 +242,9 @@ export const resendSpec: MutationSpec<typeof inviteIdSchema, IssuedInvite> = {
     });
     if (error) throw teamDbError(error, "resend_membership_invite");
     const row = rows?.[0];
-    if (!row || !isTeamRole(row.invite_role)) throw new Error("resend returned no invite");
+    if (!row || !(isTeamRole(row.invite_role) || row.invite_role === "owner")) {
+      throw new Error("resend returned no invite");
+    }
     return {
       inviteId: data.inviteId,
       token: row.token,

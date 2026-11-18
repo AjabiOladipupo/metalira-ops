@@ -80,7 +80,7 @@ export async function requestBankChangeAction(
   } catch (error) {
     return refusal(
       error,
-      "Only the owner, an admin or HR can ask to change bank details.",
+      "Only an owner, an admin or HR can ask to change bank details.",
       echoableValues(fields),
     );
   }
@@ -110,7 +110,7 @@ export async function decideBankChangeAction(
   try {
     decided = await decideBankChange(fields);
   } catch (error) {
-    return refusal(error, "Only the owner, HR or finance can approve bank changes.");
+    return refusal(error, "Only an owner, HR or finance can approve bank changes.");
   }
   const organisationId = await activeOrganisationId();
   if (organisationId && decided.status === "approved") {

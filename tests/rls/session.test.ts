@@ -17,6 +17,7 @@ import {
   anonClient,
   createTenantUser,
   createTestUser,
+  markPasswordTrusted,
   type Client,
   type TenantUser,
 } from "./helpers/supabase";
@@ -88,7 +89,7 @@ describe("loadMemberships", () => {
 });
 
 describe("ensureOrganisationForNewUser", () => {
-  async function newOwner(companyName: unknown) {
+  async function newOwner(companyName: unknown, { trusted = true } = {}) {
     const email = `rls-signup-${randomUUID()}@example.test`;
     const password = `${randomBytes(18).toString("base64url")}a1`;
     const created = await admin.auth.admin.createUser({
@@ -98,11 +99,26 @@ describe("ensureOrganisationForNewUser", () => {
       user_metadata: { full_name: "Ada Okafor", company_name: companyName },
     });
     expect(created.error).toBeNull();
+    // Slice 1.13: the company is created only for an account whose password is trusted.
+    if (trusted) await markPasswordTrusted(created.data.user!.id);
     const client = anonClient();
     const signIn = await client.auth.signInWithPassword({ email, password });
     expect(signIn.error).toBeNull();
     return { client, user: signIn.data.user! };
   }
+
+  it("creates nothing from metadata while the account's password isn't trusted", async () => {
+    // Someone signed the address up with their own company name before it was confirmed.
+    const { client, user } = await newOwner(`Attacker Holdings ${randomUUID().slice(0, 6)}`, {
+      trusted: false,
+    });
+    expect(await ensureOrganisationForNewUser(client, user)).toBeNull();
+    const { count } = await admin
+      .from("memberships")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    expect(count).toBe(0);
+  });
 
   it("creates one organisation with the user as owner, audited, and only once", async () => {
     const name = `Gamma Staffing ${randomUUID().slice(0, 6)}`;

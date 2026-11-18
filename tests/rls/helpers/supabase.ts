@@ -125,6 +125,7 @@ export async function createTestUser(label: string, fullName?: string): Promise<
   if (error || !data.user) {
     throw new Error(`Could not create test user ${label}: ${error?.message ?? "no user"}`);
   }
+  await markPasswordTrusted(data.user.id);
 
   const client = anonClient();
   const signIn = await client.auth.signInWithPassword({ email, password });
@@ -154,4 +155,36 @@ export async function pgClient(): Promise<pg.Client> {
   const client = new pg.Client({ connectionString: loadLocalEnv().dbUrl });
   await client.connect();
   return client;
+}
+
+/**
+ * Slice 1.13: a password counts only once chosen after the address was confirmed
+ * (app_metadata.password_set_at, which the app writes after an email link). Test users made with
+ * the secret key get it here, as accounts confirmed before the 1.13 migration got it there.
+ */
+export async function markPasswordTrusted(userId: string): Promise<void> {
+  const { error } = await adminClient().auth.admin.updateUserById(userId, {
+    app_metadata: { password_set_at: new Date(Date.now() + 1000).toISOString() },
+  });
+  if (error) throw new Error(`Could not mark the password: ${error.message}`);
+}
+
+/**
+ * Adds a membership as the database owner (postgres), for seeding what only the definer
+ * functions may write, such as an extra owner: the secret key can't make owners (slice 1.13).
+ */
+export async function insertMembershipAsOwner(
+  orgId: string,
+  userId: string,
+  role: string,
+): Promise<void> {
+  const db = await pgClient();
+  try {
+    await db.query(
+      "insert into public.memberships (organisation_id, user_id, role) values ($1, $2, $3::public.membership_role)",
+      [orgId, userId, role],
+    );
+  } finally {
+    await db.end();
+  }
 }

@@ -21,7 +21,7 @@ import { IMPORT_PATHS, type ImportActionState, type ImportPath } from "@/lib/peo
  * the user's own client. Messages are plain English and never carry personal data.
  */
 
-const FORBIDDEN = "Only the owner, an admin or HR can import employees.";
+const FORBIDDEN = "Only an owner, an admin or HR can import employees.";
 const FAILED = "That didn't work. Try again in a minute.";
 
 function refusal(error: unknown): { ok: false; message: string } {

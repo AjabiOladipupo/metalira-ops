@@ -27,7 +27,7 @@ export const PIN_HOLD_WINDOW_HOURS = 24;
  * towards a hold. One network address gets at most IP_WRONG_PIN_CAP of the 50.
  * The cost: a sustained attack can keep new sign-ins for one company closed 15 minutes at a
  * time. Nobody already signed in is affected, nobody is locked out for longer, each window that
- * hits the cap is in the audit log (worker_auth.company_throttled), and the owner and HR get one
+ * hits the cap is in the audit log (worker_auth.company_throttled), and every owner and HR user gets one
  * email per window. Owner confirmed 50 per 15 minutes on 18 Nov 2026, to review after pilots.
  */
 export const COMPANY_WRONG_PIN_CAP = 50;

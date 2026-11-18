@@ -10,7 +10,13 @@ import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 
 import type { Role } from "../../../src/lib/roles";
-import { adminClient, anonClient, loadLocalEnv } from "../../rls/helpers/supabase";
+import {
+  adminClient,
+  anonClient,
+  insertMembershipAsOwner,
+  loadLocalEnv,
+  markPasswordTrusted,
+} from "../../rls/helpers/supabase";
 
 /** True when the local stack is up and the app under test was built against it. */
 export const supabaseReady: boolean = (() => {
@@ -58,6 +64,7 @@ export async function createAccount(
     user_metadata: { full_name: fullName },
   });
   if (error || !data.user) throw new Error(`Could not create ${label}: ${error?.message}`);
+  await markPasswordTrusted(data.user.id);
   return { userId: data.user.id, email, password, fullName };
 }
 
@@ -94,6 +101,8 @@ export async function createOwner(
 
 /** Adds a membership directly (no invite UI until Phase 1). */
 export async function addMembership(orgId: string, userId: string, role: Role): Promise<void> {
+  // The secret key can't make owners (slice 1.13).
+  if (role === "owner") return insertMembershipAsOwner(orgId, userId, role);
   const { error } = await adminClient()
     .from("memberships")
     .insert({ organisation_id: orgId, user_id: userId, role });

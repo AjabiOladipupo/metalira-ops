@@ -1,7 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { PASSWORD_SET_AT_KEY } from "@/lib/auth/amr";
 import { isWorkerAppMetadata } from "@/lib/auth/routes";
+
+function hasPasswordSetAt(appMetadata: unknown): boolean {
+  return (
+    typeof appMetadata === "object" &&
+    appMetadata !== null &&
+    typeof (appMetadata as Record<string, unknown>)[PASSWORD_SET_AT_KEY] === "string"
+  );
+}
 import type { Database } from "@/types/db";
 
 import { getSupabasePublicEnv, type SupabasePublicEnv } from "./env";
@@ -13,6 +22,12 @@ export interface SessionUpdate {
   userId: string | null;
   /** True when the session is a worker's phone login (app_metadata, set only by the server). */
   isWorker: boolean;
+  /**
+   * True when the token carries no app_metadata.password_set_at (slice 1.13): the manager has
+   * not chosen a password after confirming their address. Optimistic; checked again on the
+   * set-password page and in the actions.
+   */
+  needsPassword: boolean;
 }
 
 function publicEnvOrNull(): SupabasePublicEnv | null {
@@ -36,7 +51,7 @@ function publicEnvOrNull(): SupabasePublicEnv | null {
 export async function updateSession(request: NextRequest): Promise<SessionUpdate> {
   let response = NextResponse.next({ request });
   const env = publicEnvOrNull();
-  if (!env) return { response, userId: null, isWorker: false };
+  if (!env) return { response, userId: null, isWorker: false, needsPassword: false };
 
   const supabase = createServerClient<Database>(env.url, env.publishableKey, {
     cookies: {
@@ -59,11 +74,16 @@ export async function updateSession(request: NextRequest): Promise<SessionUpdate
   const claims = !error && data?.claims ? data.claims : null;
   const sub = claims?.sub;
   const userId = typeof sub === "string" && sub ? sub : null;
-  return {
-    response,
-    userId,
-    isWorker: userId !== null && isWorkerAppMetadata(claims?.app_metadata),
-  };
+  const isWorker = userId !== null && isWorkerAppMetadata(claims?.app_metadata);
+  let needsPassword = userId !== null && !isWorker && !hasPasswordSetAt(claims?.app_metadata);
+  // A token issued before the password was recorded (or before the 1.13 backfill) lacks the
+  // claim: refresh once, on the manager app only, before sending anyone to choose a password.
+  const path = request.nextUrl.pathname;
+  if (needsPassword && (path === "/app" || path.startsWith("/app/"))) {
+    const refreshed = await supabase.auth.refreshSession();
+    needsPassword = !hasPasswordSetAt(refreshed.data.user?.app_metadata);
+  }
+  return { response, userId, isWorker, needsPassword };
 }
 
 /** A redirect that keeps any auth cookies `from` refreshed during this request. */

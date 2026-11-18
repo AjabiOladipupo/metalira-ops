@@ -39,7 +39,7 @@ export type RefusedOutcome = "ip_blocked" | "locked" | "held" | "company_throttl
 
 /**
  * Set once after a real company reached its cap on wrong PINs, whatever the outcome: the server
- * emails its owner and HR (one alert per capped window). Never shown to the person signing in.
+ * emails its owners and HR (one alert per capped window). Never shown to the person signing in.
  */
 export interface SignInAlert {
   alertOrganisationId?: string | null;
