@@ -177,6 +177,20 @@ Added on owner request (17 Nov 2026): the two-person rule (bank-detail changes n
 - An invited worker signs in on a phone with company code, staff ID and PIN, and sees their own profile.
 - Isolation test covers every Phase 1 table; bank-detail changes provably need a second approver.
 
+## Sign-off (owner, 18 Nov 2026)
+
+Phase 1 is signed off. Slices 1.1–1.10, 1.11 (PIN lockout rules, staff ID correction, first import) and 1.12 (team invites, added on owner request) are merged, each after review and with CI green.
+
+Owner checks on production (ops.metaliratech.com):
+- The 162-row import: 158 rows ready, 4 held back and explained.
+- An invited worker signed in on a real Android phone with company code, staff ID and PIN, installed the app and saw their own profile. Pages felt faster after the Dublin region move, and the Queries tab opens.
+- Emails arrived: worker invite, line manager change from Edit details, team invite (a second manager joined as HR), and a bank-detail change raised to the second approver and approved by them.
+
+Carried forward:
+- Known gap from 1.11: line managers can still read reportees' bank and tax columns through the API (masked or encrypted, never in clear). Close it before Phase 4's My team.
+- Phase 5: bank-file generation and payroll release must decrypt each account number and refuse a last-4 mismatch, including details saved by the first-import exception. Consider refusing payroll release while setup is unfinished.
+- Phases 3 and 4: replace `private.worker_has_work_records` when punch, timesheet or pay tables arrive (a test fails until each `worker_id` table is declared).
+
 ## Decisions (owner, 16 Nov 2026)
 
 1. Clients, sites and projects: name-only tables in 1.3; Phase 2 and 8 extend them.
