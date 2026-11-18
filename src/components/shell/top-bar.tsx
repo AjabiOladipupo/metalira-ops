@@ -66,7 +66,8 @@ export function TopBar({
         </SheetContent>
       </Sheet>
 
-      {orgSwitcher}
+      {/* On phones the company name shrinks (and truncates) so the icons stay on the first row. */}
+      <div className="flex min-w-0 flex-1 md:flex-none">{orgSwitcher}</div>
 
       <div className="hidden md:block">
         <Select defaultValue="all">
@@ -89,7 +90,7 @@ export function TopBar({
         />
       </label>
 
-      <div className="ml-auto flex items-center gap-3 md:ml-0">
+      <div className="ml-auto flex shrink-0 items-center gap-3 md:ml-0">
         <ThemeButton className="-mx-1.5" />
         <Button variant="outline" size="icon" aria-label="Notifications">
           <Bell strokeWidth={1.75} className="size-[18px]" />
@@ -102,5 +103,5 @@ export function TopBar({
 
 /** Same footprint as the company switcher, while the session loads. */
 export function OrgSwitcherSkeleton() {
-  return <span aria-hidden className="h-10 w-40 max-w-[50vw] rounded-md border border-line" />;
+  return <span aria-hidden className="h-10 w-40 max-w-full rounded-md border border-line" />;
 }

@@ -4,7 +4,11 @@ import { cn } from "@/lib/utils";
  * Plain, server-renderable table.
  * - `align: "right"` (or `kind: "money" | "number"`) right-aligns with tabular figures.
  * - Selected rows are marked with the signal colour.
- * - Scrolls sideways on narrow screens; the header sticks when `maxHeight` is set.
+ * - Scrolls inside its own frame: sideways on narrow screens, and down once it is taller than the
+ *   viewport, so the header row stays frozen while scrolling a long list. (A sticky header cannot
+ *   follow the page scroll from inside a sideways-scrolling box, and the app's top bar does not
+ *   stick, so the frame is the scroller.) The frame is at most the viewport height less 6rem for
+ *   the page's own controls; `maxHeight` overrides it.
  */
 export type Column<Row> = {
   key: string;
@@ -21,7 +25,7 @@ type DataTableProps<Row> = {
   getRowId: (row: Row) => string;
   selectedIds?: readonly string[];
   caption?: string;
-  /** e.g. "24rem". Makes the body scroll inside the table so the header can stick. */
+  /** e.g. "24rem". Overrides the default frame height. */
   maxHeight?: string;
   empty?: React.ReactNode;
   className?: string;
@@ -42,20 +46,32 @@ export function DataTable<Row>({
   className,
 }: DataTableProps<Row>) {
   return (
+    // The frame scrolls, so it is a named, focusable region: keyboard users can reach it and
+    // scroll it with the arrow keys. The height goes through a CSS variable rather than an inline
+    // max-height so the print styles can still lift it.
     <div
-      className={cn("overflow-auto rounded-lg border border-line", className)}
-      style={maxHeight ? { maxHeight } : undefined}
+      data-slot="data-table"
+      role="region"
+      aria-label={caption ? `${caption} table` : "Table"}
+      tabIndex={0}
+      className={cn(
+        "max-h-[var(--table-max-h,max(20rem,calc(100dvh-6rem)))] overflow-auto rounded-lg border border-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal print:max-h-none print:overflow-visible",
+        className,
+      )}
+      style={maxHeight ? ({ "--table-max-h": maxHeight } as React.CSSProperties) : undefined}
     >
       <table className="w-full border-collapse text-sm text-foreground">
         {caption ? <caption className="sr-only">{caption}</caption> : null}
-        <thead className="sticky top-0 z-10 bg-background">
+        {/* The rule under the header is an inset line, not a border: collapsed borders stay
+            behind when the header row sticks. */}
+        <thead className="sticky top-0 z-10 bg-background shadow-[inset_0_-1px_0_var(--line)]">
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 scope="col"
                 className={cn(
-                  "border-b border-line px-3 py-2.5 font-semibold whitespace-nowrap",
+                  "px-3 py-2.5 font-semibold whitespace-nowrap",
                   isRight(col) ? "text-right tabular-nums" : "text-left",
                   col.className,
                 )}

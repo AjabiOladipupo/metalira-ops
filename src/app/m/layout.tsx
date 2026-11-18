@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 
+import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from "@/components/theme/theme";
+
 /**
  * The worker app's web app manifest and home-screen icons (slice 1.10), so a worker can add it
  * to their phone's home screen. The manifest is a static file in public/ (the proxy never runs
@@ -23,8 +25,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
-    { media: "(prefers-color-scheme: dark)", color: "#0A0A0A" },
+    { media: "(prefers-color-scheme: light)", color: THEME_COLOR_LIGHT },
+    { media: "(prefers-color-scheme: dark)", color: THEME_COLOR_DARK },
   ],
 };
 

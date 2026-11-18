@@ -57,7 +57,7 @@ export function OrgSwitcher({
 
   if (options.length === 1) {
     return (
-      <span className="inline-flex h-10 max-w-[50vw] min-w-0 items-center gap-2 rounded-md border border-line px-3 text-sm font-medium sm:max-w-none">
+      <span className="inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-line px-3 text-sm font-medium">
         {logoUrl ? <CompanyLogo src={logoUrl} /> : null}
         <span data-testid="org-switcher" className="truncate">
           {active.name}
@@ -81,7 +81,7 @@ export function OrgSwitcher({
           data-testid="org-switcher"
           aria-label={`Company: ${active.name}. Switch company`}
           disabled={pending}
-          className="max-w-[50vw] min-w-0 sm:max-w-none"
+          className="max-w-full min-w-0"
         >
           {logoUrl ? <CompanyLogo src={logoUrl} /> : null}
           <span className="truncate">{active.name}</span>

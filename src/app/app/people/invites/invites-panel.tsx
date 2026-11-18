@@ -172,13 +172,16 @@ export function InvitesPanel({ workers }: { workers: RosterWorker[] }) {
       header: "",
       className: "w-10",
       cell: (w) => (
-        <input
-          type="checkbox"
-          aria-label={`Choose ${w.firstName} ${w.lastName}`}
-          checked={selected.has(w.id)}
-          onChange={(event) => toggle(w.id, event.target.checked)}
-          className="size-4 accent-[var(--fg)]"
-        />
+        // A 44px hit area around the box, for thumbs.
+        <label className="-mx-2 -my-2.5 flex size-11 cursor-pointer items-center justify-center">
+          <input
+            type="checkbox"
+            aria-label={`Choose ${w.firstName} ${w.lastName}`}
+            checked={selected.has(w.id)}
+            onChange={(event) => toggle(w.id, event.target.checked)}
+            className="size-[18px] cursor-pointer accent-[var(--fg)]"
+          />
+        </label>
       ),
     },
     {
@@ -303,7 +306,11 @@ export function InvitesPanel({ workers }: { workers: RosterWorker[] }) {
         rows={visible}
         getRowId={(w) => w.id}
         selectedIds={[...selected]}
-        empty="No employees here yet. Add or import employees first."
+        empty={
+          <p className="m-0 px-4 py-8 text-center text-sm text-fg-muted">
+            No employees here yet. Add or import employees first.
+          </p>
+        }
       />
     </div>
   );
