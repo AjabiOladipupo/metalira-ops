@@ -81,6 +81,7 @@ test.describe("public pages", () => {
     await expectBack(page, "/check-email", "Back to sign in", /\/sign-in$/);
     await expectBack(page, "/design-system", "Back to home", /\/$/);
     await expectBack(page, "/m/sign-in", "Back to Metalira Ops for workers", /\/for\/workers$/);
+    await expectBack(page, "/join/not-a-real-token", "Back to home", /\/$/);
   });
 });
 

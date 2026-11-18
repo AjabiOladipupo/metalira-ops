@@ -4,6 +4,8 @@
  * Sentence case, plain words a site worker reads easily, no emoji or exclamation marks.
  */
 export const workerMessages = {
+  /** Between two facts on one line: "Security guard · MO-0114". */
+  separator: " · ",
   /** Parent page names for back arrows, read as "Back to <name>". */
   back: {
     home: "home",
@@ -39,7 +41,9 @@ export const workerMessages = {
   invite: {
     eyebrow: "Invite",
     title: "Set your PIN",
-    confirmName: (name: string, staffId: string) => `Is this you? ${name} · staff ID ${staffId}`,
+    /** Shown as "Is this you? Musa Ibrahim · staff ID MO-0114"; the staff ID never wraps. */
+    confirmName: (name: string) => `Is this you? ${name}`,
+    confirmStaffId: (staffId: string) => `staff ID ${staffId}`,
     company: (company: string) => `${company} uses Metalira Ops for clock-in, leave and payslips.`,
     notYou: "Not you? Don't continue. Tell HR the invite went to the wrong person.",
     pin: "New PIN",
@@ -61,6 +65,7 @@ export const workerMessages = {
     expired: "This invite has expired. Invites last 7 days. Ask HR for a new one.",
     ended: "This invite is no longer valid.",
     failed: "Your PIN was not saved. Try again in a minute.",
+    goToSignIn: "Go to sign in",
   },
   nav: {
     label: "Worker menu",
@@ -118,8 +123,8 @@ export const workerMessages = {
     profileTab: "Profile",
     queriesTab: "Queries",
     queriesEmpty: "No queries. When your line manager sends you a query, it shows here.",
-    jobLine: (jobTitle: string | null, staffId: string) =>
-      jobTitle ? `${jobTitle} · ${staffId}` : `Staff ID ${staffId}`,
+    /** "Security guard · MO-0114", or "Staff ID MO-0114" with no job title; the ID never wraps. */
+    staffIdOnly: (staffId: string) => `Staff ID ${staffId}`,
     notSet: "Not set",
     work: "Work",
     department: "Department",

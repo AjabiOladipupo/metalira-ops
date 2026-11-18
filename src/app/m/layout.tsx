@@ -16,7 +16,12 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * `viewportFit: "cover"` lets the bottom nav's env(safe-area-inset-bottom) padding take effect:
+ * without it iOS reports a 0 inset and the home indicator sits over the nav labels.
+ */
 export const viewport: Viewport = {
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#FFFFFF" },
     { media: "(prefers-color-scheme: dark)", color: "#0A0A0A" },

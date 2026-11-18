@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
 import { BackLink } from "@/components/back-link";
 import { Illustration } from "@/components/illustration";
@@ -51,7 +50,8 @@ export function RolePage({ slug }: { slug: RoleSlug }) {
               )}
             </div>
           </div>
-          <div className="order-first lg:order-none">
+          {/* After the copy on phones, as on the landing hero, so the back arrow stays on top. */}
+          <div>
             <Illustration name={role.illustration} />
           </div>
         </Container>
@@ -102,9 +102,9 @@ export function RolePage({ slug }: { slug: RoleSlug }) {
                 your PIN, sign in with your company code, staff ID and PIN.
               </p>
             </div>
-            <Link href="/m/sign-in" className="self-start text-[17px] font-semibold lg:self-auto">
+            <CtaLink href="/m/sign-in" className="self-start lg:self-auto">
               Worker sign-in
-            </Link>
+            </CtaLink>
           </>
         ) : (
           <>

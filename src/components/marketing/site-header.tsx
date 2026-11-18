@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { Logo } from "@/components/logo";
+import { Logo, LogoMark } from "@/components/logo";
 import { ThemeButton } from "@/components/theme/theme-button";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +20,9 @@ export function SiteHeader() {
     <header className="relative border-b border-line bg-background">
       <div className="mx-auto flex max-w-[1200px] items-center gap-3 px-4 py-4 lg:gap-6 lg:px-6">
         <Link href="/" aria-label="Metalira Ops home" className="shrink-0 no-underline">
-          <Logo size={28} />
+          {/* Below 400px the wordmark leaves no room for Start setup, theme and menu. */}
+          <LogoMark size={28} className="text-foreground min-[400px]:hidden" />
+          <Logo size={28} className="max-[399px]:hidden" />
         </Link>
         <nav aria-label="Site" className="hidden flex-1 items-center gap-6 lg:flex">
           {SECTION_LINKS.map((link) => (
@@ -34,7 +36,7 @@ export function SiteHeader() {
           <Link href="/sign-in" className={cn(navLinkClass, "hidden lg:inline")}>
             Sign in
           </Link>
-          <CtaLink href="/sign-up" className="h-10 px-3 sm:px-4">
+          <CtaLink href="/sign-up" className="h-11 px-3 sm:px-4">
             Start setup
           </CtaLink>
           <span className="flex items-center lg:-mx-3">
