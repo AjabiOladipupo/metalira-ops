@@ -4,6 +4,7 @@ import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZES,
   formatPageRange,
+  linkPageSize,
   pageWindow,
   parsePage,
   parsePageSize,
@@ -93,5 +94,20 @@ describe("formatPageRange", () => {
 
   it("handles an empty list", () => {
     expect(formatPageRange(pageWindow(0, 1, 25))).toBe("0 of 0");
+  });
+});
+
+describe("linkPageSize", () => {
+  it("always carries a size from the URL, even the default", () => {
+    expect(linkPageSize(25, 25)).toBe(25);
+    expect(linkPageSize(100, 100)).toBe(100);
+  });
+
+  it("carries a remembered non-default size", () => {
+    expect(linkPageSize(null, 50)).toBe(50);
+  });
+
+  it("leaves out the default when it is not in the URL", () => {
+    expect(linkPageSize(null, 25)).toBeNull();
   });
 });

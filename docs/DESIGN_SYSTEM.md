@@ -31,7 +31,7 @@ Status is a word plus a small dot, never colour alone and never red or green. Do
 
 ## Shape and spacing
 
-- Radius: 4 (inputs, chips), 8 (cards, buttons), 12 (sheets, dialogs).
+- Radius: 4 (inputs, chips), 8 (buttons), 12 (cards, sheets, dialogs). Cards are 12, matching the screens as built (owner decision, 18 Nov 2026).
 - Spacing on a 4px grid; page gutter 16 on mobile, 24 on desktop.
 - Borders 1px `line`; no shadows except dialogs and the mobile bottom sheet.
 

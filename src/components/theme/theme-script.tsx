@@ -1,37 +1,51 @@
-import { THEME_CHANGE_EVENT, THEME_STORAGE_KEY } from "./theme";
+import {
+  THEME_CHANGE_EVENT,
+  THEME_COLOR_DARK,
+  THEME_COLOR_LIGHT,
+  THEME_STORAGE_KEY,
+} from "./theme";
 
-/** Browser chrome colours (the installed worker app's status bar): `bg` light and dark. */
-export const THEME_COLOR_LIGHT = "#FFFFFF";
-export const THEME_COLOR_DARK = "#0A0A0A";
+/** Marks the one theme-color tag the script owns. React's own tags are never touched. */
+export const OWNED_THEME_COLOR_ATTR = "data-theme-owned";
+
+/**
+ * The owned tag's colour, written in lower case. React 19 claims existing hoisted <meta> tags
+ * while hydrating by their exact `content` string (and name), not by media; with the same
+ * "#0A0A0A" as the worker app's dark tag, React would adopt the owned tag as its own, then
+ * remove it on navigation and leave its real tag behind. Lower case is the same colour and
+ * never matches.
+ */
+export function ownedColour(colour: string): string {
+  return colour.toLowerCase();
+}
 
 /**
  * Runs before first paint so the page never flashes the wrong theme.
  * - Reads the saved choice (light, dark or system) and sets the class on <html>.
- * - Keeps every `<meta name="theme-color">` (the worker app declares a light and a dark one in
- *   its viewport export) in step with the applied theme, so the installed app's status bar
- *   follows the theme chosen in the app, not only the phone's. With a fixed choice each tag gets
- *   that colour; with System each tag goes back to its own media's colour, so the browser keeps
- *   following the phone. It re-syncs on every theme change (applyThemeChoice fires the change
- *   event; System following the phone toggles the class) and when a client navigation adds the
- *   tags, so no other code has to.
+ * - Status bar colour: the worker app declares a light and a dark `<meta name="theme-color">`
+ *   (viewport export) that follow the phone's setting. With Light or Dark chosen, the script puts
+ *   ONE extra tag with no media first in <head>; the browser uses the first matching tag, so the
+ *   installed app's status bar follows the theme chosen in the app. With System the extra tag is
+ *   removed and the phone's setting wins again. React's tags are left alone (React matches
+ *   hoisted metas by their content, so editing them would make it add duplicates), and React
+ *   skips the extra tag when it hydrates the head. It updates on every theme change event, and
+ *   moves the tag back to the front when a navigation inserts React's tags ahead of it.
  */
 export const themeScript = `(function(){try{
-var K=${JSON.stringify(THEME_STORAGE_KEY)},L=${JSON.stringify(THEME_COLOR_LIGHT)},D=${JSON.stringify(THEME_COLOR_DARK)};
+var K=${JSON.stringify(THEME_STORAGE_KEY)},L=${JSON.stringify(ownedColour(THEME_COLOR_LIGHT))},D=${JSON.stringify(ownedColour(THEME_COLOR_DARK))},A=${JSON.stringify(OWNED_THEME_COLOR_ATTR)};
 var h=document.documentElement;
-function choice(){try{var v=localStorage.getItem(K);return v==="light"||v==="dark"?v:"system";}catch(e){return "system";}}
-var t=choice();
-var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
-h.classList.toggle("dark",d);
-var last=null;
-function sync(e){if(e&&typeof e.detail==="string")last=e.detail;var c=last||choice(),dark=h.classList.contains("dark"),m=document.querySelectorAll('meta[name="theme-color"]');
-for(var i=0;i<m.length;i++){var q=m[i].getAttribute("media")||"",v;
-if(c==="system"&&q.indexOf("dark")>=0)v=D;else if(c==="system"&&q.indexOf("light")>=0)v=L;else v=dark?D:L;
-if(m[i].getAttribute("content")!==v)m[i].setAttribute("content",v);}}
-sync();
-if(typeof MutationObserver==="function"){var o=new MutationObserver(sync);
-o.observe(h,{attributes:true,attributeFilter:["class"]});
-if(document.head)o.observe(document.head,{childList:true});}
-addEventListener(${JSON.stringify(THEME_CHANGE_EVENT)},sync);
+function saved(){try{var v=localStorage.getItem(K);return v==="light"||v==="dark"?v:"system";}catch(e){return "system";}}
+function paint(c){var o=document.head&&document.head.querySelector("meta["+A+"]");
+if(c==="system"){if(o)o.parentNode.removeChild(o);return;}
+if(!document.head)return;
+if(!o){o=document.createElement("meta");o.setAttribute("name","theme-color");o.setAttribute(A,"");}
+if(document.head.firstChild!==o)document.head.insertBefore(o,document.head.firstChild);
+o.setAttribute("content",c==="dark"?D:L);}
+var t=saved();
+h.classList.toggle("dark",t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches));
+paint(t);
+if(typeof MutationObserver==="function"&&document.head){new MutationObserver(function(){var o=document.head.querySelector("meta["+A+"]");if(o&&document.head.firstChild!==o)document.head.insertBefore(o,document.head.firstChild);}).observe(document.head,{childList:true});}
+addEventListener(${JSON.stringify(THEME_CHANGE_EVENT)},function(e){var c=e&&e.detail;paint(c==="light"||c==="dark"?c:"system");});
 }catch(e){}})();`;
 
 export function ThemeScript() {

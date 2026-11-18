@@ -17,6 +17,7 @@ import {
   PEOPLE_PAGE_SIZE_COOKIE,
   pageWindow,
   parsePage,
+  linkPageSize,
   parsePageSize,
   type PageSize,
 } from "@/lib/pagination";
@@ -123,16 +124,14 @@ interface PeopleParams {
 }
 
 /**
- * /app/people with the given filters, leaving out blanks, page 1 and the default page size (the
- * size picker's own links always carry `size`, so the URL wins over a remembered cookie).
+ * /app/people with the given filters, leaving out blanks and page 1. `size` is written whenever
+ * it is given: callers pass `linkPageSize(...)`, and the size picker passes its own size.
  */
-function peopleHref(params: PeopleParams, { keepSize = false } = {}): string {
+function peopleHref(params: PeopleParams): string {
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);
   if (params.dept) search.set("dept", params.dept);
-  if (params.size && (keepSize || params.size !== DEFAULT_PAGE_SIZE)) {
-    search.set("size", String(params.size));
-  }
+  if (params.size) search.set("size", String(params.size));
   if (params.page && params.page > 1) search.set("page", String(params.page));
   if (params.map) search.set("map", params.map);
   const text = search.toString();
@@ -164,10 +163,12 @@ async function PeopleList({
   const departmentId = firstParam(params.dept).slice(0, 64);
   const mapId = firstParam(params.map).slice(0, 64);
   // Page size: the URL first (shareable links), then the choice remembered on this device.
+  const urlSize = parsePageSize(firstParam(params.size));
   const size =
-    parsePageSize(firstParam(params.size)) ??
+    urlSize ??
     parsePageSize((await cookies()).get(PEOPLE_PAGE_SIZE_COOKIE)?.value) ??
     DEFAULT_PAGE_SIZE;
+  const sizeInLinks = linkPageSize(urlSize, size) ?? undefined;
   const requestedPage = parsePage(firstParam(params.page));
   const ctx = await peoplePageContext();
   const [directory, pendingBankChanges] = await Promise.all([
@@ -231,7 +232,12 @@ async function PeopleList({
   // filter run first (and their links drop `page`), so changing either starts on page 1.
   const pages = pageWindow(directory.rows.length, requestedPage, size);
   const pageRows = directory.rows.slice(pages.from, pages.to);
-  const here: PeopleParams = { q: query, dept: departmentId, size, page: pages.page };
+  const here: PeopleParams = {
+    q: query,
+    dept: departmentId,
+    size: sizeInLinks,
+    page: pages.page,
+  };
   const mapHref = ctx.canEdit ? (row: PeopleRow) => peopleHref({ ...here, map: row.id }) : null;
 
   return (
@@ -250,7 +256,7 @@ async function PeopleList({
         noDepartmentCount={directory.noDepartmentCount}
         selected={departmentId}
         query={query}
-        size={size === DEFAULT_PAGE_SIZE ? undefined : size}
+        size={sizeInLinks}
       />
 
       <div className="flex min-w-0 flex-col gap-5 lg:flex-row lg:flex-wrap lg:items-start">
@@ -258,14 +264,11 @@ async function PeopleList({
           aria-label="Employees"
           className="flex min-w-0 flex-col gap-3 lg:flex-[999_1_560px]"
         >
-          <PeopleSearch
-            query={query}
-            departmentId={departmentId}
-            size={size === DEFAULT_PAGE_SIZE ? undefined : size}
-          />
-          {/* Search results are announced; the full list's count is in the title and under the
+          <PeopleSearch query={query} departmentId={departmentId} size={sizeInLinks} />
+          {/* Search results are announced (the live region stays in the page, hidden while empty,
+              so updates are read out); the full count is in the title and under the
               table ("1–25 of 162"). */}
-          <p role="status" className="m-0 text-sm text-fg-muted empty:hidden">
+          <p role="status" className="m-0 text-sm text-fg-muted empty:sr-only">
             {filtered ? `${plural(directory.rows.length, "employee", "employees")} found` : ""}
           </p>
           <DataTable
@@ -292,7 +295,7 @@ async function PeopleList({
                   cookiePath="/app"
                   options={PAGE_SIZES.map((option) => ({
                     size: option,
-                    href: peopleHref({ ...here, size: option, page: 1 }, { keepSize: true }),
+                    href: peopleHref({ ...here, size: option, page: 1 }),
                   }))}
                 />
               }

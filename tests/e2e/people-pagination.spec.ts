@@ -119,12 +119,24 @@ test("People list pages through employees with a chosen page size and a frozen h
   await page.goto("/app/people?size=25&page=3");
   await expect(range(page)).toHaveText(`51–60 of ${TOTAL}`, NAV);
 
+  // ...and keeps winning on the next click, though the cookie still says 50: still 25 a page.
+  await page.goto("/app/people?size=25&page=2");
+  await expect(range(page)).toHaveText(`26–50 of ${TOTAL}`, NAV);
+  await expect(
+    page.getByRole("navigation", { name: "Departments" }).getByRole("link").first(),
+  ).toHaveAttribute("href", /[?&]size=25(&|$)/);
+  await pages.getByRole("link", { name: "Next" }).click();
+  await expect(page).toHaveURL(/[?&]size=25&page=3(&|$)/, NAV);
+  await expect(range(page)).toHaveText(`51–60 of ${TOTAL}`, NAV);
+  await expect(bodyRows(page)).toHaveCount(10);
+
   // Searching starts again on page 1 and keeps the size.
   await page.goto("/app/people?size=25&page=2");
   await page.getByRole("searchbox", { name: "Search by name or staff ID" }).fill("PG-05");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page).toHaveURL(/[?&]q=PG-05/, NAV);
   await expect(page).not.toHaveURL(/[?&]page=/, NAV);
+  await expect(page).toHaveURL(/[?&]size=25(&|$)/);
   await expect(page.getByRole("status").filter({ hasText: "found" })).toHaveText(
     "10 employees found",
   );

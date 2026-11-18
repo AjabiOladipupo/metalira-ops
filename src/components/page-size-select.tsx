@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useId, useTransition } from "react";
 
 import {
   Select,
@@ -29,12 +29,14 @@ export function PageSizeSelect({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const labelId = useId();
 
   function choose(next: string) {
     const option = options.find((o) => String(o.size) === next);
     if (!option) return;
     try {
-      document.cookie = `${cookieName}=${option.size}; path=${cookiePath}; max-age=31536000; samesite=lax`;
+      const secure = window.location.protocol === "https:" ? "; secure" : "";
+      document.cookie = `${cookieName}=${option.size}; path=${cookiePath}; max-age=31536000; samesite=lax${secure}`;
     } catch {
       // Cookies blocked: the size still travels in the URL.
     }
@@ -43,11 +45,11 @@ export function PageSizeSelect({
 
   return (
     <div className="flex items-center gap-2" aria-busy={pending || undefined}>
-      <span id="page-size-label" className="text-sm whitespace-nowrap text-fg-muted">
+      <span id={labelId} className="text-sm whitespace-nowrap text-fg-muted">
         Rows per page
       </span>
       <Select value={String(value)} onValueChange={choose}>
-        <SelectTrigger aria-labelledby="page-size-label" className="h-11 min-w-20 tabular-nums">
+        <SelectTrigger aria-labelledby={labelId} className="h-11 min-w-20 tabular-nums">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

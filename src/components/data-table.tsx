@@ -46,13 +46,19 @@ export function DataTable<Row>({
   className,
 }: DataTableProps<Row>) {
   return (
+    // The frame scrolls, so it is a named, focusable region: keyboard users can reach it and
+    // scroll it with the arrow keys. The height goes through a CSS variable rather than an inline
+    // max-height so the print styles can still lift it.
     <div
       data-slot="data-table"
+      role="region"
+      aria-label={caption ? `${caption} table` : "Table"}
+      tabIndex={0}
       className={cn(
-        "max-h-[max(20rem,calc(100dvh-6rem))] overflow-auto rounded-lg border border-line print:max-h-none print:overflow-visible",
+        "max-h-[var(--table-max-h,max(20rem,calc(100dvh-6rem)))] overflow-auto rounded-lg border border-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal print:max-h-none print:overflow-visible",
         className,
       )}
-      style={maxHeight ? { maxHeight } : undefined}
+      style={maxHeight ? ({ "--table-max-h": maxHeight } as React.CSSProperties) : undefined}
     >
       <table className="w-full border-collapse text-sm text-foreground">
         {caption ? <caption className="sr-only">{caption}</caption> : null}

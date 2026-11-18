@@ -17,6 +17,18 @@ export function parsePageSize(value: string | null | undefined): PageSize | null
   return (PAGE_SIZES as readonly number[]).includes(n) ? (n as PageSize) : null;
 }
 
+/**
+ * The page size to write into the page's own links (pages, filters, search, panels), or null to
+ * leave it out. A size that came from the URL is always carried, so the next click keeps it even
+ * when the cookie remembers another size; a remembered non-default size is carried too, so links
+ * copied from the page show the same rows. Left out only when it is the default and not in the
+ * URL, where the server falls back to the same value.
+ */
+export function linkPageSize(fromUrl: PageSize | null, effective: PageSize): PageSize | null {
+  if (fromUrl) return fromUrl;
+  return effective === DEFAULT_PAGE_SIZE ? null : effective;
+}
+
 /** A 1-based page number from a URL value; anything else is page 1. */
 export function parsePage(value: string | null | undefined): number {
   if (!value || !/^\d{1,6}$/.test(value.trim())) return 1;
