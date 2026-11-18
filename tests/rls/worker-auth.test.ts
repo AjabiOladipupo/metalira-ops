@@ -135,7 +135,7 @@ async function finish(workerId: string | null, ok: boolean, ip = ipKey()) {
     p_ip_key: ip,
   });
   expect(error).toBeNull();
-  return data;
+  return data?.[0]?.outcome ?? null;
 }
 
 beforeAll(async () => {
@@ -557,6 +557,7 @@ describe("PIN sign-in counter", () => {
           locks_on_failure: false,
           holds_on_failure: false,
           alert_organisation_id: null,
+          begun_at: expect.any(String),
         });
         expect(await finish(null, false)).toBe("failed");
       }

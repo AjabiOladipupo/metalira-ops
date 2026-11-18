@@ -124,7 +124,7 @@ async function finish(workerId: string | null, ok: boolean) {
     p_ip_key: ipKey(),
   });
   expect(error).toBeNull();
-  return data;
+  return data?.[0]?.outcome ?? null;
 }
 
 /** Five wrong PINs in a row; returns what the 5th try's finish said. */
@@ -466,27 +466,85 @@ describe("the company cap on wrong PINs", () => {
     expect(wrong).toBe(CAP);
   });
 
-  it("marks the window capped the moment it reaches the cap, and asks for one alert", async () => {
-    // An attacker who stops at exactly the cap still leaves the window marked.
-    for (let i = 1; i <= CAP; i += 1) await begin(`ALERT-${counter}-${i}`);
-    const { rows: marked } = await db.query<{ capped: boolean; windows: number }>(
-      "select locked_until is not null as capped, cardinality(capped_until) as windows from private.auth_throttle where key like 'company:%' and alert_pending",
+  it("marks the window capped at the 50th wrong PIN and alerts right then, once", async () => {
+    // An attacker who stops at exactly the cap: the 50th try itself carries the alert.
+    const answers = [];
+    for (let i = 1; i <= CAP; i += 1) answers.push(await begin(`ALERT-${counter}-${i}`));
+    expect(answers.slice(0, -1).every((a) => a.alert_organisation_id === null)).toBe(true);
+    expect(answers.at(-1)).toMatchObject({
+      outcome: "proceed",
+      alert_organisation_id: owner.orgId,
+    });
+    const { rows: marked } = await db.query<{ capped: boolean; windows: number; pending: boolean }>(
+      "select locked_until is not null as capped, cardinality(capped_until) as windows, alert_pending as pending from private.auth_throttle where key like 'company:%'",
     );
-    expect(marked).toEqual([{ capped: true, windows: 1 }]);
+    expect(marked).toEqual([{ capped: true, windows: 1, pending: false }]);
     const { rows: audit } = await db.query(
       "select 1 from public.audit_log where organisation_id = $1 and action = 'worker_auth.company_throttled' and at > now() - interval '1 minute'",
       [owner.orgId],
     );
     expect(audit.length).toBeGreaterThanOrEqual(1);
-    // The next begin, whatever its outcome, carries the alert once.
+    // Later tries in the window don't alert again.
     expect(await begin("ALERT-X")).toMatchObject({
-      outcome: "company_throttled",
-      alert_organisation_id: owner.orgId,
-    });
-    expect(await begin("ALERT-Y")).toMatchObject({
       outcome: "company_throttled",
       alert_organisation_id: null,
     });
+  });
+
+  it("alerts from finish when a real worker's wrong PIN reaches the cap, with no later try", async () => {
+    const worker = await signedUpWorker();
+    for (let i = 1; i < CAP; i += 1) await begin(`FIN-${counter}-${i}`);
+    const started = await begin(worker.staffId);
+    expect(started).toMatchObject({ outcome: "proceed", alert_organisation_id: null });
+    const { data, error } = await admin.rpc("worker_sign_in_finish", {
+      p_worker_id: worker.id,
+      p_ok: false,
+      p_ip_key: ipKey(),
+      p_begun_at: started.begun_at,
+    });
+    expect(error).toBeNull();
+    expect(data).toEqual([{ outcome: "failed", alert_organisation_id: owner.orgId }]);
+    // Handed out once: the next begin carries nothing.
+    expect(await begin("FIN-X")).toMatchObject({ alert_organisation_id: null });
+  });
+
+  it("a try that finishes after the window rolled doesn't take the new window's reservation", async () => {
+    const a = await signedUpWorker();
+    const b = await signedUpWorker();
+    const first = await begin(a.staffId);
+    expect(first.outcome).toBe("proceed");
+    // The window rolls before the first try finishes; a new try reserves in the new window.
+    await db.query(
+      "update private.auth_throttle set window_started_at = now() - interval '16 minutes' where key like 'company:%'",
+    );
+    const second = await begin(b.staffId);
+    expect(second.outcome).toBe("proceed");
+    const inFlight = async () =>
+      (
+        await db.query<{ in_flight: number; attempts: number }>(
+          "select in_flight, attempts from private.auth_throttle where key like 'company:%'",
+        )
+      ).rows[0];
+    expect(await inFlight()).toEqual({ in_flight: 1, attempts: 0 });
+    // The first try (begun in the old window) finishes with a wrong PIN: it counts now, but the
+    // new window's reservation stays.
+    const { error } = await admin.rpc("worker_sign_in_finish", {
+      p_worker_id: a.id,
+      p_ok: false,
+      p_ip_key: ipKey(),
+      p_begun_at: first.begun_at,
+    });
+    expect(error).toBeNull();
+    expect(await inFlight()).toEqual({ in_flight: 1, attempts: 1 });
+    // A success from the old window gives nothing back either.
+    const ok = await admin.rpc("worker_sign_in_finish", {
+      p_worker_id: a.id,
+      p_ok: true,
+      p_ip_key: ipKey(),
+      p_begun_at: first.begun_at,
+    });
+    expect(ok.error).toBeNull();
+    expect(await inFlight()).toEqual({ in_flight: 1, attempts: 1 });
   });
 
   it("holds both caps against a burst of tries begun before any finishes", async () => {

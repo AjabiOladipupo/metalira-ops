@@ -55,17 +55,34 @@ export type BeginResult = SignInAlert &
         pinHash: string | null;
         /** True when a wrong PIN now locks sign-in (the 5th try in a row). */
         locksOnFailure: boolean;
-        /** True when that lock is the 3rd in 24 hours and holds sign-in until a new PIN. */
+        /**
+         * True when that lock is the 3rd in 24 hours and holds sign-in until a new PIN. Only a
+         * guide for an unknown pair: for a real login, finish decides (the window may have
+         * been capped meanwhile).
+         */
         holdsOnFailure: boolean;
+        /** When begin reserved the try; finish releases the reservation only in that window. */
+        begunAt?: string | null;
       }
   );
 
 export type FinishOutcome = "signed_in" | "failed" | "locked" | "held";
 
+/** finish's answer, with the alert when this wrong PIN reached the company cap. */
+export type FinishResult = SignInAlert & { outcome: FinishOutcome };
+
 export interface WorkerSignInStore {
   begin(companyCode: string, staffId: string, ipKey: string): Promise<BeginResult>;
-  finish(workerId: string | null, ok: boolean, ipKey: string): Promise<FinishOutcome>;
+  finish(
+    workerId: string | null,
+    ok: boolean,
+    ipKey: string,
+    begunAt?: string | null,
+  ): Promise<FinishOutcome | FinishResult>;
 }
+
+const finishResult = (r: FinishOutcome | FinishResult): FinishResult =>
+  typeof r === "string" ? { outcome: r } : r;
 
 export type WorkerSignInResult = SignInAlert &
   (
@@ -107,11 +124,10 @@ export async function checkWorkerPin(
   verify: (pin: string, hash: string | null) => Promise<boolean> = verifyPin,
 ): Promise<WorkerSignInResult> {
   const begun = await store.begin(input.companyCode, input.staffId, network);
-  const alert: SignInAlert = begun.alertOrganisationId
-    ? { alertOrganisationId: begun.alertOrganisationId }
-    : {};
-  const result = await checkBegun(store, begun, input, network, verify);
-  return { ...result, ...alert };
+  const { result, alertOrganisationId } = await checkBegun(store, begun, input, network, verify);
+  // At most one of begin and finish carries the alert (the database hands it out once).
+  const alert = begun.alertOrganisationId ?? alertOrganisationId;
+  return alert ? { ...result, alertOrganisationId: alert } : result;
 }
 
 async function checkBegun(
@@ -120,8 +136,8 @@ async function checkBegun(
   input: WorkerSignInInput,
   network: string,
   verify: (pin: string, hash: string | null) => Promise<boolean>,
-): Promise<WorkerSignInResult> {
-  if (begun.outcome !== "proceed") return { status: begun.outcome };
+): Promise<{ result: WorkerSignInResult; alertOrganisationId?: string | null }> {
+  if (begun.outcome !== "proceed") return { result: { status: begun.outcome } };
 
   const login = begun.login;
   let ok: boolean;
@@ -130,20 +146,31 @@ async function checkBegun(
   } catch (error) {
     // begin may already have set a lock: record the try as failed so the lock is audited and
     // counted towards a hold, then report the failure.
-    await store.finish(login?.workerId ?? null, false, network).catch(() => undefined);
+    await store
+      .finish(login?.workerId ?? null, false, network, begun.begunAt)
+      .catch(() => undefined);
     throw error;
   }
   // Called for unknown IDs too, so both paths make the same round trips.
-  const finished = await store.finish(login?.workerId ?? null, ok && login !== null, network);
+  const done = finishResult(
+    await store.finish(login?.workerId ?? null, ok && login !== null, network, begun.begunAt),
+  );
+  const alertOrganisationId = done.alertOrganisationId;
+  const finished = done.outcome;
+  const reply = (result: WorkerSignInResult) => ({ result, alertOrganisationId });
 
-  if (login && ok && finished === "signed_in") {
-    return { status: "signed_in", ...login };
+  if (login) {
+    // A real login: finish has the last word (the window may have been capped since begin, in
+    // which case the lockout doesn't count towards a hold).
+    if (ok && finished === "signed_in") return reply({ status: "signed_in", ...login });
+    if (finished === "held") return reply({ status: "held" });
+    if (finished === "locked") return reply({ status: "locked" });
+    return reply({ status: "invalid" });
   }
-  if (finished === "held" || (begun.locksOnFailure && begun.holdsOnFailure)) {
-    return { status: "held" };
-  }
-  if (finished === "locked" || begun.locksOnFailure) return { status: "locked" };
-  return { status: "invalid" };
+  // An unknown pair: begin decided the lock and hold, the same answers a real login gets.
+  if (begun.locksOnFailure && begun.holdsOnFailure) return reply({ status: "held" });
+  if (begun.locksOnFailure) return reply({ status: "locked" });
+  return reply({ status: "invalid" });
 }
 
 type Admin = SupabaseClient<Database>;
@@ -186,18 +213,31 @@ export function databaseSignInStore(admin: Admin): WorkerSignInStore {
         pinHash: data.pin_hash ?? null,
         locksOnFailure: data.locks_on_failure === true,
         holdsOnFailure: data.holds_on_failure === true,
+        begunAt: data.begun_at ?? null,
       };
     },
-    async finish(workerId, ok, network) {
-      const { data, error } = await admin.rpc("worker_sign_in_finish", {
-        // The generated type says string; the function takes null for an unknown pair.
-        p_worker_id: workerId as string,
-        p_ok: ok,
-        p_ip_key: network,
-      });
-      if (error) throw new Error(`Sign-in result was not saved: ${error.code}`);
-      if (data === "signed_in" || data === "failed" || data === "locked" || data === "held") {
-        return data;
+    async finish(workerId, ok, network, begunAt) {
+      const { data, error } = await admin
+        .rpc("worker_sign_in_finish", {
+          // The generated type says string; the function takes null for an unknown pair.
+          p_worker_id: workerId as string,
+          p_ok: ok,
+          p_ip_key: network,
+          ...(begunAt ? { p_begun_at: begunAt } : {}),
+        })
+        .single();
+      if (error || !data)
+        throw new Error(`Sign-in result was not saved: ${error?.code ?? "no row"}`);
+      const outcome = data.outcome;
+      if (
+        outcome === "signed_in" ||
+        outcome === "failed" ||
+        outcome === "locked" ||
+        outcome === "held"
+      ) {
+        return data.alert_organisation_id
+          ? { outcome, alertOrganisationId: data.alert_organisation_id }
+          : { outcome };
       }
       throw new Error("Sign-in result returned an unknown outcome.");
     },

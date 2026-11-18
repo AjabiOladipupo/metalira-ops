@@ -148,10 +148,18 @@ end;
 $$;
 
 -- Records one wrong PIN against `p_key` (a company: or ipwrong: row). `p_release` also gives
--- back the reservation begin made. When a company row reaches `p_cap`, the window is marked
+-- back the reservation begin made at `p_begun_at`, but only while the row is still in the window
+-- that reservation was made in: a try finishing after the window rolled must not take a
+-- reservation of the new window (the wrong PIN still counts, in the window it lands in). When a company row reaches `p_cap`, the window is marked
 -- capped (locked_until and capped_until), the owner and HR alert is queued, and for a real
 -- company (`p_org`) worker_auth.company_throttled is audited.
-create function private.record_wrong_pin(p_key text, p_cap integer, p_org uuid, p_release boolean)
+create function private.record_wrong_pin(
+  p_key text,
+  p_cap integer,
+  p_org uuid,
+  p_release boolean,
+  p_begun_at timestamptz
+)
 returns void
 language plpgsql
 volatile
@@ -168,7 +176,11 @@ begin
   r := private.wrong_pin_window(p_key);
   update private.auth_throttle a
   set attempts = a.attempts + 1,
-      in_flight = case when p_release then greatest(a.in_flight - 1, 0) else a.in_flight end,
+      in_flight = case
+        when p_release and (p_begun_at is null or a.window_started_at <= p_begun_at)
+          then greatest(a.in_flight - 1, 0)
+        else a.in_flight
+      end,
       updated_at = now()
   where a.key = p_key
   returning a.* into r;
@@ -200,8 +212,9 @@ begin
 end;
 $$;
 
--- Gives back a reservation after a successful sign-in. Wrong PINs are never reduced.
-create function private.release_pin_try(p_key text)
+-- Gives back a reservation after a successful sign-in, if the row is still in the window the
+-- reservation was made in (`p_begun_at`). Wrong PINs are never reduced.
+create function private.release_pin_try(p_key text, p_begun_at timestamptz)
 returns void
 language sql
 volatile
@@ -211,14 +224,38 @@ as $$
   update private.auth_throttle a
   set in_flight = greatest(a.in_flight - 1, 0), updated_at = now()
   where a.key = p_key
+    and (p_begun_at is null or a.window_started_at <= p_begun_at)
 $$;
 
+-- Hands out the queued owner and HR alert for a company code, at most once: clears the flag
+-- and returns the organisation when it was set (null for an unknown code, or when another call
+-- already took it). Called by begin and by finish, so whichever comes first after the cap is
+-- reached sends the one email for that window.
+create function private.take_sign_in_alert(p_company_key text, p_org uuid)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_taken boolean;
+begin
+  update private.auth_throttle a
+  set alert_pending = false
+  where a.key = p_company_key and a.alert_pending
+  returning true into v_taken;
+  return case when v_taken then p_org end;
+end;
+$$;
+
+revoke all on function private.take_sign_in_alert(text, uuid) from public, anon, authenticated;
 revoke all on function private.company_throttle_key(text) from public, anon, authenticated;
 revoke all on function private.in_capped_window(text, timestamptz) from public, anon, authenticated;
 revoke all on function private.worker_recent_lockouts(text, uuid, timestamptz) from public, anon, authenticated;
 revoke all on function private.wrong_pin_window(text) from public, anon, authenticated;
-revoke all on function private.record_wrong_pin(text, integer, uuid, boolean) from public, anon, authenticated;
-revoke all on function private.release_pin_try(text) from public, anon, authenticated;
+revoke all on function private.record_wrong_pin(text, integer, uuid, boolean, timestamptz) from public, anon, authenticated;
+revoke all on function private.release_pin_try(text, timestamptz) from public, anon, authenticated;
 
 -- The outcome set and columns change, so the two begin functions are recreated.
 drop function public.worker_sign_in_begin(text, text, text);
@@ -246,7 +283,8 @@ returns table (
   pin_hash text,
   locks_on_failure boolean,
   holds_on_failure boolean,
-  alert_organisation_id uuid
+  alert_organisation_id uuid,
+  begun_at timestamptz
 )
 language plpgsql
 volatile
@@ -285,6 +323,7 @@ begin
     raise exception 'Company code and staff ID are too long.' using errcode = '22023';
   end if;
 
+  begun_at := now();
   locks_on_failure := false;
   holds_on_failure := false;
 
@@ -312,9 +351,9 @@ begin
   v_ipw := private.wrong_pin_window(v_ip_key);
   v_co := private.wrong_pin_window(v_company_key);
 
+  -- An alert queued when the cap was reached and not yet sent (normally finish sends it).
   if v_co.alert_pending then
-    update private.auth_throttle a set alert_pending = false where a.key = v_company_key;
-    alert_organisation_id := v_org;
+    alert_organisation_id := private.take_sign_in_alert(v_company_key, v_org);
   end if;
 
   if v_ip_attempts > ip_limit or v_ipw.attempts + v_ipw.in_flight >= ip_wrong_pin_cap then
@@ -429,8 +468,12 @@ begin
     where a.key = v_subject;
   end if;
 
-  perform private.record_wrong_pin(v_ip_key, ip_wrong_pin_cap, null, false);
-  perform private.record_wrong_pin(v_company_key, company_wrong_pin_cap, v_org, false);
+  perform private.record_wrong_pin(v_ip_key, ip_wrong_pin_cap, null, false, null);
+  perform private.record_wrong_pin(v_company_key, company_wrong_pin_cap, v_org, false, null);
+  -- This wrong PIN may have just reached the cap: send the alert now, not on a later try.
+  alert_organisation_id := coalesce(
+    alert_organisation_id, private.take_sign_in_alert(v_company_key, v_org)
+  );
 
   outcome := 'proceed';
   locks_on_failure := v_locked;
@@ -442,13 +485,19 @@ $$;
 -- company counters; a wrong PIN is then counted on both (a success lowers nothing). The 5th
 -- failure in a row is the one that locked the worker in begin, written to the audit log as
 -- worker_auth.locked, and when it is the 3rd counted lockout in 24 hours the login is held
--- (worker_auth.held). Returns signed_in, failed, locked or held.
-create or replace function private.worker_sign_in_finish_impl(
+-- (worker_auth.held). Returns the outcome (signed_in, failed, locked or held) and, when this
+-- wrong PIN reached the company cap, the organisation for the owner and HR alert (once per
+-- window, through private.take_sign_in_alert). The outcome type changes, so it is recreated.
+drop function public.worker_sign_in_finish(uuid, boolean, text);
+drop function private.worker_sign_in_finish_impl(uuid, boolean, text);
+
+create function private.worker_sign_in_finish_impl(
   p_worker_id uuid,
   p_ok boolean,
-  p_ip_key text
+  p_ip_key text,
+  p_begun_at timestamptz
 )
-returns text
+returns table (outcome text, alert_organisation_id uuid)
 language plpgsql
 volatile
 security definer
@@ -474,7 +523,9 @@ begin
     if p_ok then
       raise exception 'A sign-in can only succeed for a worker with a login.' using errcode = '22023';
     end if;
-    return 'failed';
+    outcome := 'failed';
+    return next;
+    return;
   end if;
 
   -- The counters are settled before the worker's row is locked: begin locks the counters
@@ -491,12 +542,14 @@ begin
 
   if p_ok then
     if v_ip_key is not null then
-      perform private.release_pin_try(v_ip_key);
+      perform private.release_pin_try(v_ip_key, p_begun_at);
     end if;
-    perform private.release_pin_try(v_company_key);
+    perform private.release_pin_try(v_company_key, p_begun_at);
   else
-    perform private.record_wrong_pin(v_ip_key, ip_wrong_pin_cap, null, true);
-    perform private.record_wrong_pin(v_company_key, company_wrong_pin_cap, v_org, true);
+    perform private.record_wrong_pin(v_ip_key, ip_wrong_pin_cap, null, true, p_begun_at);
+    perform private.record_wrong_pin(v_company_key, company_wrong_pin_cap, v_org, true, p_begun_at);
+    -- This wrong PIN may have just reached the cap: hand the alert to the server now.
+    alert_organisation_id := private.take_sign_in_alert(v_company_key, v_org);
   end if;
 
   select * into cred from public.worker_credentials c where c.worker_id = p_worker_id for update;
@@ -507,11 +560,15 @@ begin
         locked_until = null,
         last_sign_in_at = now()
     where c.id = cred.id;
-    return 'signed_in';
+    outcome := 'signed_in';
+    return next;
+    return;
   end if;
 
   if cred.held_at is not null then
-    return 'held';
+    outcome := 'held';
+    return next;
+    return;
   end if;
 
   if cred.locked_until is not null and cred.locked_until > now() then
@@ -525,7 +582,9 @@ begin
         and a.at > now() - interval '1 hour'
         and (a.after ->> 'locked_until')::timestamptz = cred.locked_until
     ) then
-      return 'locked';
+      outcome := 'locked';
+      return next;
+      return;
     end if;
     insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, after)
     values (
@@ -554,13 +613,39 @@ begin
         cred.worker_id,
         jsonb_build_object('lockouts_in_24_hours', v_lockouts)
       );
-      return 'held';
+      outcome := 'held';
+      return next;
+      return;
     end if;
-    return 'locked';
+    outcome := 'locked';
+    return next;
+    return;
   end if;
-  return 'failed';
+  outcome := 'failed';
+  return next;
+  return;
 end;
 $$;
+
+create function public.worker_sign_in_finish(
+  p_worker_id uuid,
+  p_ok boolean,
+  p_ip_key text,
+  p_begun_at timestamptz default null
+)
+returns table (outcome text, alert_organisation_id uuid)
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select * from private.worker_sign_in_finish_impl(p_worker_id, p_ok, p_ip_key, p_begun_at)
+$$;
+
+revoke all on function private.worker_sign_in_finish_impl(uuid, boolean, text, timestamptz) from public, anon, authenticated;
+revoke all on function public.worker_sign_in_finish(uuid, boolean, text, timestamptz) from public, anon, authenticated;
+grant execute on function private.worker_sign_in_finish_impl(uuid, boolean, text, timestamptz) to service_role;
+grant execute on function public.worker_sign_in_finish(uuid, boolean, text, timestamptz) to service_role;
 
 create function public.worker_sign_in_begin(p_company_code text, p_staff_id text, p_ip_key text)
 returns table (
@@ -571,7 +656,8 @@ returns table (
   pin_hash text,
   locks_on_failure boolean,
   holds_on_failure boolean,
-  alert_organisation_id uuid
+  alert_organisation_id uuid,
+  begun_at timestamptz
 )
 language sql
 volatile

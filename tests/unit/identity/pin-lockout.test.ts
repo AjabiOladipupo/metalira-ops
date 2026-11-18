@@ -29,6 +29,7 @@ import {
   workerSignInSchema,
   type BeginResult,
   type FinishOutcome,
+  type FinishResult,
   type WorkerSignInStore,
 } from "@/server/identity/worker-sign-in";
 
@@ -113,15 +114,19 @@ function companyStore(known: Record<string, string>) {
   };
 
   const store: WorkerSignInStore = {
+    // As in the database: the alert queued when the cap is reached is handed out once, by
+    // whichever call reached it (or, as a fallback, the next begin).
     async begin(code, staffId, key): Promise<BeginResult> {
-      // As in the database: begin reads (and clears) the queued alert before counting anything.
-      const pending = alertPending;
-      alertPending = false;
       const result = await beginInner(code, staffId, key);
-      return pending ? { ...result, alertOrganisationId: "o-1" } : result;
+      if (!alertPending) return result;
+      alertPending = false;
+      return { ...result, alertOrganisationId: "o-1" };
     },
-    async finish(workerId, ok, key): Promise<FinishOutcome> {
-      return finishInner(workerId, ok, key);
+    async finish(workerId, ok, key): Promise<FinishResult> {
+      const outcome = await finishInner(workerId, ok, key);
+      if (!alertPending) return { outcome };
+      alertPending = false;
+      return { outcome, alertOrganisationId: "o-1" };
     },
   };
 
@@ -294,18 +299,19 @@ describe("caps on wrong PINs (decision 18)", () => {
   it("stops sign-ins for the company at the cap without counting against any worker", async () => {
     const s = companyStore({ "emp-0001": RIGHT });
     // A spray from many networks: one wrong PIN for each of many staff IDs.
+    const sprayed = [];
     for (let i = 0; i < COMPANY_WRONG_PIN_CAP; i += 1) {
-      const result = await checkWorkerPin(
-        s.store,
-        input(WRONG, `EMP-${1000 + i}`),
-        freshNetwork(),
-        verify,
+      sprayed.push(
+        await checkWorkerPin(s.store, input(WRONG, `EMP-${1000 + i}`), freshNetwork(), verify),
       );
-      expect(result.status).toBe("invalid");
     }
+    expect(sprayed.every((r) => r.status === "invalid")).toBe(true);
+    // The 50th wrong PIN reached the cap: that very try asks for the owner and HR alert, so it
+    // goes out even if nobody tries again.
+    expect(sprayed.at(-1)).toEqual({ status: "invalid", alertOrganisationId: "o-1" });
+    expect(sprayed.slice(0, -1).some((r) => r.alertOrganisationId)).toBe(false);
     const refused = await checkWorkerPin(s.store, input(RIGHT), freshNetwork(), verify);
-    // The cap was reached on the 50th wrong PIN; the next sign-in asks for the owner and HR alert.
-    expect(refused).toEqual({ status: "company_throttled", alertOrganisationId: "o-1" });
+    expect(refused).toEqual({ status: "company_throttled" });
     // Nobody was locked by the refusals: after the window the real worker signs in.
     for (let i = 0; i < 20; i += 1) {
       const again = await checkWorkerPin(s.store, input(WRONG), freshNetwork(), verify);
@@ -395,6 +401,45 @@ describe("caps on wrong PINs (decision 18)", () => {
       "102.89.1.7",
     );
     expect(clientIp(headers({ "x-forwarded-for": "102.89.1.7" }))).toBeNull();
+  });
+});
+
+describe("a real login's answer comes from finish", () => {
+  it("shows locked, not held, when the window was capped between begin and finish", async () => {
+    const store: WorkerSignInStore = {
+      begin: async () => ({
+        outcome: "proceed",
+        login: { workerId: "w-1", organisationId: "o-1", authUserId: "u-1" },
+        pinHash: RIGHT,
+        locksOnFailure: true,
+        holdsOnFailure: true,
+      }),
+      finish: async () => ({ outcome: "locked", alertOrganisationId: "o-1" }),
+    };
+    expect(await checkWorkerPin(store, input(WRONG), NETWORK, verify)).toEqual({
+      status: "locked",
+      alertOrganisationId: "o-1",
+    });
+  });
+
+  it("passes the reservation time from begin to finish", async () => {
+    const seen: (string | null | undefined)[] = [];
+    const store: WorkerSignInStore = {
+      begin: async () => ({
+        outcome: "proceed",
+        login: null,
+        pinHash: null,
+        locksOnFailure: false,
+        holdsOnFailure: false,
+        begunAt: "2026-11-18T08:00:00Z",
+      }),
+      finish: async (_w, _ok, _k, begunAt) => {
+        seen.push(begunAt);
+        return "failed";
+      },
+    };
+    await checkWorkerPin(store, input(WRONG), NETWORK, verify);
+    expect(seen).toEqual(["2026-11-18T08:00:00Z"]);
   });
 });
 

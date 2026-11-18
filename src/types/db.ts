@@ -609,11 +609,13 @@ isOneToOne: false
                            },
 "worker_sign_in_begin":
 { Args: { "p_company_code": string,"p_ip_key": string,"p_staff_id": string }; Returns: {
-              "alert_organisation_id": string,"auth_user_id": string,"holds_on_failure": boolean,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
+              "alert_organisation_id": string,"auth_user_id": string,"begun_at": string,"holds_on_failure": boolean,"locks_on_failure": boolean,"organisation_id": string,"outcome": string,"pin_hash": string,"worker_id": string
             }[]
                            },
 "worker_sign_in_finish":
-{ Args: { "p_ip_key": string,"p_ok": boolean,"p_worker_id": string }; Returns: string
+{ Args: { "p_begun_at"?: string,"p_ip_key": string,"p_ok": boolean,"p_worker_id": string }; Returns: {
+              "alert_organisation_id": string,"outcome": string
+            }[]
                            },
 "worker_sign_in_status":
 { Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: {
