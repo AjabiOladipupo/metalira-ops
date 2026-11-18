@@ -28,20 +28,21 @@ export const NEW_PIN_ROLES = ["owner", "admin", "hr"] as const satisfies readonl
 
 type Client = SupabaseClient<Database>;
 
-/** The worker's login as the caller's RLS shows it, or null when there is none (or none visible). */
+/**
+ * The worker's login through public.worker_sign_in_status, or null when there is none or the
+ * caller may not see it. Owner, admin and hr get the full status; the worker's line manager gets
+ * only the last sign-in and the lock (they have no access to worker_credentials itself).
+ */
 export async function loadSignInCredential(
   supabase: Client,
   organisationId: string,
   workerId: string,
 ): Promise<SignInCredential | null> {
   const { data, error } = await supabase
-    .from("worker_credentials")
-    .select("pin_set_at, last_sign_in_at, failed_attempts, locked_until, held_at")
-    .eq("organisation_id", organisationId)
-    .eq("worker_id", workerId)
+    .rpc("worker_sign_in_status", { p_organisation_id: organisationId, p_worker_id: workerId })
     .maybeSingle();
   if (error) throw new Error(`Could not read the sign-in status: ${error.code}`);
-  if (!data) return null;
+  if (!data?.has_login) return null;
   return {
     pinSetAt: data.pin_set_at,
     lastSignInAt: data.last_sign_in_at,

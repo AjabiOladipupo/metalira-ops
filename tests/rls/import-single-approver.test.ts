@@ -1,8 +1,9 @@
 /**
- * Slice 1.11 (owner decision 20) against the real database: the owner's commit_import_batch
- * while company setup is unfinished writes new workers' bank details directly, audited per
- * worker. HR's import during setup, the owner's import after setup, and a direct create_worker
- * call all keep the two-person hold (a pending bank-detail change).
+ * Slice 1.11 (owner decision 20) against the real database: the owner's FIRST
+ * commit_import_batch while company setup is unfinished writes new workers' bank details
+ * directly, audited per worker. A later import by the owner (even during setup), HR's or an
+ * admin's import during setup, the owner's import after setup, and a direct create_worker call
+ * all keep the two-person hold (a pending bank-detail change).
  */
 import { randomBytes, randomUUID } from "node:crypto";
 
@@ -27,20 +28,21 @@ let admin: Client;
 let db: pg.Client;
 let owner: TenantUser;
 let hr: TestUser;
+let orgAdmin: TestUser;
 let counter = 0;
 
 const hex = () => `\\x${randomBytes(40).toString("hex")}`;
 
-async function addMember(user: TestUser, role: Role) {
+async function addMember(user: TestUser, role: Role, orgId = owner.orgId) {
   const { error } = await admin
     .from("memberships")
-    .insert({ organisation_id: owner.orgId, user_id: user.id, role });
+    .insert({ organisation_id: orgId, user_id: user.id, role });
   expect(error).toBeNull();
 }
 
-function workerDoc(): Record<string, Json> {
+function workerDoc(bank: "full" | "partial" | "none" = "full"): Record<string, Json> {
   counter += 1;
-  return {
+  const doc: Record<string, Json> = {
     id: randomUUID(),
     staff_id: `ONB-${String(counter).padStart(4, "0")}`,
     first_name: "Ada",
@@ -48,27 +50,35 @@ function workerDoc(): Record<string, Json> {
     phone: null,
     employment_type: "permanent",
     start_date: "2024-03-03",
-    bank_name: "GTBank",
-    account_name: `Ada Onboarded ${counter}`,
-    bank_account_enc: hex(),
-    bank_account_last4: "7712",
   };
+  if (bank === "full") {
+    Object.assign(doc, {
+      bank_name: "GTBank",
+      account_name: `Ada Onboarded ${counter}`,
+      bank_account_enc: hex(),
+      bank_account_last4: "7712",
+    });
+  } else if (bank === "partial") {
+    // A bank name without the number: can't become anything, so it's left off.
+    Object.assign(doc, { bank_name: "GTBank", account_name: `Ada Onboarded ${counter}` });
+  }
+  return doc;
 }
 
-/** A checked batch of one ready row, committed by `by`; returns the new worker's id. */
-async function importOne(by: Client): Promise<{ workerId: string; result: Json }> {
+/** A checked batch of one ready row in `orgId`. */
+async function checkedBatch(by: Client, orgId: string) {
   const batchId = randomUUID();
   const created = await by.from("import_batches").insert({
     id: batchId,
-    organisation_id: owner.orgId,
+    organisation_id: orgId,
     file_name: "employees.csv",
     file_format: "csv",
-    file_path: `${owner.orgId}/${batchId}.csv`,
+    file_path: `${orgId}/${batchId}.csv`,
   });
   expect(created.error).toBeNull();
   const rowId = randomUUID();
   const saved = await by.rpc("save_import_check", {
-    p_organisation_id: owner.orgId,
+    p_organisation_id: orgId,
     p_batch_id: batchId,
     p_check: {
       columns: ["employee_id", "first_name"],
@@ -82,9 +92,18 @@ async function importOne(by: Client): Promise<{ workerId: string; result: Json }
     p_final: true,
   });
   expect(saved.error).toBeNull();
-  const worker = workerDoc();
+  return { batchId, rowId };
+}
+
+/** Imports one worker through a checked batch; returns the new worker's id and the result. */
+async function importOne(
+  by: Client,
+  { orgId = owner.orgId, bank = "full" as "full" | "partial" | "none" } = {},
+): Promise<{ workerId: string; result: Json; batchId: string }> {
+  const { batchId, rowId } = await checkedBatch(by, orgId);
+  const worker = workerDoc(bank);
   const { data, error } = await by.rpc("commit_import_batch", {
-    p_organisation_id: owner.orgId,
+    p_organisation_id: orgId,
     p_batch_id: batchId,
     p_rows: [
       {
@@ -100,12 +119,16 @@ async function importOne(by: Client): Promise<{ workerId: string; result: Json }
     ],
   });
   expect(error).toBeNull();
-  return { workerId: worker.id as string, result: data };
+  return { workerId: worker.id as string, result: data, batchId };
 }
 
 async function bankState(workerId: string) {
-  const { rows } = await db.query<{ last4: string | null; pending: number }>(
-    `select w.bank_account_last4 as last4,
+  const { rows } = await db.query<{
+    last4: string | null;
+    pending: number;
+    needs_pay_details: boolean;
+  }>(
+    `select w.bank_account_last4 as last4, w.needs_pay_details,
        (select count(*)::int from public.bank_detail_changes c
          where c.worker_id = w.id and c.status = 'pending') as pending
      from public.workers w where w.id = $1`,
@@ -122,12 +145,16 @@ async function exceptionAudits(workerId: string) {
   return rows;
 }
 
+const held = { last4: null, pending: 1, needs_pay_details: true };
+
 beforeAll(async () => {
   admin = adminClient();
   db = await pgClient();
   owner = await createTenantUser("onb-owner", "Onboarding Org");
   hr = await createTestUser("onb-hr");
+  orgAdmin = await createTestUser("onb-admin");
   await addMember(hr, "hr");
+  await addMember(orgAdmin, "admin");
 });
 
 afterAll(async () => {
@@ -135,13 +162,25 @@ afterAll(async () => {
 });
 
 describe("first import during unfinished setup", () => {
-  it("the owner's import saves bank details directly and audits each worker", async () => {
-    const { workerId, result } = await importOne(owner.client);
+  it("HR's and an admin's import during setup keep the two-person hold", async () => {
+    for (const by of [hr.client, orgAdmin.client]) {
+      const { workerId, result } = await importOne(by);
+      expect(result).toMatchObject({ created: 1, bank_details_saved: 0 });
+      expect(await bankState(workerId)).toEqual(held);
+      expect(await exceptionAudits(workerId)).toEqual([]);
+    }
+  });
+
+  it("the owner's first import saves bank details directly and audits each worker", async () => {
+    const { workerId, result, batchId } = await importOne(owner.client);
     expect(result).toMatchObject({ created: 1, bank_details_saved: 1 });
-    expect(await bankState(workerId)).toEqual({ last4: "7712", pending: 0 });
-    const audits = await exceptionAudits(workerId);
-    expect(audits).toHaveLength(1);
-    expect(audits[0]!.actor_id).toBe(owner.id);
+    // Bank details on file; still no pay rate, so still flagged before payroll.
+    expect(await bankState(workerId)).toEqual({
+      last4: "7712",
+      pending: 0,
+      needs_pay_details: true,
+    });
+    expect(await exceptionAudits(workerId)).toEqual([{ actor_id: owner.id, batch: batchId }]);
     // The personal-data audit names the field, never the number.
     const { rows } = await db.query<{ doc: string }>(
       "select coalesce(before::text, '') || coalesce(after::text, '') as doc from public.audit_log where entity_id = $1",
@@ -150,10 +189,10 @@ describe("first import during unfinished setup", () => {
     expect(rows.map((r) => r.doc).join(" ")).not.toContain("7712");
   });
 
-  it("HR's import during setup keeps the two-person hold", async () => {
-    const { workerId, result } = await importOne(hr.client);
+  it("a later import by the owner, even during setup, keeps the hold", async () => {
+    const { workerId, result } = await importOne(owner.client);
     expect(result).toMatchObject({ created: 1, bank_details_saved: 0 });
-    expect(await bankState(workerId)).toEqual({ last4: null, pending: 1 });
+    expect(await bankState(workerId)).toEqual(held);
     expect(await exceptionAudits(workerId)).toEqual([]);
   });
 
@@ -163,29 +202,50 @@ describe("first import during unfinished setup", () => {
       p_worker: { ...worker, organisation_id: owner.orgId },
     });
     expect(error).toBeNull();
-    expect(await bankState(worker.id as string)).toEqual({ last4: null, pending: 1 });
-  });
-
-  it("the helper can't put bank details on an existing worker", async () => {
-    const { workerId } = await importOne(hr.client);
-    await expect(
-      db.query(
-        `select set_config('request.jwt.claim.sub', '${owner.id}', false);
-         select private.import_bank_details_single_approver(
-           '${owner.orgId}', gen_random_uuid(), '${workerId}', 'GTBank', 'X', '\\x00'::bytea, '0000')`,
-      ),
-    ).rejects.toThrow();
-    await db.query("select set_config('request.jwt.claim.sub', '', false)");
+    expect(await bankState(worker.id as string)).toEqual(held);
   });
 
   it("after setup is finished, the owner's import keeps the hold too", async () => {
-    const done = await owner.client.rpc("complete_company_setup", {
-      p_organisation_id: owner.orgId,
+    const fresh = await createTenantUser("onb-owner-2", "Onboarding Org Two");
+    const done = await fresh.client.rpc("complete_company_setup", {
+      p_organisation_id: fresh.orgId,
     });
     expect(done.error).toBeNull();
-    const { workerId, result } = await importOne(owner.client);
+    const { workerId, result } = await importOne(fresh.client, { orgId: fresh.orgId });
     expect(result).toMatchObject({ created: 1, bank_details_saved: 0 });
-    expect(await bankState(workerId)).toEqual({ last4: null, pending: 1 });
+    expect(await bankState(workerId)).toEqual(held);
     expect(await exceptionAudits(workerId)).toEqual([]);
+  });
+});
+
+describe("the single-approver helper", () => {
+  it("leaves incomplete bank details off, as every import does", async () => {
+    const fresh = await createTenantUser("onb-owner-3", "Onboarding Org Three");
+    const { workerId, result } = await importOne(fresh.client, {
+      orgId: fresh.orgId,
+      bank: "partial",
+    });
+    expect(result).toMatchObject({ created: 1, bank_details_saved: 0 });
+    expect(await bankState(workerId)).toEqual({ last4: null, pending: 0, needs_pay_details: true });
+  });
+
+  it("can't put bank details on a worker this import didn't just create", async () => {
+    // A fresh company whose owner has not used the exception, so only the worker guard stands.
+    const fresh = await createTenantUser("onb-owner-4", "Onboarding Org Four");
+    const existing = await importOne(fresh.client, { orgId: fresh.orgId, bank: "none" });
+    const { batchId } = await checkedBatch(fresh.client, fresh.orgId);
+    await db.query("begin");
+    try {
+      await db.query("select set_config('request.jwt.claim.sub', $1, true)", [fresh.id]);
+      await expect(
+        db.query(
+          "select private.import_bank_details_single_approver($1, $2, $3, 'GTBank', 'X', '\\x00'::bytea, '0000')",
+          [fresh.orgId, batchId, existing.workerId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await db.query("rollback");
+    }
+    expect(await bankState(existing.workerId)).toMatchObject({ last4: null });
   });
 });

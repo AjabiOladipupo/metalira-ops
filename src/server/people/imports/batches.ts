@@ -205,6 +205,12 @@ function fromDbError(error: PostgrestError): never {
         );
       }
       break;
+    case "MLSI3":
+      // A staff ID retired or reserved by a correction since the file was checked (slice 1.11).
+      throw new MutationError(
+        "invalid",
+        "A staff ID in this file was used before in your company. Check the file again.",
+      );
   }
   throw new Error(`Database refused the import (${error.code}): ${error.message}`);
 }

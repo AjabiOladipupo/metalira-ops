@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { WORKER_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
@@ -11,6 +12,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminSupabase } from "@/server/supabase/admin";
 
 import type { FormState } from "./form-state";
+import { notifyCompanyThrottled } from "./sign-in-alerts";
 import { formFields } from "./schemas";
 import { hashPin, newPinSchema } from "./pin";
 import { ensureWorkerAuthUser, openWorkerSession } from "./worker-login";
@@ -83,6 +85,9 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
   if (result.status === "locked") return { ok: false, formError: copy.signIn.locked, values };
   if (result.status === "held") return { ok: false, formError: copy.signIn.held, values };
   if (result.status === "company_throttled") {
+    // The first refusal of the window tells the owner and HR, after the response.
+    const alertOrganisationId = result.alertOrganisationId;
+    if (alertOrganisationId) after(() => notifyCompanyThrottled(alertOrganisationId));
     return { ok: false, formError: copy.signIn.companyThrottled, values };
   }
   if (result.status === "ip_blocked")

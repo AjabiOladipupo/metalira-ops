@@ -481,7 +481,10 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   await applyDueBankChanges(ctx.supabase, ctx.organisationId);
   // And the worker hears about it now, not at the next daily cron run.
   after(() => sendAppliedBankChangeNotices(ctx.organisationId));
-  const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today);
+  // A line manager loads only what their page shows: no bank, tax, pension or next of kin.
+  const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today, {
+    viewer: ctx.role === "line_manager" ? "line_manager" : "manager",
+  });
   if (!worker) notFound();
   const [bankChanges, viewer, changeRequests, credential, corrections] = await Promise.all([
     canViewBankChanges(ctx.role)

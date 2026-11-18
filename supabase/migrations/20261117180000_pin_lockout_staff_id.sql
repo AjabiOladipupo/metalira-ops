@@ -4,23 +4,31 @@
 --    * The 3rd lockout within 24 hours holds the login (worker_credentials.held_at) until a new
 --      PIN is set from an HR invite. Lockouts are the worker_auth.locked audit rows (insert-only,
 --      written since slice 1.9), counted since the later of 24 hours ago and the last PIN set.
---      A manager unlock does not reset the count.
+--      A manager unlock does not reset the count. A lockout inside a 15-minute window in which
+--      the company reached its cap (a worker_auth.company_throttled row) doesn't count: a flood
+--      across the company must not push workers into holds.
 --    * public.unlock_worker_sign_in: owner, admin, hr and the worker's line manager lift a
---      15-minute lock (never a hold, never their own login), audited as worker_auth.unlocked.
---    * A cap on wrong PINs per company code per 15 minutes (company_wrong_pin_cap below, and
---      COMPANY_WRONG_PIN_CAP in src/lib/pin-lockout.ts). Tries are counted before
---      the PIN is checked; a success gives its try back. At the cap, sign-ins for that company
---      are refused before any PIN check and count against no worker, so a flood across many
---      staff IDs can neither guess on nor lock out the whole workforce. Workers already signed
---      in are not affected. Keyed by a hash of the typed code, so an unknown code behaves the
---      same as a real one. See docs/PHASE_1.md slice 1.11 for the reasoning behind 50.
---    * A company code and staff ID with no login get the same lock and hold from
---      private.auth_throttle, so the answers never reveal which IDs exist.
+--      15-minute lock (never a hold, never their own login, never a leaver's), audited as
+--      worker_auth.unlocked. public.worker_sign_in_status gives line managers only the lock
+--      state of their reportees (no table access to worker_credentials).
+--    * Caps on wrong PINs per 15 minutes (src/lib/pin-lockout.ts has the same numbers):
+--        - per company code: company_wrong_pin_cap (50). At the cap, sign-ins for that company
+--          are refused before any PIN check and count against no worker. Workers already
+--          signed in are not affected. Keyed by a hash of the typed code, so an unknown code
+--          behaves the same as a real one.
+--        - per network address: ip_wrong_pin_cap (15), well below the company cap, so one
+--          address can't use up a company's allowance (or hold its workers) on its own.
+--      Only wrong PINs count, and a success never gives one back, so a valid login can't be
+--      used to reset a counter. The network address also has a cap on all tries (ip_limit,
+--      100), with no refund either. See docs/PHASE_1.md slice 1.11 for the reasoning.
+--    * A company code and staff ID with no login get the same lock and hold (a sliding 24-hour
+--      window of their own lockout times) from private.auth_throttle, so the answers never
+--      reveal which IDs exist. Held rows survive the quiet-day purge.
 -- B. Staff ID correction (decision 19): public.staff_id_corrections, the two-person pattern of
 --    bank_detail_changes (slice 1.7), applied to workers.staff_id on approval. An ID is never
 --    reused in a company: not one any worker has or had (workers_staff_id_key), not one a
 --    correction retired, not one a pending correction reserves.
--- C. First import (decision 20): the owner's commit_import_batch while company setup is
+-- C. First import (decision 20): the owner's first commit_import_batch while company setup is
 --    unfinished writes bank details straight to the new workers, audited per worker. Every
 --    other path keeps the two-person hold of slice 1.7.
 
@@ -38,27 +46,51 @@ comment on table public.worker_credentials is
 
 alter table private.auth_throttle
   drop constraint auth_throttle_key_format,
-  add constraint auth_throttle_key_format check (key ~ '^(ip|subject|company):[0-9a-f]{64}$'),
-  add column lockouts smallint not null default 0,
-  add column first_lockout_at timestamptz,
+  add constraint auth_throttle_key_format
+    check (key ~ '^(ip|ipwrong|subject|company):[0-9a-f]{64}$'),
+  add column lockout_times timestamptz[] not null default '{}',
   add column held_at timestamptz;
 
 comment on table private.auth_throttle is
-  'Sign-in attempt counters. subject:<sha256> mirrors worker_credentials (lock and hold) for a company code and staff ID with no login, so unknown and real IDs behave the same. ip:<sha256> caps attempts per network address. company:<sha256 of the code> caps wrong PINs per company per 15 minutes; its locked_until marks the window the cap was reached in.';
+  'Sign-in counters. ip:<key> caps all tries per network address; ipwrong:<key> caps wrong PINs per network address; company:<sha256 of the code> caps wrong PINs per company (locked_until marks the window the cap was reached in). subject:<sha256> mirrors worker_credentials (lock, lockout times, hold) for a company code and staff ID with no login, so unknown and real IDs behave the same.';
 
--- Counting a worker's lockouts reads these audit rows on every 5th wrong try.
+-- Counting a worker's lockouts reads these audit rows on every 5th wrong try; capped windows
+-- are read by organisation.
 create index audit_log_worker_locked_idx
   on public.audit_log (entity_id, at)
   where action = 'worker_auth.locked';
+create index audit_log_company_throttled_idx
+  on public.audit_log (organisation_id, at)
+  where action = 'worker_auth.company_throttled';
 
--- Line managers see their own reportees' sign-in status, to unlock them.
-create policy worker_credentials_select_line_manager on public.worker_credentials
-  for select to authenticated
-  using (private.is_reportee(worker_id));
+-- True when `p_at` falls in a 15-minute window in which the organisation reached its cap on
+-- wrong PINs (the window ends at the audit row's `until`).
+create function private.in_capped_window(p_organisation_id uuid, p_at timestamptz)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p_organisation_id is not null and exists (
+    select 1
+    from public.audit_log t
+    where t.organisation_id = p_organisation_id
+      and t.action = 'worker_auth.company_throttled'
+      and t.at > p_at - interval '1 hour'
+      and t.at < p_at + interval '1 hour'
+      and p_at >= (t.after ->> 'until')::timestamptz - interval '15 minutes'
+      and p_at < (t.after ->> 'until')::timestamptz
+  )
+$$;
 
 -- The worker's lockouts that count towards a hold: since the later of 24 hours ago and the
--- last time a PIN was set.
-create function private.worker_recent_lockouts(p_worker_id uuid, p_since timestamptz)
+-- last time a PIN was set, outside windows in which the company reached its cap.
+create function private.worker_recent_lockouts(
+  p_organisation_id uuid,
+  p_worker_id uuid,
+  p_since timestamptz
+)
 returns integer
 language sql
 stable
@@ -70,9 +102,42 @@ as $$
   where a.action = 'worker_auth.locked'
     and a.entity_id = p_worker_id
     and a.at > greatest(now() - interval '24 hours', p_since)
+    and not private.in_capped_window(p_organisation_id, a.at)
 $$;
 
-revoke all on function private.worker_recent_lockouts(uuid, timestamptz) from public, anon, authenticated;
+-- Records one wrong PIN against the company code and the network address, each in its own
+-- 15-minute window. Successes never reduce these counters.
+create function private.count_wrong_pin(p_company_key text, p_ip_key text)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  win constant interval := interval '15 minutes';
+  k text;
+begin
+  foreach k in array array[p_company_key, 'ipwrong:' || p_ip_key] loop
+    if k is null or k !~ '^(company|ipwrong):[0-9a-f]{64}$' then
+      continue;
+    end if;
+    insert into private.auth_throttle as a (key, attempts, window_started_at, updated_at)
+    values (k, 1, now(), now())
+    on conflict on constraint auth_throttle_pkey do update
+    set attempts = case when a.window_started_at <= now() - win then 1 else a.attempts + 1 end,
+        locked_until = case when a.window_started_at <= now() - win then null else a.locked_until end,
+        window_started_at = case
+          when a.window_started_at <= now() - win then now() else a.window_started_at
+        end,
+        updated_at = now();
+  end loop;
+end;
+$$;
+
+revoke all on function private.in_capped_window(uuid, timestamptz) from public, anon, authenticated;
+revoke all on function private.worker_recent_lockouts(uuid, uuid, timestamptz) from public, anon, authenticated;
+revoke all on function private.count_wrong_pin(text, text) from public, anon, authenticated;
 
 -- The outcome set and columns change, so the two begin functions are recreated.
 drop function public.worker_sign_in_begin(text, text, text);
@@ -83,7 +148,7 @@ drop function private.worker_sign_in_begin_impl(text, text, text);
 --                      row). holds_on_failure: that lock is the 3rd in 24 hours and holds.
 --   locked             5 wrong tries: refuse without checking, until the lock ends.
 --   held               3 lockouts in 24 hours: refuse until a new PIN is set.
---   ip_blocked         too many tries from this network address in 15 minutes.
+--   ip_blocked         too many tries, or wrong PINs, from this network address.
 --   company_throttled  too many wrong PINs for this company code in 15 minutes.
 create function private.worker_sign_in_begin_impl(
   p_company_code text,
@@ -111,11 +176,13 @@ declare
   hold_window constant interval := interval '24 hours';
   ip_limit constant integer := 100;
   ip_window constant interval := interval '15 minutes';
+  ip_wrong_pin_cap constant integer := 15;
   company_wrong_pin_cap constant integer := 50;
   company_window constant interval := interval '15 minutes';
   v_code text := upper(btrim(coalesce(p_company_code, '')));
   v_staff text := lower(btrim(coalesce(p_staff_id, '')));
   v_ip_attempts integer;
+  v_ip_wrong integer;
   v_company_key text;
   v_company_attempts integer;
   v_company_window timestamptz;
@@ -123,6 +190,8 @@ declare
   v_org uuid;
   v_subject text;
   v_locked boolean;
+  v_times timestamptz[];
+  v_count integer;
   cred public.worker_credentials%rowtype;
   t private.auth_throttle%rowtype;
 begin
@@ -133,8 +202,11 @@ begin
     raise exception 'Company code and staff ID are too long.' using errcode = '22023';
   end if;
 
-  -- Old counters are dropped after a quiet day.
-  delete from private.auth_throttle a where a.updated_at < now() - interval '1 day';
+  -- Old counters are dropped after a quiet day; a hold on an unknown ID is kept like a real
+  -- one (for 90 quiet days, so the table can't grow without end).
+  delete from private.auth_throttle a
+  where (a.held_at is null and a.updated_at < now() - interval '1 day')
+     or (a.held_at is not null and a.updated_at < now() - interval '90 days');
 
   insert into private.auth_throttle as a (key, attempts, window_started_at, updated_at)
   values ('ip:' || p_ip_key, 1, now(), now())
@@ -146,7 +218,12 @@ begin
       updated_at = now()
   returning a.attempts into v_ip_attempts;
 
-  if v_ip_attempts > ip_limit then
+  select a.attempts into v_ip_wrong
+  from private.auth_throttle a
+  where a.key = 'ipwrong:' || p_ip_key
+    and a.window_started_at > now() - ip_window;
+
+  if v_ip_attempts > ip_limit or coalesce(v_ip_wrong, 0) >= ip_wrong_pin_cap then
     outcome := 'ip_blocked';
     locks_on_failure := false;
     holds_on_failure := false;
@@ -154,8 +231,10 @@ begin
     return;
   end if;
 
+  select o.id into v_org from public.organisations o where o.company_code = v_code;
+
   -- The company's window: read (and row-locked until this transaction ends, so sign-ins for one
-  -- company are counted one at a time) before anything is counted against a worker.
+  -- company are checked one at a time) before anything is counted against a worker.
   v_company_key := 'company:' || encode(extensions.digest(v_code, 'sha256'), 'hex');
   insert into private.auth_throttle as a (key, attempts, window_started_at, updated_at)
   values (v_company_key, 0, now(), now())
@@ -171,31 +250,32 @@ begin
   returning a.attempts, a.window_started_at into v_company_attempts, v_company_window;
 
   if v_company_attempts >= company_wrong_pin_cap then
-    -- Audited once per window, at the first refusal, for a real company.
+    -- Audited once per window, at the first refusal, for a real company. The row's `until`
+    -- also marks the window whose lockouts don't count towards a hold.
     update private.auth_throttle a
     set locked_until = v_company_window + company_window
     where a.key = v_company_key
       and a.locked_until is null
     returning true into v_first_refusal;
-    if v_first_refusal then
-      select o.id into v_org from public.organisations o where o.company_code = v_code;
-      if v_org is not null then
-        insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, after)
-        values (
-          v_org,
-          null,
-          'worker_auth.company_throttled',
-          'organisations',
-          v_org,
-          jsonb_build_object(
-            'wrong_pin_cap', company_wrong_pin_cap,
-            'window_minutes', extract(epoch from company_window)::integer / 60,
-            'until', v_company_window + company_window
-          )
-        );
-      end if;
+    if v_first_refusal and v_org is not null then
+      insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, after)
+      values (
+        v_org,
+        null,
+        'worker_auth.company_throttled',
+        'organisations',
+        v_org,
+        jsonb_build_object(
+          'wrong_pin_cap', company_wrong_pin_cap,
+          'window_minutes', extract(epoch from company_window)::integer / 60,
+          'until', v_company_window + company_window
+        )
+      );
     end if;
     outcome := 'company_throttled';
+    -- Only on the first refusal of the window, for a real company: the server then emails the
+    -- owner and HR once (never shown to the person signing in).
+    organisation_id := case when v_first_refusal then v_org end;
     locks_on_failure := false;
     holds_on_failure := false;
     return next;
@@ -239,25 +319,24 @@ begin
     where c.id = cred.id
     returning c.locked_until is not null into v_locked;
 
-    update private.auth_throttle a
-    set attempts = a.attempts + 1, updated_at = now()
-    where a.key = v_company_key;
-
     outcome := 'proceed';
     worker_id := cred.worker_id;
     organisation_id := cred.organisation_id;
     auth_user_id := cred.auth_user_id;
     locks_on_failure := v_locked;
-    -- The lock this try would set is the 3rd in 24 hours when two are already counted.
+    -- The lock this try would set is the 3rd in 24 hours when two are already counted (and
+    -- this window isn't one the company capped).
     holds_on_failure := v_locked
-      and private.worker_recent_lockouts(cred.worker_id, cred.pin_set_at) + 1 >= hold_after_lockouts;
+      and not private.in_capped_window(cred.organisation_id, now())
+      and private.worker_recent_lockouts(cred.organisation_id, cred.worker_id, cred.pin_set_at) + 1
+        >= hold_after_lockouts;
     select p.pin_hash into pin_hash from private.worker_pins p where p.worker_id = cred.worker_id;
     return next;
     return;
   end if;
 
   -- No worker login for these IDs: the same counting, keyed by a hash of what was typed. A try
-  -- here always fails, so the lock and the hold are decided now.
+  -- here always fails, so the wrong PIN, the lock and the hold are recorded now.
   v_subject := 'subject:' || encode(extensions.digest(v_code || '|' || v_staff, 'sha256'), 'hex');
 
   select * into t from private.auth_throttle a where a.key = v_subject for update;
@@ -289,29 +368,26 @@ begin
         when a.locked_until is null and a.attempts + 1 >= max_attempts then now() + lock_for
       end,
       updated_at = now()
-  returning a.locked_until is not null into v_locked;
+  returning a.locked_until is not null, a.lockout_times into v_locked, v_times;
 
   holds_on_failure := false;
   if v_locked then
+    -- Lockout times in the last 24 hours (a sliding window, like the audit rows of a real
+    -- worker), this one included.
+    select coalesce(array_agg(x order by x), '{}') into v_times
+    from unnest(v_times || now()) as u (x)
+    where x > now() - hold_window;
+    select count(*)::integer into v_count
+    from unnest(v_times) as u (x)
+    where not private.in_capped_window(v_org, x);
+    holds_on_failure := v_count >= hold_after_lockouts;
     update private.auth_throttle a
-    set lockouts = case
-          when a.first_lockout_at is null or a.first_lockout_at <= now() - hold_window then 1
-          else a.lockouts + 1
-        end,
-        first_lockout_at = case
-          when a.first_lockout_at is null or a.first_lockout_at <= now() - hold_window then now()
-          else a.first_lockout_at
-        end
-    where a.key = v_subject
-    returning a.lockouts >= hold_after_lockouts into holds_on_failure;
-    if holds_on_failure then
-      update private.auth_throttle a set held_at = now() where a.key = v_subject;
-    end if;
+    set lockout_times = v_times,
+        held_at = case when holds_on_failure then now() end
+    where a.key = v_subject;
   end if;
 
-  update private.auth_throttle a
-  set attempts = a.attempts + 1, updated_at = now()
-  where a.key = v_company_key;
+  perform private.count_wrong_pin(v_company_key, p_ip_key);
 
   outcome := 'proceed';
   locks_on_failure := v_locked;
@@ -319,11 +395,11 @@ begin
 end;
 $$;
 
--- Records the result of the PIN check. For a worker with a login, success clears the count and
--- the lock and gives back the network and company tries. The 5th failure in a row is the one
--- that locked the worker in begin: it is written to the audit log as worker_auth.locked, and
--- when it is the 3rd lockout in 24 hours the login is held (worker_auth.held).
--- Returns signed_in, failed, locked or held.
+-- Records the result of the PIN check. Success clears the worker's count and lock (it gives
+-- nothing back to the network or company counters). A failure is counted against the company
+-- code and the network address; the 5th failure in a row is the one that locked the worker in
+-- begin, written to the audit log as worker_auth.locked, and when it is the 3rd counted lockout
+-- in 24 hours the login is held (worker_auth.held). Returns signed_in, failed, locked or held.
 create or replace function private.worker_sign_in_finish_impl(
   p_worker_id uuid,
   p_ok boolean,
@@ -364,25 +440,16 @@ begin
         locked_until = null,
         last_sign_in_at = now()
     where c.id = cred.id;
-
-    if p_ip_key ~ '^[0-9a-f]{64}$' then
-      update private.auth_throttle a
-      set attempts = greatest(a.attempts - 1, 0),
-          updated_at = now()
-      where a.key = 'ip:' || p_ip_key;
-    end if;
-
-    select o.company_code into v_code
-    from public.organisations o
-    where o.id = cred.organisation_id;
-    if v_code is not null then
-      update private.auth_throttle a
-      set attempts = greatest(a.attempts - 1, 0),
-          updated_at = now()
-      where a.key = 'company:' || encode(extensions.digest(upper(v_code), 'sha256'), 'hex');
-    end if;
     return 'signed_in';
   end if;
+
+  select o.company_code into v_code
+  from public.organisations o
+  where o.id = cred.organisation_id;
+  perform private.count_wrong_pin(
+    'company:' || encode(extensions.digest(upper(coalesce(v_code, '')), 'sha256'), 'hex'),
+    case when p_ip_key ~ '^[0-9a-f]{64}$' then p_ip_key end
+  );
 
   if cred.held_at is not null then
     return 'held';
@@ -414,7 +481,7 @@ begin
       )
     );
 
-    v_lockouts := private.worker_recent_lockouts(cred.worker_id, cred.pin_set_at);
+    v_lockouts := private.worker_recent_lockouts(cred.organisation_id, cred.worker_id, cred.pin_set_at);
     if v_lockouts >= hold_after_lockouts then
       update public.worker_credentials c
       set held_at = now()
@@ -585,7 +652,7 @@ $$;
 
 -- "Unlock sign-in" on the worker page. Lifts a 15-minute lock early; a hold (3 lockouts in 24
 -- hours) needs a new PIN from an HR invite. Owner, admin, hr, or the worker's line manager;
--- never one's own login. Returns the lock that was lifted.
+-- never one's own login, never a leaver's. Returns the lock that was lifted.
 create function private.unlock_worker_sign_in_impl(p_organisation_id uuid, p_worker_id uuid)
 returns timestamptz
 language plpgsql
@@ -614,6 +681,9 @@ begin
   end if;
   if p_worker_id in (select private.my_worker_ids()) then
     raise exception 'This is your own sign-in, so someone else must unlock it.' using errcode = 'MLPN3';
+  end if;
+  if w.status <> 'active' then
+    raise exception 'This employee has left, so there is nothing to unlock.' using errcode = 'MLPN2';
   end if;
 
   select * into cred from public.worker_credentials c where c.worker_id = p_worker_id for update;
@@ -661,6 +731,78 @@ revoke all on function public.unlock_worker_sign_in(uuid, uuid) from public, ano
 grant execute on function private.unlock_worker_sign_in_impl(uuid, uuid) to authenticated;
 grant execute on function public.unlock_worker_sign_in(uuid, uuid) to authenticated;
 
+-- A worker's sign-in status for their managers. Owner, admin and hr get everything they can
+-- already read in worker_credentials; the worker's own line manager gets only whether there is
+-- a login, the last sign-in and the lock (no table access). Anyone else: no row.
+create function private.worker_sign_in_status_impl(p_organisation_id uuid, p_worker_id uuid)
+returns table (
+  has_login boolean,
+  pin_set_at timestamptz,
+  failed_attempts smallint,
+  last_sign_in_at timestamptz,
+  locked_until timestamptz,
+  held_at timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  w public.workers%rowtype;
+  v_full boolean;
+  cred public.worker_credentials%rowtype;
+begin
+  if auth.uid() is null then
+    return;
+  end if;
+  select * into w
+  from public.workers x
+  where x.id = p_worker_id and x.organisation_id = p_organisation_id;
+  if not found then
+    return;
+  end if;
+  v_full := private.has_role(p_organisation_id, array['owner', 'admin', 'hr']);
+  if not v_full and not private.is_line_manager_for(
+    p_organisation_id, w.line_manager_worker_id, w.line_manager_membership_id
+  ) then
+    return;
+  end if;
+  select * into cred from public.worker_credentials c where c.worker_id = p_worker_id;
+  has_login := found;
+  if found then
+    pin_set_at := case when v_full then cred.pin_set_at end;
+    failed_attempts := case when v_full then cred.failed_attempts end;
+    last_sign_in_at := cred.last_sign_in_at;
+    locked_until := cred.locked_until;
+    held_at := cred.held_at;
+  end if;
+  return next;
+end;
+$$;
+
+create function public.worker_sign_in_status(p_organisation_id uuid, p_worker_id uuid)
+returns table (
+  has_login boolean,
+  pin_set_at timestamptz,
+  failed_attempts smallint,
+  last_sign_in_at timestamptz,
+  locked_until timestamptz,
+  held_at timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.worker_sign_in_status_impl(p_organisation_id, p_worker_id)
+$$;
+
+revoke all on function private.worker_sign_in_status_impl(uuid, uuid) from public, anon;
+revoke all on function public.worker_sign_in_status(uuid, uuid) from public, anon;
+grant execute on function private.worker_sign_in_status_impl(uuid, uuid) to authenticated;
+grant execute on function public.worker_sign_in_status(uuid, uuid) to authenticated;
+
 -- ===========================================================================
 -- B. Staff ID correction
 -- ===========================================================================
@@ -689,6 +831,12 @@ grant execute on function public.unlock_worker_sign_in(uuid, uuid) to authentica
 -- Phase 4 timesheets, payroll lines and payslips. Until it does, the mere existence of such a
 -- table makes this return true, so corrections fail closed instead of silently ignoring work
 -- already recorded under the old ID. Pay rates are not pay records: nothing has been paid.
+-- Locking: approval locks the worker row (select ... for update) before calling this, so a
+-- punch, timesheet or payslip table must reference workers by a foreign key (an insert then
+-- takes a key-share lock on the worker and waits for, or blocks, the approval), or take the
+-- same advisory lock (hashtextextended('staff_id:' || organisation_id, 0)). Every public table
+-- with a worker_id column must be listed in tests/rls/work-records-hook.test.ts as handled here
+-- or as not a work record.
 create function private.worker_has_work_records(p_organisation_id uuid, p_worker_id uuid)
 returns boolean
 language plpgsql
@@ -1007,6 +1155,8 @@ security definer
 set search_path = ''
 as $$
 begin
+  -- The same lock corrections take, so a new worker and an approval can't both take one ID.
+  perform pg_advisory_xact_lock(hashtextextended('staff_id:' || new.organisation_id::text, 0));
   if exists (
     select 1 from public.staff_id_corrections s
     where s.organisation_id = new.organisation_id
@@ -1083,9 +1233,10 @@ grant execute on function private.worker_has_work_records(uuid, uuid) to service
 -- ===========================================================================
 
 -- True when this import may save bank details without a second approver: the caller is the
--- owner and the company has not finished setup. Takes a share lock on the organisation row, so
+-- owner, the company has not finished setup, and no earlier import (another batch) has already
+-- used the exception: decision 20 covers the owner's first import only. Takes a share lock on the organisation row, so
 -- setup can't be completed half way through the import that relies on the answer.
-create function private.import_single_approver(p_organisation_id uuid)
+create function private.import_single_approver(p_organisation_id uuid, p_batch_id uuid)
 returns boolean
 language plpgsql
 volatile
@@ -1103,7 +1254,15 @@ begin
   from public.organisations o
   where o.id = p_organisation_id
   for share;
-  return coalesce(v_found, false) and v_completed is null;
+  return coalesce(v_found, false)
+    and v_completed is null
+    and not exists (
+      select 1
+      from public.audit_log a
+      where a.organisation_id = p_organisation_id
+        and a.action = 'people.bank_details_single_approver'
+        and (a.after ->> 'batch_id')::uuid is distinct from p_batch_id
+    );
 end;
 $$;
 
@@ -1130,7 +1289,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  if not private.import_single_approver(p_organisation_id) then
+  if not private.import_single_approver(p_organisation_id, p_batch_id) then
     raise exception 'Only the owner''s first import, before setup is finished, can skip the bank-detail approval.'
       using errcode = '42501';
   end if;
@@ -1177,10 +1336,10 @@ begin
 end;
 $$;
 
-revoke all on function private.import_single_approver(uuid) from public, anon;
+revoke all on function private.import_single_approver(uuid, uuid) from public, anon;
 revoke all on function private.import_bank_details_single_approver(uuid, uuid, uuid, text, text, bytea, text)
   from public, anon;
-grant execute on function private.import_single_approver(uuid) to authenticated;
+grant execute on function private.import_single_approver(uuid, uuid) to authenticated;
 grant execute on function private.import_bank_details_single_approver(uuid, uuid, uuid, text, text, bytea, text)
   to authenticated;
 
@@ -1281,7 +1440,7 @@ begin
   end if;
 
   -- Decision 20: the owner's import before setup is finished saves bank details directly.
-  v_single_approver := private.import_single_approver(p_organisation_id);
+  v_single_approver := private.import_single_approver(p_organisation_id, p_batch_id);
 
   -- New names, once each. The server sends a name only when it found no match.
   insert into public.departments (organisation_id, name)

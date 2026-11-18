@@ -53,7 +53,10 @@ export function SignInPanel({
   }
 
   const details = [
-    { label: "PIN set", value: formatDateTime(credential.pinSetAt) },
+    // A line manager is not shown when the PIN was set.
+    ...(credential.pinSetAt
+      ? [{ label: "PIN set", value: formatDateTime(credential.pinSetAt) }]
+      : []),
     {
       label: "Last sign-in",
       value: credential.lastSignInAt ? formatDateTime(credential.lastSignInAt) : "Not yet",

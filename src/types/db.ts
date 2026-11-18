@@ -614,6 +614,11 @@ isOneToOne: false
                            },
 "worker_sign_in_finish":
 { Args: { "p_ip_key": string,"p_ok": boolean,"p_worker_id": string }; Returns: string
+                           },
+"worker_sign_in_status":
+{ Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: {
+              "failed_attempts": number,"has_login": boolean,"held_at": string,"last_sign_in_at": string,"locked_until": string,"pin_set_at": string
+            }[]
                            }
           }
           Enums: {

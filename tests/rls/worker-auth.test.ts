@@ -614,6 +614,9 @@ describe("PIN sign-in counter", () => {
     const ip = ipKey();
     for (let i = 1; i <= 100; i += 1) {
       // A different code each time, so the per-company cap stays out of the way.
+      // Wrong PINs per address have their own, lower cap (slice 1.11): cleared each time so
+      // this checks the cap on all tries.
+      await db.query("delete from private.auth_throttle where key = $1", [`ipwrong:${ip}`]);
       const r = await begin(`NET-${i}`, ip, `NET${i}`);
       expect(r.outcome, `try ${i}`).toBe("proceed");
     }

@@ -23,21 +23,35 @@ export const PIN_HOLD_WINDOW_HOURS = 24;
  * sign-in of a few hundred workers at shift change makes well under 50 wrong tries, so honest
  * use should never reach it. Without it, someone spraying guesses across a 500-person company
  * gets 5 tries per staff ID, 2,500 per window, and locks (then holds) the whole workforce; with
- * it they get 50 per window, and can push at most about 3 workers per window towards a hold.
+ * it they get 50 per window, and lockouts inside a window that reached the cap don't count
+ * towards a hold. One network address gets at most IP_WRONG_PIN_CAP of the 50.
  * The cost: a sustained attack can keep new sign-ins for one company closed 15 minutes at a
- * time. Nobody already signed in is affected, nobody is locked out for longer, and each window
- * that hits the cap is in the audit log (worker_auth.company_throttled).
+ * time. Nobody already signed in is affected, nobody is locked out for longer, each window that
+ * hits the cap is in the audit log (worker_auth.company_throttled), and the owner and HR get one
+ * email per window. Owner confirmed 50 per 15 minutes on 18 Nov 2026, to review after pilots.
  */
 export const COMPANY_WRONG_PIN_CAP = 50;
 export const COMPANY_WINDOW_MINUTES = 15;
 
-/** Network address cap (slice 1.9), per 15 minutes. */
+/**
+ * Wrong PINs per network address per 15 minutes. Well below the company cap, so one address
+ * can't use up a company's allowance (or push its workers into holds) on its own: at most 3
+ * workers locked per window per address, against 15 a single worker could need to lock 3 times.
+ */
+export const IP_WRONG_PIN_CAP = 15;
+
+/**
+ * All tries per network address per 15 minutes (slice 1.9). Successes give nothing back, so a
+ * valid login can't be used to reset it.
+ */
 export const IP_ATTEMPT_LIMIT = 100;
 
 export interface SignInCredential {
-  pinSetAt: string;
+  /** Null for a line manager, who sees only the lock state. */
+  pinSetAt: string | null;
   lastSignInAt: string | null;
-  failedAttempts: number;
+  /** Null for a line manager. */
+  failedAttempts: number | null;
   lockedUntil: string | null;
   heldAt: string | null;
 }
@@ -56,5 +70,5 @@ export function signInState(cred: SignInCredential | null, now: Date = new Date(
     return { kind: "locked", until: cred.lockedUntil };
   }
   // A lock that has run out resets the count at the next try.
-  return { kind: "open", failedAttempts: cred.lockedUntil ? 0 : cred.failedAttempts };
+  return { kind: "open", failedAttempts: cred.lockedUntil ? 0 : (cred.failedAttempts ?? 0) };
 }

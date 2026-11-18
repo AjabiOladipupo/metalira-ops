@@ -17,7 +17,10 @@ import {
   requestStaffIdCorrection,
   withdrawStaffIdCorrection,
 } from "./staff-id-corrections";
-import { notifyApproversOfStaffIdCorrection } from "./staff-id-notices";
+import {
+  notifyApproversOfStaffIdCorrection,
+  notifyWorkerOfStaffIdChange,
+} from "./staff-id-notices";
 
 /**
  * Server Actions for slice 1.11: staff ID corrections and "Unlock sign-in" on a worker's page.
@@ -94,6 +97,11 @@ export async function decideStaffIdCorrectionAction(
     decided = await decideStaffIdCorrection(formFields(formData));
   } catch (error) {
     return refusal(error, "Only the owner, an admin or HR can decide staff ID corrections.");
+  }
+  if (decided.status === "approved") {
+    const session = await getSession();
+    const organisationId = session?.active?.organisationId;
+    if (organisationId) after(() => notifyWorkerOfStaffIdChange(organisationId, decided.id));
   }
   refresh(decided.workerId);
   return {

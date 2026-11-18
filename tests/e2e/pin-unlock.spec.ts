@@ -77,6 +77,18 @@ test("a line manager unlocks a reportee's PIN lock from the worker page", async 
 
   const lockedId = await workerWithLogin("Ibrahim", { held: false });
   const heldId = await workerWithLogin("Okafor", { held: true });
+  // A colleague in the same company who doesn't report to this line manager.
+  const strangerId = randomUUID();
+  const stranger = await admin.from("workers").insert({
+    id: strangerId,
+    organisation_id: owner.orgId,
+    staff_id: `UL-${suffix.slice(0, 4)}-S`,
+    first_name: "Ada",
+    last_name: `Stranger ${suffix}`,
+    employment_type: "permanent",
+    start_date: "2024-03-03",
+  });
+  expect(stranger.error).toBeNull();
 
   await signInViaUi(page, manager.email, manager.password);
   await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });
@@ -89,7 +101,16 @@ test("a line manager unlocks a reportee's PIN lock from the worker page", async 
   await expect(held).toContainText("Ask HR to send them a new invite.");
   await expect(page.getByRole("button", { name: "Unlock sign-in" })).toHaveCount(0);
   // A line manager sees no pay or bank details.
-  await expect(page.getByRole("heading", { name: "Bank details" })).toHaveCount(0);
+  for (const section of ["Pay", "Bank details", "Tax and pension", "Next of kin"]) {
+    await expect(page.getByRole("heading", { name: section, exact: true })).toHaveCount(0);
+  }
+  await expect(page.getByText("NIN", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("RSA PIN", { exact: true })).toHaveCount(0);
+
+  // Someone who doesn't report to them is not found.
+  await page.goto(`/app/people/${strangerId}`);
+  await expect(page.getByText("This page could not be found.")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(`Stranger ${suffix}`)).toHaveCount(0);
 
   // The locked login: unlock it.
   await page.goto(`/app/people/${lockedId}`);

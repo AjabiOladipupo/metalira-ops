@@ -192,7 +192,8 @@ describe("network key", () => {
     expect(clientIp(headers({ "x-real-ip": "102.89.1.7", "x-forwarded-for": "1.1.1.1" }))).toBe(
       "102.89.1.7",
     );
-    expect(clientIp(headers({ "x-forwarded-for": "102.89.1.7, 10.0.0.1" }))).toBe("102.89.1.7");
+    // Never x-forwarded-for, which the client controls (CLAUDE.md).
+    expect(clientIp(headers({ "x-forwarded-for": "102.89.1.7, 10.0.0.1" }))).toBeNull();
     expect(clientIp(headers({}))).toBeNull();
   });
 });

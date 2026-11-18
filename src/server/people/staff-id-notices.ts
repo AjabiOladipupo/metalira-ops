@@ -1,6 +1,9 @@
 import "server-only";
 
-import { sendStaffIdCorrectionRequestedEmail } from "@/server/email/staff-id";
+import {
+  sendStaffIdChangedEmail,
+  sendStaffIdCorrectionRequestedEmail,
+} from "@/server/email/staff-id";
 import { createAdminSupabase } from "@/server/supabase/admin";
 
 import { STAFF_ID_CORRECTORS } from "./staff-id-corrections";
@@ -82,5 +85,46 @@ export async function notifyApproversOfStaffIdCorrection(
   } catch (error) {
     logFailure("staff_id_correction_notice_failed", error);
     return 0;
+  }
+}
+
+/**
+ * Tells the worker their staff ID was corrected (owner decision, 18 Nov 2026), only when their
+ * worker record has an email address. Runs after the approval is saved and never undoes it.
+ * Failures are logged by error name only.
+ */
+export async function notifyWorkerOfStaffIdChange(
+  organisationId: string,
+  correctionId: string,
+): Promise<boolean> {
+  try {
+    const admin = createAdminSupabase();
+    const { data: correction, error } = await admin
+      .from("staff_id_corrections")
+      .select(
+        "id, status, new_staff_id, workers!staff_id_corrections_worker_fkey ( first_name, last_name, email ), organisations ( name )",
+      )
+      .eq("organisation_id", organisationId)
+      .eq("id", correctionId)
+      .maybeSingle();
+    if (error) throw new Error(`Could not read the correction: ${error.code}`);
+    const to = correction?.workers?.email;
+    if (!correction || correction.status !== "approved" || !to || !correction.organisations) {
+      return false;
+    }
+    await sendStaffIdChangedEmail({
+      to,
+      correctionId: correction.id,
+      organisationName: correction.organisations.name,
+      workerName: `${correction.workers!.first_name} ${correction.workers!.last_name}`,
+      newStaffId: correction.new_staff_id,
+    });
+    return true;
+  } catch (error) {
+    console.error(
+      "people.staff_id_changed_email_failed:",
+      error instanceof Error ? error.name : "unknown",
+    );
+    return false;
   }
 }

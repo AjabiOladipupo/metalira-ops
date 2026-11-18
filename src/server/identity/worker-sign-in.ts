@@ -35,10 +35,18 @@ export const workerSignInSchema = z.object({
 export type WorkerSignInInput = z.output<typeof workerSignInSchema>;
 
 /** Refusals decided before any PIN is checked. */
-export type RefusedOutcome = "ip_blocked" | "locked" | "held" | "company_throttled";
+export type RefusedOutcome = "ip_blocked" | "locked" | "held";
 
 export type BeginResult =
   | { outcome: RefusedOutcome }
+  | {
+      outcome: "company_throttled";
+      /**
+       * Set only on the first refusal of the window for a real company: the server emails its
+       * owner and HR once. Never shown to the person signing in.
+       */
+      alertOrganisationId: string | null;
+    }
   | {
       outcome: "proceed";
       /** The worker with a login, or null for a company code and staff ID with none. */
@@ -66,7 +74,7 @@ export type WorkerSignInResult =
   | { status: "held" }
   | { status: "ip_blocked" }
   /** Too many wrong PINs for this company code just now; no worker was counted. */
-  | { status: "company_throttled" };
+  | { status: "company_throttled"; alertOrganisationId: string | null };
 
 /**
  * The network address as a counter key: an HMAC with a server-side key, so the stored value
@@ -80,15 +88,12 @@ export function ipKey(ip: string | null | undefined): string {
 }
 
 /**
- * The client address from the request headers. On Vercel `x-real-ip` and the first
- * `x-forwarded-for` entry are set by the platform; elsewhere they may be missing, and every
- * request then shares one counter.
+ * The client address: `x-real-ip`, which Vercel sets itself. Never `x-forwarded-for`, which
+ * the client controls (CLAUDE.md). Without it every request shares one counter.
  */
 export function clientIp(headers: { get(name: string): string | null }): string | null {
   const real = headers.get("x-real-ip")?.trim();
-  if (real) return real.slice(0, 64);
-  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded ? forwarded.slice(0, 64) : null;
+  return real ? real.slice(0, 64) : null;
 }
 
 export async function checkWorkerPin(
@@ -98,10 +103,21 @@ export async function checkWorkerPin(
   verify: (pin: string, hash: string | null) => Promise<boolean> = verifyPin,
 ): Promise<WorkerSignInResult> {
   const begun = await store.begin(input.companyCode, input.staffId, network);
+  if (begun.outcome === "company_throttled") {
+    return { status: "company_throttled", alertOrganisationId: begun.alertOrganisationId };
+  }
   if (begun.outcome !== "proceed") return { status: begun.outcome };
 
-  const ok = await verify(input.pin, begun.pinHash);
   const login = begun.login;
+  let ok: boolean;
+  try {
+    ok = await verify(input.pin, begun.pinHash);
+  } catch (error) {
+    // begin may already have set a lock: record the try as failed so the lock is audited and
+    // counted towards a hold, then report the failure.
+    await store.finish(login?.workerId ?? null, false, network).catch(() => undefined);
+    throw error;
+  }
   // Called for unknown IDs too, so both paths make the same round trips.
   const finished = await store.finish(login?.workerId ?? null, ok && login !== null, network);
 
@@ -129,13 +145,11 @@ export function databaseSignInStore(admin: Admin): WorkerSignInStore {
         })
         .single();
       if (error || !data) throw new Error(`Sign-in check failed: ${error?.code ?? "no row"}`);
-      if (
-        data.outcome === "ip_blocked" ||
-        data.outcome === "locked" ||
-        data.outcome === "held" ||
-        data.outcome === "company_throttled"
-      ) {
+      if (data.outcome === "ip_blocked" || data.outcome === "locked" || data.outcome === "held") {
         return { outcome: data.outcome };
+      }
+      if (data.outcome === "company_throttled") {
+        return { outcome: "company_throttled", alertOrganisationId: data.organisation_id ?? null };
       }
       if (data.outcome !== "proceed") throw new Error("Sign-in check returned an unknown outcome.");
       return {

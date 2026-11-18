@@ -176,7 +176,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await db.query("delete from private.auth_throttle where key like 'company:%'");
+  await db.query(
+    "delete from private.auth_throttle where key like 'company:%' or key like 'ipwrong:%'",
+  );
 });
 
 describe("the hold after 3 lockouts in 24 hours", () => {
@@ -273,6 +275,40 @@ describe("the hold after 3 lockouts in 24 hours", () => {
   });
 });
 
+describe("unknown IDs use a sliding 24-hour window too", () => {
+  it("forgets an unknown ID's lockouts older than 24 hours, like a real worker's", async () => {
+    const id = `SLIDE-${counter++}`;
+    const lock = async () => {
+      for (let i = 1; i <= 5; i += 1) await begin(id);
+      await db.query(
+        "update private.auth_throttle set locked_until = now() - interval '1 second' where key like 'subject:%' and locked_until > now()",
+      );
+    };
+    await lock();
+    await lock();
+    // Both lockouts move back 25 hours.
+    await db.query(
+      "update private.auth_throttle set lockout_times = array(select t - interval '25 hours' from unnest(lockout_times) t) where key like 'subject:%' and cardinality(lockout_times) = 2",
+    );
+    for (let i = 1; i <= 4; i += 1) await begin(id);
+    expect(await begin(id)).toMatchObject({ locks_on_failure: true, holds_on_failure: false });
+  });
+
+  it("keeps a held unknown ID through the quiet-day purge", async () => {
+    const id = `KEEP-${counter++}`;
+    for (let round = 0; round < 3; round += 1) {
+      for (let i = 1; i <= 5; i += 1) await begin(id);
+      await db.query(
+        "update private.auth_throttle set locked_until = now() - interval '1 second' where key like 'subject:%' and locked_until > now()",
+      );
+    }
+    await db.query(
+      "update private.auth_throttle set updated_at = now() - interval '2 days' where held_at is not null",
+    );
+    expect((await begin(id)).outcome).toBe("held");
+  });
+});
+
 describe("unlocking sign-in", () => {
   async function lockedWorker(fields: Parameters<typeof addWorker>[0] = {}) {
     const worker = await signedUpWorker(fields);
@@ -310,17 +346,27 @@ describe("unlocking sign-in", () => {
       });
       expect(error?.code, who).toBe("42501");
     }
-    // The line manager sees the lock on their reportee's page.
-    const seen = await staff.lineManager.client
+    // The line manager sees only the lock state, through the status function; no table access.
+    const status = (by: Client, org = owner.orgId) =>
+      by.rpc("worker_sign_in_status", { p_organisation_id: org, p_worker_id: worker.id });
+    const seen = await status(staff.lineManager.client);
+    expect(seen.error).toBeNull();
+    expect(seen.data).toEqual([
+      expect.objectContaining({ has_login: true, pin_set_at: null, failed_attempts: null }),
+    ]);
+    expect(seen.data![0]!.locked_until).not.toBeNull();
+    const table = await staff.lineManager.client
       .from("worker_credentials")
       .select("locked_until")
       .eq("worker_id", worker.id);
-    expect(seen.data).toHaveLength(1);
-    const notTheirs = await staff.otherLm.client
-      .from("worker_credentials")
-      .select("locked_until")
-      .eq("worker_id", worker.id);
-    expect(notTheirs.data).toEqual([]);
+    expect(table.data).toEqual([]);
+    // Another line manager, a line manager of another company, and finance get nothing.
+    for (const by of [staff.otherLm.client, staff.finance.client, other.client]) {
+      const none = await status(by);
+      expect(none.data ?? []).toEqual([]);
+    }
+    const hr = await status(staff.hr.client);
+    expect(hr.data![0]).toMatchObject({ has_login: true, failed_attempts: 5 });
 
     const { error } = await staff.lineManager.client.rpc("unlock_worker_sign_in", {
       p_organisation_id: owner.orgId,
@@ -343,6 +389,12 @@ describe("unlocking sign-in", () => {
     expect((await unlock(open.id)).error?.code).toBe("MLPN2");
     const noLogin = await addWorker();
     expect((await unlock(noLogin.id)).error?.code).toBe("MLPN2");
+    const leaver = await lockedWorker();
+    await db.query(
+      "update public.workers set status = 'ended', end_date = '2025-12-31' where id = $1",
+      [leaver.id],
+    );
+    expect((await unlock(leaver.id)).error?.code).toBe("MLPN2");
 
     const foreign = await addWorker({}, other.orgId);
     expect((await unlock(foreign.id)).error?.code).toBe("42501");
@@ -397,20 +449,68 @@ describe("the company cap on wrong PINs", () => {
     expect(await finish(worker.id, true)).toBe("signed_in");
   });
 
-  it("gives a successful sign-in its try back", async () => {
+  it("successes give nothing back: a valid login can't reset the company counter", async () => {
     const worker = await signedUpWorker();
-    for (let i = 1; i < CAP; i += 1) {
-      await begin(`SPRAY2-${counter}-${i}`);
-      await finish(null, false);
+    let wrong = 0;
+    for (let round = 0; round < 40; round += 1) {
+      for (let k = 0; k < 2; k += 1) {
+        const started = await begin(`ALT-${counter}-${round}-${k}`);
+        if (started.outcome === "proceed") {
+          wrong += 1;
+          await finish(null, false);
+        }
+      }
+      const mine = await begin(worker.staffId);
+      if (mine.outcome === "proceed") await finish(worker.id, true);
     }
-    for (let i = 0; i < 5; i += 1) {
-      expect((await begin(worker.staffId)).outcome).toBe("proceed");
-      expect(await finish(worker.id, true)).toBe("signed_in");
+    expect(wrong).toBe(CAP);
+  });
+
+  it("returns the organisation for the owner and HR alert on the first refusal only", async () => {
+    for (let i = 1; i <= CAP; i += 1) await begin(`ALERT-${counter}-${i}`);
+    const first = await begin("ALERT-X");
+    expect(first).toMatchObject({ outcome: "company_throttled", organisation_id: owner.orgId });
+    const second = await begin("ALERT-Y");
+    expect(second).toMatchObject({ outcome: "company_throttled", organisation_id: null });
+  });
+
+  it("caps wrong PINs from one network address at 15, well below the company cap", async () => {
+    const ip = randomBytes(32).toString("hex");
+    const outcomes: string[] = [];
+    for (let i = 1; i <= 20; i += 1) {
+      const { data } = await admin
+        .rpc("worker_sign_in_begin", {
+          p_company_code: companyCode,
+          p_staff_id: `NET-${counter}-${i}`,
+          p_ip_key: ip,
+        })
+        .single();
+      outcomes.push(data!.outcome);
     }
+    expect(outcomes.filter((o) => o === "proceed")).toHaveLength(15);
+    expect(outcomes.slice(15)).toEqual(Array(5).fill("ip_blocked"));
+    // The company itself was not capped by one address.
+    expect((await begin(`NET-OTHER-${counter}`)).outcome).toBe("proceed");
   });
 
   it("caps an unknown company code the same way", async () => {
     for (let i = 1; i <= CAP; i += 1) await begin(`X-${i}`, "QQQQQQ");
     expect((await begin("X-0", "QQQQQQ")).outcome).toBe("company_throttled");
+  });
+
+  it("doesn't count lockouts from a window the company capped towards a hold (runs last)", async () => {
+    const worker = await signedUpWorker();
+    // Two lockouts, then a flood caps the window they happened in.
+    await lockOnce(worker.id, worker.staffId);
+    await endLock(worker.id);
+    await lockOnce(worker.id, worker.staffId);
+    await endLock(worker.id);
+    for (let i = 1; i <= CAP; i += 1) await begin(`FLOOD-${counter}-${i}`);
+    expect((await begin("FLOOD-X")).outcome).toBe("company_throttled");
+    // The window ends; the third lockout of the day is the first that counts.
+    await db.query(
+      "delete from private.auth_throttle where key like 'company:%' or key like 'ipwrong:%'",
+    );
+    expect(await lockOnce(worker.id, worker.staffId)).toBe("locked");
   });
 });
