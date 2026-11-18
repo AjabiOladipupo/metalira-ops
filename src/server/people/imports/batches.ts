@@ -205,6 +205,12 @@ function fromDbError(error: PostgrestError): never {
         );
       }
       break;
+    case "MLSI3":
+      // A staff ID retired or reserved by a correction since the file was checked (slice 1.11).
+      throw new MutationError(
+        "invalid",
+        "A staff ID in this file was used before in your company. Check the file again.",
+      );
   }
   throw new Error(`Database refused the import (${error.code}): ${error.message}`);
 }
@@ -551,6 +557,12 @@ export type CommittedImport =
       clients: number;
       sites: number;
       projects: number;
+      /**
+       * Workers whose bank details were saved without a second approver: the owner's import
+       * while company setup is unfinished (owner decision 20, slice 1.11). Otherwise 0, and the
+       * bank details wait in Bank-detail approvals.
+       */
+      bankDetailsSaved: number;
     }
   | { status: "changed"; importable: number };
 
@@ -561,6 +573,7 @@ const commitResultSchema = z.object({
   clients: z.number().int(),
   sites: z.number().int(),
   projects: z.number().int(),
+  bank_details_saved: z.number().int().default(0),
 });
 
 export const commitImportSpec: MutationSpec<typeof commitImportSchema, CommittedImport> = {
@@ -589,6 +602,7 @@ export const commitImportSpec: MutationSpec<typeof commitImportSchema, Committed
         clients: 0,
         sites: 0,
         projects: 0,
+        bankDetailsSaved: 0,
       };
     }
     if (importable !== data.expected) {
@@ -634,6 +648,7 @@ export const commitImportSpec: MutationSpec<typeof commitImportSchema, Committed
       clients: counts.clients,
       sites: counts.sites,
       projects: counts.projects,
+      bankDetailsSaved: counts.bank_details_saved,
     };
   },
 };

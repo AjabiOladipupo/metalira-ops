@@ -46,6 +46,7 @@ function fakeStore(known: Record<string, string>) {
         login: isKnown ? LOGIN : null,
         pinHash: isKnown ? (known[key] ?? null) : null,
         locksOnFailure: c.lockedUntil !== null,
+        holdsOnFailure: false,
       } satisfies BeginResult;
     },
     async finish(workerId, ok) {
@@ -175,7 +176,8 @@ describe("workerSignInSchema", () => {
 describe("network key", () => {
   it("keys the address with a server secret, never keeping it", () => {
     expect(ipKey("102.89.1.7")).toMatch(/^[0-9a-f]{64}$/);
-    expect(ipKey("102.89.1.7")).not.toContain("102");
+    // The whole address never appears (a random hex digest can contain "102" by chance).
+    expect(ipKey("102.89.1.7")).not.toContain("102.89");
     expect(ipKey("102.89.1.7")).toBe(ipKey(" 102.89.1.7 "));
     expect(ipKey("102.89.1.7")).not.toBe(ipKey("102.89.1.8"));
     expect(ipKey(null)).toBe(ipKey(undefined));
@@ -191,7 +193,8 @@ describe("network key", () => {
     expect(clientIp(headers({ "x-real-ip": "102.89.1.7", "x-forwarded-for": "1.1.1.1" }))).toBe(
       "102.89.1.7",
     );
-    expect(clientIp(headers({ "x-forwarded-for": "102.89.1.7, 10.0.0.1" }))).toBe("102.89.1.7");
+    // Never x-forwarded-for, which the client controls (CLAUDE.md).
+    expect(clientIp(headers({ "x-forwarded-for": "102.89.1.7, 10.0.0.1" }))).toBeNull();
     expect(clientIp(headers({}))).toBeNull();
   });
 });

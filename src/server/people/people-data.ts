@@ -516,6 +516,88 @@ export interface WorkerProfile {
 const PROFILE_COLUMNS =
   "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in" as const;
 
+/**
+ * What a line manager may load about a reportee (slice 1.11): no bank, tax, pension, next of kin
+ * or encrypted columns. RLS still lets a line manager select the whole row (a tracked gap, see
+ * docs/PHASE_1.md 1.11), so the server never asks for more than this.
+ */
+const LINE_MANAGER_COLUMNS =
+  "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, needs_pay_details, supervisor_clock_in" as const;
+
+type ProfileRow = {
+  id: string;
+  staff_id: string;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  email: string | null;
+  job_title: string | null;
+  department_id: string | null;
+  line_manager_worker_id: string | null;
+  line_manager_membership_id: string | null;
+  employment_type: WorkerProfile["employmentType"];
+  start_date: string;
+  end_date: string | null;
+  status: WorkerProfile["status"];
+  bank_name: string | null;
+  account_name: string | null;
+  bank_account_last4: string | null;
+  nin_enc: unknown;
+  tin: string | null;
+  tax_state: string | null;
+  pfa_name: string | null;
+  rsa_pin_enc: unknown;
+  rsa_pin_last4: string | null;
+  nhf_opt_in: boolean;
+  annual_rent_declared_kobo: string | null;
+  next_of_kin_name: string | null;
+  next_of_kin_phone: string | null;
+  needs_pay_details: boolean;
+  supervisor_clock_in: boolean;
+};
+
+async function loadProfileRow(
+  supabase: Client,
+  organisationId: string,
+  workerId: string,
+  limited: boolean,
+): Promise<ProfileRow | null> {
+  if (!limited) {
+    const { data, error } = await supabase
+      .from("workers")
+      .select(PROFILE_COLUMNS)
+      .eq("organisation_id", organisationId)
+      .eq("id", workerId)
+      .maybeSingle();
+    if (error) throw new Error(`Could not read the employee: ${error.message}`);
+    return data;
+  }
+  const { data, error } = await supabase
+    .from("workers")
+    .select(LINE_MANAGER_COLUMNS)
+    .eq("organisation_id", organisationId)
+    .eq("id", workerId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the employee: ${error.message}`);
+  if (!data) return null;
+  return {
+    ...data,
+    bank_name: null,
+    account_name: null,
+    bank_account_last4: null,
+    nin_enc: null,
+    tin: null,
+    tax_state: null,
+    pfa_name: null,
+    rsa_pin_enc: null,
+    rsa_pin_last4: null,
+    nhf_opt_in: false,
+    annual_rent_declared_kobo: null,
+    next_of_kin_name: null,
+    next_of_kin_phone: null,
+  };
+}
+
 export interface WorkerProfileOptions {
   /**
    * Who is reading. "manager" (the People screens) reads the line manager from the directory
@@ -523,7 +605,7 @@ export interface WorkerProfileOptions {
    * lets it read only its own row, so the line manager's name comes from public.my_line_manager
    * and no pay history is read (the Me screen shows none).
    */
-  viewer?: "manager" | "self";
+  viewer?: "manager" | "self" | "line_manager";
 }
 
 /** One worker as the People screens show them, or null when RLS hides them or none exists. */
@@ -534,13 +616,8 @@ export async function loadWorkerProfile(
   today: string,
   { viewer = "manager" }: WorkerProfileOptions = {},
 ): Promise<WorkerProfile | null> {
-  const { data: w, error } = await supabase
-    .from("workers")
-    .select(PROFILE_COLUMNS)
-    .eq("organisation_id", organisationId)
-    .eq("id", workerId)
-    .maybeSingle();
-  if (error) throw new Error(`Could not read the employee: ${error.message}`);
+  const limited = viewer === "line_manager";
+  const w = await loadProfileRow(supabase, organisationId, workerId, limited);
   if (!w) return null;
 
   const [department, lineManagerName, assignments, sites, projects, payRates] = await Promise.all([
@@ -559,7 +636,7 @@ export async function loadWorkerProfile(
     loadCurrentAssignments(supabase, organisationId, today, workerId),
     loadNames(supabase, "sites", organisationId),
     loadNames(supabase, "projects", organisationId),
-    viewer === "self" ? Promise.resolve([]) : listPayRates(supabase, organisationId, workerId),
+    viewer === "manager" ? listPayRates(supabase, organisationId, workerId) : Promise.resolve([]),
   ]);
 
   const siteIds = unique(assignments.map((a) => a.site_id));

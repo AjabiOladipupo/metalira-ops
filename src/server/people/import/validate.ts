@@ -592,6 +592,7 @@ function checkBank(draft: Draft, present: ReadonlySet<ColumnKey>): void {
 
 function checkStaffIds(drafts: Draft[], ctx: ImportContext): void {
   const existing = new Map(ctx.existingWorkers.map((w) => [staffIdKey(w.staffId), w]));
+  const retired = new Set(ctx.retiredStaffIds.map(staffIdKey));
   const firstRow = new Map<string, Draft>();
   for (const draft of drafts) {
     if (!draft.staffId) continue;
@@ -605,6 +606,14 @@ function checkStaffIds(drafts: Draft[], ctx: ImportContext): void {
         "staff_id_exists",
         "employee_id",
         `Staff ID ${draft.staffId} already belongs to ${worker.firstName} ${worker.lastName} in your account.`,
+        fix,
+      );
+    } else if (retired.has(key)) {
+      addProblem(
+        draft,
+        "staff_id_retired",
+        "employee_id",
+        `Staff ID ${draft.staffId} was used before in your account and can't be given to anyone else.`,
         fix,
       );
     } else if (first) {
@@ -624,6 +633,7 @@ function checkStaffIds(drafts: Draft[], ctx: ImportContext): void {
   if (blanks.length === 0) return;
   const taken = [
     ...ctx.existingWorkers.map((w) => w.staffId),
+    ...ctx.retiredStaffIds,
     ...drafts.flatMap((draft) => (draft.staffId ? [draft.staffId] : [])),
   ];
   const generated = generateStaffIds(taken, blanks.length, ctx.defaultStaffIdPrefix);

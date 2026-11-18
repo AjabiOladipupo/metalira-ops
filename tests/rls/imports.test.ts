@@ -403,6 +403,8 @@ describe("commit", () => {
       clients: 1,
       sites: 1,
       projects: 1,
+      // HR's import: bank details wait for a second approver (slice 1.11 keeps that).
+      bank_details_saved: 0,
     });
 
     expect(await departmentNamed("Security Services")).toHaveLength(1);
@@ -523,7 +525,14 @@ describe("commit", () => {
     );
     expect(events.filter((e) => e.action === "people.import_committed")).toEqual([
       expect.objectContaining({
-        after: { created: 2, departments: 1, clients: 1, sites: 1, projects: 1 },
+        after: {
+          created: 2,
+          departments: 1,
+          clients: 1,
+          sites: 1,
+          projects: 1,
+          bank_details_saved: 0,
+        },
       }),
     ]);
     expect(events.filter((e) => e.action === "workers.insert")).toHaveLength(2);

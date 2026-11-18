@@ -51,6 +51,11 @@ export const importContextSchema = z.object({
       z.object({ id: z.string().min(1), clientId: z.string().min(1), name: z.string().min(1) }),
     )
     .default([]),
+  /**
+   * Staff IDs no worker has but nobody may take (slice 1.11): retired by an approved staff ID
+   * correction, or reserved by a pending one. Treated like an existing worker's ID.
+   */
+  retiredStaffIds: z.array(z.string().min(1)).default([]),
   /** Prefix for generated staff IDs when neither the account nor the file shows a pattern. */
   defaultStaffIdPrefix: z.string().min(1).max(12).default("EMP-"),
 });
@@ -90,6 +95,7 @@ export type ProblemCode =
   | "staff_id_invalid"
   | "staff_id_duplicate_in_file"
   | "staff_id_exists"
+  | "staff_id_retired"
   | "line_manager_unknown"
   | "line_manager_self"
   | "line_manager_cycle"

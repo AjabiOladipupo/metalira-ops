@@ -69,7 +69,7 @@ export async function loadInviteRoster(
     readAll((from, to) =>
       supabase
         .from("worker_credentials")
-        .select("worker_id, pin_set_at, last_sign_in_at, locked_until")
+        .select("worker_id, pin_set_at, last_sign_in_at, locked_until, held_at")
         .eq("organisation_id", organisationId)
         .order("id")
         .range(from, to),
@@ -134,6 +134,7 @@ export async function loadInviteRoster(
         pinSetAt: credential?.pin_set_at ?? null,
         lastSignInAt: credential?.last_sign_in_at ?? null,
         lockedUntil: credential?.locked_until ?? null,
+        heldAt: credential?.held_at ?? null,
         openInvite: invite
           ? {
               sentVia: invite.sent_via === "email" ? "email" : "print",

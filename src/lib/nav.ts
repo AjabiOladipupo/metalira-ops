@@ -223,6 +223,9 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
   // Bank-detail approvals (slice 1.7): finance approves too, without the People list.
   { href: "/app/people/approvals", roles: ["owner", "admin", "hr", "finance"] },
+  // A worker's page (slice 1.11): line managers open their own reportees to unlock phone
+  // sign-in; RLS shows them no one else. Last, so the named People pages above win the tie.
+  { href: "/app/people/[id]", roles: ["owner", "admin", "hr", "ops_manager", "line_manager"] },
 ];
 
 function segments(path: string): string[] {

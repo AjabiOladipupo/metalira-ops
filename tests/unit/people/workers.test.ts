@@ -44,6 +44,8 @@ function fakeSupabase(options: FakeOptions = {}) {
   function from(table: string) {
     const state = { table, select: "", filters: [] as unknown[][], range: [0, 0] };
     const answer = (): Result => {
+      // Staff IDs retired or reserved by corrections (slice 1.11): none here.
+      if (state.table === "staff_id_corrections") return { data: [], error: null };
       if (state.select === "staff_id") {
         const ids = options.staffIds ?? [];
         const [start, end] = state.range as [number, number];
@@ -63,6 +65,10 @@ function fakeSupabase(options: FakeOptions = {}) {
       },
       eq(column: string, value: unknown) {
         state.filters.push(["eq", column, value]);
+        return builder;
+      },
+      in(column: string, value: unknown) {
+        state.filters.push(["in", column, value]);
         return builder;
       },
       neq(column: string, value: unknown) {

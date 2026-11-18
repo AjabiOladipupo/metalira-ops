@@ -186,9 +186,13 @@ describe("nav by role", () => {
         expect(canAccessHref(role, path), `${role} ${path}`).toBe(false);
       }
     }
-    // Viewing a profile follows People itself: ops_manager reads; line managers and finance don't.
+    // Viewing a profile: ops_manager reads; line managers open their own reportees (slice 1.11,
+    // RLS shows them no one else); finance doesn't.
     expect(canAccessHref("ops_manager", `/app/people/${id}`)).toBe(true);
-    expect(canAccessHref("line_manager", `/app/people/${id}`)).toBe(false);
+    expect(canAccessHref("line_manager", `/app/people/${id}`)).toBe(true);
+    expect(canAccessHref("line_manager", "/app/people")).toBe(false);
+    expect(canAccessHref("line_manager", "/app/people/approvals")).toBe(false);
+    expect(canAccessHref("line_manager", "/app/people/invites")).toBe(false);
     expect(canAccessHref("finance", `/app/people/${id}`)).toBe(false);
     // Anything below the edit page is gated like the edit page.
     expect(canAccessHref("ops_manager", `/app/people/${id}/edit/more`)).toBe(false);

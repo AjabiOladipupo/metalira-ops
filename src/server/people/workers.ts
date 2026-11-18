@@ -18,6 +18,7 @@ import {
   updateWorkerSchema,
 } from "./schemas";
 import { nextStaffId } from "./staff-id";
+import { loadRetiredStaffIds } from "./staff-id-corrections";
 
 /**
  * Server helpers for workers and their pay (slice 1.3). Each one goes through `mutate()`: the
@@ -66,8 +67,11 @@ async function loadStaffIds(supabase: Client, organisationId: string): Promise<s
       .range(from, from + PAGE - 1);
     if (error) throw new Error(`Could not read staff IDs: ${error.message}`);
     ids.push(...(data ?? []).map((row) => row.staff_id));
-    if (!data || data.length < PAGE) return ids;
+    if (!data || data.length < PAGE) break;
   }
+  // IDs retired or reserved by staff ID corrections are never handed out again (slice 1.11).
+  ids.push(...(await loadRetiredStaffIds(supabase, organisationId)));
+  return ids;
 }
 
 /** True when another active worker in the organisation already has this phone number. */
@@ -117,6 +121,8 @@ function fromDbError(error: PostgrestError, fields: { effectiveFrom?: string } =
         return invalid("staffId", "Another employee already has this staff ID.");
       }
       break;
+    case "MLSI3":
+      return invalid("staffId", error.message);
     case "23503":
       if (text.includes("department"))
         return invalid("departmentId", "That department wasn't found.");
@@ -218,8 +224,8 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
 
       const takenByRace =
         staffIdGenerated &&
-        error.code === "23505" &&
-        error.message.includes("workers_staff_id_key");
+        ((error.code === "23505" && error.message.includes("workers_staff_id_key")) ||
+          error.code === "MLSI3");
       if (!takenByRace || attempt >= STAFF_ID_ATTEMPTS) {
         fromDbError(error, { effectiveFrom: "payEffectiveFrom" });
       }

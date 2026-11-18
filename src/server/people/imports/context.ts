@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/db";
 
 import type { ImportContextInput } from "../import/types";
+import { loadRetiredStaffIds } from "../staff-id-corrections";
 
 type Client = SupabaseClient<Database>;
 
@@ -38,8 +39,8 @@ export async function loadImportContext(
   supabase: Client,
   organisationId: string,
 ): Promise<ImportContextInput> {
-  const [workers, managers, departments, clients, projects, sites, assignments] = await Promise.all(
-    [
+  const [workers, managers, departments, clients, projects, sites, assignments, retired] =
+    await Promise.all([
       readAll("workers", (from, to) =>
         supabase
           .from("workers")
@@ -94,8 +95,8 @@ export async function loadImportContext(
           .order("id")
           .range(from, to),
       ),
-    ],
-  );
+      loadRetiredStaffIds(supabase, organisationId),
+    ]);
   if (managers.error) throw new Error(`Could not read managers: ${managers.error.message}`);
 
   const staffIdOf = new Map(workers.map((w) => [w.id, w.staff_id]));
@@ -136,5 +137,6 @@ export async function loadImportContext(
     clients,
     projects: projects.map((p) => ({ id: p.id, clientId: p.client_id, name: p.name })),
     sites: sites.map((s) => ({ id: s.id, clientId: s.client_id, name: s.name })),
+    retiredStaffIds: retired,
   };
 }
