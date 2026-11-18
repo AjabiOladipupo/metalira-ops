@@ -143,3 +143,34 @@ test("sitemap and robots list the public pages", async ({ request }) => {
   expect(og.status()).toBe(200);
   expect(og.headers()["content-type"]).toContain("image/png");
 });
+
+test("at 360px the header fits with 44px controls, and a role page's back arrow comes before its scene", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile-390", "Phone widths only.");
+  await page.setViewportSize({ width: 360, height: 780 });
+  for (const { path } of PAGES) {
+    await page.goto(path);
+    expect(await horizontalOverflow(page), path).toBeLessThanOrEqual(0);
+  }
+  const header = page.getByRole("banner");
+  for (const control of [
+    header.getByRole("link", { name: "Start setup" }),
+    header.getByRole("button", { name: /^Theme: / }),
+    header.getByRole("button", { name: "Open menu" }),
+  ]) {
+    expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  }
+  // Footer role links are 44px tall touch targets.
+  const footerLink = page.getByRole("contentinfo").getByRole("link", { name: "For HR" });
+  expect((await footerLink.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+
+  // /for/workers was the last page visited: the scene sits below the copy, as on the landing.
+  const back = await page.getByTestId("back-link").boundingBox();
+  const scene = await page.locator('svg[data-illustration="role-worker"]').boundingBox();
+  expect(back!.y).toBeLessThan(scene!.y);
+  // The closing call to action is a button-sized link, like the hero's.
+  const ctas = page.getByRole("main").getByRole("link", { name: "Worker sign-in" });
+  await expect(ctas).toHaveCount(2);
+  expect((await ctas.nth(1).boundingBox())?.height).toBeGreaterThanOrEqual(44);
+});

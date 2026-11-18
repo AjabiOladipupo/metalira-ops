@@ -165,7 +165,7 @@ export function ChangeForms({ bankOpen }: { bankOpen: boolean }) {
                 checked={choice === value}
                 disabled={disabled}
                 onChange={() => setChoice(value)}
-                className="size-5 accent-foreground"
+                className="size-5 shrink-0 accent-foreground"
               />
               <span className="flex flex-col">
                 <span>{copy.topics[value]}</span>

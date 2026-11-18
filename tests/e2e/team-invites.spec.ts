@@ -168,6 +168,10 @@ test("owner invites HR, who accepts and approves the owner's bank change", async
   // The link worked once.
   await hrPage.goto(joinPath);
   await expect(hrPage.getByRole("alert").filter({ hasText: "already been used" })).toBeVisible();
+  // Like the other auth pages: a back arrow home and a 44px button to sign in.
+  await expect(hrPage.getByTestId("back-link")).toHaveAttribute("href", "/");
+  const toSignIn = hrPage.getByRole("link", { name: "Go to sign in" });
+  expect((await toSignIn.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 
   // HR is not an owner or admin: no Team page.
   await hrPage.goto("/app/settings/team");

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { BackLink } from "@/components/back-link";
+import { FormAlert } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { ROLE_LABELS } from "@/lib/roles";
@@ -45,17 +47,18 @@ async function Join({ token }: { token: string }) {
       <>
         <Heading
           eyebrow="Team invite"
-          title={"organisationName" in invite ? `Join ${invite.organisationName}` : "Team invite"}
+          title={
+            "organisationName" in invite
+              ? `Join ${invite.organisationName}`
+              : invite.state === "unavailable"
+                ? "We couldn't check this invite"
+                : "This invite can't be used"
+          }
         />
-        <p
-          role="alert"
-          className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm"
-        >
-          {STATE_MESSAGES[invite.state]}
-        </p>
-        <p className="m-0 text-sm">
+        <FormAlert message={STATE_MESSAGES[invite.state]} />
+        <Button asChild className="h-11 self-start rounded-lg px-5">
           <Link href={SIGN_IN_PATH}>Go to sign in</Link>
-        </p>
+        </Button>
       </>
     );
   }
@@ -103,13 +106,9 @@ async function Join({ token }: { token: string }) {
     return (
       <>
         {intro}
-        <p
-          role="alert"
-          className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm"
-        >
-          You are signed in as {session.user.email}. This invite is for {invite.email}: sign out,
-          then sign in or create an account with that address.
-        </p>
+        <FormAlert
+          message={`You are signed in as ${session.user.email}. This invite is for ${invite.email}: sign out, then sign in or create an account with that address.`}
+        />
         <form action={signOutForInviteAction}>
           <input type="hidden" name="token" value={token} />
           <Button type="submit" className="h-11 rounded-lg px-5">
@@ -125,14 +124,13 @@ async function Join({ token }: { token: string }) {
     return (
       <>
         {intro}
-        <p
-          role="alert"
-          className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm"
-        >
-          {existing.role === "worker"
-            ? `Your sign-in is a worker's at ${invite.organisationName}, so it can't also be a manager's. Ask ${who} to invite another email address.`
-            : `You are already a member of ${invite.organisationName} (${ROLE_LABELS[existing.role]}).`}
-        </p>
+        <FormAlert
+          message={
+            existing.role === "worker"
+              ? `Your sign-in is a worker's at ${invite.organisationName}, so it can't also be a manager's. Ask ${who} to invite another email address.`
+              : `You are already a member of ${invite.organisationName} (${ROLE_LABELS[existing.role]}).`
+          }
+        />
         {existing.role !== "worker" ? (
           <Button asChild className="h-11 self-start rounded-lg px-5">
             <Link href="/app">Open the app</Link>
@@ -167,10 +165,15 @@ function JoinSkeleton() {
  */
 export default function JoinPage({ params }: PageProps<"/join/[token]">) {
   return (
-    <Suspense fallback={<JoinSkeleton />}>
-      {params.then(({ token }) => (
-        <Join token={token} />
-      ))}
-    </Suspense>
+    <>
+      {/* Outside Suspense so it is in the first paint and nothing shifts when the invite loads.
+          The negative bottom margin keeps it 6px above the eyebrow despite the column's gap. */}
+      <BackLink href="/" label="home" className="-mt-2 -mb-[26px]" />
+      <Suspense fallback={<JoinSkeleton />}>
+        {params.then(({ token }) => (
+          <Join token={token} />
+        ))}
+      </Suspense>
+    </>
   );
 }
