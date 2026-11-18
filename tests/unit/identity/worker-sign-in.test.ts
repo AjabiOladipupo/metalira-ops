@@ -176,7 +176,8 @@ describe("workerSignInSchema", () => {
 describe("network key", () => {
   it("keys the address with a server secret, never keeping it", () => {
     expect(ipKey("102.89.1.7")).toMatch(/^[0-9a-f]{64}$/);
-    expect(ipKey("102.89.1.7")).not.toContain("102");
+    // The whole address never appears (a random hex digest can contain "102" by chance).
+    expect(ipKey("102.89.1.7")).not.toContain("102.89");
     expect(ipKey("102.89.1.7")).toBe(ipKey(" 102.89.1.7 "));
     expect(ipKey("102.89.1.7")).not.toBe(ipKey("102.89.1.8"));
     expect(ipKey(null)).toBe(ipKey(undefined));
