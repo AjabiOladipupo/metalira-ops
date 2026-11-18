@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { passwordTrusted, PASSWORD_SET_AT_KEY } from "@/lib/auth/amr";
 import { SIGN_IN_PATH, safeNextPath } from "@/lib/auth/routes";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { sessionUsedPassword } from "@/server/identity/claims";
+import { sessionFromEmailLink } from "@/server/identity/claims";
 import { sendSetPasswordLinkAction } from "@/server/identity/password-actions";
 
 import { SetPasswordForm } from "./set-password-form";
@@ -54,7 +54,7 @@ async function SetPassword({ next }: { next: string }) {
       </>
     );
   }
-  if (await sessionUsedPassword(supabase)) {
+  if (!(await sessionFromEmailLink(supabase))) {
     return (
       <>
         <Heading body="To keep your account safe, choose your password from a link we email you." />
@@ -68,12 +68,27 @@ async function SetPassword({ next }: { next: string }) {
       </>
     );
   }
+  // A new company's owner (a pending company name from sign-up and no membership yet) confirms
+  // their name and company name here; nothing parked on the account before is used unseen.
+  const pending = user.user_metadata?.company_name;
+  const { count } = await supabase
+    .from("memberships")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+  const company =
+    typeof pending === "string" && (count ?? 0) === 0
+      ? {
+          fullName:
+            typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : "",
+          companyName: pending,
+        }
+      : null;
   return (
     <>
       <Heading
         body={`Signed in as ${user.email ?? "you"}. Choose the password you will sign in with.`}
       />
-      <SetPasswordForm next={next} />
+      <SetPasswordForm next={next} company={company} />
     </>
   );
 }

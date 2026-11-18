@@ -426,7 +426,7 @@ export async function acceptTeamInviteAction(
   const step = invite.state === "pending" ? await invitePasswordStepFor(supabase) : "ready";
   if (step === "use_email_link") return { ok: false, formError: ACCEPT_MESSAGES.MLPW1 };
   if (step === "set_password") {
-    // The invitee types their own name here (recommended default, pending owner confirmation),
+    // The invitee types their own name here (owner confirmed 19 Nov 2026),
     // and chooses their password: both only from this email-link session.
     const name = fullNameSchema.safeParse(fields.fullName ?? "");
     const password = newPasswordSchema.safeParse(fields.password ?? "");

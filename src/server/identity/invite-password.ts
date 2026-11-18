@@ -8,7 +8,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database } from "@/types/db";
 
-import { sessionUsedPassword } from "./claims";
+import { sessionFromEmailLink } from "./claims";
 import { appOrigin } from "./origin";
 
 /**
@@ -23,12 +23,12 @@ type Client = SupabaseClient<Database>;
 
 /** The join page's password step for the signed-in user. Verified with getUser. */
 export async function invitePasswordStepFor(supabase: Client): Promise<InvitePasswordStep> {
-  const [usedPassword, { data }] = await Promise.all([
-    sessionUsedPassword(supabase),
+  const [fromEmailLink, { data }] = await Promise.all([
+    sessionFromEmailLink(supabase),
     supabase.auth.getUser(),
   ]);
   return invitePasswordStep({
-    usedPassword,
+    fromEmailLink,
     confirmedAt: data.user?.email_confirmed_at ?? null,
     passwordSetAt: data.user?.app_metadata?.[PASSWORD_SET_AT_KEY],
   });
@@ -43,23 +43,25 @@ export async function markPasswordChosen(userId: string): Promise<void> {
 }
 
 /**
- * Ends the user's other sessions (public.end_other_sessions deletes them from auth.sessions, so
- * their refresh tokens die; an access token already issued lasts at most jwt_expiry, 15 minutes),
- * then refreshes this session so its token carries the new password_set_at. Failures are logged
- * by error code only and never block the user.
+ * Ends the user's other sessions two ways: public.end_other_sessions deletes them from
+ * auth.sessions, and Supabase's own sign-out of other sessions revokes their refresh tokens. An
+ * access token already issued lasts at most jwt_expiry (15 minutes). Throws when both fail, so
+ * the password is never recorded as trusted while another session may survive. Error codes only.
  */
-export async function afterPasswordChosen(supabase: Client): Promise<void> {
-  const { error } = await supabase.rpc("end_other_sessions");
-  if (error) console.error("identity.end_other_sessions_failed:", error.code);
-  const refreshed = await supabase.auth.refreshSession();
-  if (refreshed.error) {
-    console.error("identity.refresh_after_password_failed:", refreshed.error.code ?? "unknown");
+export async function endOtherSessions(supabase: Client): Promise<void> {
+  const { error: rpcError } = await supabase.rpc("end_other_sessions");
+  if (rpcError) console.error("identity.end_other_sessions_failed:", rpcError.code);
+  const { error: signOutError } = await supabase.auth.signOut({ scope: "others" });
+  if (signOutError) {
+    console.error("identity.sign_out_others_failed:", signOutError.code ?? "unknown");
   }
+  if (rpcError && signOutError) throw new Error("Could not end the account's other sessions");
 }
 
 /**
- * Sets the signed-in user's password from an email-link session and records it. Returns a
- * field error to show, or null when it worked.
+ * Sets the signed-in user's password from an email-link session, ends their other sessions, and
+ * only then records the password as trusted and refreshes this session (so its token carries
+ * password_set_at). Returns a field error to show, or null when it worked; throws on failure.
  */
 export async function chooseOwnPassword(
   supabase: Client,
@@ -73,8 +75,12 @@ export async function chooseOwnPassword(
     }
     throw new Error(`Could not set the password: ${error.code ?? "unknown"}`);
   }
+  await endOtherSessions(supabase);
   await markPasswordChosen(userId);
-  await afterPasswordChosen(supabase);
+  const refreshed = await supabase.auth.refreshSession();
+  if (refreshed.error) {
+    console.error("identity.refresh_after_password_failed:", refreshed.error.code ?? "unknown");
+  }
   return null;
 }
 

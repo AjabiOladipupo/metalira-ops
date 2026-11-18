@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { signedInWithPassword } from "@/lib/auth/amr";
+import { signedInWithEmailLink } from "@/lib/auth/amr";
 import type { Database } from "@/types/db";
 
 export interface ClaimsUser {
@@ -26,12 +26,12 @@ export async function claimsUser(supabase: SupabaseClient<Database>): Promise<Cl
 }
 
 /**
- * True when the session was signed in with a password (the token's `amr` claim), false for an
- * email link, no session or a bad token. Render and action paths both use it to decide whether
- * the join page asks for a new password (slice 1.13); the token itself is checked by getClaims.
+ * True only when the session was opened from an email link (the token's `amr`, checked by
+ * getClaims). False for a password sign-in, no session, a bad token or an unreadable claim, so
+ * every caller fails closed (slice 1.13).
  */
-export async function sessionUsedPassword(supabase: SupabaseClient<Database>): Promise<boolean> {
+export async function sessionFromEmailLink(supabase: SupabaseClient<Database>): Promise<boolean> {
   const { data, error } = await supabase.auth.getClaims();
   if (error || !data?.claims) return false;
-  return signedInWithPassword((data.claims as { amr?: unknown }).amr);
+  return signedInWithEmailLink((data.claims as { amr?: unknown }).amr);
 }

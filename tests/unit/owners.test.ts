@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { invitePasswordStep, passwordTrusted, signedInWithPassword } from "@/lib/auth/amr";
+import { invitePasswordStep, passwordTrusted, signedInWithEmailLink } from "@/lib/auth/amr";
 import { proxyDecision, safeNextPath } from "@/lib/auth/routes";
 import {
   describeOwnerChange,
@@ -141,14 +141,18 @@ describe("messages", () => {
   });
 });
 
-describe("signedInWithPassword", () => {
-  it("is true only when the token's amr names a password sign-in", () => {
-    expect(signedInWithPassword([{ method: "password", timestamp: 1 }])).toBe(true);
-    expect(signedInWithPassword([{ method: "otp", timestamp: 1 }])).toBe(false);
-    expect(signedInWithPassword([{ method: "magiclink" }])).toBe(false);
-    expect(signedInWithPassword(undefined)).toBe(false);
-    expect(signedInWithPassword("password")).toBe(false);
-    expect(signedInWithPassword([null, "password"])).toBe(false);
+describe("signedInWithEmailLink", () => {
+  it("is true only for an email-link session, and fails closed otherwise", () => {
+    expect(signedInWithEmailLink([{ method: "otp", timestamp: 1 }])).toBe(true);
+    expect(signedInWithEmailLink([{ method: "magiclink" }])).toBe(true);
+    expect(signedInWithEmailLink([{ method: "recovery" }])).toBe(true);
+    expect(signedInWithEmailLink([{ method: "password", timestamp: 1 }])).toBe(false);
+    expect(signedInWithEmailLink([{ method: "otp" }, { method: "password" }])).toBe(false);
+    expect(signedInWithEmailLink([{ method: "oauth" }])).toBe(false);
+    expect(signedInWithEmailLink([])).toBe(false);
+    expect(signedInWithEmailLink(undefined)).toBe(false);
+    expect(signedInWithEmailLink("otp")).toBe(false);
+    expect(signedInWithEmailLink([null, "otp"])).toBe(false);
   });
 });
 
@@ -165,7 +169,7 @@ describe("a password counts only once chosen after confirming", () => {
   });
 
   it("an email-link session without a trusted password chooses one", () => {
-    expect(invitePasswordStep({ usedPassword: false, confirmedAt, passwordSetAt: undefined })).toBe(
+    expect(invitePasswordStep({ fromEmailLink: true, confirmedAt, passwordSetAt: undefined })).toBe(
       "set_password",
     );
   });
@@ -173,7 +177,7 @@ describe("a password counts only once chosen after confirming", () => {
   it("a password session without a trusted password uses an email link, however old", () => {
     expect(
       invitePasswordStep({
-        usedPassword: true,
+        fromEmailLink: false,
         confirmedAt: "2020-01-01T00:00:00Z",
         passwordSetAt: null,
       }),
@@ -182,8 +186,8 @@ describe("a password counts only once chosen after confirming", () => {
 
   it("a trusted password is ready, whichever way they signed in", () => {
     const passwordSetAt = "2026-11-18T10:01:00Z";
-    expect(invitePasswordStep({ usedPassword: true, confirmedAt, passwordSetAt })).toBe("ready");
-    expect(invitePasswordStep({ usedPassword: false, confirmedAt, passwordSetAt })).toBe("ready");
+    expect(invitePasswordStep({ fromEmailLink: false, confirmedAt, passwordSetAt })).toBe("ready");
+    expect(invitePasswordStep({ fromEmailLink: true, confirmedAt, passwordSetAt })).toBe("ready");
   });
 });
 

@@ -375,7 +375,7 @@ begin
     raise exception 'that member changed meanwhile: refresh and try again' using errcode = 'MLOW5';
   end if;
   -- A removed or demoted owner's own pending requests, and pending requests about them, are
-  -- withdrawn in the same transaction (recommended default, pending owner confirmation).
+  -- withdrawn in the same transaction (owner confirmed 19 Nov 2026).
   if c.kind in ('remove', 'demote') then
     update public.owner_changes x
     set status = 'cancelled',
@@ -417,7 +417,7 @@ declare
   v_session uuid;
   v_count integer;
 begin
-  if auth.uid() is null then
+  if auth.uid() is null or not private.session_trusted() then
     raise exception 'sign in first' using errcode = '42501';
   end if;
   begin
@@ -497,6 +497,19 @@ security invoker
 set search_path = ''
 as $$
   select private.email_link_allowed_impl(p_keys)
+$$;
+
+-- The definer functions here delete from auth.sessions and this migration updates auth.users:
+-- fail loudly rather than silently if the migration role can't.
+do $$
+begin
+  if not has_table_privilege(current_user, 'auth.sessions', 'DELETE') then
+    raise exception 'slice 1.13 needs DELETE on auth.sessions for %', current_user;
+  end if;
+  if not has_table_privilege(current_user, 'auth.users', 'UPDATE') then
+    raise exception 'slice 1.13 needs UPDATE on auth.users for %', current_user;
+  end if;
+end;
 $$;
 
 -- Accounts already confirmed when this migration runs keep signing in with their password:
@@ -1571,3 +1584,167 @@ revoke all on function public.request_owner_change(uuid, public.owner_change_kin
 revoke all on function public.decide_owner_change(uuid, uuid, text) from public, anon;
 grant execute on function public.request_owner_change(uuid, public.owner_change_kind, uuid, text, public.membership_role, text) to authenticated;
 grant execute on function public.decide_owner_change(uuid, uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 7. Untrusted password sessions see nothing
+-- ---------------------------------------------------------------------------
+-- A password session is trusted only once the account chose its password after confirming its
+-- address (app_metadata.password_set_at, written by the server; backfilled above for accounts
+-- already confirmed). Otherwise the password may be one somebody else chose by signing the
+-- address up first, and their token, used straight against the Data API, must read nothing.
+-- A session whose token's `amr` names `password` is trusted only when private.password_trusted
+-- holds for the account (password_set_at at or after email_confirmed_at, read from auth.users by
+-- primary key: one lookup per statement, since callers wrap it in a scalar subquery). Email-link
+-- sessions (otp, magiclink, recovery, signup), worker logins (app_metadata.login = 'worker';
+-- they sign in through an OTP minted by the server) and calls with no token (the secret key)
+-- are unaffected.
+create function private.session_trusted()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case
+    when auth.uid() is null then true
+    when (auth.jwt() -> 'app_metadata' ->> 'login') = 'worker' then true
+    when not exists (
+      select 1
+      from jsonb_array_elements(
+        case when jsonb_typeof(auth.jwt() -> 'amr') = 'array' then auth.jwt() -> 'amr' else '[]'::jsonb end
+      ) e
+      where e ->> 'method' = 'password'
+    ) then true
+    else coalesce((
+      select private.password_trusted(u.raw_app_meta_data ->> 'password_set_at', u.email_confirmed_at)
+      from auth.users u
+      where u.id = auth.uid()
+    ), false)
+  end
+$$;
+
+-- The caller's id when their session is trusted, else null. Every tenancy helper and the
+-- policies that compare a row with the caller use it, so an untrusted session has no
+-- organisations, no roles, no worker record and no own rows.
+create function private.session_uid()
+returns uuid
+language sql
+stable
+set search_path = ''
+as $$
+  select case when private.session_trusted() then auth.uid() end
+$$;
+
+revoke all on function private.session_trusted() from public, anon;
+revoke all on function private.session_uid() from public, anon;
+grant execute on function private.session_trusted() to authenticated, service_role;
+grant execute on function private.session_uid() to authenticated, service_role;
+
+create or replace function private.user_org_ids()
+returns setof uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select m.organisation_id
+  from public.memberships m
+  where m.user_id = (select private.session_uid())
+$$;
+
+create or replace function private.has_role(org uuid, roles text[])
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.memberships m
+    where m.organisation_id = org
+      and m.user_id = (select private.session_uid())
+      and m.role::text = any (roles)
+  )
+$$;
+
+create or replace function private.manages_member(uid uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.memberships target
+    join public.memberships me on me.organisation_id = target.organisation_id
+    where target.user_id = uid
+      and me.user_id = (select private.session_uid())
+      and me.role in ('owner', 'admin', 'hr', 'finance', 'ops_manager', 'line_manager')
+  )
+$$;
+
+create or replace function private.my_worker_ids()
+returns setof uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select m.worker_id
+  from public.memberships m
+  where m.user_id = (select private.session_uid())
+    and m.worker_id is not null
+$$;
+
+create or replace function private.is_line_manager_for(org uuid, lm_worker uuid, lm_membership uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (lm_worker is not null or lm_membership is not null) and exists (
+    select 1
+    from public.memberships m
+    where m.organisation_id = org
+      and m.user_id = (select private.session_uid())
+      and m.role = 'line_manager'
+      and (m.id = lm_membership or (m.worker_id is not null and m.worker_id = lm_worker))
+  )
+$$;
+
+-- The policies that compare a row with the caller directly.
+drop policy memberships_select on public.memberships;
+create policy memberships_select on public.memberships
+  for select to authenticated
+  using (
+    user_id = (select private.session_uid())
+    or private.has_role(
+      organisation_id,
+      array['owner', 'admin', 'hr', 'finance', 'ops_manager', 'line_manager']
+    )
+  );
+
+drop policy profiles_select on public.profiles;
+create policy profiles_select on public.profiles
+  for select to authenticated
+  using (user_id = (select private.session_uid()) or private.manages_member(user_id));
+
+drop policy profiles_update on public.profiles;
+create policy profiles_update on public.profiles
+  for update to authenticated
+  using (user_id = (select private.session_uid()))
+  with check (user_id = (select private.session_uid()));
+
+drop policy bank_detail_changes_update on public.bank_detail_changes;
+create policy bank_detail_changes_update on public.bank_detail_changes for update to authenticated
+  using (
+    private.has_role(organisation_id, array['owner', 'hr', 'finance'])
+    or requested_by = (select private.session_uid())
+  )
+  with check (
+    private.has_role(organisation_id, array['owner', 'hr', 'finance'])
+    or requested_by = (select private.session_uid())
+  );

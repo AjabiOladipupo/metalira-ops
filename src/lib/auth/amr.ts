@@ -1,19 +1,30 @@
 /**
- * How a session was signed in, from the access token's `amr` claim (Supabase Auth writes one
- * entry per method, e.g. `{ method: "password" }` or `{ method: "otp" }` for an email link).
- * Pure, for the join page (slice 1.13): someone who arrived through an email link sets their own
- * password before accepting an invite, so a password chosen by whoever held the link (or anyone
- * who signed the address up through the Auth API) never survives.
+ * The `amr` methods Supabase Auth writes for a session opened from an emailed link: a one-time
+ * code or token hash (`otp`), a magic link, a recovery link, the sign-up confirmation and an
+ * invite. Only these prove the person holds the mailbox.
  */
-export function signedInWithPassword(amr: unknown): boolean {
-  return (
-    Array.isArray(amr) &&
-    amr.some(
-      (entry) =>
-        typeof entry === "object" &&
-        entry !== null &&
-        (entry as { method?: unknown }).method === "password",
-    )
+export const EMAIL_LINK_METHODS = [
+  "otp",
+  "magiclink",
+  "recovery",
+  "email/signup",
+  "invite",
+] as const;
+
+/**
+ * True only when the access token's `amr` claim shows an email-link session: at least one
+ * method from EMAIL_LINK_METHODS and no `password` entry. Anything else (a password sign-in,
+ * an unknown method, a missing or unreadable claim) is false, so callers fail closed (slice
+ * 1.13): only an email-link session may choose the password that then counts.
+ */
+export function signedInWithEmailLink(amr: unknown): boolean {
+  if (!Array.isArray(amr) || amr.length === 0) return false;
+  const methods = amr.map((entry) =>
+    typeof entry === "object" && entry !== null ? (entry as { method?: unknown }).method : null,
+  );
+  if (methods.some((m) => m === "password")) return false;
+  return methods.some(
+    (m) => typeof m === "string" && (EMAIL_LINK_METHODS as readonly string[]).includes(m),
   );
 }
 
@@ -48,10 +59,10 @@ export type InvitePasswordStep =
  * (accept_membership_invite, SQLSTATE MLPW1).
  */
 export function invitePasswordStep(input: {
-  usedPassword: boolean;
+  fromEmailLink: boolean;
   confirmedAt: string | null;
   passwordSetAt: unknown;
 }): InvitePasswordStep {
   if (passwordTrusted(input.passwordSetAt, input.confirmedAt)) return "ready";
-  return input.usedPassword ? "use_email_link" : "set_password";
+  return input.fromEmailLink ? "set_password" : "use_email_link";
 }

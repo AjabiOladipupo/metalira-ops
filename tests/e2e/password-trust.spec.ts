@@ -29,7 +29,8 @@ test("a password set before the address was confirmed opens nothing", async ({ b
     email,
     password: attackerPassword,
     email_confirm: true,
-    user_metadata: { full_name: "Victim Person" },
+    // The attacker parked their own company name on the account.
+    user_metadata: { full_name: "Victim Person", company_name: "Attacker Holdings" },
   });
   expect(error).toBeNull();
 
@@ -45,6 +46,12 @@ test("a password set before the address was confirmed opens nothing", async ({ b
   await followEmailLink(victim, await latestEmailTo(email));
   await expect(victim).toHaveURL(/\/set-password\?next=/, { timeout: 15_000 });
   const mine = newPassword();
+  // The company comes from what the victim types here, never from the parked name unseen.
+  const company = victim.getByLabel("Company name");
+  await expect(company).toHaveValue("Attacker Holdings");
+  const victimCompany = `Victim Cleaning ${Date.now()}`;
+  await company.fill(victimCompany);
+  await victim.getByLabel("Your full name").fill("Ngozi Eze");
   await victim.getByLabel("Choose a password").fill(mine);
   await victim.getByRole("button", { name: "Save password" }).click();
   await expect(victim).toHaveURL(/\/(app|no-access)/, { timeout: 15_000 });
@@ -57,4 +64,9 @@ test("a password set before the address was confirmed opens nothing", async ({ b
 
   const { data: user } = await adminClient().auth.admin.getUserById(created.user!.id);
   expect(typeof user.user?.app_metadata?.password_set_at).toBe("string");
+  const { data: memberships } = await adminClient()
+    .from("memberships")
+    .select("role, organisations(name)")
+    .eq("user_id", created.user!.id);
+  expect(memberships).toEqual([{ role: "owner", organisations: { name: victimCompany } }]);
 });

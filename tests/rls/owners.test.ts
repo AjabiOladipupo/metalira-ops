@@ -733,3 +733,66 @@ describe("history can't be rewritten", () => {
     expect(data).toEqual([{ status: "approved" }]);
   });
 });
+
+describe("an untrusted password session reads nothing (slice 1.13)", () => {
+  it("sees no organisations, memberships or workers until its password is trusted", async () => {
+    const owner = await createTenantUser("own-gate-owner", "Gate Ltd");
+    const { error: workerError } = await admin.from("workers").insert({
+      organisation_id: owner.orgId,
+      staff_id: `GATE-${crypto.randomUUID().slice(0, 6)}`,
+      first_name: "Gate",
+      last_name: "Worker",
+      employment_type: "permanent",
+      start_date: "2025-01-06",
+    });
+    expect(workerError).toBeNull();
+
+    // A pre-registered password (no password_set_at) on an account that is HR in the company.
+    const email = `rls-own-gate-${crypto.randomUUID()}@example.test`;
+    const password = `${crypto.randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    expect(created.error).toBeNull();
+    const userId = created.data.user!.id;
+    await add(owner.orgId, { id: userId, email, client: anonClient() }, "hr");
+    const client = anonClient();
+    expect((await client.auth.signInWithPassword({ email, password })).error).toBeNull();
+
+    const read = async () => ({
+      orgs: (await client.from("organisations").select("id").eq("id", owner.orgId)).data ?? [],
+      members:
+        (await client.from("memberships").select("id").eq("organisation_id", owner.orgId)).data ??
+        [],
+      workers:
+        (await client.from("workers").select("id").eq("organisation_id", owner.orgId)).data ?? [],
+      own: (await client.from("profiles").select("user_id").eq("user_id", userId)).data ?? [],
+    });
+    expect(await read()).toEqual({ orgs: [], members: [], workers: [], own: [] });
+    // It can't end other sessions either.
+    expect((await client.rpc("end_other_sessions")).error?.code).toBe(PERMISSION_DENIED);
+
+    // Once the password is trusted (chosen from an email link), the same token reads its company.
+    await markPasswordTrusted(userId);
+    const after = await read();
+    expect(after.orgs).toHaveLength(1);
+    expect(after.members.length).toBeGreaterThanOrEqual(2);
+    expect(after.workers).toHaveLength(1);
+    expect(after.own).toHaveLength(1);
+  });
+
+  it("an email-link session is trusted without password_set_at", async () => {
+    const owner = await createTenantUser("own-gate2-owner", "Gate Two Ltd");
+    const email = `rls-own-gate2-${crypto.randomUUID()}@example.test`;
+    const created = await admin.auth.admin.createUser({ email, email_confirm: true });
+    expect(created.error).toBeNull();
+    await add(owner.orgId, { id: created.data.user!.id, email, client: anonClient() }, "hr");
+    const client = anonClient();
+    const link = await admin.auth.admin.generateLink({ type: "magiclink", email });
+    const verified = await client.auth.verifyOtp({
+      type: "magiclink",
+      token_hash: link.data.properties!.hashed_token,
+    });
+    expect(verified.error).toBeNull();
+    const { data } = await client.from("organisations").select("id").eq("id", owner.orgId);
+    expect(data).toHaveLength(1);
+  });
+});
