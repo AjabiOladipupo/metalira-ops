@@ -143,12 +143,12 @@ async function Join({ token }: { token: string }) {
   }
 
   // After an email link (no password yet, or one somebody else may have chosen): set one first.
-  const step = await invitePasswordStepFor(await createServerSupabase(), invite.invitedAt);
+  const step = await invitePasswordStepFor(await createServerSupabase());
   if (step === "use_email_link") {
     return (
       <>
         {intro}
-        <FormAlert message="Your email address was confirmed after this invite was sent. For your safety, sign in with the link we email you and choose your password there, then accept." />
+        <FormAlert message="Your password was set before your email address was confirmed, so it can't be used to join. For your safety, sign in with the link we email you and choose your password there, then accept." />
         <form action={signOutForInviteAction}>
           <input type="hidden" name="token" value={token} />
           <Button type="submit" className="h-11 rounded-lg px-5">

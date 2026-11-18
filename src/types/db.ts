@@ -217,14 +217,14 @@ isOneToOne: false
                   ]
                 },"owner_changes": {
                   Row: {
-                    "approved_by": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"id": string,"invite_email": string | null,"kind": Database["public"]['Enums']["owner_change_kind"],"new_role": Database["public"]['Enums']["membership_role"] | null,"organisation_id": string,"owners_at_request": number,"reason": string | null,"rejected_by": string | null,"requested_by": string,"single_owner": boolean,"status": Database["public"]['Enums']["owner_change_status"],"target_membership_id": string | null,"target_user_id": string | null,"updated_at": string
+                    "approved_by": string | null,"cancel_reason": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"id": string,"invite_email": string | null,"kind": Database["public"]['Enums']["owner_change_kind"],"new_role": Database["public"]['Enums']["membership_role"] | null,"organisation_id": string,"owners_at_request": number,"reason": string | null,"rejected_by": string | null,"requested_by": string,"single_owner": boolean,"status": Database["public"]['Enums']["owner_change_status"],"target_membership_id": string | null,"target_user_id": string | null,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "approved_by"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"id"?: string,"invite_email"?: string | null,"kind": Database["public"]['Enums']["owner_change_kind"],"new_role"?: Database["public"]['Enums']["membership_role"] | null,"organisation_id": string,"owners_at_request": number,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"single_owner"?: boolean,"status"?: Database["public"]['Enums']["owner_change_status"],"target_membership_id"?: string | null,"target_user_id"?: string | null,"updated_at"?: string
+                    "approved_by"?: string | null,"cancel_reason"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"id"?: string,"invite_email"?: string | null,"kind": Database["public"]['Enums']["owner_change_kind"],"new_role"?: Database["public"]['Enums']["membership_role"] | null,"organisation_id": string,"owners_at_request": number,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"single_owner"?: boolean,"status"?: Database["public"]['Enums']["owner_change_status"],"target_membership_id"?: string | null,"target_user_id"?: string | null,"updated_at"?: string
                   }
                   Update: {
-                    "approved_by"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"id"?: string,"invite_email"?: string | null,"kind"?: Database["public"]['Enums']["owner_change_kind"],"new_role"?: Database["public"]['Enums']["membership_role"] | null,"organisation_id"?: string,"owners_at_request"?: number,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"single_owner"?: boolean,"status"?: Database["public"]['Enums']["owner_change_status"],"target_membership_id"?: string | null,"target_user_id"?: string | null,"updated_at"?: string
+                    "approved_by"?: string | null,"cancel_reason"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"id"?: string,"invite_email"?: string | null,"kind"?: Database["public"]['Enums']["owner_change_kind"],"new_role"?: Database["public"]['Enums']["membership_role"] | null,"organisation_id"?: string,"owners_at_request"?: number,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"single_owner"?: boolean,"status"?: Database["public"]['Enums']["owner_change_status"],"target_membership_id"?: string | null,"target_user_id"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -575,8 +575,14 @@ isOneToOne: false
               "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
             }[]
                            },
+"email_link_allowed":
+{ Args: { "p_keys": (string)[] }; Returns: boolean
+                           },
 "end_employment":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_id": string }; Returns: undefined
+                           },
+"end_other_sessions":
+{ Args: Record<PropertyKey, never>; Returns: number
                            },
 "list_import_managers":
 { Args: { "p_organisation_id": string }; Returns: {

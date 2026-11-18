@@ -38,19 +38,11 @@ export function SignUpForm() {
         defaultValue={values?.email}
         error={errors?.email}
       />
-      <Field
-        label="Password"
-        name="password"
-        type="password"
-        autoComplete="new-password"
-        required
-        minLength={8}
-        maxLength={72}
-        hint="At least 8 characters, with letters and numbers."
-        error={errors?.password}
-      />
+      <p className="m-0 text-sm text-fg-muted">
+        We email you a link to confirm your address. You choose your password after opening it.
+      </p>
       <FormAlert message={state?.formError} />
-      <SubmitButton pendingLabel="Creating account…">Create account</SubmitButton>
+      <SubmitButton pendingLabel="Sending…">Create account</SubmitButton>
     </form>
   );
 }

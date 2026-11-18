@@ -143,7 +143,7 @@ describe("notifyOwnerChange", () => {
     });
   });
 
-  it("never puts an invited address that looks like a web address in the summary", async () => {
+  it("never puts the invited address in the summary", async () => {
     const { notifyOwnerChange } = await import("@/server/identity/owner-notices");
     const send = vi.fn(async () => ({ status: "sent" as const }));
     await notifyOwnerChange(CHANGE, "requested", "u-a", {
@@ -160,7 +160,9 @@ describe("notifyOwnerChange", () => {
       send: send as never,
     });
     const calls = send.mock.calls as unknown as [Record<string, unknown>][];
-    expect(calls[0]![0].summary).toBe("Invite someone as an owner");
+    expect(calls[0]![0].summary).toBe(
+      "Invite someone as an owner (check the address in Team settings before approving)",
+    );
   });
 
   it("keys each notice by change, event and recipient", async () => {
@@ -178,5 +180,16 @@ describe("notifyOwnerChange", () => {
       idempotencyKey: `owner-change/${CHANGE}/rejected/u-a`,
       subject: "Owner change rejected at Coastline",
     });
+  });
+});
+
+describe("emailDisplayName", () => {
+  it("falls back to generic wording for anything an email would refuse", async () => {
+    const { emailDisplayName } = await import("@/server/email/team");
+    expect(emailDisplayName("Ada Okafor")).toBe("Ada Okafor");
+    expect(emailDisplayName("verify at paypal-secure.co")).toBeNull();
+    expect(emailDisplayName("Ada <b>")).toBeNull();
+    expect(emailDisplayName("x".repeat(201))).toBeNull();
+    expect(emailDisplayName("Ada")).toBeNull();
   });
 });

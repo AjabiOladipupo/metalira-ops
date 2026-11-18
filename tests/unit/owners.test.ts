@@ -5,7 +5,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { invitePasswordStep, signedInWithPassword } from "@/lib/auth/amr";
+import { invitePasswordStep, passwordTrusted, signedInWithPassword } from "@/lib/auth/amr";
+import { proxyDecision, safeNextPath } from "@/lib/auth/routes";
 import {
   describeOwnerChange,
   needsSecondOwner,
@@ -151,51 +152,56 @@ describe("signedInWithPassword", () => {
   });
 });
 
-describe("invitePasswordStep", () => {
-  const invitedAt = "2026-11-18T09:00:00Z";
+describe("a password counts only once chosen after confirming", () => {
+  const confirmedAt = "2026-11-18T10:00:00Z";
 
-  it("asks anyone who came through an email link to choose a password", () => {
+  it("passwordTrusted needs password_set_at at or after the confirmation", () => {
+    expect(passwordTrusted("2026-11-18T10:00:00Z", confirmedAt)).toBe(true);
+    expect(passwordTrusted("2026-11-18T10:05:00Z", confirmedAt)).toBe(true);
+    expect(passwordTrusted("2026-11-18T09:59:59Z", confirmedAt)).toBe(false);
+    expect(passwordTrusted(undefined, confirmedAt)).toBe(false);
+    expect(passwordTrusted("not a date", confirmedAt)).toBe(false);
+    expect(passwordTrusted("2026-11-18T10:05:00Z", null)).toBe(false);
+  });
+
+  it("an email-link session without a trusted password chooses one", () => {
+    expect(invitePasswordStep({ usedPassword: false, confirmedAt, passwordSetAt: undefined })).toBe(
+      "set_password",
+    );
+  });
+
+  it("a password session without a trusted password uses an email link, however old", () => {
     expect(
       invitePasswordStep({
-        usedPassword: false,
-        confirmedAt: null,
+        usedPassword: true,
+        confirmedAt: "2020-01-01T00:00:00Z",
         passwordSetAt: null,
-        invitedAt,
-      }),
-    ).toBe("set_password");
-  });
-
-  it("lets an account confirmed before the invite accept with its password", () => {
-    expect(
-      invitePasswordStep({
-        usedPassword: true,
-        confirmedAt: "2026-10-01T00:00:00Z",
-        passwordSetAt: undefined,
-        invitedAt,
-      }),
-    ).toBe("ready");
-  });
-
-  it("sends a password sign-in on an address confirmed since the invite to the email link", () => {
-    const confirmedAt = "2026-11-18T10:00:00Z";
-    expect(
-      invitePasswordStep({ usedPassword: true, confirmedAt, passwordSetAt: null, invitedAt }),
-    ).toBe("use_email_link");
-    expect(
-      invitePasswordStep({
-        usedPassword: true,
-        confirmedAt,
-        passwordSetAt: "2026-11-18T09:30:00Z",
-        invitedAt,
       }),
     ).toBe("use_email_link");
-    expect(
-      invitePasswordStep({
-        usedPassword: true,
-        confirmedAt,
-        passwordSetAt: "2026-11-18T10:01:00Z",
-        invitedAt,
-      }),
-    ).toBe("ready");
+  });
+
+  it("a trusted password is ready, whichever way they signed in", () => {
+    const passwordSetAt = "2026-11-18T10:01:00Z";
+    expect(invitePasswordStep({ usedPassword: true, confirmedAt, passwordSetAt })).toBe("ready");
+    expect(invitePasswordStep({ usedPassword: false, confirmedAt, passwordSetAt })).toBe("ready");
+  });
+});
+
+describe("the proxy sends a manager without a trusted password to choose one", () => {
+  it("redirects the manager app, never the worker app or a worker", () => {
+    expect(proxyDecision("/app/people", "", true, false, true)).toEqual({
+      type: "redirect",
+      location: "/set-password?next=%2Fapp%2Fpeople",
+    });
+    expect(proxyDecision("/app", "", true, false, false)).toEqual({ type: "next" });
+    expect(proxyDecision("/m", "", true, true, true)).toEqual({ type: "next" });
+    expect(proxyDecision("/join/" + "a".repeat(64), "", true, false, true)).toEqual({
+      type: "next",
+    });
+  });
+
+  it("lets an email link come back to /set-password, and nowhere outside the app", () => {
+    expect(safeNextPath("/set-password?next=%2Fapp")).toBe("/set-password?next=%2Fapp");
+    expect(safeNextPath("//evil.example/set-password")).toBe("/app");
   });
 });

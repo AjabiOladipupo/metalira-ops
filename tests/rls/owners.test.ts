@@ -11,6 +11,8 @@ import {
   anonClient,
   createTenantUser,
   createTestUser,
+  insertMembershipAsOwner,
+  markPasswordTrusted,
   type Client,
   type TenantUser,
   type TestUser,
@@ -21,7 +23,6 @@ const LAST_OWNER = "MLOW1";
 const OWN_REQUEST = "MLOW2";
 const NOT_ELIGIBLE = "MLOW3";
 const DECIDED = "MLOW4";
-const OUT_OF_DATE = "MLOW5";
 const NEEDS_APPROVAL = "MLOW6";
 const ALREADY_WAITING = "MLOW7";
 const WORKER_LOGIN = "MLTM2";
@@ -33,6 +34,8 @@ type Role = "owner" | "admin" | "hr" | "finance" | "ops_manager" | "line_manager
 let admin: Client;
 
 async function add(orgId: string, user: TestUser, role: Role, extra: Record<string, unknown> = {}) {
+  // The secret key can't make owners: extra owners are seeded as the database owner.
+  if (role === "owner") return insertMembershipAsOwner(orgId, user.id, role);
   const { error } = await admin
     .from("memberships")
     .insert({ organisation_id: orgId, user_id: user.id, role, ...extra });
@@ -199,10 +202,14 @@ describe("one owner", () => {
     await admin.auth.admin.updateUserById(login.id, { app_metadata: { login: "worker" } });
     const invite = await request(founder, orgId, { kind: "invite", email: login.email });
     expect(invite.error?.code).toBe(WORKER_LOGIN);
-    const flagged = await admin
+    await expect(insertMembershipAsOwner(orgId, login.id, "owner")).rejects.toThrow(
+      /worker can't be an owner/,
+    );
+    // And the secret key can't make anyone an owner at all.
+    const viaKey = await admin
       .from("memberships")
       .insert({ organisation_id: orgId, user_id: login.id, role: "owner" });
-    expect(flagged.error?.message).toMatch(/worker can't be an owner/);
+    expect(viaKey.error?.code).toBe(PERMISSION_DENIED);
   });
 
   it("only owners ask: an admin can't add an owner", async () => {
@@ -363,7 +370,7 @@ describe("two or more owners", () => {
 });
 
 describe("approval checks the company as it is", () => {
-  it("refuses a request whose owner was demoted meanwhile", async () => {
+  it("withdraws a request whose owner was demoted meanwhile, so it can't be approved", async () => {
     const { orgId, owners } = await companyWithOwners("own-stale", 3);
     const [a, b, c] = owners as [TestUser, TestUser, TestUser];
     const hr = await createTestUser("own-stale-hr");
@@ -379,7 +386,7 @@ describe("approval checks the company as it is", () => {
     });
     expect((await decide(c, orgId, demoteA!.change_id, "approve")).error).toBeNull();
     const stale = await decide(b, orgId, row!.change_id, "approve");
-    expect(stale.error?.code).toBe(OUT_OF_DATE);
+    expect(stale.error?.code).toBe(DECIDED);
     expect(await roleOf(hr.id, orgId)).toBe("hr");
   });
 
@@ -482,34 +489,229 @@ describe("other companies", () => {
   });
 });
 
-describe("an address confirmed after the invite", () => {
-  it("joins only once a password was chosen from an email link (MLPW1)", async () => {
-    const owner = await createTenantUser("own-pw", "Password Ltd");
-    const email = `rls-own-pw-new-${crypto.randomUUID()}@example.test`;
-    const { data: token, error } = await owner.client.rpc("create_membership_invite", {
-      p_organisation_id: owner.orgId,
-      p_email: email,
-      p_role: "hr",
-    });
-    expect(error).toBeNull();
-
-    // Someone signed the address up with their own password; it was confirmed after the invite.
+describe("a password counts only once chosen after the address was confirmed (MLPW1)", () => {
+  async function untrustedAccount(label: string) {
+    const email = `rls-${label}-${crypto.randomUUID()}@example.test`;
     const password = `${crypto.randomUUID()}a1`;
+    // Signed up by someone else with their password, then confirmed by the mailbox owner: no
+    // password_set_at.
     const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
     expect(created.error).toBeNull();
     const client = anonClient();
     expect((await client.auth.signInWithPassword({ email, password })).error).toBeNull();
+    return { email, id: created.data.user!.id, client };
+  }
+
+  it("refuses an account confirmed after the invite until a password was chosen", async () => {
+    const owner = await createTenantUser("own-pw", "Password Ltd");
+    const email = `rls-own-pw-new-${crypto.randomUUID()}@example.test`;
+    const { data: token } = await owner.client.rpc("create_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_email: email,
+      p_role: "hr",
+    });
+    const password = `${crypto.randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    const client = anonClient();
+    await client.auth.signInWithPassword({ email, password });
     const refused = await client.rpc("accept_membership_invite", { p_token: token! });
     expect(refused.error?.code).toBe("MLPW1");
     expect(await roleOf(created.data.user!.id, owner.orgId)).toBeNull();
-
-    // The server records a password chosen from an email link; then it joins.
-    await admin.auth.admin.updateUserById(created.data.user!.id, {
-      app_metadata: { password_set_at: new Date(Date.now() + 1000).toISOString() },
-    });
-    const accepted = await client.rpc("accept_membership_invite", { p_token: token! });
-    expect(accepted.error).toBeNull();
+    await markPasswordTrusted(created.data.user!.id);
+    expect((await client.rpc("accept_membership_invite", { p_token: token! })).error).toBeNull();
     expect(await roleOf(created.data.user!.id, owner.orgId)).toBe("hr");
+  });
+
+  it("refuses an account confirmed before the invite too (pre-registered password)", async () => {
+    const victim = await untrustedAccount("own-prereg");
+    const owner = await createTenantUser("own-prereg-owner", "Prereg Ltd");
+    const { data: token } = await owner.client.rpc("create_membership_invite", {
+      p_organisation_id: owner.orgId,
+      p_email: victim.email,
+      p_role: "finance",
+    });
+    const refused = await victim.client.rpc("accept_membership_invite", { p_token: token! });
+    expect(refused.error?.code).toBe("MLPW1");
+    expect(await roleOf(victim.id, owner.orgId)).toBeNull();
+  });
+});
+
+describe("other sessions", () => {
+  it("end_other_sessions ends every other session of the caller, not the current one", async () => {
+    const user = await createTestUser("own-sessions");
+    const second = anonClient();
+    // A second sign-in on the same account, through a magic link.
+    const link = await admin.auth.admin.generateLink({ type: "magiclink", email: user.email });
+    expect(link.error).toBeNull();
+    const verified = await second.auth.verifyOtp({
+      type: "magiclink",
+      token_hash: link.data.properties!.hashed_token,
+    });
+    expect(verified.error).toBeNull();
+
+    const { data: ended, error } = await user.client.rpc("end_other_sessions");
+    expect(error).toBeNull();
+    expect(ended).toBeGreaterThanOrEqual(1);
+    const refreshed = await second.auth.refreshSession();
+    expect(refreshed.error).not.toBeNull();
+    // The caller's own session still works.
+    expect((await user.client.auth.refreshSession()).error).toBeNull();
+  });
+});
+
+describe("a removed or demoted owner's pending requests", () => {
+  it("are withdrawn automatically, with a reason and the owner who made the change", async () => {
+    const { orgId, owners } = await companyWithOwners("own-auto", 3);
+    const [a, b, c] = owners as [TestUser, TestUser, TestUser];
+    const hr = await createTestUser("own-auto-hr");
+    await add(orgId, hr, "hr");
+    const { row: byC } = await request(c, orgId, {
+      kind: "add",
+      membershipId: await membershipId(hr.id, orgId),
+    });
+    const { row: demoteC } = await request(a, orgId, {
+      kind: "demote",
+      membershipId: await membershipId(c.id, orgId),
+      newRole: "hr",
+    });
+    expect((await decide(b, orgId, demoteC!.change_id, "approve")).error).toBeNull();
+    const { data } = await admin
+      .from("owner_changes")
+      .select("status, cancelled_by, cancel_reason")
+      .eq("id", byC!.change_id)
+      .single();
+    expect(data?.status).toBe("cancelled");
+    expect(data?.cancelled_by).toBe(b.id);
+    expect(data?.cancel_reason).toMatch(/no longer an owner/);
+    expect(await roleOf(hr.id, orgId)).toBe("hr");
+  });
+
+  it("an approver demoted before approving can't approve", async () => {
+    const { orgId, owners } = await companyWithOwners("own-apdem", 3);
+    const [a, b, c] = owners as [TestUser, TestUser, TestUser];
+    const hr = await createTestUser("own-apdem-hr");
+    await add(orgId, hr, "hr");
+    const { row } = await request(a, orgId, {
+      kind: "add",
+      membershipId: await membershipId(hr.id, orgId),
+    });
+    const { row: demoteB } = await request(c, orgId, {
+      kind: "demote",
+      membershipId: await membershipId(b.id, orgId),
+      newRole: "admin",
+    });
+    expect((await decide(a, orgId, demoteB!.change_id, "approve")).error).toBeNull();
+    expect((await decide(b, orgId, row!.change_id, "approve")).error?.code).toBe(PERMISSION_DENIED);
+    expect(await roleOf(hr.id, orgId)).toBe("hr");
+  });
+});
+
+describe("approved owner invites", () => {
+  it("keep the owner who asked as inviter on resend, and stop working once they leave", async () => {
+    const { orgId, owners } = await companyWithOwners("own-keep", 2);
+    const [a, b] = owners as [TestUser, TestUser];
+    const invitee = await createTestUser("own-keep-new");
+    const { row } = await request(a, orgId, { kind: "invite", email: invitee.email });
+    expect((await decide(b, orgId, row!.change_id, "approve")).error).toBeNull();
+    const { data: invite } = await admin
+      .from("membership_invites")
+      .select("id, created_by")
+      .eq("owner_change_id", row!.change_id)
+      .single();
+    expect(invite?.created_by).toBe(a.id);
+    const resent = await b.client.rpc("resend_membership_invite", {
+      p_organisation_id: orgId,
+      p_invite_id: invite!.id,
+    });
+    expect(resent.error).toBeNull();
+    const { data: after } = await admin
+      .from("membership_invites")
+      .select("created_by")
+      .eq("id", invite!.id)
+      .single();
+    expect(after?.created_by).toBe(a.id);
+
+    // The owner who asked steps down (approved by b): the invite no longer works.
+    const { row: stepDown } = await request(a, orgId, {
+      kind: "demote",
+      membershipId: await membershipId(a.id, orgId),
+      newRole: "admin",
+    });
+    expect((await decide(b, orgId, stepDown!.change_id, "approve")).error).toBeNull();
+    const accept = await invitee.client.rpc("accept_membership_invite", {
+      p_token: resent.data![0]!.token,
+    });
+    expect(accept.error?.code).toBe(PERMISSION_DENIED);
+    expect(await roleOf(invitee.id, orgId)).toBeNull();
+  });
+});
+
+describe("concurrent owner changes", () => {
+  const ok = (r: { error: unknown }) => r.error === null;
+
+  async function ownerCount(orgId: string) {
+    const { count } = await admin
+      .from("memberships")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", orgId)
+      .eq("role", "owner");
+    return count;
+  }
+
+  it("two step-downs approved at once leave one owner", async () => {
+    const { orgId, owners } = await companyWithOwners("own-race2", 2);
+    const [a, b] = owners as [TestUser, TestUser];
+    const { row: aDown } = await request(a, orgId, {
+      kind: "demote",
+      membershipId: await membershipId(a.id, orgId),
+      newRole: "admin",
+    });
+    const { row: bDown } = await request(b, orgId, {
+      kind: "demote",
+      membershipId: await membershipId(b.id, orgId),
+      newRole: "admin",
+    });
+    const results = await Promise.all([
+      decide(b, orgId, aDown!.change_id, "approve"),
+      decide(a, orgId, bDown!.change_id, "approve"),
+    ]);
+    expect(results.filter(ok)).toHaveLength(1);
+    expect(await ownerCount(orgId)).toBe(1);
+  });
+
+  it("a removal and a step-down approved at once leave one owner", async () => {
+    const { orgId, owners } = await companyWithOwners("own-race3", 2);
+    const [a, b] = owners as [TestUser, TestUser];
+    const { row: removeB } = await request(a, orgId, {
+      kind: "remove",
+      membershipId: await membershipId(b.id, orgId),
+    });
+    const { row: aDown } = await request(a, orgId, {
+      kind: "demote",
+      membershipId: await membershipId(a.id, orgId),
+      newRole: "admin",
+    });
+    const results = await Promise.all([
+      decide(b, orgId, removeB!.change_id, "approve"),
+      decide(b, orgId, aDown!.change_id, "approve"),
+    ]);
+    expect(results.filter(ok)).toHaveLength(1);
+    expect(await ownerCount(orgId)).toBe(1);
+  });
+
+  it("two single-owner invites accepted at once add one owner", async () => {
+    const { orgId, founder } = await companyWithOwners("own-race4", 1);
+    const x = await createTestUser("own-race4-x");
+    const y = await createTestUser("own-race4-y");
+    const { row: rx } = await request(founder, orgId, { kind: "invite", email: x.email });
+    const { row: ry } = await request(founder, orgId, { kind: "invite", email: y.email });
+    const results = await Promise.all([
+      x.client.rpc("accept_membership_invite", { p_token: rx!.invite_token }),
+      y.client.rpc("accept_membership_invite", { p_token: ry!.invite_token }),
+    ]);
+    expect(results.filter(ok)).toHaveLength(1);
+    expect(results.find((r) => r.error)?.error?.code).toBe(NEEDS_APPROVAL);
+    expect(await ownerCount(orgId)).toBe(2);
   });
 });
 

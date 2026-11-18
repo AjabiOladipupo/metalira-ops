@@ -107,7 +107,7 @@ test("an owner invites a second owner, who sets their password after confirming;
   const signUp = page.getByRole("form", { name: "Create your account" });
   await expect(signUp.getByLabel("Work email")).toHaveValue(email.toLowerCase());
   await expect(signUp.getByLabel("Password")).toHaveCount(0);
-  await signUp.getByLabel("Your full name").fill("Bola Adeyemi");
+  await expect(signUp.getByLabel("Your full name")).toHaveCount(0);
   await signUp.getByRole("button", { name: "Email me a link" }).click();
   await expect(page).toHaveURL(/\/check-email\?sent=invite$/, { timeout: 15_000 });
   await expectNoHorizontalScroll(page);
@@ -116,6 +116,8 @@ test("an owner invites a second owner, who sets their password after confirming;
   await followEmailLink(page, await latestEmailTo(email));
   await expect(page).toHaveURL(new RegExp(`${joinPath}$`), { timeout: 15_000 });
   const accept = page.getByRole("form", { name: "Accept the invite" });
+  // They type their own name here, not on the link page.
+  await accept.getByLabel("Your full name").fill("Bola Adeyemi");
   await accept.getByLabel("Choose a password").fill(password);
   await accept.getByRole("button", { name: "Set password and join" }).click();
   await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });

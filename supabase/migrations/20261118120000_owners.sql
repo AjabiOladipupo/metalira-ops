@@ -32,8 +32,8 @@
 --   MLOW5 the request is out of date (the requester is no longer an owner)
 --   MLOW6 the owner invite needs a second owner's approval now
 --   MLOW7 a request for this person is already waiting
---   MLPW1 an address confirmed since the invite was made must choose a password from an email
---         link before accepting (any invite; see accept_membership_invite_impl)
+--   MLPW1 the account's password was not chosen after its address was confirmed: choose one
+--         from an email link before accepting (any invite; see private.password_trusted)
 --   MLTM1, MLTM2, MLTM6, MLTM9 as in slice 1.12; 42501 not an owner; 22023 bad input;
 --   P0002 not found in this organisation.
 
@@ -79,6 +79,10 @@ create table public.owner_changes (
   rejected_by uuid,
   cancelled_by uuid,
   decided_at timestamptz,
+  -- Set only when the database withdrew a request because its owner, or the owner it was
+  -- about, stopped being an owner (cancelled_by is then whoever made that change).
+  cancel_reason text
+    constraint owner_changes_cancel_reason_text check (char_length(cancel_reason) between 1 and 300),
 
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -118,6 +122,7 @@ create table public.owner_changes (
       when 'cancelled' then cancelled_by is not null and decided_at is not null
         and num_nonnulls(approved_by, rejected_by) = 0 and not single_owner
     end
+    and (cancel_reason is null or status = 'cancelled')
   )
 );
 
@@ -369,9 +374,142 @@ begin
   if c.kind <> 'invite' and not found then
     raise exception 'that member changed meanwhile: refresh and try again' using errcode = 'MLOW5';
   end if;
+  -- A removed or demoted owner's own pending requests, and pending requests about them, are
+  -- withdrawn in the same transaction (recommended default, pending owner confirmation).
+  if c.kind in ('remove', 'demote') then
+    update public.owner_changes x
+    set status = 'cancelled',
+        cancelled_by = uid,
+        cancel_reason = 'Withdrawn automatically: the owner who asked, or the owner it was about, is no longer an owner.'
+    where x.organisation_id = c.organisation_id
+      and x.status = 'pending'
+      and x.id <> c.id
+      and (x.requested_by = c.target_user_id or x.target_membership_id = c.target_membership_id);
+  end if;
   return v_token;
 end;
 $$;
+
+-- True when `p_password_set_at` (app_metadata.password_set_at, ISO 8601 text) is at or after
+-- the address confirmation: the account's password was chosen by whoever holds the mailbox.
+create function private.password_trusted(p_password_set_at text, p_confirmed_at timestamptz)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select p_confirmed_at is not null
+    and coalesce(p_password_set_at, '') ~ '^\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:?\d{2})$'
+    and p_password_set_at::timestamptz >= p_confirmed_at
+$$;
+
+-- Ends every other session of the caller (deletes them from auth.sessions, so their refresh
+-- tokens stop working; an access token already issued lasts until it expires, at most
+-- jwt_expiry). Used after a password is chosen from an email link. Returns how many ended.
+create function private.end_other_sessions_impl()
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_session uuid;
+  v_count integer;
+begin
+  if auth.uid() is null then
+    raise exception 'sign in first' using errcode = '42501';
+  end if;
+  begin
+    v_session := nullif(auth.jwt() ->> 'session_id', '')::uuid;
+  exception when invalid_text_representation then
+    v_session := null;
+  end;
+  delete from auth.sessions s
+  where s.user_id = auth.uid()
+    and s.id is distinct from v_session;
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+create function public.end_other_sessions()
+returns integer
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.end_other_sessions_impl()
+$$;
+
+-- Email-link sends started from the app (join page, owner sign-up), so the link can't be used to
+-- send mail at scale: Supabase counts the server's address, not the visitor's. Keys are hashes
+-- the server computes (the invite token, the visitor's address, the typed email).
+create table private.email_link_sends (
+  id bigint generated always as identity primary key,
+  key text not null constraint email_link_sends_key_length check (char_length(key) between 8 and 200),
+  sent_at timestamptz not null default now()
+);
+create index email_link_sends_key_idx on private.email_link_sends (key, sent_at);
+revoke all on table private.email_link_sends from public, anon, authenticated, service_role;
+
+-- Records one send under each key unless one of them reached its cap in the last hour; returns
+-- whether the send may go. Server secret key only. Keys look like 'token:<hash>' (5 an hour),
+-- 'ip:<hash>' (20 an hour) or 'email:<hash>' (5 an hour).
+create function private.email_link_allowed_impl(p_keys text[])
+returns boolean
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  k text;
+  v_cap integer;
+begin
+  if p_keys is null or cardinality(p_keys) = 0 or cardinality(p_keys) > 5 then
+    raise exception 'give one to five keys' using errcode = '22023';
+  end if;
+  foreach k in array p_keys loop
+    perform pg_advisory_xact_lock(hashtextextended('email_link:' || k, 0));
+  end loop;
+  foreach k in array p_keys loop
+    v_cap := case split_part(k, ':', 1) when 'ip' then 20 else 5 end;
+    if (
+      select count(*) from private.email_link_sends e
+      where e.key = k and e.sent_at > now() - interval '1 hour'
+    ) >= v_cap then
+      return false;
+    end if;
+  end loop;
+  insert into private.email_link_sends (key) select unnest(p_keys);
+  delete from private.email_link_sends e where e.sent_at < now() - interval '1 day';
+  return true;
+end;
+$$;
+
+create function public.email_link_allowed(p_keys text[])
+returns boolean
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.email_link_allowed_impl(p_keys)
+$$;
+
+-- Accounts already confirmed when this migration runs keep signing in with their password:
+-- their password counts as chosen now. Worker logins (PIN, synthetic address) are left alone.
+update auth.users u
+set raw_app_meta_data = coalesce(u.raw_app_meta_data, '{}'::jsonb)
+  || jsonb_build_object(
+    'password_set_at',
+    to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+  )
+where u.email_confirmed_at is not null
+  and coalesce(u.raw_app_meta_data ->> 'login', '') <> 'worker'
+  and lower(coalesce(u.email, '')) not like '%.invalid';
 
 -- ---------------------------------------------------------------------------
 -- 3. Triggers: insert-only history, two-person rule, workers never owners
@@ -386,6 +524,9 @@ security definer
 set search_path = ''
 as $$
 begin
+  if auth.uid() is not null and new.requested_by is distinct from auth.uid() then
+    raise exception 'a request is recorded under the name of whoever makes it' using errcode = '42501';
+  end if;
   if not exists (
     select 1 from public.memberships m
     where m.organisation_id = new.organisation_id
@@ -412,6 +553,7 @@ begin
   end if;
   new.rejected_by := null;
   new.cancelled_by := null;
+  new.cancel_reason := null;
   new.created_at := now();
   new.updated_at := now();
   return new;
@@ -428,7 +570,8 @@ set search_path = ''
 as $$
 declare
   c_decision constant text[] := array[
-    'status', 'approved_by', 'rejected_by', 'cancelled_by', 'decided_at', 'updated_at'
+    'status', 'approved_by', 'rejected_by', 'cancelled_by', 'cancel_reason', 'decided_at',
+    'updated_at'
   ];
 begin
   if old.status <> 'pending' or new.status = old.status then
@@ -437,8 +580,17 @@ begin
   if (to_jsonb(new) - c_decision) <> (to_jsonb(old) - c_decision) then
     raise exception 'an owner change request can''t be edited' using errcode = 'MLOW4';
   end if;
-  if new.status = 'cancelled' and new.cancelled_by is distinct from old.requested_by then
+  if new.status <> 'cancelled' and new.cancel_reason is not null then
+    raise exception 'only a withdrawal has a reason' using errcode = '42501';
+  end if;
+  -- A withdrawal is the requester's, unless the database withdraws it (cancel_reason set) while
+  -- applying a removal or demotion, under the name of whoever made that change.
+  if new.status = 'cancelled' and new.cancel_reason is null
+    and new.cancelled_by is distinct from old.requested_by then
     raise exception 'only the owner who asked can withdraw this' using errcode = '42501';
+  end if;
+  if new.status = 'cancelled' and new.cancel_reason is not null and auth.uid() is null then
+    raise exception 'an automatic withdrawal needs the owner who made the change' using errcode = '42501';
   end if;
   -- A signed-in decider is always named as themselves (the secret key has no user).
   if auth.uid() is not null
@@ -514,6 +666,31 @@ create trigger memberships_owner_not_worker
   before insert or update on public.memberships
   for each row execute function private.memberships_owner_not_worker();
 
+-- BEFORE INSERT/UPDATE/DELETE on memberships: the secret key never makes someone an owner and
+-- never changes or removes an owner row. Owner changes run inside the definer functions (as
+-- their owner, postgres), so current_user is service_role only for a direct secret-key write.
+-- Not security definer, so current_user is the caller.
+create function private.memberships_owner_not_service_role()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if current_user = 'service_role' and (
+    (tg_op in ('INSERT', 'UPDATE') and new.role = 'owner')
+    or (tg_op in ('UPDATE', 'DELETE') and old.role = 'owner')
+  ) then
+    raise exception 'owners change only through owner requests, never with the secret key'
+      using errcode = '42501';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end;
+$$;
+
+create trigger memberships_owner_not_service_role
+  before insert or update or delete on public.memberships
+  for each row execute function private.memberships_owner_not_service_role();
+
 -- ---------------------------------------------------------------------------
 -- 4. Request and decide
 -- ---------------------------------------------------------------------------
@@ -550,8 +727,13 @@ begin
   if p_kind is null then
     raise exception 'choose an owner change' using errcode = '22023';
   end if;
-  perform private.assert_owner(p_organisation_id);
+  if uid is null or p_organisation_id is null
+    or not (p_organisation_id in (select private.user_org_ids())) then
+    raise exception 'only an owner can change who owns the company' using errcode = '42501';
+  end if;
+  -- Lock order everywhere: the organisation, then memberships, then invite or request rows.
   perform private.lock_owners(p_organisation_id);
+  perform private.assert_owner(p_organisation_id);
 
   if p_kind = 'remove' then
     if exists (
@@ -634,11 +816,11 @@ begin
   if p_organisation_id is null or not (p_organisation_id in (select private.user_org_ids())) then
     raise exception 'only an owner can change who owns the company' using errcode = '42501';
   end if;
-  -- Same lock order as a request: the caller's membership, then the organisation.
+  -- Lock order everywhere: the organisation, then memberships, then invite or request rows.
+  perform private.lock_owners(p_organisation_id);
   if p_decision <> 'cancel' then
     perform private.assert_owner(p_organisation_id);
   end if;
-  perform private.lock_owners(p_organisation_id);
 
   select * into c
   from public.owner_changes x
@@ -754,6 +936,14 @@ begin
     select 1 from public.memberships m
     where m.organisation_id = inv.organisation_id
       and m.user_id = inv.created_by
+      and m.role = 'owner'
+  ) then
+    return 'invalid';
+  end if;
+  if not exists (
+    select 1 from public.memberships m
+    where m.organisation_id = inv.organisation_id
+      and m.user_id = c.requested_by
       and m.role = 'owner'
   ) then
     return 'invalid';
@@ -879,16 +1069,15 @@ declare
   v_token text;
   v_expires_at timestamptz;
 begin
-  perform private.assert_team_manager(p_organisation_id, false);
-
-  -- Owner invites: the organisation lock first, then the invite row (the order every owner
-  -- change takes), so a resend and an acceptance can't deadlock.
-  if exists (
+  -- Owner invites: the organisation lock first, then memberships, then the invite row (the
+  -- order every owner change takes), so a resend and an acceptance can't deadlock.
+  if p_organisation_id in (select private.user_org_ids()) and exists (
     select 1 from public.membership_invites i
     where i.id = p_invite_id and i.organisation_id = p_organisation_id and i.role = 'owner'
   ) then
     perform private.lock_owners(p_organisation_id);
   end if;
+  perform private.assert_team_manager(p_organisation_id, false);
 
   select *
   into inv
@@ -914,6 +1103,10 @@ begin
   end if;
   if inv.role = 'owner' then
     perform private.lock_owners(p_organisation_id);
+    if private.owner_invite_usable(inv) = 'invalid' then
+      raise exception 'this owner invite is no longer valid: cancel it and ask again'
+        using errcode = '42501';
+    end if;
     if private.owner_invite_usable(inv) = 'needs_approval' then
       raise exception 'the company has two or more owners now, so this owner invite needs another owner''s approval: cancel it and ask again'
         using errcode = 'MLOW6';
@@ -937,7 +1130,8 @@ begin
   set token_hash = encode(extensions.digest(v_token, 'sha256'), 'hex'),
       expires_at = now() + interval '7 days',
       sent_at = now(),
-      created_by = uid
+      -- An owner invite keeps the owner who asked for it as its inviter.
+      created_by = case when inv.role = 'owner' then inv.created_by else uid end
   where i.id = inv.id
   returning i.expires_at into v_expires_at;
 
@@ -1061,14 +1255,11 @@ begin
     raise exception 'this invite is for a different email address' using errcode = '42501';
   end if;
 
-  -- Slice 1.13: an address confirmed since the invite was made could belong to an account
-  -- someone else signed up with a password of their choosing. It joins only once a password was
-  -- chosen after the confirmation, from an email-link session (app_metadata.password_set_at,
-  -- written by the server with the secret key).
-  if v_confirmed_at >= inv.created_at and not (
-    coalesce(v_password_set_at, '') ~ '^\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:?\d{2})$'
-    and v_password_set_at::timestamptz >= v_confirmed_at
-  ) then
+  -- Slice 1.13: an account's password is trusted only once it was chosen after the address was
+  -- confirmed, from an email-link session (app_metadata.password_set_at, written by the server
+  -- with the secret key; backfilled for accounts confirmed before this migration). Otherwise
+  -- it may be a password someone else chose by signing the address up first.
+  if not private.password_trusted(v_password_set_at, v_confirmed_at) then
     raise exception 'choose your password from the link we emailed you, then accept'
       using errcode = 'MLPW1';
   end if;
@@ -1361,6 +1552,16 @@ revoke all on function private.owner_changes_before_insert() from public, anon, 
 revoke all on function private.owner_changes_before_update() from public, anon, authenticated;
 revoke all on function private.owner_changes_no_delete() from public, anon, authenticated;
 revoke all on function private.memberships_owner_not_worker() from public, anon, authenticated;
+revoke all on function private.password_trusted(text, timestamptz) from public, anon, authenticated;
+revoke all on function private.memberships_owner_not_service_role() from public, anon, authenticated;
+revoke all on function private.end_other_sessions_impl() from public, anon;
+grant execute on function private.end_other_sessions_impl() to authenticated;
+revoke all on function public.end_other_sessions() from public, anon;
+grant execute on function public.end_other_sessions() to authenticated;
+revoke all on function private.email_link_allowed_impl(text[]) from public, anon, authenticated;
+grant execute on function private.email_link_allowed_impl(text[]) to service_role;
+revoke all on function public.email_link_allowed(text[]) from public, anon, authenticated;
+grant execute on function public.email_link_allowed(text[]) to service_role;
 revoke all on function private.request_owner_change_impl(uuid, public.owner_change_kind, uuid, text, public.membership_role, text) from public, anon;
 revoke all on function private.decide_owner_change_impl(uuid, uuid, text) from public, anon;
 grant execute on function private.request_owner_change_impl(uuid, public.owner_change_kind, uuid, text, public.membership_role, text) to authenticated;

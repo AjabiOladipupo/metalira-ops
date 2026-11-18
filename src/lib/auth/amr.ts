@@ -20,16 +20,27 @@ export function signedInWithPassword(amr: unknown): boolean {
 /** app_metadata key the server sets (secret key) when a password was chosen after an email link. */
 export const PASSWORD_SET_AT_KEY = "password_set_at";
 
+/**
+ * True when the account's password was chosen after its address was confirmed
+ * (`password_set_at` at or after `email_confirmed_at`). Only then is a password sign-in
+ * trusted: otherwise the password may be one somebody else chose by signing the address up
+ * before its owner confirmed it. The database applies the same rule (private.password_trusted).
+ */
+export function passwordTrusted(
+  passwordSetAt: unknown,
+  confirmedAt: string | null | undefined,
+): boolean {
+  const confirmed = confirmedAt ? Date.parse(confirmedAt) : NaN;
+  const set = typeof passwordSetAt === "string" ? Date.parse(passwordSetAt) : NaN;
+  return !Number.isNaN(confirmed) && !Number.isNaN(set) && set >= confirmed;
+}
+
 export type InvitePasswordStep =
-  /** Accept as is: signed in with a password that predates nothing suspicious. */
+  /** Accept as is: the account's password is trusted. */
   | "ready"
-  /** Arrived through an email link: choose a password, then accept. */
+  /** Arrived through an email link and no trusted password yet: choose one, then accept. */
   | "set_password"
-  /**
-   * Signed in with a password, but the address was confirmed since the invite was made and no
-   * password was chosen from an email link after that: the password may be someone else's (an
-   * account signed up through the Auth API before the invitee confirmed it). Use the email link.
-   */
+  /** Signed in with a password that is not trusted: use an email link and choose a new one. */
   | "use_email_link";
 
 /**
@@ -40,12 +51,7 @@ export function invitePasswordStep(input: {
   usedPassword: boolean;
   confirmedAt: string | null;
   passwordSetAt: unknown;
-  invitedAt: string | null;
 }): InvitePasswordStep {
-  if (!input.usedPassword) return "set_password";
-  const confirmed = input.confirmedAt ? Date.parse(input.confirmedAt) : NaN;
-  const invited = input.invitedAt ? Date.parse(input.invitedAt) : NaN;
-  if (Number.isNaN(confirmed) || Number.isNaN(invited) || confirmed < invited) return "ready";
-  const set = typeof input.passwordSetAt === "string" ? Date.parse(input.passwordSetAt) : NaN;
-  return !Number.isNaN(set) && set >= confirmed ? "ready" : "use_email_link";
+  if (passwordTrusted(input.passwordSetAt, input.confirmedAt)) return "ready";
+  return input.usedPassword ? "use_email_link" : "set_password";
 }

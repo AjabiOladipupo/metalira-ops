@@ -1,23 +1,27 @@
 "use server";
 
 import type { User } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import type { z } from "zod";
 
+import { passwordTrusted, PASSWORD_SET_AT_KEY } from "@/lib/auth/amr";
 import {
   APP_HOME_PATH,
   CHECK_EMAIL_PATH,
   NEXT_PATH_KEY,
   SIGN_IN_PATH,
+  isWorkerAppMetadata,
   safeNextPath,
 } from "@/lib/auth/routes";
 import { getSupabasePublicEnv } from "@/lib/supabase/env";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 import { ACTIVE_ORG_COOKIE, ACTIVE_ORG_COOKIE_OPTIONS } from "./active-org";
+import { emailLinkAllowed } from "./email-link-limit";
 import type { FormState } from "./form-state";
+import { sendSetPasswordLink } from "./invite-password";
 import { appOrigin } from "./origin";
 import {
   formFields,
@@ -107,6 +111,20 @@ export async function signInWithPassword(_prev: FormState, formData: FormData): 
     return { ok: false, formError: "That email and password don't match an account.", values };
   }
 
+  // Slice 1.13: a password counts only once it was chosen after the address was confirmed. A
+  // password set before that may be someone else's (they signed the address up first), so it
+  // opens nothing: sign out and email a link to choose a password, worded the same either way.
+  if (
+    !isWorkerAppMetadata(data.user.app_metadata) &&
+    !passwordTrusted(data.user.app_metadata?.[PASSWORD_SET_AT_KEY], data.user.email_confirmed_at)
+  ) {
+    await supabase.auth.signOut({ scope: "local" });
+    if (await emailLinkAllowed({ kind: "email", value: parsed.data.email }, await headers())) {
+      await sendSetPasswordLink(parsed.data.email, safeNextPath(parsed.data.next));
+    }
+    redirect(`${CHECK_EMAIL_PATH}?sent=password`);
+  }
+
   // Covers an owner who confirmed their email in another browser, where the link could not
   // finish signing them in.
   await finishOwnerSignUp(supabase, data.user);
@@ -139,6 +157,13 @@ export async function sendMagicLink(_prev: FormState, formData: FormData): Promi
   redirect(`${CHECK_EMAIL_PATH}?sent=link`);
 }
 
+/**
+ * Owner sign-up (slice 1.13): name, company and email first; no password yet. Supabase emails a
+ * confirmation link (or, for an address that already has an account, a sign-in link); it signs
+ * them in, the company is created (ensureOrganisationForNewUser) and the app asks them to choose
+ * their password (/set-password) before anything opens. Whoever typed the address never picks the
+ * password, and a password someone set earlier through the Auth API is never trusted.
+ */
 export async function signUp(_prev: FormState, formData: FormData): Promise<FormState> {
   const fields = formFields(formData);
   const values = {
@@ -150,49 +175,33 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
   if (!parsed.success) return invalid(parsed.error, values);
   if (!configured()) return { ok: false, formError: NOT_CONFIGURED, values };
 
-  const { fullName, companyName, email, password } = parsed.data;
+  const { fullName, companyName, email } = parsed.data;
+  if (!(await emailLinkAllowed({ kind: "email", value: email }, await headers()))) {
+    return { ok: false, formError: TOO_MANY, values };
+  }
   const supabase = await createServerSupabase();
-  const { data, error } = await supabase.auth.signUp({
+  const { error } = await supabase.auth.signInWithOtp({
     email,
-    password,
     options: {
+      shouldCreateUser: true,
       emailRedirectTo: `${await appOrigin()}/auth/callback?next=${APP_HOME_PATH}`,
-      // full_name fills profiles.full_name (private.handle_new_user); company_name waits for
-      // the confirmed sign-in (ensureOrganisationForNewUser).
-      // next_path is where the confirmation email's link lands (confirmation.html).
+      // Used only when the account is new. full_name fills profiles.full_name
+      // (private.handle_new_user); company_name waits for the confirmed sign-in
+      // (ensureOrganisationForNewUser); next_path is where the confirmation link lands.
       data: { full_name: fullName, company_name: companyName, [NEXT_PATH_KEY]: APP_HOME_PATH },
     },
   });
 
   if (error) {
-    if (isRateLimited(error)) return { ok: false, formError: TOO_MANY, values };
-    if (error.code === "weak_password") {
-      return {
-        ok: false,
-        fieldErrors: { password: "Choose a stronger password with letters and numbers." },
-        values,
-      };
+    if (isRateLimited(error) || error.code === "over_email_send_rate_limit") {
+      return { ok: false, formError: TOO_MANY, values };
     }
-    if (error.code === "user_already_exists" || error.code === "email_exists") {
-      return {
-        ok: false,
-        formError: "We couldn't create that account. If you already have one, sign in instead.",
-        values,
-      };
-    }
-    if (error.code === "signup_disabled") {
+    if (error.code === "signup_disabled" || error.code === "otp_disabled") {
       return { ok: false, formError: "New accounts are closed for now.", values };
     }
     return { ok: false, formError: SOMETHING_WRONG, values };
   }
 
-  // Email confirmation off: there is a session now, so finish here.
-  if (data.session && data.user) {
-    await finishOwnerSignUp(supabase, data.user);
-    redirect(APP_HOME_PATH);
-  }
-
-  // Email confirmation on (the default): the link in the email finishes sign-up.
   redirect(`${CHECK_EMAIL_PATH}?sent=signup`);
 }
 

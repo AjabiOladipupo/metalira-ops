@@ -12,6 +12,8 @@ import {
   adminClient,
   createTenantUser,
   createTestUser,
+  insertMembershipAsOwner,
+  pgClient,
   type Client,
   type TenantUser,
   type TestUser,
@@ -352,30 +354,52 @@ describe("memberships", () => {
     expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
   });
 
-  it("the secret-key client cannot remove the last owner either", async () => {
-    const { error } = await admin
+  it("the secret-key client can't remove or change an owner (slice 1.13)", async () => {
+    const del = await admin
       .from("memberships")
       .delete()
       .eq("organisation_id", owner.orgId)
       .eq("user_id", owner.id);
-    expect(error?.message).toMatch(LAST_OWNER);
+    expect(del.error?.code).toBe(PERMISSION_DENIED);
+    const demote = await admin
+      .from("memberships")
+      .update({ role: "admin" })
+      .eq("organisation_id", owner.orgId)
+      .eq("user_id", owner.id);
+    expect(demote.error?.code).toBe(PERMISSION_DENIED);
     expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
   });
 
-  it("removing every owner in one statement still trips the guard", async () => {
+  it("the database owner can't remove the last owner either, even all owners in one statement", async () => {
     const coOwner = await createTestUser("m-co-owner");
-    const added = await admin
-      .from("memberships")
-      .insert({ organisation_id: owner.orgId, user_id: coOwner.id, role: "owner" });
-    expect(added.error).toBeNull();
-
-    const both = await admin
-      .from("memberships")
-      .delete()
-      .eq("organisation_id", owner.orgId)
-      .eq("role", "owner");
-    expect(both.error?.message).toMatch(LAST_OWNER);
-    expect(await roleOf(owner.id, owner.orgId)).toBe("owner");
+    await insertMembershipAsOwner(owner.orgId, coOwner.id, "owner");
+    const db = await pgClient();
+    try {
+      await expect(
+        db.query("delete from public.memberships where organisation_id = $1 and role = 'owner'", [
+          owner.orgId,
+        ]),
+      ).rejects.toThrow(LAST_OWNER);
+      await expect(
+        db.query("delete from public.memberships where organisation_id = $1 and user_id = $2", [
+          owner.orgId,
+          owner.id,
+        ]),
+      ).resolves.toBeDefined();
+      await expect(
+        db.query("delete from public.memberships where organisation_id = $1 and user_id = $2", [
+          owner.orgId,
+          coOwner.id,
+        ]),
+      ).rejects.toThrow(LAST_OWNER);
+    } finally {
+      // Put the first owner back for any later test.
+      await db.query(
+        "insert into public.memberships (organisation_id, user_id, role) values ($1, $2, 'owner') on conflict do nothing",
+        [owner.orgId, owner.id],
+      );
+      await db.end();
+    }
     expect(await roleOf(coOwner.id, owner.orgId)).toBe("owner");
   });
 });

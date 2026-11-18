@@ -30,6 +30,16 @@ export function AcceptForm({
       </p>
       {needsPassword ? (
         <Field
+          label="Your full name"
+          name="fullName"
+          autoComplete="name"
+          required
+          defaultValue={state?.values?.fullName}
+          error={state?.fieldErrors?.fullName}
+        />
+      ) : null}
+      {needsPassword ? (
+        <Field
           label="Choose a password"
           name="password"
           type="password"
@@ -55,7 +65,6 @@ export function AcceptForm({
  */
 export function JoinSignUpForm({ token, email }: { token: string; email: string }) {
   const [state, action] = useActionState(signUpForInviteAction, null);
-  const errors = state?.fieldErrors;
   return (
     <form
       action={action}
@@ -72,16 +81,9 @@ export function JoinSignUpForm({ token, email }: { token: string; email: string 
         disabled
         hint="Set by the invite."
       />
-      <Field
-        label="Your full name"
-        name="fullName"
-        autoComplete="name"
-        required
-        defaultValue={state?.values?.fullName}
-        error={errors?.fullName}
-      />
       <p className="m-0 text-sm text-fg-muted">
-        We email {email} a link to confirm it. You choose your password after opening it.
+        We email {email} a link to confirm it. You give your name and choose your password after
+        opening it.
       </p>
       <FormAlert message={state?.formError} />
       <SubmitButton pendingLabel="Sending…">Email me a link</SubmitButton>

@@ -8,6 +8,11 @@ export const SIGN_UP_PATH = "/sign-up";
 export const CHECK_EMAIL_PATH = "/check-email";
 export const NO_ACCESS_PATH = "/no-access";
 export const APP_HOME_PATH = "/app";
+/**
+ * Where a manager chooses their password after an email link (slice 1.13). A password counts
+ * only once chosen after the address was confirmed; until then the app sends them here.
+ */
+export const SET_PASSWORD_PATH = "/set-password";
 /** The worker app (phone PWA). Workers sign in with company code, staff ID and PIN. */
 export const WORKER_HOME_PATH = "/m";
 export const WORKER_SIGN_IN_PATH = "/m/sign-in";
@@ -81,7 +86,13 @@ export function safeNextPath(
     return fallback;
   }
   if (url.origin !== "http://n.invalid") return fallback;
-  if (!isProtected(url.pathname) && !isTeamJoin(url.pathname)) return fallback;
+  if (
+    !isProtected(url.pathname) &&
+    !isTeamJoin(url.pathname) &&
+    url.pathname !== SET_PASSWORD_PATH
+  ) {
+    return fallback;
+  }
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -123,6 +134,7 @@ export function proxyDecision(
   search: string,
   hasUser: boolean,
   isWorker = false,
+  needsPassword = false,
 ): ProxyDecision {
   if (isWorkerApp(pathname)) {
     if (!hasUser && !isWorkerPublic(pathname)) {
@@ -147,6 +159,14 @@ export function proxyDecision(
         ? SIGN_IN_PATH
         : `${SIGN_IN_PATH}?next=${encodeURIComponent(safeNextPath(next))}`;
     return { type: "redirect", location };
+  }
+  // A manager whose token carries no password_set_at (slice 1.13) chooses a password first.
+  // Optimistic: the set-password page and the actions check again with the Auth server.
+  if (hasUser && !isWorker && needsPassword && isProtected(pathname)) {
+    return {
+      type: "redirect",
+      location: `${SET_PASSWORD_PATH}?next=${encodeURIComponent(safeNextPath(`${pathname}${search}`))}`,
+    };
   }
   if (hasUser && SIGNED_OUT_ONLY.has(pathname)) {
     return { type: "redirect", location: safeNextPath(new URLSearchParams(search).get("next")) };

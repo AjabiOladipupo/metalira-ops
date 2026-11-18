@@ -108,15 +108,19 @@ export async function notifyOwnerChange(
       nameOf(all.admin, change.requested_by),
       nameOf(all.admin, actorId),
     ]);
-    const summary = describeOwnerChange({
-      kind: change.kind,
-      targetName,
-      inviteEmail: emailDisplayName(change.invite_email),
-      newRoleLabel:
-        change.new_role && isRole(change.new_role) ? ROLE_LABELS[change.new_role] : null,
-      requesterName,
-      selfDemotion: change.kind === "demote" && change.target_user_id === change.requested_by,
-    });
+    // An invited address is never shown in the email: the owners check it in Team settings.
+    const summary =
+      change.kind === "invite"
+        ? "Invite someone as an owner (check the address in Team settings before approving)"
+        : describeOwnerChange({
+            kind: change.kind,
+            targetName,
+            inviteEmail: null,
+            newRoleLabel:
+              change.new_role && isRole(change.new_role) ? ROLE_LABELS[change.new_role] : null,
+            requesterName,
+            selfDemotion: change.kind === "demote" && change.target_user_id === change.requested_by,
+          });
 
     const recipients = await ownerIds(all.admin, change.organisation_id);
     // A removed or demoted owner hears about it too, though they are no longer an owner.

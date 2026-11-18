@@ -265,8 +265,7 @@ test("a new manager creates their account from the invite; a wrong account is to
   await page.goto(joinPath);
   const signUp = page.getByRole("form", { name: "Create your account" });
   await expect(signUp.getByLabel("Work email")).toHaveValue(email.toLowerCase());
-  await signUp.getByLabel("Your full name").fill("Femi Adeyemi");
-  // Slice 1.13: no password until the address is confirmed.
+  // Slice 1.13: no password (or name) until the address is confirmed.
   await expect(signUp.getByLabel("Password")).toHaveCount(0);
   await signUp.getByRole("button", { name: "Email me a link" }).click();
   await expect(page).toHaveURL(/\/check-email\?sent=invite$/, { timeout: 15_000 });
@@ -275,6 +274,7 @@ test("a new manager creates their account from the invite; a wrong account is to
   // their password and accept.
   await followEmailLink(page, await latestEmailTo(email));
   await expect(page).toHaveURL(new RegExp(`${joinPath}$`), { timeout: 15_000 });
+  await page.getByLabel("Your full name").fill("Femi Adeyemi");
   await page.getByLabel("Choose a password").fill(password);
   await page.getByRole("button", { name: "Set password and join" }).click();
   await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
@@ -20,9 +20,10 @@ import { ACTIVE_ORG_COOKIE, ACTIVE_ORG_COOKIE_OPTIONS } from "./active-org";
 import { getCompany } from "./company-data";
 import { MutationError, mutate } from "./mutate";
 import { fullNameSchema } from "./names";
-import { invitePasswordStepFor, markPasswordChosen } from "./invite-password";
+import { emailLinkAllowed } from "./email-link-limit";
+import { chooseOwnPassword, invitePasswordStepFor } from "./invite-password";
 import { appOrigin } from "./origin";
-import { formFields } from "./schemas";
+import { formFields, newPasswordSchema } from "./schemas";
 import { notifyOwnerChange, notifyOwnerJoined } from "./owner-notices";
 import {
   decideOwnerChangeSpec,
@@ -394,20 +395,13 @@ const ACCEPT_MESSAGES: Record<string, string> = {
   MLTM4: "This invite has expired. Ask the person who invited you to send it again.",
   MLTM5: "This invite was cancelled. Ask the person who invited you for a new one.",
   MLPW1:
-    'For your safety, open the sign-in link we emailed you, choose your password there, then accept. On the sign-in page, choose "Email link" to get a new one.',
+    'For your safety, choose your password from a link we email you, then accept. Sign out, then choose "Email link" on the sign-in page.',
   MLOW6:
     "This owner invite now needs a second owner's approval. Ask an owner of the company to send a new one.",
   "42501":
     "This invite is for a different email address, or is no longer valid. Sign in with the address it was sent to, or ask for a new invite.",
   "22023": "This invite link is not valid.",
 };
-
-const passwordSchema = z
-  .string()
-  .min(8, "Use at least 8 characters")
-  .max(72, "Use 72 characters or fewer")
-  .regex(/[A-Za-z]/, "Use at least one letter")
-  .regex(/[0-9]/, "Use at least one number");
 
 /**
  * Accepts the invite as the signed-in user, then opens the app in that company. Someone who
@@ -429,15 +423,25 @@ export async function acceptTeamInviteAction(
   const invite = await lookupTeamInvite(token.data);
   const supabase = await createServerSupabase();
 
-  const step =
-    invite.state === "pending" ? await invitePasswordStepFor(supabase, invite.invitedAt) : "ready";
+  const step = invite.state === "pending" ? await invitePasswordStepFor(supabase) : "ready";
   if (step === "use_email_link") return { ok: false, formError: ACCEPT_MESSAGES.MLPW1 };
   if (step === "set_password") {
-    const password = passwordSchema.safeParse(fields.password ?? "");
-    if (!password.success) {
+    // The invitee types their own name here (recommended default, pending owner confirmation),
+    // and chooses their password: both only from this email-link session.
+    const name = fullNameSchema.safeParse(fields.fullName ?? "");
+    const password = newPasswordSchema.safeParse(fields.password ?? "");
+    if (!name.success || !password.success) {
       return {
         ok: false,
-        fieldErrors: { password: password.error.issues[0]?.message ?? "Choose a password." },
+        fieldErrors: {
+          ...(name.success
+            ? {}
+            : { fullName: name.error.issues[0]?.message ?? "Enter your name." }),
+          ...(password.success
+            ? {}
+            : { password: password.error.issues[0]?.message ?? "Choose a password." }),
+        },
+        values: { fullName: fields.fullName ?? "" },
       };
     }
     // Only once the invite is still open and for this account: never change a password for an
@@ -445,28 +449,21 @@ export async function acceptTeamInviteAction(
     if (invite.state !== "pending" || invite.email !== session.user.email.toLowerCase()) {
       return { ok: false, formError: ACCEPT_MESSAGES["42501"] };
     }
-    const { error: passwordError } = await supabase.auth.updateUser({
-      password: password.data,
-    });
-    if (passwordError && passwordError.code !== "same_password") {
-      if (passwordError.code === "weak_password") {
-        return {
-          ok: false,
-          fieldErrors: { password: "Choose a stronger password with letters and numbers." },
-        };
-      }
-      logFailure("team.join_password_failed", new Error(passwordError.code ?? "unknown"));
-      return { ok: false, formError: FAILED };
-    }
     try {
-      await markPasswordChosen(session.user.id);
-    } catch (markError) {
-      logFailure("team.join_password_mark_failed", markError);
+      // Records password_set_at, ends the account's other sessions (anyone who signed the address
+      // up before the invitee confirmed it) and refreshes this one.
+      const refusal = await chooseOwnPassword(supabase, session.user.id, password.data);
+      if (refusal) return { ok: false, fieldErrors: { password: refusal } };
+    } catch (passwordError) {
+      logFailure("team.join_password_failed", passwordError);
       return { ok: false, formError: FAILED };
     }
-    // Any other session on this account (someone who signed the address up before the invitee
-    // confirmed it) ends here. Best effort: acceptance still checks the password marker.
-    await supabase.auth.signOut({ scope: "others" });
+    // The user's own client, so RLS (own row only) and the audit trigger apply.
+    const { error: nameError } = await supabase
+      .from("profiles")
+      .update({ full_name: name.data })
+      .eq("user_id", session.user.id);
+    if (nameError) logFailure("team.join_name_failed", new Error(nameError.code));
   }
   const { data, error } = await supabase.rpc("accept_membership_invite", { p_token: token.data });
   if (error || !data) {
@@ -485,41 +482,30 @@ export async function acceptTeamInviteAction(
   redirect(APP_HOME_PATH);
 }
 
-const joinSignUpSchema = z.object({
-  token: tokenSchema,
-  fullName: fullNameSchema,
-});
-
 /**
- * Starts an account for the invited address (slice 1.13: no password here). The address comes
- * from the invite, never from the form, so this can only ever email the person the owner or
- * admin invited. Supabase emails them a confirmation link (or, for an address that already has
- * an account, a sign-in link); it brings them back to the invite signed in, where they choose
- * their password and accept. Whoever holds the invite link can't pick the invitee's password.
- * No company is created (no pending company name).
+ * Starts an account for the invited address (slice 1.13: no password or name here). The address
+ * comes from the invite, never from the form, so this can only ever email the person the owner
+ * or admin invited. Supabase emails them a confirmation link (or, for an address that already has
+ * an account, a sign-in link); it brings them back to the invite signed in, where they type their
+ * name, choose their password and accept. Whoever holds the invite link picks neither. Capped
+ * per invite and per visitor address (email-link-limit.ts). No company is created.
  */
 export async function signUpForInviteAction(
   _prev: JoinActionState,
   formData: FormData,
 ): Promise<JoinActionState> {
-  const fields = formFields(formData);
-  const values = { fullName: fields.fullName ?? "" };
-  const parsed = joinSignUpSchema.safeParse(fields);
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      const key = String(issue.path[0] ?? "");
-      if (key && !fieldErrors[key]) fieldErrors[key] = issue.message;
-    }
-    return { ok: false, fieldErrors, values, formError: fieldErrors.token };
-  }
+  const token = tokenSchema.safeParse(formFields(formData).token);
+  if (!token.success) return { ok: false, formError: ACCEPT_MESSAGES["22023"] };
 
-  const invite = await lookupTeamInvite(parsed.data.token);
+  const invite = await lookupTeamInvite(token.data);
   if (invite.state !== "pending") {
-    return { ok: false, formError: "This invite can no longer be used.", values };
+    return { ok: false, formError: "This invite can no longer be used." };
+  }
+  if (!(await emailLinkAllowed({ kind: "token", value: token.data }, await headers()))) {
+    return { ok: false, formError: "Too many links sent for this invite. Try again in an hour." };
   }
 
-  const path = teamInvitePath(parsed.data.token);
+  const path = teamInvitePath(token.data);
   const supabase = await createServerSupabase();
   const { error } = await supabase.auth.signInWithOtp({
     email: invite.email,
@@ -528,7 +514,7 @@ export async function signUpForInviteAction(
       emailRedirectTo: `${await appOrigin()}/auth/callback?next=${encodeURIComponent(path)}`,
       // Used only when the account is new. next_path: where the confirmation email's link lands
       // (supabase/templates/confirmation.html).
-      data: { full_name: parsed.data.fullName, [NEXT_PATH_KEY]: path },
+      data: { [NEXT_PATH_KEY]: path },
     },
   });
   if (error) {
@@ -537,17 +523,13 @@ export async function signUpForInviteAction(
       error.code === "over_request_rate_limit" ||
       error.code === "over_email_send_rate_limit"
     ) {
-      return {
-        ok: false,
-        formError: "Too many attempts. Wait a few minutes and try again.",
-        values,
-      };
+      return { ok: false, formError: "Too many attempts. Wait a few minutes and try again." };
     }
     if (error.code === "signup_disabled" || error.code === "otp_disabled") {
-      return { ok: false, formError: "New accounts are closed for now.", values };
+      return { ok: false, formError: "New accounts are closed for now." };
     }
     logFailure("team.join_sign_up_failed", new Error(error.code ?? "unknown"));
-    return { ok: false, formError: FAILED, values };
+    return { ok: false, formError: FAILED };
   }
   redirect(`${CHECK_EMAIL_PATH}?sent=invite`);
 }

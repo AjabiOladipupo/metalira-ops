@@ -4,6 +4,7 @@ import {
   formFields,
   magicLinkSchema,
   signInPasswordSchema,
+  newPasswordSchema,
   signUpSchema,
   switchOrganisationSchema,
 } from "@/server/identity/schemas";
@@ -12,7 +13,6 @@ const validSignUp = {
   fullName: "  Ada Okafor ",
   companyName: " Alpha Guards Ltd ",
   email: " Ada@Example.COM ",
-  password: "correcthorse9",
 };
 
 function firstMessage(result: { success: boolean; error?: { issues: { message: string }[] } }) {
@@ -26,17 +26,17 @@ describe("signUpSchema", () => {
       fullName: "Ada Okafor",
       companyName: "Alpha Guards Ltd",
       email: "ada@example.com",
-      password: "correcthorse9",
     });
+  });
+
+  it("takes no password: it is chosen after the email link (slice 1.13)", () => {
+    const parsed = signUpSchema.parse({ ...validSignUp, password: "correcthorse9" });
+    expect(parsed).not.toHaveProperty("password");
   });
 
   it.each([
     ["a bad email", { email: "not-an-email" }, "Enter a valid email address"],
     ["an empty email", { email: "  " }, "Enter your email address"],
-    ["a short password", { password: "abc1234" }, "Use at least 8 characters"],
-    ["a long password", { password: `${"a".repeat(72)}1` }, "Use 72 characters or fewer"],
-    ["a password with no number", { password: "onlyletters" }, "Use at least one number"],
-    ["a password with no letter", { password: "1234567890" }, "Use at least one letter"],
     ["an empty name", { fullName: "  " }, "Enter your full name"],
     ["an empty company", { companyName: "" }, "Enter your company name"],
     ["a one-letter company", { companyName: "A" }, "Enter your company name"],
@@ -63,6 +63,17 @@ describe("signUpSchema", () => {
     ],
   ])("rejects %s", (_label, patch, message) => {
     expect(firstMessage(signUpSchema.safeParse({ ...validSignUp, ...patch }))).toBe(message);
+  });
+});
+
+describe("newPasswordSchema", () => {
+  it.each([
+    ["a short password", "abc1234", "Use at least 8 characters"],
+    ["a long password", `${"a".repeat(72)}1`, "Use 72 characters or fewer"],
+    ["a password with no number", "onlyletters", "Use at least one number"],
+    ["a password with no letter", "1234567890", "Use at least one letter"],
+  ])("rejects %s", (_label, password, message) => {
+    expect(firstMessage(newPasswordSchema.safeParse(password))).toBe(message);
   });
 });
 

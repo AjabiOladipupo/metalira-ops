@@ -40,7 +40,10 @@ const DOMAIN_LIKE = /\b[a-z0-9-]+\.[a-z]{2,}\b/i;
 /** `name` when it is safe to put in an email, else null (generic wording). */
 export function emailDisplayName(name: string | null): string | null {
   if (!name) return null;
-  return DOMAIN_LIKE.test(name) ? null : name;
+  if (DOMAIN_LIKE.test(name)) return null;
+  // Anything the email schemas would refuse (control characters, angle brackets, a web address,
+  // over 200 characters) falls back to generic wording too, so one odd name never stops a send.
+  return emailSafeName.safeParse(name).success ? name : null;
 }
 
 const roleLabel = z
