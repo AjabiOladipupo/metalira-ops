@@ -78,11 +78,12 @@ export async function setPasswordAction(
     if (fullName?.success && companyName?.success) {
       // The user's own client: RLS (own row) and the audit trigger apply.
       await supabase.from("profiles").update({ full_name: fullName.data }).eq("user_id", user.id);
+      // The company fields are shown only to someone with no company yet, so no company now
+      // means it wasn't created.
       const created = await createOwnerCompany(supabase, companyName.data);
-      if (created) {
-        const name = fullName.data;
-        after(() => sendOwnerWelcome(user, created, name));
-      }
+      if (!created) throw new Error("The company was not created");
+      const name = fullName.data;
+      after(() => sendOwnerWelcome(user, created, name));
     }
   } catch (error) {
     console.error(

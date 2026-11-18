@@ -12,18 +12,17 @@ export const EMAIL_LINK_METHODS = [
 ] as const;
 
 /**
- * True only when the access token's `amr` claim shows an email-link session: at least one
- * method from EMAIL_LINK_METHODS and no `password` entry. Anything else (a password sign-in,
- * an unknown method, a missing or unreadable claim) is false, so callers fail closed (slice
- * 1.13): only an email-link session may choose the password that then counts.
+ * True only when the access token's `amr` claim shows an email-link session: every method is
+ * one of EMAIL_LINK_METHODS. Anything else (a password sign-in, an unknown method, a missing or
+ * unreadable claim) is false, so callers fail closed (slice 1.13): only an email-link session may
+ * choose the password that then counts. private.session_trusted applies the same list.
  */
 export function signedInWithEmailLink(amr: unknown): boolean {
   if (!Array.isArray(amr) || amr.length === 0) return false;
   const methods = amr.map((entry) =>
     typeof entry === "object" && entry !== null ? (entry as { method?: unknown }).method : null,
   );
-  if (methods.some((m) => m === "password")) return false;
-  return methods.some(
+  return methods.every(
     (m) => typeof m === "string" && (EMAIL_LINK_METHODS as readonly string[]).includes(m),
   );
 }

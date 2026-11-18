@@ -1592,12 +1592,12 @@ grant execute on function public.decide_owner_change(uuid, uuid, text) to authen
 -- address (app_metadata.password_set_at, written by the server; backfilled above for accounts
 -- already confirmed). Otherwise the password may be one somebody else chose by signing the
 -- address up first, and their token, used straight against the Data API, must read nothing.
--- A session whose token's `amr` names `password` is trusted only when private.password_trusted
--- holds for the account (password_set_at at or after email_confirmed_at, read from auth.users by
--- primary key: one lookup per statement, since callers wrap it in a scalar subquery). Email-link
--- sessions (otp, magiclink, recovery, signup), worker logins (app_metadata.login = 'worker';
--- they sign in through an OTP minted by the server) and calls with no token (the secret key)
--- are unaffected.
+-- Email-link sessions (every amr method one of otp, magiclink, recovery, email/signup, invite),
+-- worker logins (app_metadata.login = 'worker'; they sign in through an OTP minted by the
+-- server) and calls with no token (the secret key) are trusted. Any other session, a password
+-- one included, is trusted only when private.password_trusted holds for the account
+-- (password_set_at at or after email_confirmed_at, read from auth.users by primary key). The
+-- token is read once.
 create function private.session_trusted()
 returns boolean
 language sql
@@ -1605,22 +1605,27 @@ stable
 security definer
 set search_path = ''
 as $$
+  with t as (select auth.jwt() as jwt, auth.uid() as uid)
   select case
-    when auth.uid() is null then true
-    when (auth.jwt() -> 'app_metadata' ->> 'login') = 'worker' then true
-    when not exists (
-      select 1
-      from jsonb_array_elements(
-        case when jsonb_typeof(auth.jwt() -> 'amr') = 'array' then auth.jwt() -> 'amr' else '[]'::jsonb end
-      ) e
-      where e ->> 'method' = 'password'
-    ) then true
+    when t.uid is null then true
+    when (t.jwt -> 'app_metadata' ->> 'login') = 'worker' then true
+    -- An email-link session: every amr method is one of these (the same list as
+    -- EMAIL_LINK_METHODS in src/lib/auth/amr.ts). Anything else, unknown methods included,
+    -- needs a trusted password.
+    when jsonb_typeof(t.jwt -> 'amr') = 'array'
+      and jsonb_array_length(t.jwt -> 'amr') > 0
+      and not exists (
+        select 1
+        from jsonb_array_elements(t.jwt -> 'amr') e
+        where coalesce(e ->> 'method', '') not in ('otp', 'magiclink', 'recovery', 'email/signup', 'invite')
+      ) then true
     else coalesce((
       select private.password_trusted(u.raw_app_meta_data ->> 'password_set_at', u.email_confirmed_at)
       from auth.users u
-      where u.id = auth.uid()
+      where u.id = t.uid
     ), false)
   end
+  from t
 $$;
 
 -- The caller's id when their session is trusted, else null. Every tenancy helper and the
@@ -1748,3 +1753,63 @@ create policy bank_detail_changes_update on public.bank_detail_changes for updat
     private.has_role(organisation_id, array['owner', 'hr', 'finance'])
     or requested_by = (select private.session_uid())
   );
+
+-- Creating a company trusts the caller's session too: an untrusted password session can't
+-- create one (for instance the victim's, before they reach /set-password).
+create or replace function private.create_organisation_impl(p_name text)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+  v_name text := btrim(p_name);
+  org_id uuid;
+begin
+  if uid is null or not private.session_trusted() then
+    raise exception 'sign in to create an organisation' using errcode = '42501';
+  end if;
+  if v_name is null or char_length(v_name) not between 1 and 200 then
+    raise exception 'organisation name must be 1 to 200 characters' using errcode = '22023';
+  end if;
+  if v_name ~ '[\x01-\x1f\x7f-\x9f<>]' or v_name ~* '(://|www\.)' then
+    raise exception 'organisation name must be plain text, without < or > or a web address'
+      using errcode = '22023';
+  end if;
+
+  insert into public.organisations (name, created_by)
+  values (v_name, uid)
+  returning id into org_id;
+
+  insert into public.memberships (organisation_id, user_id, role, created_by)
+  values (org_id, uid, 'owner', uid);
+
+  return org_id;
+end;
+$$;
+
+create or replace function private.create_first_organisation_impl(p_name text)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null or not private.session_trusted() then
+    raise exception 'sign in to create an organisation' using errcode = '42501';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtextextended('create_first_organisation:' || uid::text, 0));
+
+  if exists (select 1 from public.memberships m where m.user_id = uid) then
+    return null;
+  end if;
+
+  return private.create_organisation_impl(p_name);
+end;
+$$;

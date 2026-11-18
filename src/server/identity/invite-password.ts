@@ -69,7 +69,9 @@ export async function chooseOwnPassword(
   password: string,
 ): Promise<string | null> {
   const { error } = await supabase.auth.updateUser({ password });
-  if (error && error.code !== "same_password") {
+  if (error) {
+    // The account's current password may be one somebody else chose: never keep it.
+    if (error.code === "same_password") return "Choose a different password.";
     if (error.code === "weak_password") {
       return "Choose a stronger password with letters and numbers.";
     }

@@ -232,6 +232,7 @@ Owner checks on production (ops.metaliratech.com):
 Carried forward:
 - Known gap from 1.11: line managers can still read reportees' bank and tax columns through the API (masked or encrypted, never in clear). Close it before Phase 4's My team.
 - Phase 5: bank-file generation and payroll release must decrypt each account number and refuse a last-4 mismatch, including details saved by the first-import exception. Consider refusing payroll release while setup is unfinished.
+- Before Phase 3's punch tables (slice 1.13 review): `private.has_role`, `manages_member` and `is_line_manager_for` take an argument per row, so the session trust check inside them (one `auth.users` lookup by primary key, through `private.session_uid()`) can run once per row in policies that call them. Benchmark a large table (People with a few thousand workers, then punches) and, if it shows, restructure the policies so trust is computed once per statement (for example `(select private.session_uid())` passed in, or an `organisation_id in (select private.user_org_ids())` pre-filter).
 - Phases 3 and 4: replace `private.worker_has_work_records` when punch, timesheet or pay tables arrive (a test fails until each `worker_id` table is declared).
 
 ## Decisions (owner, 16 Nov 2026)

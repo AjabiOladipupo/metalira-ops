@@ -149,6 +149,7 @@ describe("signedInWithEmailLink", () => {
     expect(signedInWithEmailLink([{ method: "password", timestamp: 1 }])).toBe(false);
     expect(signedInWithEmailLink([{ method: "otp" }, { method: "password" }])).toBe(false);
     expect(signedInWithEmailLink([{ method: "oauth" }])).toBe(false);
+    expect(signedInWithEmailLink([{ method: "otp" }, { method: "oauth" }])).toBe(false);
     expect(signedInWithEmailLink([])).toBe(false);
     expect(signedInWithEmailLink(undefined)).toBe(false);
     expect(signedInWithEmailLink("otp")).toBe(false);

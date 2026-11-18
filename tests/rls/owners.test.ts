@@ -767,8 +767,18 @@ describe("an untrusted password session reads nothing (slice 1.13)", () => {
       own: (await client.from("profiles").select("user_id").eq("user_id", userId)).data ?? [],
     });
     expect(await read()).toEqual({ orgs: [], members: [], workers: [], own: [] });
-    // It can't end other sessions either.
+    // It can't end other sessions or create a company either.
     expect((await client.rpc("end_other_sessions")).error?.code).toBe(PERMISSION_DENIED);
+    for (const fn of ["create_first_organisation", "create_organisation"] as const) {
+      const made = await client.rpc(fn, { p_name: "Hijack Holdings" });
+      expect(made.error?.code).toBe(PERMISSION_DENIED);
+    }
+    const { count: owned } = await admin
+      .from("memberships")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("role", "owner");
+    expect(owned).toBe(0);
 
     // Once the password is trusted (chosen from an email link), the same token reads its company.
     await markPasswordTrusted(userId);
