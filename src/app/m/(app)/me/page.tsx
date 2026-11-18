@@ -183,7 +183,15 @@ async function MeHeader() {
           {profile.name}
         </span>
         <span className="text-sm text-fg-muted">
-          {copy.jobLine(profile.jobTitle, profile.staffId)}
+          {profile.jobTitle ? (
+            <>
+              {profile.jobTitle}
+              {copy.jobLineSeparator}
+              <span className="whitespace-nowrap">{profile.staffId}</span>
+            </>
+          ) : (
+            <span className="whitespace-nowrap">{copy.staffIdOnly(profile.staffId)}</span>
+          )}
         </span>
       </span>
     </div>

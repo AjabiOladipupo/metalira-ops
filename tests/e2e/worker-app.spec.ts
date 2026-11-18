@@ -181,6 +181,8 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await nav.getByRole("link", { name: "Payslips" }).click();
   await expect(w.getByRole("heading", { level: 1 })).toHaveText("Payslips");
   await expect(w.getByRole("button", { name: /^Theme: / })).toBeVisible();
+  // Its back arrow sits where Me has it (Wk* boards), so the top row does not jump between tabs.
+  const soonBack = await w.getByTestId("back-link").boundingBox();
   await w.getByRole("link", { name: "Back to home" }).click();
   await expect(w).toHaveURL(/\/m$/);
 
@@ -189,6 +191,7 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await w.getByRole("link", { name: "My profile" }).click();
   await expect(w).toHaveURL(/\/m\/me$/);
   await expect(w.getByText("Musa Ibrahim", { exact: true })).toBeVisible();
+  expect((await w.getByTestId("back-link").boundingBox())?.y).toBe(soonBack?.y);
   await expect(w.getByText(/Security guard · MO-/)).toBeVisible();
   await expect(w.getByTestId("me-department")).toHaveText("Security services");
   await expect(w.getByTestId("me-line-manager")).toHaveText("Kola Adebayo");
@@ -253,6 +256,9 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await w.getByRole("link", { name: "Request a change" }).click();
   await expect(w.getByRole("radio", { name: /Bank details/ })).toBeDisabled();
   await w.getByRole("radio", { name: "Next of kin" }).check();
+  // A two-line choice keeps its full-size radio.
+  const workRadio = await w.getByRole("radio", { name: /Work details/ }).boundingBox();
+  expect(workRadio?.width).toBeGreaterThanOrEqual(19);
   const details = w.getByLabel("What should change?");
   await details.fill("My next of kin is now my brother Sani, 0803 555 1234");
   await w.getByRole("button", { name: "Send to HR" }).click();
