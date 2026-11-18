@@ -7,7 +7,11 @@ import {
   THEME_COLOR_LIGHT,
   THEME_STORAGE_KEY,
 } from "../../src/components/theme/theme";
-import { OWNED_THEME_COLOR_ATTR, ownedColour, themeScript } from "../../src/components/theme/theme-script";
+import {
+  OWNED_THEME_COLOR_ATTR,
+  ownedColour,
+  themeScript,
+} from "../../src/components/theme/theme-script";
 
 interface FakeNode {
   attrs: Map<string, string>;
