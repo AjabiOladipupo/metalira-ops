@@ -15,6 +15,7 @@ import {
   uniqueSuffix,
   type TestOwner,
 } from "./helpers/auth";
+import { pickBank } from "./helpers/bank";
 
 test.skip(!supabaseReady, NEEDS_SUPABASE);
 
@@ -236,12 +237,17 @@ test("a signed-in worker sees their own masked profile, raises a bank change HR 
   await expect(w.getByRole("link", { name: "Back to Me" })).toHaveAttribute("href", "/m/me");
   await w.getByRole("radio", { name: "Bank details" }).check();
   const bank = w.getByRole("form", { name: "Bank details" });
-  await bank.getByLabel("Bank name").fill("Access Bank");
-  await bank.getByLabel("Account name").fill("Musa Ibrahim");
+  // Slice 2.3b: the bank gives the name on the account; nothing can be sent before it does.
+  await pickBank(bank, "access", "Access Bank");
   await bank.getByLabel("Account number").fill("012345");
-  await bank.getByRole("button", { name: "Send for approval" }).click();
-  await expect(w.getByText("Bank account numbers are 10 digits.")).toBeVisible();
-  await w.getByLabel("Account number").fill("0123 459 981");
+  await expect(bank.getByRole("button", { name: "Send for approval" })).toBeDisabled();
+  await bank.getByLabel("Account number").fill("0123 459 981");
+  const looked = bank.getByTestId("bank-lookup-result");
+  await expect(looked.getByTestId("name-check-status")).toHaveText("Name matches", {
+    timeout: 15_000,
+  });
+  await expect(looked.getByTestId("test-lookup")).toBeVisible();
+  await expectNoHorizontalScroll(w);
   await w.getByRole("button", { name: "Send for approval" }).click();
   await expect(w.getByRole("status")).toContainText("Sent for approval.");
   await expectNoHorizontalScroll(w);

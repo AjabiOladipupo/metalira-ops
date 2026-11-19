@@ -6,6 +6,9 @@
  * - SUPABASE_SECRET_KEY: the LOCAL stack's own key (a fixed development value), only when the
  *   app is built against that local stack. Worker sign-in and invite links need it.
  * - PII_ENCRYPTION_KEY: a throwaway key for PIN hashing, unless the environment sets one.
+ * - METALIRA_TEST_BANK_LOOKUP: the app runs as a production build, which would refuse account
+ *   name lookups without provider keys; this lets it use the deterministic test resolver
+ *   (slice 2.3b). Ignored on Vercel production.
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -43,5 +46,6 @@ export function appServerEnv(appSupabaseUrl: string | undefined): Record<string,
   return {
     ...localSecretKey(appSupabaseUrl),
     PII_ENCRYPTION_KEY: process.env.PII_ENCRYPTION_KEY ?? randomBytes(32).toString("base64"),
+    METALIRA_TEST_BANK_LOOKUP: "1",
   };
 }

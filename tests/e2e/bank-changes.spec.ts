@@ -13,6 +13,7 @@ import {
   uniqueSuffix,
   type TestAccount,
 } from "./helpers/auth";
+import { NEAR_ENDING, NO_MATCH_ENDING, enterBankAccount } from "./helpers/bank";
 
 test.skip(!supabaseReady, NEEDS_SUPABASE);
 // The new account number is encrypted by the app, so the server under test needs a key.
@@ -22,6 +23,7 @@ test.skip(
 );
 
 const NEW_NUBAN = "2000009153";
+const GTBANK = "GTBank (Guaranty Trust Bank)";
 
 async function expectNoHorizontalScroll(page: Page) {
   const overflow = await page.evaluate(
@@ -114,9 +116,17 @@ test("a bank change needs a second approver and applies 72 hours later", async (
   await expect(hrPage.getByRole("heading", { level: 1 })).toHaveText(name);
   await expect(hrPage.getByTestId("bank-account")).toHaveText("••••1234");
   const form = hrPage.getByRole("form", { name: "Change bank details" });
-  await form.getByLabel("New bank name", { exact: true }).fill("GTBank");
-  await form.getByLabel("New account name", { exact: true }).fill("Musa Ibrahim");
-  await form.getByLabel("New account number", { exact: true }).fill(NEW_NUBAN);
+  const looked = await enterBankAccount(form, {
+    search: "gtb",
+    bankName: GTBANK,
+    number: NEW_NUBAN,
+    prefix: "New ",
+  });
+  // The bank's name (surname first, as banks print it) matches the employee's name.
+  await expect(looked.getByTestId("bank-lookup-name")).toHaveText(
+    `IBRAHIM ${suffix.toUpperCase()} MUSA`,
+  );
+  await expect(looked.getByTestId("name-check-status")).toHaveText("Name matches");
   await form.getByLabel("Reason", { exact: true }).fill("Moved to GTBank, letter on file");
   await expectNoHorizontalScroll(hrPage);
   await form.getByRole("button", { name: "Send for approval" }).click();
@@ -150,6 +160,7 @@ test("a bank change needs a second approver and applies 72 hours later", async (
   await expect(pending).toContainText("Waiting for your approval");
   await expect(pending).toContainText("Moved to GTBank, letter on file");
   await expect(pending).toContainText("Access Bank ••••1234");
+  await expect(pending.getByTestId("name-check-status")).toHaveText("Name matches");
   // Finance may check the new number in full; the reveal is audited.
   await pending.getByRole("button", { name: "Show account number" }).click();
   await expect(pending.getByTestId("bank-change-account")).toHaveText(NEW_NUBAN, {
@@ -205,4 +216,89 @@ test("a bank change needs a second approver and applies 72 hours later", async (
     ]),
   );
   expect(JSON.stringify(audit)).not.toContain(NEW_NUBAN);
+});
+
+/**
+ * Slice 2.3b: a worker's new account must be in their name. Someone else's name can't be sent;
+ * a close match needs a reason, which the approver sees with both names.
+ */
+test("a bank change in someone else's name is refused; a close match needs a reason", async ({
+  browser,
+}) => {
+  test.setTimeout(150_000);
+  const suffix = uniqueSuffix();
+  const owner = await createOwner("bank-near", `Ikoyi Cleaning ${suffix}`);
+  const hr = await createAccount("bank-near-hr", "Hauwa Bello");
+  await addMembership(owner.orgId, hr.userId, "hr");
+  const workerId = randomUUID();
+  const name = `Chidinma Okafor ${suffix}`;
+  const { error } = await adminClient()
+    .from("workers")
+    .insert({
+      id: workerId,
+      organisation_id: owner.orgId,
+      staff_id: "IK-0007",
+      first_name: "Chidinma",
+      last_name: `Okafor ${suffix}`,
+      employment_type: "permanent",
+      start_date: "2024-03-03",
+    });
+  expect(error).toBeNull();
+
+  const hrPage = await signedInPage(browser, hr);
+  await hrPage.goto(`/app/people/${workerId}`);
+  const form = hrPage.getByRole("form", { name: "Change bank details" });
+  const send = form.getByRole("button", { name: "Send for approval" });
+
+  // Someone else's name: shown, flagged, and the request can't be sent.
+  const other = await enterBankAccount(form, {
+    search: "opay",
+    bankName: "OPay",
+    number: `801234567${NO_MATCH_ENDING}`,
+    prefix: "New ",
+  });
+  await expect(other.getByTestId("bank-lookup-name")).toHaveText("OKONKWO CHIDINMA BLESSING");
+  await expect(other.getByTestId("name-check-status")).toHaveText("Name doesn't match");
+  await expect(send).toBeDisabled();
+  await expectNoHorizontalScroll(hrPage);
+
+  // A close match: the form asks why; the server refuses it without a reason.
+  await form.getByLabel("New account number", { exact: true }).fill(`801234567${NEAR_ENDING}`);
+  const near = form.getByTestId("bank-lookup-result");
+  await expect(near.getByTestId("name-check-status")).toHaveText("Close match");
+  await expect(near.getByTestId("bank-lookup-name")).toHaveText(`OKAFOR ${suffix.toUpperCase()} C`);
+  await send.click();
+  await expect(hrPage.getByRole("alert").first()).toContainText("close but not the same");
+
+  // Again, with a reason.
+  const again = hrPage.getByRole("form", { name: "Change bank details" });
+  await enterBankAccount(again, {
+    search: "opay",
+    bankName: "OPay",
+    number: `801234567${NEAR_ENDING}`,
+    prefix: "New ",
+  });
+  await again
+    .getByLabel("Why is this the right account?", { exact: true })
+    .fill("OPay shows her first initial only; statement seen");
+  await again.getByRole("button", { name: "Send for approval" }).click();
+
+  // The owner, as approver, sees both names and the reason.
+  const ownerPage = await signedInPage(browser, owner);
+  await ownerPage.goto("/app/people/approvals");
+  const card = ownerPage.getByRole("article", { name: `Bank change for ${name}` });
+  await expect(card.getByTestId("name-check-status")).toHaveText("Close match", {
+    timeout: 15_000,
+  });
+  await expect(card).toContainText(`Expected: Chidinma Okafor ${suffix}`);
+  await expect(card.getByTestId("name-check-reason")).toContainText(
+    "OPay shows her first initial only; statement seen",
+  );
+  await expectNoHorizontalScroll(ownerPage);
+  await card.getByRole("button", { name: "Approve" }).click();
+  await expect(
+    ownerPage
+      .getByRole("region", { name: /On hold/ })
+      .getByRole("article", { name: `Bank change for ${name}` }),
+  ).toContainText("Approved, on hold", { timeout: 15_000 });
 });

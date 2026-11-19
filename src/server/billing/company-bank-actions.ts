@@ -6,16 +6,24 @@ import { after } from "next/server";
 import { z } from "zod";
 
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
-import { canRevealCompanyBank } from "@/lib/company-bank";
+import { canRequestCompanyBank, canRevealCompanyBank } from "@/lib/company-bank";
 import { formatDateTime } from "@/lib/dates";
+import { createServerSupabase } from "@/lib/supabase/server";
 import type { CompanyFormState } from "@/server/identity/company-form-state";
 import { MutationError } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 import { getSession } from "@/server/identity/session";
 import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "@/server/people/pii-access";
 
+import {
+  LOOKUP_MESSAGES,
+  loadCompanyNames,
+  runBankLookup,
+  type BankLookupView,
+} from "./bank-lookup";
 import { decideCompanyBank, requestCompanyBank, withdrawCompanyBank } from "./company-bank";
 import { sendCompanyBankNotices } from "./company-bank-notices";
+import { lookupBankAccountSchema } from "./schemas";
 
 /**
  * Server Actions for the company bank account (slice 2.3). Each runs through `mutate()`, which
@@ -61,8 +69,46 @@ function refresh(): void {
 
 /** Refills the form after a refusal, never with the account number. */
 function echo(fields: Record<string, string>): Record<string, string> {
-  const { bankName = "", accountName = "", reason = "" } = fields;
-  return { bankName, accountName, reason };
+  const { bankCode = "", reason = "", nameCheckReason = "" } = fields;
+  return { bankCode, reason, nameCheckReason };
+}
+
+/**
+ * "Check" on the company account form: asks the bank network for the account name and compares
+ * it with the company's legal and trading names (slice 2.3b). Owner, admin and finance. Returns
+ * the name and a lookup id the form sends with the request; the account number is never echoed.
+ */
+export async function lookupCompanyBankAccountAction(input: unknown): Promise<BankLookupView> {
+  const parsed = lookupBankAccountSchema.safeParse(input);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue?.path[0] === "bankCode" ? "bankCode" : "bankAccountNumber";
+    return { ok: false, message: issue?.message ?? "Check the bank and account number.", field };
+  }
+  const session = await getSession();
+  if (!session) redirect(SIGN_IN_PATH);
+  if (!session.active || !canRequestCompanyBank(session.active.role)) {
+    return {
+      ok: false,
+      message: "Only an owner, an admin or finance can change the company bank account.",
+    };
+  }
+  const organisationId = session.active.organisationId;
+  try {
+    const supabase = await createServerSupabase();
+    return await runBankLookup({
+      organisationId,
+      userId: session.user.id,
+      purpose: "company_bank",
+      workerId: null,
+      bankCode: parsed.data.bankCode,
+      accountNumber: parsed.data.bankAccountNumber,
+      expected: await loadCompanyNames(supabase, organisationId),
+    });
+  } catch (error) {
+    console.error("billing.bank_lookup_failed:", error instanceof Error ? error.name : "unknown");
+    return { ok: false, message: LOOKUP_MESSAGES.failed };
+  }
 }
 
 /** "Add account" / "Change account": raises a request (or adds the first account during setup). */

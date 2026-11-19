@@ -21,6 +21,13 @@ import { getSession } from "@/server/identity/session";
 import type { Database } from "@/types/db";
 
 import {
+  loadCompanyNames,
+  nameCheckView,
+  refuseCheckedRequest,
+  takeCheckedName,
+  type NameCheckView,
+} from "./bank-lookup";
+import {
   decideCompanyBankSchema,
   requestCompanyBankSchema,
   withdrawCompanyBankSchema,
@@ -72,6 +79,12 @@ function fromDbError(error: PostgrestError, field = "bankAccountNumber"): never 
     case "MLOB4":
     case "MLOB5":
       throw new MutationError("invalid", error.message);
+    case "MLBL3":
+    case "MLBL4":
+    case "MLBL5":
+    case "MLBL6":
+    case "MLBL7":
+      throw new MutationError("invalid", error.message, { bankAccountNumber: error.message });
     case "23505":
       if (text.includes("organisation_bank_accounts_one_open_key")) {
         throw new MutationError("invalid", OPEN_REQUEST, { [field]: OPEN_REQUEST });
@@ -107,6 +120,17 @@ export const requestCompanyBankSpec: MutationSpec<
   schema: requestCompanyBankSchema,
   roles: COMPANY_BANK_REQUESTERS,
   run: async ({ supabase, organisationId, data }) => {
+    // The account name is the bank's, from the caller's own lookup; never from the form.
+    const checked = await takeCheckedName(supabase, {
+      organisationId,
+      lookupId: data.bankLookupId,
+      purpose: "company_bank",
+      workerId: null,
+      bankCode: data.bankCode,
+      accountNumber: data.bankAccountNumber,
+      expected: await loadCompanyNames(supabase, organisationId),
+      reason: data.nameCheckReason,
+    });
     const id = randomUUID();
     const sealed = sealPii(data.bankAccountNumber, companyBankContext(organisationId, id));
     // A NUBAN is 10 digits, so it always has four to show.
@@ -114,11 +138,16 @@ export const requestCompanyBankSpec: MutationSpec<
     const { data: rows, error } = await supabase.rpc("request_org_bank_account", {
       p_organisation_id: organisationId,
       p_id: id,
-      p_bank_name: data.bankName,
-      p_account_name: data.accountName,
+      p_bank_name: checked.bankName,
+      p_account_name: checked.accountName,
       p_bank_account_enc: sealed.enc,
       p_bank_account_last4: sealed.last4,
       p_reason: data.reason ?? undefined,
+      p_bank_code: checked.bankCode,
+      p_bank_lookup_id: data.bankLookupId,
+      p_bank_account_digest: checked.digest,
+      p_name_check: checked.nameCheck,
+      p_name_check_reason: checked.reason ?? undefined,
     });
     if (error) fromDbError(error);
     const row = rows?.[0];
@@ -176,7 +205,9 @@ export async function checkRequestedAccount(
 ): Promise<void> {
   const { data: rows, error } = await supabase
     .from("organisation_bank_accounts")
-    .select("id, status, bank_name, account_name, bank_account_enc, bank_account_last4")
+    .select(
+      "id, status, bank_name, account_name, bank_account_enc, bank_account_last4, bank_code, bank_lookup_id, bank_account_digest, name_check, name_check_reason",
+    )
     .eq("organisation_id", organisationId)
     .in("status", ["pending", "active"]);
   if (error) fromDbError(error, "decision");
@@ -199,6 +230,16 @@ export async function checkRequestedAccount(
       "The last four digits on this request don't match its account number, so it can't be approved. Reject it and raise a new one.",
     );
   }
+
+  // The bank's name check (slice 2.3b): the number is the one checked, and the name still
+  // compares by today's rules and company names.
+  const refusal = refuseCheckedRequest(
+    organisationId,
+    request,
+    number,
+    await loadCompanyNames(supabase, organisationId),
+  );
+  if (refusal) throw new MutationError("invalid", refusal);
 
   const current = rows?.find((r) => r.status === "active");
   if (
@@ -311,6 +352,8 @@ export interface CompanyBankView {
   /** "GTBank ••••4410 · ADEBAYO FACILITY SERVICES LTD". */
   label: string;
   reason: string | null;
+  /** The bank's account name check, recomputed from the stored name (slice 2.3b). */
+  nameCheck: NameCheckView;
   singleApprover: boolean;
   requestedBy: string;
   requestedByName: string;
@@ -336,7 +379,7 @@ export interface CompanyBankDetail {
 }
 
 const COLUMNS =
-  "id, status, bank_name, account_name, bank_account_last4, reason, single_approver, requested_by, approved_by, rejected_by, cancelled_by, decision_note, created_at, decided_at, applies_after, activated_at, retired_at, cancelled_at";
+  "id, status, bank_name, account_name, bank_account_last4, reason, name_check, name_check_reason, name_check_source, single_approver, requested_by, approved_by, rejected_by, cancelled_by, decision_note, created_at, decided_at, applies_after, activated_at, retired_at, cancelled_at";
 
 const FORMER_USER = "A former user";
 
@@ -381,6 +424,7 @@ export async function loadCompanyBank(
     ),
   );
   const nameOf = (id: string | null) => (id ? (names.get(id) ?? FORMER_USER) : null);
+  const companyNames = rows.length > 0 ? await loadCompanyNames(supabase, organisationId) : null;
 
   const history: CompanyBankView[] = rows.map((r) => ({
     id: r.id,
@@ -394,6 +438,7 @@ export async function loadCompanyBank(
       last4: r.bank_account_last4,
     }),
     reason: r.reason,
+    nameCheck: nameCheckView(r, companyNames),
     singleApprover: r.single_approver,
     requestedBy: r.requested_by,
     requestedByName: nameOf(r.requested_by) ?? FORMER_USER,

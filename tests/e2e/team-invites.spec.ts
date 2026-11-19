@@ -23,6 +23,7 @@ import {
   uniqueSuffix,
   type TestAccount,
 } from "./helpers/auth";
+import { enterBankAccount } from "./helpers/bank";
 
 test.skip(!supabaseReady, NEEDS_SUPABASE);
 
@@ -181,9 +182,12 @@ test("owner invites HR, who accepts and approves the owner's bank change", async
   // --- The owner raises a bank change; HR approves it ---------------------------------------
   await ownerPage.goto(`/app/people/${workerId}`);
   const form = ownerPage.getByRole("form", { name: "Change bank details" });
-  await form.getByLabel("New bank name", { exact: true }).fill("GTBank");
-  await form.getByLabel("New account name", { exact: true }).fill("Musa Ibrahim");
-  await form.getByLabel("New account number", { exact: true }).fill(NEW_NUBAN);
+  await enterBankAccount(form, {
+    search: "gtb",
+    bankName: "GTBank (Guaranty Trust Bank)",
+    number: NEW_NUBAN,
+    prefix: "New ",
+  });
   await form.getByLabel("Reason", { exact: true }).fill("Moved to GTBank, letter on file");
   await form.getByRole("button", { name: "Send for approval" }).click();
   const card = ownerPage.getByRole("article", { name: `Bank change for ${name}` });

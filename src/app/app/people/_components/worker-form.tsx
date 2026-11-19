@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useRef, useState } from "react";
 
+import { BankAccountFields } from "@/components/bank-account-fields";
 import { Field, FormAlert, SelectField, SubmitButton } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { NIGERIAN_STATES } from "@/lib/company";
 import { maskRsaPin, ninStatus } from "@/lib/mask";
 import { EMPLOYMENT_TYPE_LABELS, PAY_TYPE_LABELS, type PayType } from "@/lib/people";
 import { createWorkerAction, updateWorkerAction } from "@/server/people/actions";
+import { lookupWorkerBankAccountAction } from "@/server/people/bank-change-actions";
 import type { Option } from "@/server/people/people-data";
 
 import { fieldValue } from "../../_company/form-footer";
@@ -133,8 +135,8 @@ export function WorkerForm({
     startDate: fieldValue(state, "startDate", worker?.startDate ?? today),
     payType: fieldValue(state, "payType", ""),
     payEffectiveFrom: fieldValue(state, "payEffectiveFrom", ""),
-    bankName: fieldValue(state, "bankName", ""),
-    accountName: fieldValue(state, "accountName", ""),
+    bankCode: fieldValue(state, "bankCode", ""),
+    nameCheckReason: fieldValue(state, "nameCheckReason", ""),
     tin: fieldValue(state, "tin", worker?.tin),
     taxState: fieldValue(state, "taxState", worker?.taxState),
     pfaName: fieldValue(state, "pfaName", worker?.pfaName),
@@ -146,10 +148,12 @@ export function WorkerForm({
   };
 
   const [payType, setPayType] = useState(defaults.payType);
+  const formRef = useRef<HTMLFormElement>(null);
   const cancelHref = worker ? `/app/people/${worker.id}` : "/app/people";
 
   return (
     <form
+      ref={formRef}
       key={JSON.stringify(defaults)}
       action={action}
       noValidate
@@ -290,31 +294,26 @@ export function WorkerForm({
       {mode === "create" ? (
         <Fieldset
           legend="Bank details"
-          note="Enter all three, or leave them blank and add them later. Someone other than you approves them, and payouts use them 72 hours after approval."
+          note="Choose the bank and enter the account number, and the bank gives the account name. Or leave them blank and add them later. Someone other than you approves them, and payouts use them 72 hours after approval."
         >
-          <div className={GRID}>
-            <Field
-              label="Bank name"
-              name="bankName"
-              defaultValue={defaults.bankName}
-              error={errors?.bankName}
-            />
-            <Field
-              label="Account name"
-              name="accountName"
-              defaultValue={defaults.accountName}
-              error={errors?.accountName}
-            />
-            <Field
-              label="Account number"
-              name="bankAccountNumber"
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="10 digits"
-              maxLength={14}
-              error={errors?.bankAccountNumber}
-            />
-          </div>
+          <BankAccountFields
+            lookup={(input) => {
+              const form = formRef.current ? new FormData(formRef.current) : null;
+              const text = (key: string) => {
+                const value = form?.get(key);
+                return typeof value === "string" ? value : "";
+              };
+              return lookupWorkerBankAccountAction({
+                ...input,
+                firstName: text("firstName"),
+                lastName: text("lastName"),
+              });
+            }}
+            defaultBankCode={defaults.bankCode}
+            defaultReason={defaults.nameCheckReason}
+            errors={errors}
+            whose="the employee's"
+          />
         </Fieldset>
       ) : (
         <Fieldset

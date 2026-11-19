@@ -2,6 +2,12 @@ import { z } from "zod";
 
 import { isNinFormat } from "@/lib/mask";
 import { parseNairaToKobo, type Kobo } from "@/lib/money";
+import {
+  bankCheckFields,
+  bankCodeSchema,
+  bankLookupIdSchema,
+  nameCheckReasonSchema,
+} from "@/server/billing/bank-check-schema";
 import { plainText } from "@/server/identity/names";
 import { Constants } from "@/types/db";
 
@@ -289,9 +295,11 @@ export const createWorkerSchema = z
     employmentType: z.enum(EMPLOYMENT_TYPES, "Choose permanent, contract, casual or daily"),
     startDate: isoDateSchema,
 
-    bankName: optional(note("Bank name")),
-    accountName: optional(text("Account name")),
+    /** Bank details (slice 2.3b): the bank's code, the number, and the account name check. */
+    bankCode: optional(bankCodeSchema),
     bankAccountNumber: optional(nubanSchema),
+    bankLookupId: optional(bankLookupIdSchema),
+    nameCheckReason: nameCheckReasonSchema,
 
     nin: optional(ninSchema),
     tin: optional(note("TIN")),
@@ -321,21 +329,26 @@ export const createWorkerSchema = z
         message: "Choose one line manager",
       });
     }
-    const bank = [data.bankName, data.accountName, data.bankAccountNumber];
+    const bank = [data.bankCode, data.bankAccountNumber];
     if (bank.some((value) => value !== null) && bank.some((value) => value === null)) {
       for (const [key, value] of [
-        ["bankName", data.bankName],
-        ["accountName", data.accountName],
+        ["bankCode", data.bankCode],
         ["bankAccountNumber", data.bankAccountNumber],
       ] as const) {
         if (value === null) {
           ctx.addIssue({
             code: "custom",
             path: [key],
-            message: "Enter the bank name, account name and account number together",
+            message: "Choose the bank and enter the account number together",
           });
         }
       }
+    } else if (data.bankCode !== null && data.bankLookupId === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["bankAccountNumber"],
+        message: "Wait for the bank to give the account name",
+      });
     }
     if (data.payType) {
       checkPayAmounts(data.payType, data, ctx);
@@ -458,10 +471,15 @@ export type UpdateDepartmentInput = z.input<typeof updateDepartmentSchema>;
  */
 export const requestBankChangeSchema = z.object({
   workerId: z.uuid("Choose an employee"),
-  bankName: note("Bank name"),
-  accountName: text("Account name"),
+  ...bankCheckFields,
   bankAccountNumber: nubanSchema,
   reason: optional(note("Reason", 500)),
+});
+
+/** "Check bank details" on the person page: the bank to check the number on file with. */
+export const checkWorkerBankSchema = z.object({
+  workerId: z.uuid("Choose an employee"),
+  bankCode: bankCodeSchema,
 });
 
 export type RequestBankChangeInput = z.input<typeof requestBankChangeSchema>;

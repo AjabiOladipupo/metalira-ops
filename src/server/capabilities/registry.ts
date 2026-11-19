@@ -1,12 +1,13 @@
 import "server-only";
 
 import { MANAGER_ROLES } from "@/lib/roles";
-import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
+import { COMPANY_BANK_REQUESTERS, COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
 import {
   decideCompanyBankSpec,
   requestCompanyBankSpec,
   withdrawCompanyBankSpec,
 } from "@/server/billing/company-bank";
+import { lookupBankAccountSchema } from "@/server/billing/schemas";
 import { listClients, loadClientsSummary } from "@/server/business/clients-data";
 import {
   CLIENT_READERS,
@@ -48,6 +49,7 @@ import {
   requestBankChangeSpec,
   withdrawBankChangeSpec,
 } from "@/server/people/bank-changes";
+import { lookupWorkerBankSchema } from "@/server/people/bank-lookups";
 import { resolveChangeRequestSpec } from "@/server/people/change-requests";
 import { createDepartmentSpec, updateDepartmentSpec } from "@/server/people/departments";
 import {
@@ -58,7 +60,12 @@ import {
   startImportSpec,
 } from "@/server/people/imports/batches";
 import { saveMappingSpec } from "@/server/people/mapping";
-import { ownBankChangeSchema, ownChangeRequestSchema } from "@/server/people/own-requests";
+import { checkWorkerBankSchema } from "@/server/people/schemas";
+import {
+  ownBankChangeSchema,
+  ownBankLookupSchema,
+  ownChangeRequestSchema,
+} from "@/server/people/own-requests";
 import { unlockSignInSpec } from "@/server/people/sign-in-status";
 import {
   decideStaffIdCorrectionSpec,
@@ -70,6 +77,7 @@ import {
   cancelPayRateSpec,
   createWorkerSpec,
   endEmploymentSpec,
+  PEOPLE_EDITORS,
   updateWorkerSpec,
 } from "@/server/people/workers";
 import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
@@ -113,6 +121,8 @@ const AUTH = "Sign-in and account flows are never run by the agent.";
 const NO_PREVIEW = "Changes several rows or money and has no preview yet.";
 const SECOND_APPROVER = "Decides a two-person request: the agent is never the second approver.";
 const REVEAL = "Shows personal data in full: the agent sees masked values only.";
+const LOOKUP =
+  "Exposes an account holder's name from the bank network (personal data), and each lookup is rate-limited and may cost money: people only.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -606,6 +616,32 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: REVEAL,
   },
+  {
+    name: "bank_changes.lookup_account",
+    description:
+      "Asks the bank network for the account name of a bank and number, for an employee being added or changed.",
+    kind: "read",
+    audience: "manager",
+    roles: [...PEOPLE_EDITORS],
+    input: lookupWorkerBankSchema,
+    changes: "none",
+    action: at("people/bank-change-actions", "lookupWorkerBankAccountAction"),
+    agent: false,
+    agentNote: LOOKUP,
+  },
+  {
+    name: "people.check_bank_details",
+    description:
+      "Checks an employee's bank details on file with the bank network and keeps the result on the employee.",
+    kind: "write",
+    audience: "manager",
+    roles: [...PEOPLE_EDITORS],
+    input: checkWorkerBankSchema,
+    changes: "one",
+    action: at("people/bank-change-actions", "checkWorkerBankDetailsAction"),
+    agent: false,
+    agentNote: LOOKUP,
+  },
 
   // -------------------------------------------------------------------------
   // Company bank account (billing/company-bank-actions.ts, slice 2.3)
@@ -655,6 +691,19 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("billing/company-bank-actions", "revealCompanyBankAccount"),
     agent: false,
     agentNote: REVEAL,
+  },
+  {
+    name: "company_bank.lookup_account",
+    description:
+      "Asks the bank network for the account name of a bank and number, and compares it with the company's names.",
+    kind: "read",
+    audience: "manager",
+    roles: [...COMPANY_BANK_REQUESTERS],
+    input: lookupBankAccountSchema,
+    changes: "none",
+    action: at("billing/company-bank-actions", "lookupCompanyBankAccountAction"),
+    agent: false,
+    agentNote: LOOKUP,
   },
 
   // -------------------------------------------------------------------------
@@ -736,6 +785,18 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/own-request-actions", "requestOwnBankChangeAction"),
     agent: false,
     agentNote: PERSONAL,
+  },
+  {
+    name: "me.lookup_bank_account",
+    description: "Asks the bank network for the account name of a worker's own new account.",
+    kind: "read",
+    audience: "worker",
+    roles: [],
+    input: ownBankLookupSchema,
+    changes: "none",
+    action: at("people/own-request-actions", "lookupOwnBankAccountAction"),
+    agent: false,
+    agentNote: LOOKUP,
   },
   {
     name: "me.request_change",

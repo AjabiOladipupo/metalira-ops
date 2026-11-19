@@ -21,6 +21,7 @@ import {
   type TenantUser,
   type TestUser,
 } from "./helpers/supabase";
+import { makeLookup } from "./helpers/bank-lookup";
 
 type Role = Database["public"]["Enums"]["membership_role"];
 
@@ -65,7 +66,19 @@ async function company(label: string, setupDone: boolean): Promise<Company> {
   return { owner, people };
 }
 
-function request(c: Company, by: Client, last4 = "4410") {
+/**
+ * Raises a request as `by`, with an account name lookup made for them by the server (slice
+ * 2.3b). A caller the lookup refuses (wrong role, another company) raises without one, so the
+ * request itself is what the database refuses.
+ */
+async function request(c: Company, by: Client, last4 = "4410") {
+  const { data: who } = await by.auth.getUser();
+  const lookup = await makeLookup(admin, {
+    orgId: c.owner.orgId,
+    userId: who.user!.id,
+    purpose: "company_bank",
+    last4,
+  }).catch(() => null);
   return by.rpc("request_org_bank_account", {
     p_organisation_id: c.owner.orgId,
     p_id: randomUUID(),
@@ -73,6 +86,14 @@ function request(c: Company, by: Client, last4 = "4410") {
     p_account_name: "Bank Test Ltd",
     p_bank_account_enc: enc(),
     p_bank_account_last4: last4,
+    ...(lookup
+      ? {
+          p_bank_code: lookup.bankCode,
+          p_bank_lookup_id: lookup.id,
+          p_bank_account_digest: lookup.digest,
+          p_name_check: "match" as const,
+        }
+      : {}),
   });
 }
 

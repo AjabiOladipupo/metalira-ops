@@ -21,6 +21,8 @@ import {
 } from "@/server/people/own-requests";
 import type { Database } from "@/types/db";
 
+import { LOOKUP_ID, lookupRow } from "../helpers/bank-lookup";
+
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
 
 const ORG = "a0000000-0000-4000-8000-000000000001";
@@ -32,7 +34,15 @@ const copy = workerMessages.change;
 
 type Result = { data: unknown; error: unknown };
 
-function fakeSupabase(result: Result) {
+/** The worker's own lookup (slice 2.3b), as RLS returns it to them. */
+function ownLookup(accountName = "IBRAHIM MUSA"): Result {
+  return {
+    data: lookupRow({ organisationId: ORG, accountNumber: NUBAN, accountName, workerId: WORKER }),
+    error: null,
+  };
+}
+
+function fakeSupabase(result: Result, lookup: Result = ownLookup()) {
   const calls: { table: string; op: string; payload: unknown; filters: unknown[][] }[] = [];
   function from(table: string) {
     const call = { table, op: "select", payload: undefined as unknown, filters: [] as unknown[][] };
@@ -54,7 +64,7 @@ function fakeSupabase(result: Result) {
       },
       select: () => builder,
       single: async () => result,
-      maybeSingle: async () => result,
+      maybeSingle: async () => (table === "bank_account_lookups" ? lookup : result),
     };
     return builder;
   }
@@ -62,7 +72,14 @@ function fakeSupabase(result: Result) {
 }
 
 function ctx(client: SupabaseClient<Database>): OwnContext {
-  return { supabase: client, organisationId: ORG, workerId: WORKER };
+  return {
+    supabase: client,
+    organisationId: ORG,
+    workerId: WORKER,
+    userId: "user-1",
+    firstName: "Musa",
+    lastName: "Ibrahim",
+  };
 }
 
 async function refusal(promise: Promise<unknown>): Promise<MutationError> {
@@ -87,8 +104,10 @@ describe("a worker's own bank change", () => {
     // A form can't choose whose bank details change.
     workerId: OTHER,
     organisationId: OTHER,
-    bankName: " GTBank ",
-    accountName: "Musa Ibrahim",
+    bankCode: "058",
+    bankLookupId: LOOKUP_ID,
+    // Never taken from the form: the bank's name comes from the lookup.
+    accountName: "Someone Else",
     bankAccountNumber: "0123 457 712",
     reason: "",
   };
@@ -96,14 +115,16 @@ describe("a worker's own bank change", () => {
   it("is raised for the signed-in worker, encrypted for their own column", async () => {
     const fake = fakeSupabase({ data: { id: ROW }, error: null });
     await expect(runOwnBankChange(ctx(fake.client), input)).resolves.toEqual({ id: ROW });
-    const [call] = fake.calls;
+    const call = fake.calls.find((c) => c.op === "insert");
     expect(call).toMatchObject({ table: "bank_detail_changes", op: "insert" });
     const row = call!.payload as Record<string, string | null>;
     expect(row).toMatchObject({
       organisation_id: ORG,
       worker_id: WORKER,
-      bank_name: "GTBank",
-      account_name: "Musa Ibrahim",
+      bank_name: "GTBank (Guaranty Trust Bank)",
+      account_name: "IBRAHIM MUSA",
+      bank_code: "058",
+      name_check: "match",
       bank_account_last4: "7712",
       reason: null,
     });
@@ -117,18 +138,25 @@ describe("a worker's own bank change", () => {
     const error = await refusal(
       runOwnBankChange(ctx(fake.client), {
         ...input,
-        bankName: "",
-        accountName: "www.example.com",
+        bankCode: "",
+        bankLookupId: "",
         bankAccountNumber: "012345771",
       }),
     );
     expect(error.code).toBe("invalid");
     expect(error.fieldErrors).toEqual({
-      bankName: copy.bankNameRequired,
-      accountName: copy.accountNameNoLinks,
+      bankCode: copy.bankRequired,
+      bankLookupId: copy.checkFirst,
       bankAccountNumber: copy.accountNumberInvalid,
     });
     expect(fake.calls).toEqual([]);
+  });
+
+  it("refuses an account that isn't in the worker's name", async () => {
+    const fake = fakeSupabase({ data: { id: ROW }, error: null }, ownLookup("ADAMU HALIMA"));
+    const error = await refusal(runOwnBankChange(ctx(fake.client), input));
+    expect(error.fieldErrors.bankAccountNumber).toContain("ADAMU HALIMA");
+    expect(fake.calls.some((c) => c.op === "insert")).toBe(false);
   });
 
   it("explains a bank change that is already waiting", async () => {
