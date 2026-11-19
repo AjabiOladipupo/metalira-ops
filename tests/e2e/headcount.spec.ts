@@ -116,6 +116,7 @@ test("ops_manager adds 4 headcount rows at two sites and sees the weekly total",
       unit: "shift",
       rate_kobo: 1_250_000,
       ot_multiplier_bps: 15_000,
+      sort_order: 0,
     },
     {
       organisation_id: owner.orgId,

@@ -97,14 +97,14 @@ isOneToOne: false
                   ]
                 },"clients": {
                   Row: {
-                    "billing_address": string | null,"billing_terms_days": number | null,"created_at": string,"created_by": string | null,"id": string,"legal_name": string | null,"name": string,"notes": string | null,"organisation_id": string,"rc_number": string | null,"state": string | null,"status": string,"tin": string | null,"updated_at": string
+                    "billing_address": string | null,"billing_terms_days": number | null,"created_at": string,"created_by": string | null,"deducts_wht": string,"id": string,"legal_name": string | null,"name": string,"notes": string | null,"organisation_id": string,"rc_number": string | null,"state": string | null,"status": string,"tin": string | null,"updated_at": string,"withholds_vat": boolean
                   }
                   ComputedFields: never
                   Insert: {
-                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"id"?: string,"legal_name"?: string | null,"name": string,"notes"?: string | null,"organisation_id": string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string
+                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"deducts_wht"?: string,"id"?: string,"legal_name"?: string | null,"name": string,"notes"?: string | null,"organisation_id": string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string,"withholds_vat"?: boolean
                   }
                   Update: {
-                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"id"?: string,"legal_name"?: string | null,"name"?: string,"notes"?: string | null,"organisation_id"?: string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string
+                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"deducts_wht"?: string,"id"?: string,"legal_name"?: string | null,"name"?: string,"notes"?: string | null,"organisation_id"?: string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string,"withholds_vat"?: boolean
                   }
                   Relationships: [
                     {
@@ -145,32 +145,6 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "sites"
       referencedColumns: ["organisation_id","id"]
-    }
-                  ]
-                },"contract_wht_rates": {
-                  Row: {
-                    "contract_id": string,"created_at": string,"created_by": string | null,"effective_from": string,"effective_to": string | null,"id": string,"organisation_id": string,"rate_bps": number,"updated_at": string
-                  }
-                  ComputedFields: never
-                  Insert: {
-                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"effective_from": string,"effective_to"?: string | null,"id"?: string,"organisation_id": string,"rate_bps": number,"updated_at"?: string
-                  }
-                  Update: {
-                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"effective_from"?: string,"effective_to"?: string | null,"id"?: string,"organisation_id"?: string,"rate_bps"?: number,"updated_at"?: string
-                  }
-                  Relationships: [
-                    {
-      foreignKeyName: "contract_wht_rates_contract_fkey"
-      columns: ["organisation_id","contract_id"]
-isOneToOne: false
-      referencedRelation: "contracts"
-      referencedColumns: ["organisation_id","id"]
-    },{
-      foreignKeyName: "contract_wht_rates_organisation_id_fkey"
-      columns: ["organisation_id"]
-isOneToOne: false
-      referencedRelation: "organisations"
-      referencedColumns: ["id"]
     }
                   ]
                 },"contracts": {
@@ -483,14 +457,14 @@ isOneToOne: false
                   ]
                 },"rate_card_lines": {
                   Row: {
-                    "band": string,"created_at": string,"created_by": string | null,"currency": string,"id": string,"organisation_id": string,"ot_multiplier_bps": number | null,"ot_rate_kobo": number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"sort_order": number,"unit": string
+                    "band": string,"created_at": string,"created_by": string | null,"currency": string,"id": string,"organisation_id": string,"ot_multiplier_bps": number | null,"ot_rate_kobo": number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"service_type": string,"sort_order": number,"unit": string,"wht_rate_bps": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "band"?: string,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"id"?: string,"organisation_id": string,"ot_multiplier_bps"?: number | null,"ot_rate_kobo"?: number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"sort_order"?: number,"unit": string
+                    "band"?: string,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"id"?: string,"organisation_id": string,"ot_multiplier_bps"?: number | null,"ot_rate_kobo"?: number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"service_type"?: string,"sort_order"?: number,"unit": string,"wht_rate_bps": number
                   }
                   Update: {
-                    "band"?: string,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"id"?: string,"organisation_id"?: string,"ot_multiplier_bps"?: number | null,"ot_rate_kobo"?: number | null,"rate_card_id"?: string,"rate_kobo"?: number,"role"?: string,"sort_order"?: number,"unit"?: string
+                    "band"?: string,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"id"?: string,"organisation_id"?: string,"ot_multiplier_bps"?: number | null,"ot_rate_kobo"?: number | null,"rate_card_id"?: string,"rate_kobo"?: number,"role"?: string,"service_type"?: string,"sort_order"?: number,"unit"?: string,"wht_rate_bps"?: number
                   }
                   Relationships: [
                     {
@@ -533,16 +507,42 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
-                },"sites": {
+                },"site_checkpoints": {
                   Row: {
-                    "client_id": string,"created_at": string,"created_by": string | null,"id": string,"name": string,"organisation_id": string,"updated_at": string
+                    "created_at": string,"created_by": string | null,"id": string,"location": unknown,"name": string,"organisation_id": string,"qr_rotated_at": string | null,"qr_token": string,"retired_at": string | null,"retired_by": string | null,"site_id": string,"sort_order": number,"status": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "client_id": string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"name": string,"organisation_id": string,"updated_at"?: string
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name": string,"organisation_id": string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id": string,"sort_order"?: number,"status"?: string,"updated_at"?: string
                   }
                   Update: {
-                    "client_id"?: string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"updated_at"?: string
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name"?: string,"organisation_id"?: string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id"?: string,"sort_order"?: number,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "site_checkpoints_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "site_checkpoints_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"sites": {
+                  Row: {
+                    "address": string | null,"boundary": unknown,"centre": unknown,"client_id": string,"created_at": string,"created_by": string | null,"geofence": unknown,"geofence_set_at": string | null,"geofence_set_by": string | null,"id": string,"landmark": string | null,"name": string,"organisation_id": string,"radius_m": number,"state": string | null,"status": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id": string,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"landmark"?: string | null,"name": string,"organisation_id": string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id"?: string,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"landmark"?: string | null,"name"?: string,"organisation_id"?: string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -759,9 +759,6 @@ isOneToOne: false
               "organisation_id": string,"pin_reset": boolean,"worker_id": string
             }[]
                            },
-"add_contract_wht_rate":
-{ Args: { "p_contract_id": string,"p_effective_from": string,"p_organisation_id": string,"p_rate_bps": number }; Returns: string
-                           },
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
@@ -773,9 +770,6 @@ isOneToOne: false
                            },
 "apply_due_org_bank_accounts":
 { Args: { "p_organisation_id": string }; Returns: number
-                           },
-"cancel_contract_wht_rate":
-{ Args: { "p_organisation_id": string,"p_wht_rate_id": string }; Returns: undefined
                            },
 "cancel_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
@@ -796,7 +790,7 @@ isOneToOne: false
                            },
 "client_billing":
 { Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
-              "billing_address": string,"billing_terms_days": number,"client_id": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string
+              "billing_address": string,"billing_terms_days": number,"client_id": string,"deducts_wht": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string,"withholds_vat": boolean
             }[]
                            },
 "commit_import_batch":
@@ -809,7 +803,7 @@ isOneToOne: false
 { Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
                            },
 "create_contract":
-{ Args: { "p_contract": Json,"p_organisation_id": string,"p_site_ids"?: (string)[],"p_wht_rate_bps"?: number }; Returns: string
+{ Args: { "p_contract": Json,"p_organisation_id": string,"p_site_ids"?: (string)[] }; Returns: string
                            },
 "create_first_organisation":
 { Args: { "p_name": string }; Returns: string
@@ -860,6 +854,9 @@ isOneToOne: false
               "email": string,"expires_at": string,"invite_id": string,"invited_at": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
             }[]
                            },
+"move_site_checkpoint":
+{ Args: { "p_checkpoint_id": string,"p_direction": string,"p_organisation_id": string }; Returns: number
+                           },
 "my_line_manager":
 { Args: { "p_organisation_id": string }; Returns: {
               "has_line_manager": boolean,"name": string
@@ -898,6 +895,9 @@ isOneToOne: false
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"rotate_checkpoint_qr":
+{ Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
 "save_draft_rate_card":
 { Args: { "p_contract_id": string,"p_effective_from": string,"p_lines": Json,"p_note"?: string,"p_organisation_id": string }; Returns: string
                            },
@@ -906,6 +906,19 @@ isOneToOne: false
                            },
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
+                           },
+"set_client_tax_settings":
+{ Args: { "p_client_id": string,"p_deducts_wht": string,"p_organisation_id": string,"p_reason"?: string,"p_withholds_vat": boolean }; Returns: undefined
+                           },
+"site_checkpoint_tokens":
+{ Args: { "p_organisation_id": string,"p_site_id": string }; Returns: {
+              "checkpoint_id": string,"name": string,"qr_token": string,"sort_order": number
+            }[]
+                           },
+"site_geofences":
+{ Args: { "p_organisation_id": string,"p_site_id"?: string }; Returns: {
+              "area_m2": number,"boundary": Json,"centre_lat": number,"centre_lng": number,"radius_m": number,"site_id": string
+            }[]
                            },
 "team_members":
 { Args: { "p_organisation_id": string }; Returns: {

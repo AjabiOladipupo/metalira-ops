@@ -131,6 +131,7 @@ describe("client summary", () => {
     legalName: null,
     status: "active",
     siteCount: 1,
+    sitesWithoutGeofence: 0,
     activeContractCount: 0,
     primaryBillingEmail: null,
     needsDetails: false,
@@ -139,11 +140,24 @@ describe("client summary", () => {
 
   it("counts clients, those needing details and sites, without names", () => {
     const summary = summariseClients([
-      row({ needsDetails: true, siteCount: 2 }),
+      row({ needsDetails: true, siteCount: 2, sitesWithoutGeofence: 2 }),
       row({ name: "Greenfield" }),
-      row({ name: "Old Co", status: "archived", needsDetails: true, siteCount: 5 }),
+      row({
+        name: "Old Co",
+        status: "archived",
+        needsDetails: true,
+        siteCount: 5,
+        sitesWithoutGeofence: 5,
+      }),
     ]);
-    expect(summary).toEqual({ total: 3, active: 2, archived: 1, needsDetails: 1, sites: 3 });
+    expect(summary).toEqual({
+      total: 3,
+      active: 2,
+      archived: 1,
+      needsDetails: 1,
+      sites: 3,
+      sitesWithoutGeofence: 2,
+    });
   });
 
   it("needs a billing address and a billing contact", () => {

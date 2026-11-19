@@ -219,7 +219,10 @@ async function PeopleList({
   const [formOptions, targets] = panelRow
     ? await Promise.all([
         loadWorkerFormOptions(ctx.supabase, ctx.organisationId, panelRow.id),
-        loadMappingTargets(ctx.supabase, ctx.organisationId),
+        loadMappingTargets(ctx.supabase, ctx.organisationId, [
+          ...panelRow.siteIds,
+          ...panelRow.projectIds,
+        ]),
       ])
     : [null, null];
 

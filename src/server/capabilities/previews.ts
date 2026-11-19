@@ -1,17 +1,9 @@
 import "server-only";
 
 import { formatDate, lagosToday } from "@/lib/dates";
-import {
-  diffRateLines,
-  formatLineRate,
-  formatPercentBps,
-  formatRateKey,
-  planNewVersion,
-  previewRateChange,
-} from "@/lib/rate-cards";
+import { diffRateLines, formatLineRate, formatRateKey, previewRateChange } from "@/lib/rate-cards";
 import {
   CONTRACT_TYPE_LABELS,
-  type addWhtRateSchema,
   type createContractSchema,
   type saveRateCardSchema,
   type updateContractSchema,
@@ -27,10 +19,13 @@ import type { MutationContext } from "@/server/identity/mutate";
 import { previewHeadcountChange, type HeadcountLine } from "@/lib/headcount";
 import {
   CONTACT_ROLE_LABELS,
+  DEDUCTS_WHT_LABELS,
+  type clientTaxSchema,
   type addContactSchema,
   type createClientSchema,
   type quickAddClientSchema,
 } from "@/server/business/schemas";
+import type { moveCheckpointSchema } from "@/server/sites/schemas";
 
 import type { CapabilityPreview, PreviewFn } from "./types";
 
@@ -111,6 +106,48 @@ export const previewAddContact: PreviewFn<typeof addContactSchema> = async ({
   };
 };
 
+/** Names the two checkpoints that swap places in the site's round, or says nothing moves. */
+export const previewMoveCheckpoint: PreviewFn<typeof moveCheckpointSchema> = async ({
+  supabase,
+  organisationId,
+  data,
+}) => {
+  const { data: target, error } = await supabase
+    .from("site_checkpoints")
+    .select("site_id")
+    .eq("organisation_id", organisationId)
+    .eq("id", data.checkpointId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw new Error(`Could not read checkpoints: ${error.message}`);
+  if (!target) return { summary: "That checkpoint wasn't found.", changes: [] };
+  const { data: rows, error: listError } = await supabase
+    .from("site_checkpoints")
+    .select("id, name")
+    .eq("organisation_id", organisationId)
+    .eq("site_id", target.site_id)
+    .eq("status", "active")
+    .order("sort_order")
+    .order("created_at")
+    .order("id");
+  if (listError) throw new Error(`Could not read checkpoints: ${listError.message}`);
+  const list = rows ?? [];
+  const at = list.findIndex((c) => c.id === data.checkpointId);
+  const to = data.direction === "up" ? at - 1 : at + 1;
+  const moving = list[at];
+  const other = list[to];
+  if (!moving || !other) {
+    return { summary: "Nothing moves: the checkpoint is already at that end.", changes: [] };
+  }
+  return {
+    summary: `Moves ${moving.name} to place ${to + 1} and ${other.name} to place ${at + 1}.`,
+    changes: [
+      { label: moving.name, before: `Place ${at + 1}`, after: `Place ${to + 1}` },
+      { label: other.name, before: `Place ${to + 1}`, after: `Place ${at + 1}` },
+    ],
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Contracts, rate cards and WHT (slice 2.4)
 // ---------------------------------------------------------------------------
@@ -125,12 +162,7 @@ export const previewCreateContract: PreviewFn<typeof createContractSchema> = ({ 
       }`,
     },
   ];
-  if (data.whtRate !== null) {
-    changes.push({
-      label: "WHT rate",
-      after: `${formatPercentBps(data.whtRate)} from ${formatDate(data.startDate)}`,
-    });
-  }
+  changes.push({ label: "VAT", after: data.vatApplies ? "Charged (7.5%)" : "Not charged" });
   return {
     summary: `Adds draft contract ${data.name} covering ${plural(data.siteIds.length, "site", "sites")}.`,
     changes,
@@ -259,53 +291,30 @@ export const previewRemoveHeadcount: PreviewFn<typeof removeHeadcountSchema> = (
       : NO_ROW,
   );
 
-export const previewAddWhtRate: PreviewFn<typeof addWhtRateSchema> = async ({
+/** A client's tax settings, before and after. */
+export const previewSetClientTax: PreviewFn<typeof clientTaxSchema> = async ({
   supabase,
   organisationId,
   data,
 }) => {
-  const { data: row, error } = await supabase
-    .from("contracts")
-    .select(
-      "status, start_date, end_date, contract_wht_rates(id, rate_bps, effective_from, effective_to)",
-    )
-    .eq("organisation_id", organisationId)
-    .eq("id", data.contractId)
-    .maybeSingle();
-  if (error) throw new Error(`Could not read WHT rates: ${error.message}`);
-  if (!row) return { summary: "That contract wasn't found.", changes: [] };
-  const versions = (row.contract_wht_rates ?? []).map((w) => ({
-    id: w.id,
-    effectiveFrom: w.effective_from,
-    effectiveTo: w.effective_to,
-    rateBps: w.rate_bps,
-  }));
-  const after = `${formatPercentBps(data.rate)} from ${formatDate(data.effectiveFrom)}`;
-  if (versions.length === 0) {
-    return { summary: `Sets WHT at ${after}.`, changes: [{ label: "WHT rate", after }] };
-  }
-  const plan = planNewVersion(versions, data.effectiveFrom, lagosToday(), {
-    status: row.status as "draft" | "active" | "ended",
-    startDate: row.start_date,
-    endDate: row.end_date,
+  const { data: rows, error } = await supabase.rpc("client_billing", {
+    p_organisation_id: organisationId,
+    p_client_id: data.clientId,
   });
-  if (!plan.ok) {
-    const reason = plan.reason
-      .replace("A rate card from", "A WHT rate from")
-      .replace("A rate change starts", "A WHT change starts")
-      .replace("The new rates must start", "The WHT rate must start")
-      .replace("its rates can't change", "its WHT rate can't change");
-    return { summary: reason, changes: [] };
-  }
-  const closing = versions.find((v) => v.id === plan.closes.id);
+  if (error) throw new Error(`Could not read the client: ${error.message}`);
+  const current = rows?.[0];
+  if (!current) return { summary: "That client wasn't found.", changes: [] };
+  const vat = (on: boolean) =>
+    on ? "Pays VAT to the tax authority" : "Pays VAT with each payment";
   return {
-    summary: `Changes WHT to ${after}; the current rate ends on ${formatDate(plan.closes.effectiveToAfter)}.`,
+    summary: `Sets ${DEDUCTS_WHT_LABELS[data.deductsWht].toLowerCase()} and ${vat(data.withholdsVat).toLowerCase()}.`,
     changes: [
       {
-        label: "WHT rate",
-        before: closing ? formatPercentBps(closing.rateBps) : "None",
-        after,
+        label: "WHT",
+        before: DEDUCTS_WHT_LABELS[current.deducts_wht as keyof typeof DEDUCTS_WHT_LABELS],
+        after: DEDUCTS_WHT_LABELS[data.deductsWht],
       },
+      { label: "VAT", before: vat(current.withholds_vat), after: vat(data.withholdsVat) },
     ],
   };
 };

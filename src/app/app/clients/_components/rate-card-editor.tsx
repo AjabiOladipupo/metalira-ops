@@ -7,20 +7,26 @@ import { Field, FormAlert, SubmitButton } from "@/components/form";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dates";
 import {
+  DEFAULT_WHT_BPS,
   RATE_UNIT_LABELS,
   RATE_UNITS,
+  SERVICE_TYPE_LABELS,
+  SERVICE_TYPES,
+  formatPercentBps,
   diffRateLines,
   duplicateRateKeys,
   formatLineRate,
   formatOvertime,
   formatRateKey,
   formatRateSummary,
+  formatWht,
   parseRateLine,
   previewRateChange,
   type ContractDates,
   type RateCardVersion,
   type RateLine,
   type RateLineInput,
+  type ServiceType,
 } from "@/lib/rate-cards";
 import {
   addRateCardVersionAction,
@@ -44,6 +50,8 @@ const EMPTY_LINE: RateLineInput = {
   rate: "",
   otRate: "",
   otMultiplier: "",
+  serviceType: "services",
+  whtRate: "2",
 };
 
 function parseAll(inputs: readonly RateLineInput[]): {
@@ -94,6 +102,7 @@ function LineEditor({
   canRemove: boolean;
 }) {
   const unitId = useId();
+  const serviceId = useId();
   const set = (key: keyof RateLineInput) => (event: { currentTarget: { value: string } }) =>
     onChange({ ...line, [key]: event.currentTarget.value });
   return (
@@ -135,7 +144,7 @@ function LineEditor({
           onChange={set("rate")}
         />
         <Field
-          label="Overtime rate an hour (₦)"
+          label="Overtime rate per hour (₦)"
           inputMode="decimal"
           placeholder="1,600"
           value={line.otRate}
@@ -145,9 +154,42 @@ function LineEditor({
           label="Overtime multiplier"
           inputMode="decimal"
           placeholder="1.5"
-          hint="Shown when there is no hourly rate."
+          hint="On hourly lines it works out the overtime rate."
           value={line.otMultiplier}
           onChange={set("otMultiplier")}
+        />
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={serviceId} className="text-[13px] font-medium">
+            Service type
+          </label>
+          <select
+            id={serviceId}
+            value={line.serviceType || "services"}
+            onChange={(event) => {
+              const serviceType = event.currentTarget.value as ServiceType;
+              // A new type brings its own WHT rate; the person can still change it.
+              onChange({
+                ...line,
+                serviceType,
+                whtRate: formatPercentBps(DEFAULT_WHT_BPS[serviceType]).replace("%", ""),
+              });
+            }}
+            className="h-11 w-full min-w-0 rounded-lg border border-line bg-background px-3 text-[15px] text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+          >
+            {SERVICE_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {SERVICE_TYPE_LABELS[type]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <Field
+          label="WHT (%)"
+          inputMode="decimal"
+          placeholder="2"
+          hint="Before VAT. Set from the service type."
+          value={line.whtRate}
+          onChange={set("whtRate")}
         />
       </div>
       {canRemove ? (
@@ -297,7 +339,9 @@ export function RateCardEditor({
             </Button>
           </div>
           <p className="m-0 text-sm text-fg-muted">
-            Rates are without VAT. VAT is added on invoices when the contract charges it.
+            Rates are without VAT. VAT is added on invoices when the contract charges it. Split
+            facility management into service lines and a separate management fee line: 2% on
+            services, 5% on the management fee.
           </p>
           <FormAlert message={problem ?? fieldErrors?.lines ?? serverError} />
           <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
@@ -357,7 +401,8 @@ export function RateCardEditor({
                 {parsed.lines.map((line, i) => (
                   <li key={i}>
                     {formatRateKey(line)}: {formatLineRate(line)}, overtime{" "}
-                    {formatOvertime(line).toLowerCase()}
+                    {formatOvertime(line).toLowerCase()},{" "}
+                    {SERVICE_TYPE_LABELS[line.serviceType].toLowerCase()}, {formatWht(line)}
                   </li>
                 ))}
               </ul>

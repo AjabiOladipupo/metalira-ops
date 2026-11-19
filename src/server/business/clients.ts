@@ -7,6 +7,7 @@ import { MutationError, mutate, type MutationSpec } from "@/server/identity/muta
 
 import {
   addContactSchema,
+  clientTaxSchema,
   contactIdSchema,
   createClientSchema,
   quickAddClientSchema,
@@ -40,6 +41,17 @@ export const CONTACT_EDITORS = [
 
 /** Who opens /app/clients (the nav item's roles). */
 export const CLIENT_READERS = CONTACT_EDITORS;
+
+/** A client's tax settings (deducts WHT, withholds VAT): owner, admin, finance. */
+export const CLIENT_TAX_EDITORS = [
+  "owner",
+  "admin",
+  "finance",
+] as const satisfies readonly ManagerRole[];
+
+export function canEditClientTax(role: ManagerRole): boolean {
+  return (CLIENT_TAX_EDITORS as readonly ManagerRole[]).includes(role);
+}
 
 export function canEditClients(role: ManagerRole): boolean {
   return (CLIENT_EDITORS as readonly ManagerRole[]).includes(role);
@@ -272,4 +284,36 @@ export const removeContactSpec: MutationSpec<typeof contactIdSchema, { id: strin
 
 export function removeContact(input: unknown): Promise<{ id: string }> {
   return mutate(removeContactSpec, input);
+}
+
+// ---------------------------------------------------------------------------
+// Tax settings (owner's accountant, 19 Nov 2026)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the client is expected to deduct WHT, and whether it pays the VAT to the tax authority
+ * itself (government MDAs, VAT withholding agents). `public.set_client_tax_settings` checks the
+ * role again, and audits the row change and the reason.
+ */
+export const setClientTaxSpec: MutationSpec<typeof clientTaxSchema, { id: string }> = {
+  schema: clientTaxSchema,
+  roles: CLIENT_TAX_EDITORS,
+  run: async ({ supabase, organisationId, data }) => {
+    const { error } = await supabase.rpc("set_client_tax_settings", {
+      p_organisation_id: organisationId,
+      p_client_id: data.clientId,
+      p_deducts_wht: data.deductsWht,
+      p_withholds_vat: data.withholdsVat,
+      ...(data.reason ? { p_reason: data.reason } : {}),
+    });
+    if (error) {
+      if (error.code === "P0002") throw new MutationError("invalid", "That client wasn't found.");
+      fromDbError(error);
+    }
+    return { id: data.clientId };
+  },
+};
+
+export function setClientTax(input: unknown): Promise<{ id: string }> {
+  return mutate(setClientTaxSpec, input);
 }

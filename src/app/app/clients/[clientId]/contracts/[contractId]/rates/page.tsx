@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
-import { addDays, lagosToday } from "@/lib/dates";
+import { addDays } from "@/lib/dates";
 import { toRateLineInput } from "@/lib/rate-cards";
 import { loadContract } from "@/server/business/contracts-data";
 
@@ -26,7 +26,7 @@ async function RateCardPage({
   const back = `/app/clients/${clientId}/contracts/${contract.id}?tab=rates`;
   if (contract.status === "ended") redirect(back);
 
-  const today = lagosToday();
+  const today = ctx.today;
   const latest = contract.versions[contract.versions.length - 1] ?? null;
   // A draft with one card (or none) edits it whole; anything else is a dated change.
   const mode: "draft" | "change" =

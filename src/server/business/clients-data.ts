@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/types/db";
 
-import type { ClientStatus, ContactRole } from "./schemas";
+import type { ClientStatus, ContactRole, DeductsWht } from "./schemas";
 
 /**
  * Reads for the Clients screens (slice 2.1). Every query runs with the signed-in user's own
@@ -28,7 +28,10 @@ export interface ClientRow {
   name: string;
   legalName: string | null;
   status: ClientStatus;
+  /** Active sites. */
   siteCount: number;
+  /** Active sites with no geofence yet (slice 2.2). */
+  sitesWithoutGeofence: number;
   /** Active contracts (slice 2.4). */
   activeContractCount: number;
   primaryBillingEmail: string | null;
@@ -75,7 +78,7 @@ export async function listClients(
     supabase
       .from("clients")
       .select(
-        "id, name, status, sites(count), client_contacts(email, role, is_primary, status), contracts(status)",
+        "id, name, status, sites(status, geofence_set_at), client_contacts(email, role, is_primary, status), contracts(status)",
       )
       .eq("organisation_id", organisationId)
       .order("name")
@@ -90,12 +93,14 @@ export async function listClients(
     );
     const primary = billing.find((c) => c.is_primary) ?? billing[0];
     const details = billingById.get(row.id);
+    const sites = (row.sites ?? []).filter((s) => s.status === "active");
     return {
       id: row.id,
       name: row.name,
       legalName: details?.legal_name ?? null,
       status: row.status as ClientStatus,
-      siteCount: row.sites?.[0]?.count ?? 0,
+      siteCount: sites.length,
+      sitesWithoutGeofence: sites.filter((s) => !s.geofence_set_at).length,
       activeContractCount: (row.contracts ?? []).filter((c) => c.status === "active").length,
       primaryBillingEmail: primary?.email ?? null,
       needsDetails: clientNeedsDetails({
@@ -130,6 +135,8 @@ export interface ClientsSummary {
   needsDetails: number;
   /** Sites across active clients. */
   sites: number;
+  /** Of those, sites with no geofence yet (slice 2.2). */
+  sitesWithoutGeofence: number;
 }
 
 export function summariseClients(rows: readonly ClientRow[]): ClientsSummary {
@@ -140,6 +147,7 @@ export function summariseClients(rows: readonly ClientRow[]): ClientsSummary {
     archived: rows.length - active.length,
     needsDetails: active.filter((r) => r.needsDetails).length,
     sites: active.reduce((sum, r) => sum + r.siteCount, 0),
+    sitesWithoutGeofence: active.reduce((sum, r) => sum + r.sitesWithoutGeofence, 0),
   };
 }
 
@@ -162,6 +170,7 @@ export interface ClientContact {
 export interface ClientSite {
   id: string;
   name: string;
+  status: string;
 }
 
 export interface ClientDetail {
@@ -175,6 +184,10 @@ export interface ClientDetail {
   billingTermsDays: number | null;
   status: ClientStatus;
   notes: string | null;
+  /** Whether the client is expected to deduct WHT (owner's accountant, 19 Nov 2026). */
+  deductsWht: DeductsWht;
+  /** It pays the VAT to the tax authority itself (government MDAs, VAT withholding agents). */
+  withholdsVat: boolean;
   createdAt: string;
   /** Active contacts, primary first within each role. Empty when RLS hides contacts. */
   contacts: ClientContact[];
@@ -208,7 +221,7 @@ export async function loadClient(
       .order("created_at"),
     supabase
       .from("sites")
-      .select("id, name")
+      .select("id, name, status")
       .eq("organisation_id", organisationId)
       .eq("client_id", clientId)
       .order("name"),
@@ -245,9 +258,11 @@ export async function loadClient(
     billingTermsDays: billing?.billing_terms_days ?? null,
     status: row.status as ClientStatus,
     notes: billing?.notes ?? null,
+    deductsWht: (billing?.deducts_wht ?? "expected") as DeductsWht,
+    withholdsVat: billing?.withholds_vat ?? false,
     createdAt: row.created_at,
     contacts: contactRows,
-    sites: (sites.data ?? []).map((s) => ({ id: s.id, name: s.name })),
+    sites: (sites.data ?? []).map((s) => ({ id: s.id, name: s.name, status: s.status })),
     needsDetails: clientNeedsDetails({
       billingAddress: billing?.billing_address ?? null,
       hasBillingContact: contactRows.some((c) => c.role === "billing"),

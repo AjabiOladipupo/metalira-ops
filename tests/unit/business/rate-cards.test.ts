@@ -12,6 +12,7 @@ import {
   formatPercentBps,
   formatRateSummary,
   missingRateKeys,
+  overtimeFromMultiplier,
   parseMultiplierBps,
   parsePercentBps,
   parseRateKobo,
@@ -36,6 +37,8 @@ const line = (over: Partial<RateLine> = {}): RateLine => ({
   currency: "NGN",
   otRateKobo: null,
   otMultiplierBps: 15_000,
+  serviceType: "services",
+  whtRateBps: 200,
   ...over,
 });
 
@@ -63,8 +66,10 @@ describe("kobo parsing on rate lines", () => {
       band: "Day",
       unit: "shift",
       rate: "12500.50",
-      otRate: "",
+      otRate: "1,600",
       otMultiplier: "1.5",
+      serviceType: "services",
+      whtRate: "",
     });
     expect(parsed.ok && parsed.line.rateKobo).toBe(1_250_050n);
     if (!parsed.ok) throw new Error("expected a line");
@@ -75,8 +80,10 @@ describe("kobo parsing on rate lines", () => {
       band: "Day",
       unit: "shift",
       rate_kobo: "1250050",
-      ot_rate_kobo: null,
+      ot_rate_kobo: "160000",
       ot_multiplier_bps: 15_000,
+      service_type: "services",
+      wht_rate_bps: 200,
     });
   });
 
@@ -95,6 +102,8 @@ describe("kobo parsing on rate lines", () => {
       rate: "12500",
       otRate: "",
       otMultiplier: "",
+      serviceType: "",
+      whtRate: "",
     };
     expect(parseRateLine(base)).toMatchObject({
       ok: true,
@@ -227,7 +236,7 @@ describe("rate keys", () => {
 describe("summary text", () => {
   it("reads like the Setup board without an hourly overtime rate", () => {
     expect(formatRateSummary([DAY, NIGHT])).toBe(
-      "₦12,500 day · ₦15,000 night shift · overtime 1.5×",
+      "₦12,500 day · ₦15,000 night shift · overtime 1.5× · WHT 2%",
     );
   });
 
@@ -237,14 +246,14 @@ describe("summary text", () => {
       line({ band: "Night", rateKobo: 1_500_000n, otRateKobo: 160_000n }),
     ];
     expect(formatRateSummary(withOt)).toBe(
-      "₦12,500 day · ₦15,000 night shift · overtime ₦1,600 an hour",
+      "₦12,500 day · ₦15,000 night shift · overtime ₦1,600 an hour · WHT 2%",
     );
     const differ = [
       line({ otRateKobo: 160_000n }),
       line({ band: "Night", rateKobo: 1_500_000n, otRateKobo: 190_050n }),
     ];
     expect(formatRateSummary(differ)).toBe(
-      "₦12,500 day (overtime ₦1,600 an hour) · ₦15,000 night shift (overtime ₦1,900.50 an hour)",
+      "₦12,500 day (overtime ₦1,600 an hour) · ₦15,000 night shift (overtime ₦1,900.50 an hour) · WHT 2%",
     );
   });
 
@@ -253,7 +262,7 @@ describe("summary text", () => {
       formatRateSummary([
         line({ role: "Supervisor", band: "standard", rateKobo: 1_800_000n, otMultiplierBps: null }),
       ]),
-    ).toBe("₦18,000 a shift");
+    ).toBe("₦18,000 a shift · WHT 2%");
     expect(
       formatRateSummary([
         line({ otMultiplierBps: null }),
@@ -265,7 +274,7 @@ describe("summary text", () => {
           otMultiplierBps: null,
         }),
       ]),
-    ).toBe("₦12,500 guard day shift · ₦4,500.50 cleaner visit");
+    ).toBe("₦12,500 guard day shift · ₦4,500.50 cleaner visit · WHT 2%");
     expect(formatRateSummary([])).toBe("No rates yet");
   });
 });
@@ -293,8 +302,8 @@ describe("preview of a rate change", () => {
     });
     expect(preview.changes).toContainEqual({
       label: "Guard · Day (shift)",
-      before: "₦12,500 a shift, overtime 1.5×",
-      after: "₦13,000 a shift, overtime 1.5×",
+      before: "₦12,500 a shift, overtime 1.5×, WHT 2%",
+      after: "₦13,000 a shift, overtime 1.5×, WHT 2%",
     });
     const removed = diffRateLines(v1.lines, [DAY]);
     expect(removed.changes).toEqual([{ key: NIGHT, kind: "removed", before: NIGHT, after: null }]);
@@ -307,5 +316,100 @@ describe("preview of a rate change", () => {
       summary: "A rate card from this date or later already exists. Cancel it first.",
       changes: [],
     });
+  });
+});
+
+describe("overtime and the contract's end (money review)", () => {
+  const typed = {
+    role: "Guard",
+    band: "Relief",
+    rate: "1,500.50",
+    otRate: "",
+    otMultiplier: "1.5",
+    serviceType: "",
+    whtRate: "",
+  };
+
+  it("works out an hourly line's overtime rate from the multiplier, half up once", () => {
+    expect(overtimeFromMultiplier(150_050n, 15_000)).toBe(225_075n);
+    expect(overtimeFromMultiplier(1n, 15_000)).toBe(2n);
+    expect(overtimeFromMultiplier(3n, 12_500)).toBe(4n);
+    expect(parseRateLine({ ...typed, unit: "hour" })).toMatchObject({
+      ok: true,
+      line: { otRateKobo: 225_075n, otMultiplierBps: 15_000 },
+    });
+  });
+
+  it("needs the hourly overtime rate on other units when a multiplier is given", () => {
+    expect(parseRateLine({ ...typed, unit: "shift" })).toMatchObject({
+      ok: false,
+      field: "otRate",
+    });
+    expect(parseRateLine({ ...typed, unit: "shift", otRate: "1,600" })).toMatchObject({
+      ok: true,
+      line: { otRateKobo: 160_000n, otMultiplierBps: 15_000 },
+    });
+  });
+
+  it("puts nothing in force after the contract ends, open version or not", () => {
+    expect(rateCardInForce([v1], "2027-02-01", "2027-01-31")).toBeNull();
+    expect(rateCardInForce([v1], "2027-01-31", "2027-01-31")?.id).toBe("v1");
+  });
+
+  it("sets WHT per line from the service type, and says it per line when lines differ", () => {
+    const input = {
+      role: "Supervisor",
+      band: "",
+      unit: "month",
+      rate: "100,000",
+      otRate: "",
+      otMultiplier: "",
+    };
+    expect(parseRateLine({ ...input, serviceType: "services", whtRate: "" })).toMatchObject({
+      ok: true,
+      line: { serviceType: "services", whtRateBps: 200 },
+    });
+    expect(parseRateLine({ ...input, serviceType: "management_fee", whtRate: "" })).toMatchObject({
+      ok: true,
+      line: { whtRateBps: 500 },
+    });
+    expect(parseRateLine({ ...input, serviceType: "rent_hire", whtRate: "" })).toMatchObject({
+      ok: true,
+      line: { whtRateBps: 1000 },
+    });
+    expect(parseRateLine({ ...input, serviceType: "goods", whtRate: "7.5" })).toMatchObject({
+      ok: true,
+      line: { whtRateBps: 750 },
+    });
+    expect(parseRateLine({ ...input, serviceType: "lunch", whtRate: "" })).toMatchObject({
+      ok: false,
+      field: "serviceType",
+    });
+    expect(parseRateLine({ ...input, serviceType: "services", whtRate: "25" })).toMatchObject({
+      ok: false,
+      field: "whtRate",
+    });
+
+    const services = line({
+      role: "Cleaner",
+      band: "standard",
+      unit: "month",
+      rateKobo: 90_000_000n,
+      otMultiplierBps: null,
+    });
+    const fee = line({
+      role: "Management",
+      band: "standard",
+      unit: "month",
+      rateKobo: 10_000_000n,
+      otMultiplierBps: null,
+      serviceType: "management_fee",
+      whtRateBps: 500,
+    });
+    expect(formatRateSummary([services, fee])).toBe(
+      "₦900,000 cleaner (WHT 2%) · ₦100,000 management month (WHT 5%)",
+    );
+    const diff = diffRateLines([services], [{ ...services, whtRateBps: 500 }]);
+    expect(diff.changes.map((c) => c.kind)).toEqual(["changed"]);
   });
 });

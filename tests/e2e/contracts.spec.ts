@@ -30,7 +30,7 @@ async function fillLine(
   await line.getByRole("textbox", { name: "Role" }).fill(values.role);
   await line.getByRole("textbox", { name: "Band" }).fill(values.band);
   await line.getByRole("textbox", { name: "Rate (₦)", exact: true }).fill(values.rate);
-  await line.getByRole("textbox", { name: "Overtime rate an hour (₦)" }).fill(values.otRate);
+  await line.getByRole("textbox", { name: "Overtime rate per hour (₦)" }).fill(values.otRate);
   await line.getByRole("textbox", { name: "Overtime multiplier" }).fill(values.otMultiplier);
 }
 
@@ -100,6 +100,8 @@ test("ops_manager adds a Coastline contract, its rate card and a scheduled rate 
   await expect(page).toHaveURL(/\?tab=rates$/, { timeout: 15_000 });
   const versions = page.getByRole("list", { name: "Rate card versions" });
   await expect(versions.getByRole("listitem")).toHaveCount(1);
+  // Each line's WHT follows its service type (2% on services).
+  await expect(versions).toContainText("Services · 2%");
   await expect(versions).toContainText(
     "₦12,500 day (overtime ₦1,600 an hour) · ₦15,000 night shift (overtime ₦1,900 an hour)",
   );

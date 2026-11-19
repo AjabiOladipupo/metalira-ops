@@ -1,8 +1,8 @@
 /** Slice 2.4: contract, rate card and WHT input, as the forms send it. */
 import { describe, expect, it } from "vitest";
 
+import { clientTaxSchema } from "@/server/business/schemas";
 import {
-  addWhtRateSchema,
   createContractSchema,
   saveRateCardSchema,
   toSla,
@@ -30,7 +30,6 @@ describe("createContractSchema", () => {
       coverageTargetBps: "98.5",
       responseMinutes: "30",
       slaNotes: "Relief within 2 hours",
-      whtRate: "5",
       siteIds: [SITE, SITE],
     });
     expect(parsed).toMatchObject({
@@ -39,7 +38,6 @@ describe("createContractSchema", () => {
       vatApplies: true,
       coverageTargetBps: 9850,
       responseMinutes: 30,
-      whtRate: 500,
       siteIds: [SITE],
     });
     expect(toSla(parsed)).toEqual({
@@ -57,7 +55,6 @@ describe("createContractSchema", () => {
     expect(issues({ startDate: "1 Dec" })).toEqual(["startDate"]);
     expect(issues({ startDate: "2026-02-31" })).toEqual(["startDate"]);
     expect(issues({ reference: "CTR 7" })).toEqual(["reference"]);
-    expect(issues({ whtRate: "25" })).toEqual(["whtRate"]);
     expect(issues({ coverageTargetBps: "101" })).toEqual(["coverageTargetBps"]);
     expect(issues({ responseMinutes: "0" })).toEqual(["responseMinutes"]);
     expect(issues({ name: "<script>" })).toEqual(["name"]);
@@ -80,7 +77,7 @@ describe("saveRateCardSchema", () => {
     band: "Day",
     unit: "shift",
     rate: "12,500",
-    otRate: "",
+    otRate: "1,600",
     otMultiplier: "1.5",
   };
 
@@ -88,9 +85,11 @@ describe("saveRateCardSchema", () => {
     const parsed = saveRateCardSchema.parse(
       card([day, { ...day, band: "Night", rate: "15000.50", otRate: "1,900" }]),
     );
-    expect(parsed.lines.map((l) => [l.rateKobo, l.otRateKobo, l.otMultiplierBps])).toEqual([
-      [1_250_000n, null, 15_000],
-      [1_500_050n, 190_000n, 15_000],
+    expect(
+      parsed.lines.map((l) => [l.rateKobo, l.otRateKobo, l.otMultiplierBps, l.whtRateBps]),
+    ).toEqual([
+      [1_250_000n, 160_000n, 15_000, 200],
+      [1_500_050n, 190_000n, 15_000, 200],
     ]);
   });
 
@@ -106,14 +105,13 @@ describe("saveRateCardSchema", () => {
   });
 });
 
-describe("addWhtRateSchema", () => {
-  it("takes a percentage as basis points", () => {
+describe("clientTaxSchema", () => {
+  it("takes the WHT expectation, the VAT box and an optional reason", () => {
     expect(
-      addWhtRateSchema.parse({ contractId: CLIENT, rate: "7.5", effectiveFrom: "2027-01-01" }).rate,
-    ).toBe(750);
-    expect(
-      addWhtRateSchema.safeParse({ contractId: CLIENT, rate: "abc", effectiveFrom: "2027-01-01" })
-        .success,
-    ).toBe(false);
+      clientTaxSchema.parse({ clientId: CLIENT, deductsWht: "not_deducted", withholdsVat: "on" }),
+    ).toEqual({ clientId: CLIENT, deductsWht: "not_deducted", withholdsVat: true, reason: null });
+    expect(clientTaxSchema.safeParse({ clientId: CLIENT, deductsWht: "sometimes" }).success).toBe(
+      false,
+    );
   });
 });

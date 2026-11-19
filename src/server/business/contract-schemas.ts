@@ -4,7 +4,6 @@ import {
   MAX_RATE_LINES,
   duplicateRateKeys,
   formatRateKey,
-  parsePercentBps,
   parseRateLine,
   type RateLine,
   type RateLineInput,
@@ -139,18 +138,6 @@ const slaNotes = z
       .regex(/^[^\u0000-\u0008\u000b-\u001f\u007f-\u009f<>]*$/u, "SLA notes must be plain text"),
   );
 
-const whtRate = z.string().transform((value, ctx) => {
-  const bps = parsePercentBps(value);
-  if (bps === null) {
-    ctx.addIssue({
-      code: "custom",
-      message: "Enter the WHT rate as a percentage from 0 to 20, like 5",
-    });
-    return z.NEVER;
-  }
-  return bps;
-});
-
 /** Site ids from the form's checkboxes (FormData.getAll), each once. */
 const siteIds = z
   .array(z.uuid("Choose a site"))
@@ -209,8 +196,6 @@ export const createContractSchema = z
     clientId: id("client"),
     reference: optional(reference),
     ...contractFields,
-    /** Owner and admin only (WHT writers); the database refuses it for anyone else. */
-    whtRate: optional(whtRate),
   })
   .superRefine(datesInOrder);
 
@@ -229,6 +214,8 @@ const lineInput = z.object({
   rate: z.string().max(40).default(""),
   otRate: z.string().max(40).default(""),
   otMultiplier: z.string().max(20).default(""),
+  serviceType: z.string().max(40).default(""),
+  whtRate: z.string().max(20).default(""),
 }) satisfies z.ZodType<RateLineInput, unknown>;
 
 /**
@@ -289,19 +276,6 @@ export const saveRateCardSchema = z.object({
 
 export const rateCardIdSchema = z.object({ rateCardId: id("rate card") });
 
-// ---------------------------------------------------------------------------
-// WHT
-// ---------------------------------------------------------------------------
-
-export const addWhtRateSchema = z.object({
-  contractId: id("contract"),
-  rate: whtRate,
-  effectiveFrom: isoDate("Choose the date the rate starts"),
-});
-
-export const whtRateIdSchema = z.object({ whtRateId: id("WHT rate") });
-
 export type CreateContractInput = z.output<typeof createContractSchema>;
 export type UpdateContractInput = z.output<typeof updateContractSchema>;
 export type SaveRateCardInput = z.output<typeof saveRateCardSchema>;
-export type AddWhtRateInput = z.output<typeof addWhtRateSchema>;

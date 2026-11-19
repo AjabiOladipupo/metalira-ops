@@ -41,6 +41,8 @@ const rate = (over: Partial<RateLine>): RateLine => ({
   currency: "NGN",
   otRateKobo: null,
   otMultiplierBps: 15_000,
+  serviceType: "services",
+  whtRateBps: 500,
   ...over,
 });
 
