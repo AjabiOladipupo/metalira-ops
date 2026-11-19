@@ -55,6 +55,7 @@ describe("createContractSchema", () => {
     expect(issues({ type: "milestone" })).toEqual(["type"]);
     expect(issues({ endDate: "2026-11-30" })).toEqual(["endDate"]);
     expect(issues({ startDate: "1 Dec" })).toEqual(["startDate"]);
+    expect(issues({ startDate: "2026-02-31" })).toEqual(["startDate"]);
     expect(issues({ reference: "CTR 7" })).toEqual(["reference"]);
     expect(issues({ whtRate: "25" })).toEqual(["whtRate"]);
     expect(issues({ coverageTargetBps: "101" })).toEqual(["coverageTargetBps"]);

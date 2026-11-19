@@ -48,8 +48,7 @@ async function RateCardPage({
       : contract.status === "draft"
         ? addDays(latest!.effectiveFrom, 1)
         : [today, addDays(latest!.effectiveFrom, 1)].sort().at(-1)!;
-  const defaultFrom =
-    mode === "draft" ? (latest?.effectiveFrom ?? contract.startDate) : firstAllowed;
+  const defaultFrom = mode === "draft" ? contract.startDate : firstAllowed;
 
   return (
     <>

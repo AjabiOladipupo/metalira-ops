@@ -221,7 +221,14 @@ export const previewAddWhtRate: PreviewFn<typeof addWhtRateSchema> = async ({
     startDate: row.start_date,
     endDate: row.end_date,
   });
-  if (!plan.ok) return { summary: plan.reason.replace("rate card", "WHT rate"), changes: [] };
+  if (!plan.ok) {
+    const reason = plan.reason
+      .replace("A rate card from", "A WHT rate from")
+      .replace("A rate change starts", "A WHT change starts")
+      .replace("The new rates must start", "The WHT rate must start")
+      .replace("its rates can't change", "its WHT rate can't change");
+    return { summary: reason, changes: [] };
+  }
   const closing = versions.find((v) => v.id === plan.closes.id);
   return {
     summary: `Changes WHT to ${after}; the current rate ends on ${formatDate(plan.closes.effectiveToAfter)}.`,

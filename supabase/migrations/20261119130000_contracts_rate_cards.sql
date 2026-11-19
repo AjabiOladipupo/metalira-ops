@@ -134,8 +134,8 @@ comment on column public.contracts.vat_applies is
 -- * a blank reference becomes the next CTR-0001 of the organisation (one writer at a time);
 -- * vat_applies left out follows the organisation's VAT registration;
 -- * a new contract is a draft; the client, organisation and reference never change;
--- * once the contract has left draft only the status, activation and end fields change, and the
---   status only moves forward (draft -> active -> ended, or draft -> ended).
+-- * once the contract has left draft only the status, activation and end-reason fields change
+--   (end_date waits for end_contract in 2.7), and the status only moves forward (draft -> active -> ended, or draft -> ended).
 -- Runs as the caller, so the reference look-up sees what RLS lets the writer see (every contract
 -- of the organisation, for the roles that may insert).
 create function private.contracts_before_write()
@@ -184,12 +184,14 @@ begin
     raise exception 'A contract can''t go back to %.', new.status using errcode = 'MLCO1';
   end if;
 
+  -- end_date is frozen too: ending or shortening a live contract is end_contract's job (2.7),
+  -- which closes the dated versions with it. Slice 2.7 replaces this function to let it through.
   if old.status <> 'draft' and (
-    new.name, new.type, new.start_date, new.billing_frequency, new.billing_terms_days,
-    new.vat_applies, new.sla, new.created_at, new.created_by
+    new.name, new.type, new.start_date, new.end_date, new.billing_frequency,
+    new.billing_terms_days, new.vat_applies, new.sla, new.created_at, new.created_by
   ) is distinct from (
-    old.name, old.type, old.start_date, old.billing_frequency, old.billing_terms_days,
-    old.vat_applies, old.sla, old.created_at, old.created_by
+    old.name, old.type, old.start_date, old.end_date, old.billing_frequency,
+    old.billing_terms_days, old.vat_applies, old.sla, old.created_at, old.created_by
   ) then
     raise exception 'This contract is live and its terms can''t change.' using errcode = 'MLCO1';
   end if;
@@ -342,7 +344,8 @@ create table public.rate_card_lines (
   -- The line's own overtime rate per hour (owner decision), or null.
   ot_rate_kobo bigint
     constraint rate_card_lines_ot_rate_range check (ot_rate_kobo between 1 and 100000000000),
-  -- Shown as "overtime 1.5×" when there is no hourly overtime rate. 10000 = 1.0×.
+  -- Shown as "overtime 1.5×" when there is no hourly overtime rate. 10000 = 1.0×. When a line has
+  -- both, the hourly rate is what bills (Phase 6) and the multiplier is for display only.
   ot_multiplier_bps integer
     constraint rate_card_lines_ot_multiplier_range check (ot_multiplier_bps between 10000 and 30000),
   sort_order integer not null default 0
@@ -595,9 +598,9 @@ begin
 
   if tg_op in ('INSERT', 'UPDATE') and v_start is not null and (
     new.effective_from < v_start
-    or (v_end is not null and new.effective_from > v_end)
+    or (v_end is not null and coalesce(new.effective_to, new.effective_from) > v_end)
   ) then
-    raise exception 'A WHT rate must start inside the contract''s dates.' using errcode = 'MLWH4';
+    raise exception 'A WHT rate must sit inside the contract''s dates.' using errcode = 'MLWH4';
   end if;
 
   if v_status = 'draft' then
@@ -731,11 +734,23 @@ begin
   if exists (
     select 1 from public.rate_cards r
     where r.contract_id = new.id
-      and (r.effective_from < new.start_date or r.effective_from > coalesce(new.end_date, 'infinity'))
+      and (
+        r.effective_from < new.start_date
+        or coalesce(r.effective_to, r.effective_from) > coalesce(new.end_date, 'infinity')
+      )
   ) or exists (
     select 1 from public.contract_wht_rates w
     where w.contract_id = new.id
-      and (w.effective_from < new.start_date or w.effective_from > coalesce(new.end_date, 'infinity'))
+      and (
+        w.effective_from < new.start_date
+        or coalesce(w.effective_to, w.effective_from) > coalesce(new.end_date, 'infinity')
+      )
+  ) or exists (
+    -- The first rate card starts on the start date (save_draft_rate_card), so no day goes unpriced.
+    select 1 from public.rate_cards r
+    where r.contract_id = new.id
+      and r.effective_from = (select min(f.effective_from) from public.rate_cards f where f.contract_id = new.id)
+      and r.effective_from <> new.start_date
   ) then
     raise exception 'A rate card or WHT rate starts outside the new dates. Cancel it first.'
       using errcode = 'MLCO4';
@@ -975,6 +990,11 @@ begin
   end if;
   if p_effective_from is null then
     raise exception 'Choose the date the rates start.' using errcode = '22023';
+  end if;
+  -- The first rate card starts with the contract, so no day of it goes unpriced (a gap could
+  -- never be filled once live: backdating is refused).
+  if p_effective_from <> (select c.start_date from public.contracts c where c.id = p_contract_id) then
+    raise exception 'The first rate card starts on the contract''s start date.' using errcode = 'MLRC4';
   end if;
 
   select count(*), min(r.id::text)::uuid into v_count, v_card

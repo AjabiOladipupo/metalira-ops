@@ -133,7 +133,11 @@ export const createContractSpec: MutationSpec<
 > = {
   schema: createContractSchema,
   roles: CONTRACT_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, role, data }) => {
+    if (data.whtRate !== null && !canEditWht(role)) {
+      const message = "Owners, admins and finance set the WHT rate. Leave it blank.";
+      throw new MutationError("invalid", message, { whtRate: message });
+    }
     const { data: id, error } = await supabase.rpc("create_contract", {
       p_organisation_id: organisationId,
       p_contract: { ...contractRow(data), client_id: data.clientId, reference: data.reference },

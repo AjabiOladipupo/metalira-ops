@@ -51,12 +51,16 @@ export const BILLING_FREQUENCY_LABELS: Record<BillingFrequency, string> = {
 
 const id = (what: string) => z.uuid(`Choose a ${what}`);
 
+/** A real calendar day as YYYY-MM-DD: 2026-02-31 does not survive the round trip. */
 const isoDate = (message: string) =>
   z
     .string()
     .trim()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, message)
-    .refine((value) => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)), message);
+    .refine((value) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+      const date = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    }, message);
 
 /** "" or a missing field becomes null; anything else goes through `schema`. */
 function optional<T extends z.ZodType<unknown, string>>(schema: T) {

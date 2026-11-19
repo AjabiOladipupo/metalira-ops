@@ -283,6 +283,12 @@ describe("contracts", () => {
     await expect(
       db.query("update public.contracts set status = 'draft' where id = $1", [id]),
     ).rejects.toThrow(/go back/);
+    // Ending or shortening a live contract waits for end_contract (2.7).
+    const ending = await owner.client
+      .from("contracts")
+      .update({ end_date: addDays(today, -1) })
+      .eq("id", id);
+    expect(ending.error?.code).toBe("MLCO1");
   });
 });
 
@@ -324,6 +330,18 @@ describe("rate cards", () => {
     expect(audit?.channel).toBe("web");
     expect(JSON.stringify(audit?.before)).toContain("1250000");
     expect(JSON.stringify(audit?.after)).toContain("1500000");
+  });
+
+  it("starts the first rate card on the contract's start date", async () => {
+    const id = await newContract(ops);
+    const late = await ops.client.rpc("save_draft_rate_card", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: addDays(start, 14),
+      p_lines: [DAY] as Json,
+    });
+    expect(late.error?.code).toBe("MLRC4");
+    expect(await versions(id)).toEqual([]);
   });
 
   it("refuses fractions, floats and duplicate keys in the lines", async () => {

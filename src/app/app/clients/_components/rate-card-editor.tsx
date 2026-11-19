@@ -257,11 +257,12 @@ export function RateCardEditor({
               type="date"
               min={minFrom}
               value={from}
+              readOnly={mode === "draft"}
               onChange={(event) => setFrom(event.currentTarget.value)}
               hint={
                 mode === "change"
                   ? "The current rates end the day before."
-                  : "Usually the contract's start date."
+                  : "The contract's start date. Change it on the contract to move the rates with it."
               }
               error={fieldErrors?.effectiveFrom}
             />
