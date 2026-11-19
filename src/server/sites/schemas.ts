@@ -64,7 +64,9 @@ const radius = z
     const trimmed = (value ?? "").trim();
     if (trimmed === "") return RADIUS_DEFAULT_M;
     const parsed = /^\d{1,5}$/.test(trimmed) ? Number.parseInt(trimmed, 10) : Number.NaN;
-    const problem = Number.isNaN(parsed) ? "Enter the radius in whole metres" : radiusProblem(parsed);
+    const problem = Number.isNaN(parsed)
+      ? "Enter the radius in whole metres"
+      : radiusProblem(parsed);
     if (problem) {
       ctx.addIssue({ code: "custom", message: problem });
       return z.NEVER;

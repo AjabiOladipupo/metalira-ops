@@ -161,7 +161,9 @@ export function GeofenceEditor({ siteId, initial }: { siteId: string; initial: G
         const accuracy = Math.round(pos.coords.accuracy);
         setLocateNote(
           `${mode === "circle" ? "Pin set" : "Corner added"} to within ${accuracy.toLocaleString("en-NG")} m.` +
-            (accuracy > 50 ? " Step outside or wait a moment, then try again for a closer fix." : ""),
+            (accuracy > 50
+              ? " Step outside or wait a moment, then try again for a closer fix."
+              : ""),
         );
       },
       (error) => {

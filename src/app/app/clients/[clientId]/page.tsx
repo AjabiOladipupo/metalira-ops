@@ -201,7 +201,9 @@ async function Sites({
           {summary.withoutGeofence
             ? ` · ${summary.withoutGeofence.toLocaleString("en-NG")} without a geofence`
             : " · all with a geofence"}
-          {summary.checkpoints ? ` · ${plural(summary.checkpoints, "checkpoint", "checkpoints")}` : ""}
+          {summary.checkpoints
+            ? ` · ${plural(summary.checkpoints, "checkpoint", "checkpoints")}`
+            : ""}
         </p>
         {addSite}
       </div>
@@ -215,8 +217,7 @@ async function Sites({
               <span className="flex min-w-0 flex-col">
                 <span className="font-semibold">{site.name}</span>
                 <span className="text-xs text-fg-muted">
-                  {[firstLine(site.address), site.state].filter(Boolean).join(", ") ||
-                    "No address"}
+                  {[firstLine(site.address), site.state].filter(Boolean).join(", ") || "No address"}
                 </span>
               </span>
               <span className="flex flex-wrap items-center gap-3 text-sm">

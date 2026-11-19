@@ -33,7 +33,10 @@ const DUPLICATE_SITE = "This client already has a site with this name.";
 const DUPLICATE_CHECKPOINT = "This site already has a checkpoint with this name.";
 
 const DB_REFUSALS: Record<string, { message: string; field?: string }> = {
-  MLST1: { message: "The outline crosses itself. Draw it again around the site.", field: "outline" },
+  MLST1: {
+    message: "The outline crosses itself. Draw it again around the site.",
+    field: "outline",
+  },
   MLST2: { message: "An outline can have 200 corners or fewer.", field: "outline" },
   MLST3: { message: "An outline can cover 4 square kilometres or less.", field: "outline" },
   MLST4: { message: "The geofence must be in Nigeria.", field: "lat" },

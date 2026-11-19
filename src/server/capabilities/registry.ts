@@ -889,7 +889,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "sites.set_geofence",
-    description: "Sets a site's geofence: a pin with a radius of 25 to 2,000 m, or a drawn outline.",
+    description:
+      "Sets a site's geofence: a pin with a radius of 25 to 2,000 m, or a drawn outline.",
     kind: "write",
     audience: "manager",
     ...fromSpec(setGeofenceSpec),
@@ -961,7 +962,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
 ];
 
-/** The capability with this name, or undefined. */ */
+/** The capability with this name, or undefined. */
 export function findCapability(name: string): Capability | undefined {
   return CAPABILITIES.find((c) => c.name === name);
 }

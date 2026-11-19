@@ -333,7 +333,7 @@ isOneToOne: false
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name": string,"organisation_id": string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id": string,"sort_order": number,"status"?: string,"updated_at"?: string
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name": string,"organisation_id": string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id": string,"sort_order"?: number,"status"?: string,"updated_at"?: string
                   }
                   Update: {
                     "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name"?: string,"organisation_id"?: string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id"?: string,"sort_order"?: number,"status"?: string,"updated_at"?: string
@@ -656,6 +656,9 @@ isOneToOne: false
 { Args: { "p_token": string }; Returns: {
               "email": string,"expires_at": string,"invite_id": string,"invited_at": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
             }[]
+                           },
+"move_site_checkpoint":
+{ Args: { "p_checkpoint_id": string,"p_direction": string,"p_organisation_id": string }; Returns: number
                            },
 "my_line_manager":
 { Args: { "p_organisation_id": string }; Returns: {

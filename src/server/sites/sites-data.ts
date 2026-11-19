@@ -243,7 +243,9 @@ export async function listSitesWithoutGeofence(
       clientName: s.clientName,
       href: `/app/clients/${s.row.clientId}/sites/${s.row.id}`,
     }))
-    .sort((a, b) => a.clientName.localeCompare(b.clientName) || a.siteName.localeCompare(b.siteName));
+    .sort(
+      (a, b) => a.clientName.localeCompare(b.clientName) || a.siteName.localeCompare(b.siteName),
+    );
 }
 
 /** Where a checkpoint's QR code points. The scan page arrives in Phase 3. */

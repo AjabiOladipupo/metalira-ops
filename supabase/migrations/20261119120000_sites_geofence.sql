@@ -77,7 +77,9 @@ as $$
   select extensions.st_covers(extensions.st_makeenvelope(2.5, 4.0, 14.8, 14.0, 4326), g)
 $$;
 
-revoke all on function private.inside_nigeria(extensions.geometry) from public, anon, authenticated;
+-- Pure; the site and checkpoint triggers run as the caller, so writers need it.
+revoke all on function private.inside_nigeria(extensions.geometry) from public, anon;
+grant execute on function private.inside_nigeria(extensions.geometry) to authenticated, service_role;
 
 -- BEFORE INSERT/UPDATE on sites:
 -- * the client and organisation never change (neither is granted; this stops the secret key);
@@ -229,7 +231,8 @@ create table public.site_checkpoints (
     constraint site_checkpoints_qr_token_key unique,
   qr_rotated_at timestamptz,
   location extensions.geography(Point, 4326),
-  sort_order integer not null
+  -- -1 (the default) means "last": the insert trigger puts the checkpoint at the end.
+  sort_order integer not null default -1
     constraint site_checkpoints_sort_order_range check (sort_order between 0 and 10000),
   status text not null default 'active'
     constraint site_checkpoints_status_value check (status in ('active', 'retired')),
@@ -288,7 +291,7 @@ begin
     new.retired_at := null;
     new.retired_by := null;
     new.qr_rotated_at := null;
-    if new.sort_order is null then
+    if new.sort_order < 0 then
       -- One writer at a time per site, so two adds can't take the same place.
       perform pg_advisory_xact_lock(hashtextextended('site_checkpoints:' || new.site_id::text, 0));
       select coalesce(max(c.sort_order) + 1, 0) into new.sort_order

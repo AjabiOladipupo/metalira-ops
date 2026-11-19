@@ -77,7 +77,9 @@ export default function GeofenceMap({
     });
     const streets = tiles("streets-v2", apiKey, "png").addTo(instance);
     const satellite = tiles("hybrid", apiKey, "jpg");
-    L.control.layers({ Map: streets, Satellite: satellite }, undefined, { position: "topright" }).addTo(instance);
+    L.control
+      .layers({ Map: streets, Satellite: satellite }, undefined, { position: "topright" })
+      .addTo(instance);
     shapes.current = L.layerGroup().addTo(instance);
     instance.on("click", (event: L.LeafletMouseEvent) => {
       pick.current?.({ lat: event.latlng.lat, lng: event.latlng.lng });

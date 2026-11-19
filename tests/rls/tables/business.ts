@@ -4,7 +4,11 @@ import { randomUUID } from "node:crypto";
 import type { TableSpec } from "../helpers/registry";
 import type { Client } from "../helpers/supabase";
 
-async function firstId(admin: Client, table: "client_contacts", orgId: string) {
+async function firstId(
+  admin: Client,
+  table: "client_contacts" | "site_checkpoints",
+  orgId: string,
+) {
   const { data, error } = await admin
     .from(table)
     .select("id")
@@ -54,6 +58,38 @@ export const tables: TableSpec[] = [
       email: "hijack@example.test",
       role: "billing",
     }),
+    patch: { name: "Hijacked" },
+  },
+  {
+    table: "site_checkpoints",
+    ...byOrg,
+    // Slice 2.2. Seeds its own client and site (this file loads before people.ts). qr_token is
+    // not granted to signed-in users; it is read through site_checkpoint_tokens.
+    seed: async ({ admin, side }) => {
+      const client = await admin
+        .from("clients")
+        .insert({ organisation_id: side.orgId, name: "Marina VI Tower" })
+        .select("id")
+        .single();
+      if (client.error) throw new Error(client.error.message);
+      const site = await admin
+        .from("sites")
+        .insert({ organisation_id: side.orgId, client_id: client.data.id, name: "Tower lobby" })
+        .select("id")
+        .single();
+      if (site.error) throw new Error(site.error.message);
+      const { error } = await admin
+        .from("site_checkpoints")
+        .insert({ organisation_id: side.orgId, site_id: site.data.id, name: "Gate A" });
+      if (error) throw new Error(error.message);
+    },
+    rowOf: ({ admin, side }) => firstId(admin, "site_checkpoints", side.orgId),
+    attackInsert: ({ victim }) => ({
+      organisation_id: victim.orgId,
+      site_id: randomUUID(),
+      name: "Hijack",
+    }),
+    selectColumns: "id, organisation_id, site_id, name, sort_order, status",
     patch: { name: "Hijacked" },
   },
 ];

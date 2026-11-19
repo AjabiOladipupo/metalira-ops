@@ -45,7 +45,8 @@ export function distanceM(a: LatLng, b: LatLng): number {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const h =
-    Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
@@ -74,7 +75,10 @@ function project(points: readonly LatLng[]): { x: number; y: number }[] {
   const lat0 = points.reduce((sum, p) => sum + p.lat, 0) / Math.max(points.length, 1);
   const lng0 = points.reduce((sum, p) => sum + p.lng, 0) / Math.max(points.length, 1);
   const kx = EARTH_RADIUS_M * Math.cos(toRad(lat0));
-  return points.map((p) => ({ x: toRad(p.lng - lng0) * kx, y: toRad(p.lat - lat0) * EARTH_RADIUS_M }));
+  return points.map((p) => ({
+    x: toRad(p.lng - lng0) * kx,
+    y: toRad(p.lat - lat0) * EARTH_RADIUS_M,
+  }));
 }
 
 /** Area of the outline in square metres (open or closed ring). */
@@ -185,7 +189,10 @@ export function parseLatLng(text: string): LatLng | null {
 /** An outline typed one corner per line ("6.5244, 3.3792"). Blank lines are skipped. */
 export function parseOutline(text: string): { points: LatLng[] } | { error: string } {
   const points: LatLng[] = [];
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
   for (const [i, line] of lines.entries()) {
     const p = parseLatLng(line);
     if (!p) return { error: `Line ${i + 1} isn't a latitude and longitude, like 6.5244, 3.3792` };
@@ -201,7 +208,10 @@ export function formatOutline(points: readonly LatLng[]): string {
     .join("\n");
 }
 
-const fixed = (value: number) => roundCoordinate(value).toFixed(6).replace(/\.?0+$/, "");
+const fixed = (value: number) =>
+  roundCoordinate(value)
+    .toFixed(6)
+    .replace(/\.?0+$/, "");
 
 /** EWKT for a geography(Point) column: longitude first. */
 export function pointEwkt(p: LatLng): string {
@@ -224,7 +234,8 @@ export function formatLatLng(p: LatLng): string {
 /** "3,142 m²" under a hectare, else "3.2 ha" (one decimal), else "1.25 km²". */
 export function formatArea(m2: number): string {
   if (m2 < 10_000) return `${Math.round(m2).toLocaleString("en-NG")} m²`;
-  if (m2 < 1_000_000) return `${(m2 / 10_000).toLocaleString("en-NG", { maximumFractionDigits: 1 })} ha`;
+  if (m2 < 1_000_000)
+    return `${(m2 / 10_000).toLocaleString("en-NG", { maximumFractionDigits: 1 })} ha`;
   return `${(m2 / 1_000_000).toLocaleString("en-NG", { maximumFractionDigits: 2 })} km²`;
 }
 

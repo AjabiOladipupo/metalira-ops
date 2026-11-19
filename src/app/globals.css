@@ -249,4 +249,25 @@
   .invite-card {
     break-inside: avoid;
   }
+
+  /* Checkpoint QR sheet (slice 2.2): the same treatment. */
+  body:has(.checkpoint-sheet) * {
+    visibility: hidden;
+  }
+  body:has(.checkpoint-sheet) .checkpoint-sheet,
+  body:has(.checkpoint-sheet) .checkpoint-sheet * {
+    visibility: visible;
+    color: #0a0a0a;
+  }
+  body:has(.checkpoint-sheet) .checkpoint-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    border: 0;
+    background: #ffffff;
+  }
+  .checkpoint-card {
+    break-inside: avoid;
+  }
 }
