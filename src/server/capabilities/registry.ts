@@ -1,5 +1,7 @@
 import "server-only";
 
+import { z } from "zod";
+
 import { lagosToday } from "@/lib/dates";
 import { MANAGER_ROLES } from "@/lib/roles";
 import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
@@ -30,6 +32,16 @@ import {
   updateContractSpec,
 } from "@/server/business/contracts";
 import { listContracts, loadContractsSummary } from "@/server/business/contracts-data";
+import {
+  confirmContractDocumentSpec,
+  contractDocumentLink,
+  removeContractDocumentSpec,
+  startContractDocumentSpec,
+} from "@/server/business/contract-documents";
+import {
+  listContractDocuments,
+  loadContractDocumentsSummary,
+} from "@/server/business/contract-documents-data";
 import {
   advanceSetupSpec,
   completeSetupSpec,
@@ -92,6 +104,7 @@ import {
   previewCreateClient,
   previewCreateContract,
   previewQuickAddClient,
+  previewRemoveContractDocument,
   previewSaveDraftRateCard,
   previewUpdateContract,
 } from "./previews";
@@ -118,8 +131,14 @@ const NO_PREVIEW = "Changes several rows or money and has no preview yet.";
 const SECOND_APPROVER = "Decides a two-person request: the agent is never the second approver.";
 const REVEAL = "Shows personal data in full: the agent sees masked values only.";
 const RATES = "Changes what clients are billed (kind money): kept to people.";
+const FILES = "Takes a file from the person's device: uploads are made on the screen.";
+const OPEN_FILE = "Hands out a link to a stored file: the agent never opens or passes on files.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
+
+/** A contract's id, for the document reads. */
+const contractIdInput = z.object({ contractId: z.uuid("Choose a contract") });
+const documentIdInput = z.object({ documentId: z.uuid("Choose a document") });
 
 export const CAPABILITIES: readonly Capability[] = [
   // -------------------------------------------------------------------------
@@ -1010,6 +1029,83 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("business/contract-actions", "cancelWhtRateAction"),
     agent: false,
     agentNote: RATES,
+  },
+
+  // -------------------------------------------------------------------------
+  // Contract documents (business/contract-document-actions.ts, slice 2.6)
+  // -------------------------------------------------------------------------
+  {
+    name: "contract_documents.summary",
+    description:
+      "Counts documents on file by kind, and active contracts with no signed contract on file.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadContractDocumentsSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "contract_documents.list",
+    description: "Lists a contract's documents: kind, title, file name, size and who uploaded it.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: contractIdInput,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }, input) =>
+      listContractDocuments(supabase, organisationId, (input as { contractId: string }).contractId),
+    agent: true,
+  },
+  {
+    name: "contract_documents.open",
+    description: "Makes a 60-second link that opens or downloads one document on file.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: documentIdInput,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }, input) =>
+      contractDocumentLink(supabase, organisationId, (input as { documentId: string }).documentId),
+    agent: false,
+    agentNote: OPEN_FILE,
+  },
+  {
+    name: "contract_documents.start_upload",
+    description: "Starts a document upload on a contract and returns where the file goes.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(startContractDocumentSpec),
+    changes: "one",
+    action: at("business/contract-document-actions", "startContractDocumentUpload"),
+    agent: false,
+    agentNote: FILES,
+  },
+  {
+    name: "contract_documents.confirm_upload",
+    description: "Checks an uploaded document's type from its bytes and puts it on file.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(confirmContractDocumentSpec),
+    changes: "one",
+    action: at("business/contract-document-actions", "confirmContractDocumentUpload"),
+    agent: false,
+    agentNote: FILES,
+  },
+  {
+    name: "contract_documents.remove",
+    description: "Marks a contract document removed with a reason; its file stops opening.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(removeContractDocumentSpec),
+    changes: "one",
+    action: at("business/contract-document-actions", "removeContractDocumentAction"),
+    preview: previewRemoveContractDocument,
+    agent: true,
   },
 ];
 

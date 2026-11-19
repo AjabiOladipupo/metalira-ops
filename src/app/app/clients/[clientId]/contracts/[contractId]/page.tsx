@@ -7,7 +7,8 @@ import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { paymentTermsLabel } from "@/lib/company";
-import { addDays, formatDate, lagosToday } from "@/lib/dates";
+import { DOCUMENT_KIND_LABELS, formatFileSize } from "@/lib/contract-documents";
+import { addDays, formatDate, formatDateTime, lagosToday } from "@/lib/dates";
 import {
   formatLineRate,
   formatOvertime,
@@ -19,6 +20,10 @@ import {
 } from "@/lib/rate-cards";
 import { cn } from "@/lib/utils";
 import { loadClient } from "@/server/business/clients-data";
+import {
+  listContractDocuments,
+  type ContractDocument,
+} from "@/server/business/contract-documents-data";
 import { BILLING_FREQUENCY_LABELS, CONTRACT_TYPE_LABELS } from "@/server/business/contract-schemas";
 import { loadContract, type ContractDetail } from "@/server/business/contracts-data";
 import { getActiveCompany } from "@/server/identity/company-data";
@@ -28,6 +33,7 @@ import { DetailList, Section } from "../../../../people/_components/display";
 import { inheritedTermsLabel } from "../../../_components/contract-options";
 import { clientsPageContext } from "../../../_components/context";
 import { ContractStatusChip } from "../../../_components/contract-status";
+import { DocumentUploadForm, RemoveDocumentForm } from "../../../_components/document-forms";
 import { CancelVersionButton, WhtRateForm } from "../../../_components/rate-forms";
 
 export const metadata: Metadata = { title: "Contract" };
@@ -374,6 +380,133 @@ function DetailsTab({
   );
 }
 
+function uploadedLine(doc: ContractDocument): string {
+  const parts = [doc.fileName];
+  if (doc.sizeBytes !== null) parts.push(formatFileSize(doc.sizeBytes));
+  if (doc.uploadedAt) {
+    parts.push(
+      `uploaded ${formatDateTime(doc.uploadedAt)}${doc.uploadedByName ? ` by ${doc.uploadedByName}` : ""}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+function DocumentsTab({
+  contract,
+  documents,
+  canEdit,
+}: {
+  contract: ContractDetail;
+  documents: ContractDocument[];
+  canEdit: boolean;
+}) {
+  const active = documents.filter((d) => d.status === "active");
+  const removed = documents.filter((d) => d.status === "removed");
+  const hasSigned = active.some((d) => d.kind === "signed_contract");
+  const base = `/app/clients/${contract.clientId}/contracts/${contract.id}/documents`;
+  return (
+    <div className="flex flex-col gap-6">
+      {active.length === 0 ? (
+        <EmptyState message="No documents yet. Upload the signed contract, the SLA and anything else agreed with the client." />
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="m-0 text-sm text-fg-muted" data-testid="documents-count">
+            {active.length} {active.length === 1 ? "document" : "documents"} on file
+            {hasSigned ? "" : " · no signed contract yet"}
+          </p>
+          <ul className="m-0 flex list-none flex-col gap-3 p-0" aria-label="Documents">
+            {active.map((doc) => (
+              <li
+                key={doc.id}
+                className="flex flex-col gap-3 rounded-xl border border-line p-4"
+                data-testid="contract-document"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="text-xs font-medium tracking-wide text-fg-muted uppercase">
+                      {DOCUMENT_KIND_LABELS[doc.kind]}
+                    </span>
+                    <span className="font-medium break-words">{doc.title}</span>
+                    <span className="text-sm break-words text-fg-muted">{uploadedLine(doc)}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button asChild className="h-11 px-4">
+                      <a
+                        href={`${base}/${doc.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Open ${doc.title}`}
+                      >
+                        Open
+                      </a>
+                    </Button>
+                    <Button asChild variant="outline" className="h-11 px-4">
+                      <a
+                        href={`${base}/${doc.id}?download=1`}
+                        rel="noopener noreferrer"
+                        aria-label={`Download ${doc.title}`}
+                      >
+                        Download
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+                {canEdit ? (
+                  <RemoveDocumentForm
+                    clientId={contract.clientId}
+                    contractId={contract.id}
+                    documentId={doc.id}
+                    title={doc.title}
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {canEdit ? (
+        <DocumentUploadForm
+          clientId={contract.clientId}
+          contractId={contract.id}
+          defaultKind={hasSigned ? "other" : "signed_contract"}
+        />
+      ) : null}
+      {removed.length ? (
+        <Section
+          id="removed-documents"
+          title="Removed"
+          description="Kept on record. Their files can't be opened and are deleted 30 days after removal."
+        >
+          <ul
+            className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0"
+            aria-label="Removed documents"
+          >
+            {removed.map((doc) => (
+              <li
+                key={doc.id}
+                className="flex flex-col gap-1 px-4 py-3"
+                data-testid="removed-document"
+              >
+                <span className="font-medium break-words">
+                  {doc.title}{" "}
+                  <span className="text-sm font-normal text-fg-muted">
+                    · {DOCUMENT_KIND_LABELS[doc.kind]}
+                  </span>
+                </span>
+                <span className="text-sm break-words text-fg-muted">
+                  Removed {doc.removedAt ? formatDateTime(doc.removedAt) : ""}
+                  {doc.removedByName ? ` by ${doc.removedByName}` : ""}
+                  {doc.removedReason ? `: ${doc.removedReason}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+    </div>
+  );
+}
+
 async function ContractPage({
   params,
   searchParams,
@@ -384,10 +517,13 @@ async function ContractPage({
   const [{ clientId, contractId }, query] = await Promise.all([params, searchParams]);
   const tab = parseTab(query.tab);
   const ctx = await clientsPageContext();
-  const [contract, client, company] = await Promise.all([
+  const [contract, client, company, documents] = await Promise.all([
     loadContract(ctx.supabase, ctx.organisationId, clientId, contractId),
     loadClient(ctx.supabase, ctx.organisationId, clientId),
     getActiveCompany(),
+    tab === "documents" && /^[0-9a-f-]{36}$/i.test(contractId)
+      ? listContractDocuments(ctx.supabase, ctx.organisationId, contractId)
+      : Promise.resolve([]),
   ]);
   if (!contract || !client) notFound();
   const today = lagosToday();
@@ -427,7 +563,7 @@ async function ContractPage({
         <EmptyState message="No headcount yet. Posts, shifts and how many people each needs come here next." />
       ) : null}
       {tab === "documents" ? (
-        <EmptyState message="No documents yet. Signed contracts and SLAs are uploaded here next." />
+        <DocumentsTab contract={contract} documents={documents} canEdit={ctx.canEditContracts} />
       ) : null}
     </>
   );

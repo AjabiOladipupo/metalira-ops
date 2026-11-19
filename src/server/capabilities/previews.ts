@@ -24,6 +24,9 @@ import {
   type quickAddClientSchema,
 } from "@/server/business/schemas";
 
+import { DOCUMENT_KIND_LABELS, type DocumentKind } from "@/lib/contract-documents";
+import type { removeContractDocumentSchema } from "@/server/business/contract-documents";
+
 import type { CapabilityPreview, PreviewFn } from "./types";
 
 /**
@@ -239,5 +242,30 @@ export const previewAddWhtRate: PreviewFn<typeof addWhtRateSchema> = async ({
         after,
       },
     ],
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Contract documents (slice 2.6)
+// ---------------------------------------------------------------------------
+
+/** Names the document a removal takes off file, and the reason that is kept with it. */
+export const previewRemoveContractDocument: PreviewFn<
+  typeof removeContractDocumentSchema
+> = async ({ supabase, organisationId, data }) => {
+  const { data: doc, error } = await supabase
+    .from("contract_documents")
+    .select("title, kind, status")
+    .eq("organisation_id", organisationId)
+    .eq("id", data.documentId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the document (${error.code})`);
+  if (!doc || doc.status !== "active") {
+    return { summary: "Nothing to remove: the document isn't on file.", changes: [] };
+  }
+  const kind = DOCUMENT_KIND_LABELS[doc.kind as DocumentKind] ?? doc.kind;
+  return {
+    summary: `Removes 1 document: ${doc.title} (${kind}). It can't be opened afterwards.`,
+    changes: [{ label: doc.title, before: "On file", after: `Removed: ${data.reason}` }],
   };
 };

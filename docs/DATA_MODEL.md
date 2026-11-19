@@ -34,7 +34,7 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 | rate_cards / rate_card_lines | contract_id, effective_from, effective_to, note; role, band (default standard), unit (shift, hour, visit, month, job), rate_kobo, currency, ot_rate_kobo null, ot_multiplier_bps null | Dated versions, no overlaps (GiST), inside the contract dates, VAT-exclusive. Written only by `save_draft_rate_card`, `add_rate_card_version`, `cancel_rate_card_version`. Lines are insert-only and matched by rate key (role, band, unit) (2.4) |
 | contract_wht_rates | contract_id, rate_bps (0–2000), effective_from, effective_to | WHT per contract (owner decision), dated like rate cards; the rate valid on the invoice date applies. WHT base (subtotal or total) is a RULES_NIGERIA gap (2.4) |
 | headcount_requirements | contract_id, site_id, role, shift_pattern, count | Drives rosters |
-| contract_documents | contract_id, storage_path, kind | |
+| contract_documents | contract_id, kind (signed_contract, sla, amendment, purchase_order, insurance, other), title, file_name, file_ext (pdf, png, jpg), mime_type, storage_path (unique), size_bytes, sha256, status (pending, active, rejected, removed), uploaded_by, uploaded_at, removed_at/by, removed_reason, file_deleted_at | Files in the private `contract-docs` bucket at `{organisation_id}/{contract_id}/{id}.{ext}`, opened by 60-second signed URLs. Type checked from the file's magic bytes. Never deleted or edited: removed rows keep who, when and why; the file is deleted 30 days after removal (2.6) |
 
 ## Workforce (Phases 3–4)
 | Table | Key columns | Notes |
