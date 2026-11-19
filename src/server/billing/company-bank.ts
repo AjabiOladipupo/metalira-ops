@@ -92,6 +92,8 @@ function fromDbError(error: PostgrestError, field = "bankAccountNumber"): never 
 
 export interface RaisedCompanyBank {
   id: string;
+  /** The organisation the change was made in (the mutation's own, never re-read). */
+  organisationId: string;
   status: CompanyBankStatus;
   /** True when it was the first account, in use at once without a second approver. */
   singleApprover: boolean;
@@ -123,6 +125,7 @@ export const requestCompanyBankSpec: MutationSpec<
     if (!row) throw new Error("The request was not saved");
     return {
       id: row.id,
+      organisationId,
       status: row.status,
       singleApprover: row.single_approver,
       last4: sealed.last4,
@@ -141,6 +144,7 @@ export function requestCompanyBank(input: unknown): Promise<RaisedCompanyBank> {
 
 export interface DecidedCompanyBank {
   id: string;
+  organisationId: string;
   status: CompanyBankStatus;
   appliesAfter: string | null;
   last4: string;
@@ -232,6 +236,7 @@ export const decideCompanyBankSpec: MutationSpec<
     if (!row) throw new MutationError("invalid", NOT_FOUND_OR_DECIDED);
     return {
       id: row.id,
+      organisationId,
       status: row.status,
       appliesAfter: row.applies_after,
       last4: row.bank_account_last4,

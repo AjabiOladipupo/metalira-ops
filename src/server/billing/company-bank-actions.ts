@@ -15,11 +15,7 @@ import { getSession } from "@/server/identity/session";
 import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "@/server/people/pii-access";
 
 import { decideCompanyBank, requestCompanyBank, withdrawCompanyBank } from "./company-bank";
-import {
-  notifyApproversOfCompanyBank,
-  notifyCompanyBankApproval,
-  sendAppliedCompanyBankNotices,
-} from "./company-bank-notices";
+import { sendCompanyBankNotices } from "./company-bank-notices";
 
 /**
  * Server Actions for the company bank account (slice 2.3). Each runs through `mutate()`, which
@@ -57,11 +53,6 @@ function refusal(
   return { ok: false, status: 500, formError: FAILED, values };
 }
 
-async function activeOrganisationId(): Promise<string | null> {
-  const session = await getSession();
-  return session?.active?.organisationId ?? null;
-}
-
 function refresh(): void {
   revalidatePath("/app/settings/bank-account");
   revalidatePath("/app/settings/company");
@@ -90,14 +81,8 @@ export async function requestCompanyBankAction(
       echo(fields),
     );
   }
-  const organisationId = await activeOrganisationId();
-  if (organisationId) {
-    after(() =>
-      raised.status === "active"
-        ? sendAppliedCompanyBankNotices(organisationId)
-        : notifyApproversOfCompanyBank(organisationId, raised.id),
-    );
-  }
+  // Emails are a sweep over the rows (requests made outside the app are announced too).
+  after(() => sendCompanyBankNotices(raised.organisationId));
   refresh();
   return {
     ok: true,
@@ -126,10 +111,7 @@ export async function decideCompanyBankAction(
   } catch (error) {
     return refusal(error, "Only an owner or finance can approve the company bank account.");
   }
-  const organisationId = await activeOrganisationId();
-  if (organisationId && decided.status === "approved") {
-    after(() => notifyCompanyBankApproval(organisationId, decided.id));
-  }
+  after(() => sendCompanyBankNotices(decided.organisationId));
   refresh();
   const message =
     decided.status === "approved" && decided.appliesAfter

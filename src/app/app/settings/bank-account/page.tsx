@@ -17,7 +17,7 @@ import {
   type CompanyBankView,
   type CompanyBankViewer,
 } from "@/server/billing/company-bank";
-import { sendAppliedCompanyBankNotices } from "@/server/billing/company-bank-notices";
+import { sendCompanyBankNotices } from "@/server/billing/company-bank-notices";
 import { getActiveCompany } from "@/server/identity/company-data";
 import { getPageSession } from "@/server/identity/session";
 
@@ -216,7 +216,8 @@ async function CompanyBankPage({ searchParams }: { searchParams: Promise<{ from?
 
   // Accounts whose hold has ended take effect before anything is shown (pg_cron does this too).
   await applyDueCompanyBank(supabase, organisationId);
-  after(() => sendAppliedCompanyBankNotices(organisationId));
+  // Every email due for this company, including requests or approvals made outside the app.
+  after(() => sendCompanyBankNotices(organisationId));
 
   const now = new Date();
   const detail = await loadCompanyBank(supabase, organisationId, now);

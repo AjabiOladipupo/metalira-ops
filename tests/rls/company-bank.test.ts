@@ -370,11 +370,55 @@ describe("two people, then 72 hours", () => {
   });
 });
 
+describe("email marks (sweeps over the rows)", () => {
+  it("lets the secret key mark each email once, for its own status, and nobody else", async () => {
+    const c = await company("marks", true);
+    const pending = await mustRequest(c, c.people.admin.client);
+    const mark = (patch: Record<string, string>) =>
+      admin.from("organisation_bank_accounts").update(patch).eq("id", pending.id).select("id");
+    const now = new Date().toISOString();
+
+    // Signed-in users can't write the marks at all (column grants).
+    const byOwner = await c.owner.client
+      .from("organisation_bank_accounts")
+      .update({ requested_notified_at: now })
+      .eq("id", pending.id);
+    expect(byOwner.error).not.toBeNull();
+    // Wrong mark for the status.
+    expect((await mark({ approved_notified_at: now })).error?.code).toBe("MLOB4");
+    expect((await mark({ requested_notified_at: now })).error).toBeNull();
+    // Once only.
+    expect((await mark({ requested_notified_at: now })).error?.code).toBe("MLOB4");
+
+    // An approval made straight over the Data API leaves the "approved" email due.
+    expect((await decide(c, pending.id, "approve", c.people.finance.client)).error).toBeNull();
+    const { rows } = await db.query<{ approved_notified_at: Date | null }>(
+      "select approved_notified_at from public.organisation_bank_accounts where id = $1",
+      [pending.id],
+    );
+    expect(rows[0]!.approved_notified_at).toBeNull();
+    expect((await mark({ approved_notified_at: now })).error).toBeNull();
+  });
+});
+
 describe("who can read and request", () => {
   let c: Company;
   beforeAll(async () => {
     c = await company("roles", true);
     await mustRequest(c, c.people.finance.client);
+  });
+
+  it("lets only owner, admin and finance run the apply", async () => {
+    for (const who of ["hr", "ops", "line", "worker"] as const) {
+      const { error } = await c.people[who].client.rpc("apply_due_org_bank_accounts", {
+        p_organisation_id: c.owner.orgId,
+      });
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+    const { error } = await c.people.admin.client.rpc("apply_due_org_bank_accounts", {
+      p_organisation_id: c.owner.orgId,
+    });
+    expect(error).toBeNull();
   });
 
   it("hides the table (and its ciphertext) from hr, operations, line managers and workers", async () => {

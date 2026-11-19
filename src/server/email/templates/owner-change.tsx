@@ -1,7 +1,14 @@
 import { APP_NAME } from "@/lib/app";
 import { EmailButton, EmailHeading, EmailLayout, EmailText } from "../layout";
 
-export type OwnerChangeEvent = "requested" | "done" | "rejected" | "withdrawn" | "joined";
+export type OwnerChangeEvent =
+  | "requested"
+  | "done"
+  | "rejected"
+  | "withdrawn"
+  | "joined"
+  /** Someone was given the admin, finance or HR role (owner decision, 19 Nov 2026). */
+  | "role_given";
 
 export type OwnerChangeEmailProps = {
   /** The company, or null when its name can't safely go in an email (looks like a web address). */
@@ -23,6 +30,7 @@ const HEADINGS: Record<OwnerChangeEvent, string> = {
   rejected: "An owner change was rejected",
   withdrawn: "An owner change was withdrawn",
   joined: "A new owner joined",
+  role_given: "Someone was given a role that approves money changes",
 };
 
 export const ownerChangeSubject = (organisationName: string | null, event: OwnerChangeEvent) => {
@@ -38,6 +46,8 @@ export const ownerChangeSubject = (organisationName: string | null, event: Owner
       return `Owner change withdrawn at ${where}`;
     case "joined":
       return `New owner at ${where}`;
+    case "role_given":
+      return `New admin, finance or HR manager at ${where}`;
   }
 };
 
@@ -55,6 +65,8 @@ function body(event: OwnerChangeEvent, summary: string, actor: string, single: b
       return `${summary}: withdrawn by ${actor}, who asked for it. Nothing changed.`;
     case "joined":
       return `${actor} accepted an invite and is now an owner.`;
+    case "role_given":
+      return `${summary}. Admins, finance and HR can approve bank account and bank-detail changes, so every owner is told.`;
   }
 }
 

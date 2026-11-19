@@ -12,40 +12,38 @@ import {
 import { createAdminSupabase } from "@/server/supabase/admin";
 
 /**
- * Emails about the company bank account (slice 2.3): approvers (owner and finance, never the
- * requester) when a request is raised; every owner and finance user when it is approved and when
- * it takes effect (the first account during setup takes effect at once, so it gets the second
- * kind only). They run after the change is saved (`after()` or the daily cron route) and never
- * undo it. A failed send is logged by error name only, never with an address, a name or digits.
+ * Emails about the company bank account (slice 2.3):
+ * - requested: approvers (owner and finance, never the requester) when a request is waiting;
+ * - approved: every owner and finance user when a second person approves, so a change nobody
+ *   asked for can be stopped during the 72-hour hold;
+ * - applied: every owner and finance user when an account takes effect (the first account during
+ *   setup takes effect at once, so it gets only this one).
  *
- * They read with the secret key because addresses live in Supabase Auth, which no signed-in user
- * can read. Every query is scoped to one organisation and one account, except the cron sweep,
- * which looks for accounts in use that nobody has been told about yet.
+ * All three are sweeps over the rows themselves, not hooks on the app's actions: a request or an
+ * approval made straight against the Data API is announced just the same. Each row is marked
+ * (`requested_notified_at`, `approved_notified_at`, `applied_notified_at`; only the secret key can
+ * write them, and the trigger allows each once, for its own status) only after its emails went,
+ * so a failed send is retried by the next sweep for up to NOTICE_RETRY_DAYS. Sends carry an
+ * idempotency key per row, kind and recipient, so overlapping sweeps send each email once.
+ *
+ * Sweeps run after every change in the app (`after()`), when the bank account page loads, every
+ * 15 minutes (`/api/cron/company-bank`) and daily (`/api/cron/bank-detail-changes`). They read
+ * with the secret key because addresses live in Supabase Auth. A failed send is logged by error
+ * name only, never with an address, a name or digits.
  */
 
 type Admin = ReturnType<typeof createAdminSupabase>;
 
 const DAY = 86_400_000;
-/** How long a failed "in use" email is retried before the sweep gives up on it. */
-export const APPLIED_NOTICE_RETRY_DAYS = 7;
+/** How long a failed email is retried before the sweep gives up on it. */
+export const NOTICE_RETRY_DAYS = 7;
 
 function logFailure(what: string, error: unknown): void {
   console.error(`billing.${what}:`, error instanceof Error ? error.name : "unknown");
 }
 
 const COLUMNS =
-  "id, organisation_id, requested_by, status, bank_name, bank_account_last4, applies_after, activated_at, organisations ( name )";
-
-async function loadAccount(admin: Admin, organisationId: string, accountId: string) {
-  const { data, error } = await admin
-    .from("organisation_bank_accounts")
-    .select(COLUMNS)
-    .eq("organisation_id", organisationId)
-    .eq("id", accountId)
-    .maybeSingle();
-  if (error) throw new Error(`Could not read the bank account: ${error.code}`);
-  return data;
-}
+  "id, organisation_id, requested_by, status, bank_name, bank_account_last4, created_at, decided_at, applies_after, activated_at, organisations ( name )";
 
 /** Owner and finance members with a confirmed address, as { userId, email }. */
 async function recipients(
@@ -69,161 +67,146 @@ async function recipients(
   return out;
 }
 
-/** Tells every owner and finance user other than the requester that a request is waiting. */
-export async function notifyApproversOfCompanyBank(
-  organisationId: string,
-  accountId: string,
-): Promise<number> {
-  try {
-    const admin = createAdminSupabase();
-    const account = await loadAccount(admin, organisationId, accountId);
-    if (account?.status !== "pending" || !account.organisations) return 0;
+type Kind = "requested" | "approved" | "applied";
 
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("full_name")
-      .eq("user_id", account.requested_by)
-      .maybeSingle();
-    const requesterName = profile?.full_name?.trim() || null;
-
-    let sent = 0;
-    for (const to of await recipients(admin, organisationId, account.requested_by)) {
-      try {
-        await sendCompanyBankRequestedEmail({
-          to: to.email,
-          accountId: account.id,
-          recipientId: to.userId,
-          organisationName: account.organisations.name,
-          requesterName,
-          bankName: account.bank_name,
-          last4: account.bank_account_last4,
-        });
-        sent += 1;
-      } catch (sendError) {
-        logFailure("company_bank_request_email_failed", sendError);
-      }
-    }
-    return sent;
-  } catch (error) {
-    logFailure("company_bank_request_notice_failed", error);
-    return 0;
+const KINDS: Record<
+  Kind,
+  {
+    statuses: ("pending" | "approved" | "active" | "retired")[];
+    column: "requested_notified_at" | "approved_notified_at" | "applied_notified_at";
   }
-}
+> = {
+  requested: { statuses: ["pending"], column: "requested_notified_at" },
+  approved: { statuses: ["approved"], column: "approved_notified_at" },
+  // A replaced account nobody was told about is marked without an email.
+  applied: { statuses: ["active", "retired"], column: "applied_notified_at" },
+};
 
-/** Tells every owner and finance user that a second person approved; it applies after the hold. */
-export async function notifyCompanyBankApproval(
-  organisationId: string,
-  accountId: string,
-): Promise<number> {
-  try {
-    const admin = createAdminSupabase();
-    const account = await loadAccount(admin, organisationId, accountId);
-    if (account?.status !== "approved" || !account.applies_after || !account.organisations) {
-      return 0;
-    }
-    let sent = 0;
-    for (const to of await recipients(admin, organisationId, null)) {
-      try {
-        await sendCompanyBankApprovedEmail({
-          to: to.email,
-          accountId: account.id,
-          recipientId: to.userId,
-          organisationName: account.organisations.name,
-          bankName: account.bank_name,
-          last4: account.bank_account_last4,
-          at: formatDateTime(account.applies_after),
-        });
-        sent += 1;
-      } catch (sendError) {
-        logFailure("company_bank_approved_email_failed", sendError);
-      }
-    }
-    return sent;
-  } catch (error) {
-    logFailure("company_bank_approved_notice_failed", error);
-    return 0;
+function markPatch(kind: Kind, at: string) {
+  switch (kind) {
+    case "requested":
+      return { requested_notified_at: at };
+    case "approved":
+      return { approved_notified_at: at };
+    case "applied":
+      return { applied_notified_at: at };
   }
 }
 
 /**
- * Tells every owner and finance user about accounts now in use that nobody has been told about.
- * An account is marked (applied_notified_at) only after its emails went, so a failed send is
- * tried again by the next sweep (the bank account page or the daily cron route), for up to
- * APPLIED_NOTICE_RETRY_DAYS. Sends carry an idempotency key per account and recipient, so two
- * sweeps at once still send each email once. `organisationId` null sweeps every organisation
- * (the cron route only).
+ * Sends one kind of email for every row that needs it and marks each row once its emails went.
+ * `organisationId` null sweeps every organisation (cron routes only). Returns emails sent.
  */
-export async function sendAppliedCompanyBankNotices(
-  organisationId: string | null,
-): Promise<number> {
+async function sweep(kind: Kind, organisationId: string | null): Promise<number> {
+  const { statuses, column } = KINDS[kind];
   try {
     const admin = createAdminSupabase();
     let query = admin
       .from("organisation_bank_accounts")
       .select(COLUMNS)
-      .in("status", ["active", "retired"])
-      .is("applied_notified_at", null)
-      .order("activated_at")
+      .in("status", statuses)
+      .is(column, null)
+      .order("created_at")
       .limit(200);
     if (organisationId) query = query.eq("organisation_id", organisationId);
     const { data: due, error } = await query;
-    if (error) throw new Error(`Could not read accounts in use: ${error.code}`);
+    if (error) throw new Error(`Could not read bank accounts: ${error.code}`);
 
     let sent = 0;
-    for (const account of due ?? []) {
-      if (!account.organisations || !account.activated_at) continue;
+    for (const row of due ?? []) {
+      if (!row.organisations) continue;
       let delivered = true;
-      // An account replaced before anyone was told about it needs no "now in use" email.
-      if (account.status === "active") {
-        try {
-          for (const to of await recipients(admin, account.organisation_id, null)) {
+      try {
+        const common = {
+          accountId: row.id,
+          organisationName: row.organisations.name,
+          bankName: row.bank_name,
+          last4: row.bank_account_last4,
+        };
+        let send: ((to: { userId: string; email: string }) => Promise<unknown>) | null = null;
+        let except: string | null = null;
+        if (kind === "requested") {
+          const { data: profile } = await admin
+            .from("profiles")
+            .select("full_name")
+            .eq("user_id", row.requested_by)
+            .maybeSingle();
+          const requesterName = profile?.full_name?.trim() || null;
+          except = row.requested_by;
+          send = (to) =>
+            sendCompanyBankRequestedEmail({
+              ...common,
+              to: to.email,
+              recipientId: to.userId,
+              requesterName,
+            });
+        } else if (kind === "approved" && row.applies_after) {
+          const at = formatDateTime(row.applies_after);
+          send = (to) =>
+            sendCompanyBankApprovedEmail({ ...common, to: to.email, recipientId: to.userId, at });
+        } else if (kind === "applied" && row.status === "active" && row.activated_at) {
+          const at = formatDateTime(row.activated_at);
+          send = (to) =>
+            sendCompanyBankAppliedEmail({ ...common, to: to.email, recipientId: to.userId, at });
+        }
+        if (send) {
+          for (const to of await recipients(admin, row.organisation_id, except)) {
             try {
-              await sendCompanyBankAppliedEmail({
-                to: to.email,
-                accountId: account.id,
-                recipientId: to.userId,
-                organisationName: account.organisations.name,
-                bankName: account.bank_name,
-                last4: account.bank_account_last4,
-                at: formatDateTime(account.activated_at),
-              });
+              await send(to);
               sent += 1;
             } catch (sendError) {
-              logFailure("company_bank_applied_email_failed", sendError);
+              logFailure(`company_bank_${kind}_email_failed`, sendError);
               // Bad input never becomes good: don't retry it forever.
               if (!(sendError instanceof z.ZodError)) delivered = false;
             }
           }
-        } catch (readError) {
-          logFailure("company_bank_applied_notice_failed", readError);
-          delivered = false;
         }
+      } catch (readError) {
+        logFailure(`company_bank_${kind}_notice_failed`, readError);
+        delivered = false;
       }
 
-      const givenUp =
-        !delivered &&
-        Date.now() - Date.parse(account.activated_at) > APPLIED_NOTICE_RETRY_DAYS * DAY;
+      const since = Date.parse(
+        (kind === "requested" ? row.created_at : (row.decided_at ?? row.created_at)) ?? "",
+      );
+      const givenUp = !delivered && Date.now() - since > NOTICE_RETRY_DAYS * DAY;
       if (!delivered && !givenUp) continue;
       const { error: markError } = await admin
         .from("organisation_bank_accounts")
-        .update({ applied_notified_at: new Date().toISOString() })
-        .eq("id", account.id)
-        .eq("status", account.status)
-        .is("applied_notified_at", null);
-      if (markError) logFailure("company_bank_applied_mark_failed", markError);
+        .update(markPatch(kind, new Date().toISOString()))
+        .eq("id", row.id)
+        .eq("status", row.status)
+        .is(column, null);
+      if (markError) logFailure(`company_bank_${kind}_mark_failed`, markError);
     }
     return sent;
   } catch (error) {
-    logFailure("company_bank_applied_notice_failed", error);
+    logFailure(`company_bank_${kind}_notice_failed`, error);
     return 0;
   }
 }
 
 /**
- * The scheduled job (the daily bank-change cron route): applies every account whose hold has
- * ended, in case pg_cron is not running, then sends the "now in use" emails.
+ * Every company bank account email that is due, for one organisation or (null, cron routes
+ * only) all of them. Safe to call any number of times.
  */
-export async function runCompanyBankJob(): Promise<{ applied: number; notified: number }> {
+export async function sendCompanyBankNotices(
+  organisationId: string | null,
+): Promise<{ requested: number; approved: number; applied: number }> {
+  const requested = await sweep("requested", organisationId);
+  const approved = await sweep("approved", organisationId);
+  const applied = await sweep("applied", organisationId);
+  return { requested, approved, applied };
+}
+
+/**
+ * The scheduled job (every 15 minutes, and daily with the bank-change route): applies every
+ * account whose hold has ended, in case pg_cron is not running, then sends every email due.
+ */
+export async function runCompanyBankJob(): Promise<{
+  applied: number;
+  notified: { requested: number; approved: number; applied: number };
+}> {
   let applied = 0;
   try {
     const admin = createAdminSupabase();
@@ -236,6 +219,6 @@ export async function runCompanyBankJob(): Promise<{ applied: number; notified: 
   } catch (error) {
     logFailure("company_bank_apply_job_failed", error);
   }
-  const notified = await sendAppliedCompanyBankNotices(null);
+  const notified = await sendCompanyBankNotices(null);
   return { applied, notified };
 }

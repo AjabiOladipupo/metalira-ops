@@ -112,7 +112,11 @@ create table public.organisation_bank_accounts (
   activated_at timestamptz,
   retired_at timestamptz,
   cancelled_at timestamptz,
-  -- When owners and finance were told it is in use (set by the server after it emails).
+  -- When the emails about this row went (set by the server's sweeps after they send, so a
+  -- request or approval made by any client, the Data API included, is always announced):
+  -- approvers told it is waiting; owners and finance told it was approved; and told it is in use.
+  requested_notified_at timestamptz,
+  approved_notified_at timestamptz,
   applied_notified_at timestamptz,
 
   created_at timestamptz not null default now(),
@@ -183,7 +187,9 @@ create index organisation_bank_accounts_due_idx
   where status = 'approved';
 create index organisation_bank_accounts_unnotified_idx
   on public.organisation_bank_accounts (organisation_id)
-  where status in ('active', 'retired') and applied_notified_at is null;
+  where (status = 'pending' and requested_notified_at is null)
+    or (status = 'approved' and approved_notified_at is null)
+    or (status in ('active', 'retired') and applied_notified_at is null);
 
 comment on table public.organisation_bank_accounts is
   'The company''s own collection bank account and the requests to add or change it: two-person approval, then a 72-hour hold (CLAUDE.md rules 6 and 10). Insert-only history; the status moves forward by trigger-checked updates. bank_account_enc is encrypted for this row.';
@@ -236,6 +242,8 @@ begin
   new.activated_at := null;
   new.retired_at := null;
   new.cancelled_at := null;
+  new.requested_notified_at := null;
+  new.approved_notified_at := null;
   new.applied_notified_at := null;
   new.created_at := now();
   new.updated_at := now();
@@ -320,16 +328,28 @@ begin
   end if;
 
   if new.status = old.status then
-    -- The only change without a status move: marking an account in use as emailed, once.
-    if old.status in ('active', 'retired')
-      and old.applied_notified_at is null
-      and new.applied_notified_at is not null
-      and (
+    -- The only change without a status move: marking the email that fits the status as sent,
+    -- once (waiting: requested; on hold: approved; in use: applied). Nothing else may change.
+    if (
         new.approved_by, new.rejected_by, new.cancelled_by, new.decided_at, new.decision_note,
         new.applies_after, new.activated_at, new.retired_at, new.cancelled_at
       ) is not distinct from (
         old.approved_by, old.rejected_by, old.cancelled_by, old.decided_at, old.decision_note,
         old.applies_after, old.activated_at, old.retired_at, old.cancelled_at
+      )
+      and (
+        (old.status = 'pending'
+          and old.requested_notified_at is null and new.requested_notified_at is not null
+          and (new.approved_notified_at, new.applied_notified_at)
+            is not distinct from (old.approved_notified_at, old.applied_notified_at))
+        or (old.status = 'approved'
+          and old.approved_notified_at is null and new.approved_notified_at is not null
+          and (new.requested_notified_at, new.applied_notified_at)
+            is not distinct from (old.requested_notified_at, old.applied_notified_at))
+        or (old.status in ('active', 'retired')
+          and old.applied_notified_at is null and new.applied_notified_at is not null
+          and (new.requested_notified_at, new.approved_notified_at)
+            is not distinct from (old.requested_notified_at, old.approved_notified_at))
       ) then
       return new;
     end if;
@@ -345,6 +365,8 @@ begin
   new.activated_at := old.activated_at;
   new.retired_at := old.retired_at;
   new.cancelled_at := old.cancelled_at;
+  new.requested_notified_at := old.requested_notified_at;
+  new.approved_notified_at := old.approved_notified_at;
   new.applied_notified_at := old.applied_notified_at;
 
   v_approver := v_actor is not null
@@ -645,11 +667,14 @@ declare
   r record;
   v_count integer := 0;
 begin
+  -- Signed-in callers: owner, admin or finance of the named organisation only (the bank account
+  -- page). Callers without a signed-in user (pg_cron, the secret key) may sweep every one.
   if auth.uid() is not null and (
     p_organisation_id is null
-    or p_organisation_id not in (select private.user_org_ids())
+    or not private.has_role(p_organisation_id, array['owner', 'admin', 'finance'])
   ) then
-    raise exception 'Choose an organisation you belong to.' using errcode = '42501';
+    raise exception 'Only an owner, an admin or finance can apply the company bank account.'
+      using errcode = '42501';
   end if;
 
   for r in
