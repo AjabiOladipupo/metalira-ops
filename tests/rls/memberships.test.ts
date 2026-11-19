@@ -188,7 +188,7 @@ describe("memberships", () => {
   it("an admin changes a member's role through change_member_role only", async () => {
     const direct = await orgAdmin.client
       .from("memberships")
-      .update({ role: "hr" })
+      .update({ role: "ops_manager" })
       .eq("organisation_id", owner.orgId)
       .eq("user_id", staff.id);
     expect(direct.error?.code).toBe(PERMISSION_DENIED);
@@ -196,11 +196,11 @@ describe("memberships", () => {
     const { data, error } = await orgAdmin.client.rpc("change_member_role", {
       p_organisation_id: owner.orgId,
       p_membership_id: await membershipId(staff.id, owner.orgId),
-      p_role: "hr",
+      p_role: "ops_manager",
     });
     expect(error).toBeNull();
-    expect(data?.[0]).toMatchObject({ old_role: "line_manager", new_role: "hr" });
-    expect(await roleOf(staff.id, owner.orgId)).toBe("hr");
+    expect(data?.[0]).toMatchObject({ old_role: "line_manager", new_role: "ops_manager" });
+    expect(await roleOf(staff.id, owner.orgId)).toBe("ops_manager");
   });
 
   it("an admin cannot invite an owner or an admin", async () => {
@@ -239,7 +239,7 @@ describe("memberships", () => {
       (await coAdmin.client.rpc("accept_membership_invite", { p_token: adminToken })).error,
     ).toBeNull();
 
-    const token = await inviteToken(coAdmin, second.orgId, invitee.email, "finance");
+    const token = await inviteToken(coAdmin, second.orgId, invitee.email, "ops_manager");
     const removed = await second.client.rpc("remove_member", {
       p_organisation_id: second.orgId,
       p_membership_id: await membershipId(coAdmin.id, second.orgId),
@@ -302,7 +302,7 @@ describe("memberships", () => {
       p_role: "owner",
     });
     expect(viaRpc.error?.code).toBe(INVALID);
-    expect(await roleOf(staff.id, owner.orgId)).toBe("hr");
+    expect(await roleOf(staff.id, owner.orgId)).toBe("ops_manager");
   });
 
   it("nobody can change or remove the owner", async () => {
