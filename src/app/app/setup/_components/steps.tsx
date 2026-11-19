@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { previousSetupStep, resumeSetupSlug, setupStepHref, type SetupSlug } from "@/lib/company";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { COLLECTION_RAILS } from "@/server/billing/collection-rails";
+import { lagosToday } from "@/lib/dates";
+import { formatRateSummary } from "@/lib/rate-cards";
 import { listSetupClients, type SetupClientRow } from "@/server/business/clients-data";
+import { currentOrNextVersion, listContracts } from "@/server/business/contracts-data";
 import { continueFromClients, finishSetup } from "@/server/identity/company-actions";
 import {
   getActiveCompany,
@@ -93,7 +96,14 @@ export async function InvoicesStep() {
   );
 }
 
-function SetupClientsTable({ rows }: { rows: SetupClientRow[] }) {
+function SetupClientsTable({
+  rows,
+  rates,
+}: {
+  rows: SetupClientRow[];
+  /** The rate summary of each client's first open contract with a rate card. */
+  rates: Map<string, string>;
+}) {
   return (
     <DataTable
       caption="Clients added"
@@ -117,7 +127,10 @@ function SetupClientsTable({ rows }: { rows: SetupClientRow[] }) {
         {
           key: "rate",
           header: "Rate",
-          cell: () => <span className="text-fg-muted">Add a contract</span>,
+          cell: (row) =>
+            rates.get(row.id) ?? (
+              <Link href={`/app/clients/${row.id}/contracts/new`}>Add a contract</Link>
+            ),
         },
       ]}
       rows={rows}
@@ -133,7 +146,19 @@ function SetupClientsTable({ rows }: { rows: SetupClientRow[] }) {
 
 export async function ClientsStep() {
   const company = await requireCompany();
-  const clients = await listSetupClients(await createServerSupabase(), company.id);
+  const supabase = await createServerSupabase();
+  const [clients, contracts] = await Promise.all([
+    listSetupClients(supabase, company.id),
+    listContracts(supabase, company.id),
+  ]);
+  const today = lagosToday();
+  const rates = new Map<string, string>();
+  // Oldest contract first, so each client shows the rates of the contract it started with.
+  for (const contract of [...contracts].reverse()) {
+    if (contract.status === "ended" || rates.has(contract.clientId)) continue;
+    const version = currentOrNextVersion(contract.versions, today);
+    if (version) rates.set(contract.clientId, formatRateSummary(version.lines));
+  }
   return (
     <SetupFrame
       current="clients"
@@ -142,7 +167,7 @@ export async function ClientsStep() {
       description="The companies you service. The billing email is where invoices go; rates come with each contract."
     >
       <QuickAddClientForm />
-      <SetupClientsTable rows={clients} />
+      <SetupClientsTable rows={clients} rates={rates} />
       <p className="m-0 text-sm text-fg-muted">
         Client, project and site names in your employee file are kept. New names become clients you
         can finish later under Clients.

@@ -26,7 +26,8 @@ type Client = SupabaseClient<Database>;
 const LINE_SELECT =
   "role, band, unit, rate_kobo::text, currency, ot_rate_kobo::text, ot_multiplier_bps, sort_order" as const;
 
-const VERSION_SELECT = `id, effective_from, effective_to, note, rate_card_lines(${LINE_SELECT})` as const;
+const VERSION_SELECT =
+  `id, effective_from, effective_to, note, rate_card_lines(${LINE_SELECT})` as const;
 
 interface LineTextRow {
   role: string;

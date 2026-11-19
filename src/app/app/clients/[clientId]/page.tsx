@@ -8,7 +8,15 @@ import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { paymentTermsLabel } from "@/lib/company";
 import { cn } from "@/lib/utils";
+import { formatDate, lagosToday } from "@/lib/dates";
+import { formatRateSummary } from "@/lib/rate-cards";
 import { loadClient, type ClientDetail } from "@/server/business/clients-data";
+import { CONTRACT_TYPE_LABELS } from "@/server/business/contract-schemas";
+import {
+  currentOrNextVersion,
+  listContracts,
+  type ContractRow,
+} from "@/server/business/contracts-data";
 import { CONTACT_ROLE_HINTS, CONTACT_ROLE_LABELS, CONTACT_ROLES } from "@/server/business/schemas";
 import { getActiveCompany } from "@/server/identity/company-data";
 
@@ -16,6 +24,7 @@ import { RouteGate } from "../../_shell/slots";
 import { DetailList, Section } from "../../people/_components/display";
 import { AddContactForm, ClientStatusForm, ContactRowForm } from "../_components/contact-forms";
 import { clientsPageContext } from "../_components/context";
+import { ContractStatusChip } from "../_components/contract-status";
 
 export const metadata: Metadata = { title: "Client" };
 
@@ -218,6 +227,68 @@ function Contacts({ client, canEdit }: { client: ClientDetail; canEdit: boolean 
   );
 }
 
+function Contracts({
+  client,
+  contracts,
+  canEdit,
+}: {
+  client: ClientDetail;
+  contracts: ContractRow[];
+  canEdit: boolean;
+}) {
+  const add = canEdit ? (
+    <Button asChild className="h-11 px-4">
+      <Link href={`/app/clients/${client.id}/contracts/new`}>Add contract</Link>
+    </Button>
+  ) : null;
+  if (contracts.length === 0) {
+    return (
+      <EmptyState
+        message="No contracts yet. Add what you do for this client and on what terms."
+        action={add}
+      />
+    );
+  }
+  const today = lagosToday();
+  return (
+    <div className="flex flex-col gap-3">
+      {add ? <div className="flex justify-end">{add}</div> : null}
+      <ul
+        aria-label="Contracts"
+        className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0"
+      >
+        {contracts.map((contract) => {
+          const version = currentOrNextVersion(contract.versions, today);
+          return (
+            <li key={contract.id}>
+              <Link
+                href={`/app/clients/${client.id}/contracts/${contract.id}`}
+                className="flex flex-col gap-1 px-4 py-3 no-underline hover:bg-surface"
+              >
+                <span className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-foreground">
+                    {contract.name}{" "}
+                    <span className="text-sm font-normal text-fg-muted">{contract.reference}</span>
+                  </span>
+                  <ContractStatusChip status={contract.status} />
+                </span>
+                <span className="text-sm text-fg-muted">
+                  {CONTRACT_TYPE_LABELS[contract.type]} · from {formatDate(contract.startDate)}
+                  {contract.endDate ? ` to ${formatDate(contract.endDate)}` : ""} ·{" "}
+                  {contract.siteCount} {contract.siteCount === 1 ? "site" : "sites"}
+                </span>
+                <span className="text-sm text-foreground" data-testid="contract-rates">
+                  {version ? formatRateSummary(version.lines) : "No rate card yet"}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 async function ClientPage({
   params,
   searchParams,
@@ -228,11 +299,13 @@ async function ClientPage({
   const [{ clientId }, query] = await Promise.all([params, searchParams]);
   const tab = parseTab(query.tab);
   const ctx = await clientsPageContext();
-  const [client, company] = await Promise.all([
+  const [client, company, contracts] = await Promise.all([
     loadClient(ctx.supabase, ctx.organisationId, clientId),
     getActiveCompany(),
+    listContracts(ctx.supabase, ctx.organisationId, { clientId }),
   ]);
   if (!client) notFound();
+  const activeContracts = contracts.filter((c) => c.status === "active").length;
 
   const status =
     client.status === "archived" ? (
@@ -253,7 +326,11 @@ async function ClientPage({
           client.sites.length === 1 ? "site" : "sites"
         } · ${client.contacts.length.toLocaleString("en-NG")} ${
           client.contacts.length === 1 ? "contact" : "contacts"
-        } · no contracts yet`}
+        } · ${
+          contracts.length === 0
+            ? "no contracts yet"
+            : `${contracts.length.toLocaleString("en-NG")} ${contracts.length === 1 ? "contract" : "contracts"}, ${activeContracts.toLocaleString("en-NG")} active`
+        }`}
         actions={status}
       />
       <TabLinks clientId={client.id} current={tab} />
@@ -266,7 +343,7 @@ async function ClientPage({
       ) : null}
       {tab === "sites" ? <Sites client={client} /> : null}
       {tab === "contracts" ? (
-        <EmptyState message="No contracts yet. Contracts and rate cards are added here next." />
+        <Contracts client={client} contracts={contracts} canEdit={ctx.canEditContracts} />
       ) : null}
       {tab === "contacts" ? <Contacts client={client} canEdit={ctx.canEditContacts} /> : null}
     </>

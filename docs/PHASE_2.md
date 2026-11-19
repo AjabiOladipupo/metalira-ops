@@ -114,7 +114,7 @@ Replaces the "Connect in Phase 2" placeholder on Setup step 3 and in Settings (D
   - `add_rate_card_version(contract, effective_from, lines jsonb)` is for active contracts. It runs in one transaction, needs `effective_from >= org_today` (backdating waits for Phase 6, like decision 17), closes the previous version the day before, and refuses the change if any open post's rate key is missing from the new lines.
   - `cancel_rate_card_version(id)` works only on a version that hasn't started yet, and only the latest one; it reopens the version before it.
   - `add_contract_wht_rate(contract, rate_bps, effective_from)` and `cancel_contract_wht_rate(id)`, the same dating rules.
-- Pure library `src/server/business/rate-cards.ts`:
+- Pure library `src/lib/rate-cards.ts` (isomorphic, built in 2.4 so the rate card editor shows the same preview in the browser; it imports nothing from `src/server/`):
   - `rateCardInForce(versions, date)`.
   - `planNewVersion(versions, from, today)`, which returns the row to close and the new row, or a reason it can't (also the preview for "Change rates from").
   - `findRateLine(version, key)`.
@@ -131,6 +131,14 @@ Replaces the "Connect in Phase 2" placeholder on Setup step 3 and in Settings (D
   - Database tests for the triggers, including the WHT versions.
   - RLS for the five tables.
   - money-reviewer before merge.
+
+- **As built (2.4):**
+  - Rate card and WHT writes are private security definer functions (role checked through `private.has_role`, so untrusted sessions are refused) behind public invoker wrappers, because the tables have no write grants. The audit actor is still the caller. Contracts and contract sites are written as the caller (`create_contract`, `update_draft_contract`).
+  - "Frozen" applies once the contract has left draft: on a draft nothing has used the card, so `save_draft_rate_card` replaces it whole and versions may be cancelled. `add_rate_card_version` also works on a draft (a change already agreed, from after the current card), which is how "Change rates from" is shown before activation exists.
+  - Lines are insert-only. `private.rate_card_open_post_keys(org, contract)` returns nothing until 2.7 replaces it with the open posts' keys; `add_rate_card_version` already refuses (`MLRC5`) a change that leaves one out.
+  - Moving a draft's start date moves its first rate card and WHT version with it; anything else left outside the dates is refused (`MLCO4`).
+  - `billing_frequency` is monthly, fortnightly, weekly or on_completion (owner to confirm). Refusal codes: `MLCO1`–`MLCO4`, `MLRC1`–`MLRC8`, `MLWH1`–`MLWH4` (MLCT stays for 2.7).
+  - Routes: `/app/clients/[clientId]/contracts/new`, `/app/clients/[clientId]/contracts/[contractId]` (Details with WHT history, Rate card with versions, Headcount and Documents placeholders), `.../edit` (draft only) and `.../rates` (draft card or `?mode=change`), each with a Review step that shows the preview before saving.
 
 **Accept:** a draft Coastline contract gets a rate card (Guard Day ₦12,500 a shift, Guard Night ₦15,000 a shift, overtime 1.5×) and a 5% WHT rate; after activation in 2.7, "Change rates from 1 Jan" adds a version and closes the old one on 31 Dec; editing a past version is refused by the database.
 

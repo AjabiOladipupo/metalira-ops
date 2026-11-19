@@ -115,12 +115,14 @@ export function missingRateKeys(
 
 /** Keys that appear more than once in `lines`; a version takes each key once. */
 export function duplicateRateKeys(lines: readonly RateKey[]): RateKey[] {
-  const seen = new Set<string>();
+  const first = new Map<string, RateKey>();
   const duplicates: RateKey[] = [];
   for (const line of lines) {
     const id = rateKeyId(line);
-    if (seen.has(id)) duplicates.push(line);
-    seen.add(id);
+    const earlier = first.get(id);
+    // Named as first written, so the message matches what the person sees at the top.
+    if (earlier) duplicates.push(earlier);
+    else first.set(id, line);
   }
   return duplicates;
 }
@@ -134,7 +136,10 @@ function byStart<T extends DatedVersion>(versions: readonly T[]): T[] {
 }
 
 /** The version in force on `date`, or null. */
-export function rateCardInForce<T extends DatedVersion>(versions: readonly T[], date: string): T | null {
+export function rateCardInForce<T extends DatedVersion>(
+  versions: readonly T[],
+  date: string,
+): T | null {
   return versions.find((v) => isWithin(date, v.effectiveFrom, v.effectiveTo)) ?? null;
 }
 
@@ -289,8 +294,7 @@ export interface RateLineInput {
 }
 
 export type ParsedRateLine =
-  | { ok: true; line: RateLine }
-  | { ok: false; field: keyof RateLineInput; message: string };
+  { ok: true; line: RateLine } | { ok: false; field: keyof RateLineInput; message: string };
 
 const PLAIN_TEXT = /^[^\u0000-\u001f\u007f-\u009f<>]*$/u;
 
@@ -301,7 +305,8 @@ function plainField(
 ): { ok: true; value: string } | { ok: false; message: string } {
   const trimmed = value.trim();
   if (trimmed === "") return { ok: false, message: `Enter the ${label.toLowerCase()}` };
-  if (trimmed.length > max) return { ok: false, message: `${label} must be ${max} characters or fewer` };
+  if (trimmed.length > max)
+    return { ok: false, message: `${label} must be ${max} characters or fewer` };
   if (!PLAIN_TEXT.test(trimmed) || /:\/\/|www\./i.test(trimmed)) {
     return { ok: false, message: `${label} must be plain text` };
   }
@@ -411,7 +416,8 @@ export function toRateLineInput(line: RateLine): RateLineInput {
     unit: line.unit,
     rate: koboToInput(line.rateKobo),
     otRate: line.otRateKobo === null ? "" : koboToInput(line.otRateKobo),
-    otMultiplier: line.otMultiplierBps === null ? "" : formatMultiplier(line.otMultiplierBps).replace("×", ""),
+    otMultiplier:
+      line.otMultiplierBps === null ? "" : formatMultiplier(line.otMultiplierBps).replace("×", ""),
   };
 }
 
@@ -593,7 +599,11 @@ export function previewRateChange(
     } else if (change.kind === "removed" && change.before) {
       changes.push({ label, before: describeLine(change.before), after: "Removed" });
     } else if (change.before && change.after) {
-      changes.push({ label, before: describeLine(change.before), after: describeLine(change.after) });
+      changes.push({
+        label,
+        before: describeLine(change.before),
+        after: describeLine(change.after),
+      });
     }
   }
   const changed = diff.changes.length;
@@ -601,7 +611,9 @@ export function previewRateChange(
     ok: true,
     summary: `Changes ${pluralLines(changed)} from ${formatDate(from)}; ${pluralLines(
       diff.unchanged,
-    )} stay the same. The current rates end on ${formatDate(plan.closes.effectiveToAfter)}.`,
+    )} ${diff.unchanged === 1 ? "stays" : "stay"} the same. The current rates end on ${formatDate(
+      plan.closes.effectiveToAfter,
+    )}.`,
     changes,
   };
 }

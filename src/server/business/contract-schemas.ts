@@ -138,7 +138,10 @@ const slaNotes = z
 const whtRate = z.string().transform((value, ctx) => {
   const bps = parsePercentBps(value);
   if (bps === null) {
-    ctx.addIssue({ code: "custom", message: "Enter the WHT rate as a percentage from 0 to 20, like 5" });
+    ctx.addIssue({
+      code: "custom",
+      message: "Enter the WHT rate as a percentage from 0 to 20, like 5",
+    });
     return z.NEVER;
   }
   return bps;

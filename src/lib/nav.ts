@@ -229,6 +229,11 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // finance opens too.
   { href: "/app/clients/new", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/clients/[id]/edit", roles: ["owner", "admin", "ops_manager"] },
+  // Slice 2.4: adding and editing contracts and their rate cards. The contract page itself is
+  // read by every Clients reader (finance sets WHT rates there).
+  { href: "/app/clients/[id]/contracts/new", roles: ["owner", "admin", "ops_manager"] },
+  { href: "/app/clients/[id]/contracts/[id]/edit", roles: ["owner", "admin", "ops_manager"] },
+  { href: "/app/clients/[id]/contracts/[id]/rates", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },

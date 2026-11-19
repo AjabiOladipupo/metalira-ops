@@ -144,9 +144,7 @@ export function ContractForm({
 
       <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
         <legend className="mb-3 p-0 type-h3">Sites</legend>
-        {errors?.siteIds ? (
-          <p className="m-0 text-xs font-medium">{errors.siteIds}</p>
-        ) : null}
+        {errors?.siteIds ? <p className="m-0 text-xs font-medium">{errors.siteIds}</p> : null}
         {sites.length === 0 ? (
           <p className="m-0 text-sm text-fg-muted">
             This client has no sites yet. Add them on the client page, then tick them here.

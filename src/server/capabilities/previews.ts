@@ -161,7 +161,13 @@ async function rateContext(
 export const previewAddRateCardVersion: PreviewFn<typeof saveRateCardSchema> = async (ctx) => {
   const { contract, versions, today } = await rateContext(ctx);
   if (!contract) return { summary: "That contract wasn't found.", changes: [] };
-  const preview = previewRateChange(versions, ctx.data.effectiveFrom, today, contract, ctx.data.lines);
+  const preview = previewRateChange(
+    versions,
+    ctx.data.effectiveFrom,
+    today,
+    contract,
+    ctx.data.lines,
+  );
   return { summary: preview.summary, changes: preview.changes };
 };
 
@@ -192,7 +198,9 @@ export const previewAddWhtRate: PreviewFn<typeof addWhtRateSchema> = async ({
 }) => {
   const { data: row, error } = await supabase
     .from("contracts")
-    .select("status, start_date, end_date, contract_wht_rates(id, rate_bps, effective_from, effective_to)")
+    .select(
+      "status, start_date, end_date, contract_wht_rates(id, rate_bps, effective_from, effective_to)",
+    )
     .eq("organisation_id", organisationId)
     .eq("id", data.contractId)
     .maybeSingle();

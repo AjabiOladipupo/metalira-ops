@@ -29,7 +29,7 @@ export interface ClientRow {
   legalName: string | null;
   status: ClientStatus;
   siteCount: number;
-  /** Active contracts arrive in slice 2.4; 0 until then. */
+  /** Active contracts (slice 2.4). */
   activeContractCount: number;
   primaryBillingEmail: string | null;
   needsDetails: boolean;
@@ -74,7 +74,9 @@ export async function listClients(
   const [{ data, error }, billingById] = await Promise.all([
     supabase
       .from("clients")
-      .select("id, name, status, sites(count), client_contacts(email, role, is_primary, status)")
+      .select(
+        "id, name, status, sites(count), client_contacts(email, role, is_primary, status), contracts(status)",
+      )
       .eq("organisation_id", organisationId)
       .order("name")
       .limit(LIST_LIMIT),
@@ -94,7 +96,7 @@ export async function listClients(
       legalName: details?.legal_name ?? null,
       status: row.status as ClientStatus,
       siteCount: row.sites?.[0]?.count ?? 0,
-      activeContractCount: 0,
+      activeContractCount: (row.contracts ?? []).filter((c) => c.status === "active").length,
       primaryBillingEmail: primary?.email ?? null,
       needsDetails: clientNeedsDetails({
         billingAddress: details?.billing_address ?? null,

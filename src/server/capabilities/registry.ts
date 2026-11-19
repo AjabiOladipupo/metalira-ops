@@ -933,7 +933,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "contract_wht.add_rate",
-    description: "Sets a contract's withholding tax rate from a date; the current rate ends before.",
+    description:
+      "Sets a contract's withholding tax rate from a date; the current rate ends before.",
     kind: "money",
     audience: "manager",
     ...fromSpec(addWhtRateSpec),
@@ -956,7 +957,7 @@ export const CAPABILITIES: readonly Capability[] = [
   },
 ];
 
-/** The capability with this name, or undefined. */ */
+/** The capability with this name, or undefined. */
 export function findCapability(name: string): Capability | undefined {
   return CAPABILITIES.find((c) => c.name === name);
 }

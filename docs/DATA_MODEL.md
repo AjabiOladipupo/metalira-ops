@@ -27,11 +27,12 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 | --- | --- | --- |
 | organisation_bank_accounts | bank_name, account_name, bank_account_enc, bank_account_last4, is_default, status | The company's own collection account, shown on invoices. Changes need a second approver (rule 10). Phase 2 |
 | clients | name, rc_number, tin, billing_terms_days | |
-| client_wht_rates | client_id, rate_bps, effective_from, effective_to | Dated (rule 3); the rate valid on the invoice date applies. WHT base (subtotal or total) is a RULES_NIGERIA gap |
 | client_contacts | client_id, name, email, role (billing, approver, ops) | |
 | sites | client_id, name, address, geofence geography(Polygon), radius_m, checkpoints jsonb | PostGIS |
-| contracts | client_id, type (manned_post, per_visit, fixed_monthly, per_job, milestone, cost_plus), start, end, sla jsonb, status | |
-| rate_cards / rate_card_lines | contract_id, effective_from, effective_to; role, unit (shift, hour, visit, month, job), rate_kobo, ot_multiplier_bps | Dated versions |
+| contracts | client_id, reference (CTR-0001, unique ignoring case, never changes), name, type (manned_post, per_visit, fixed_monthly, per_job; milestone and cost_plus later), start_date, end_date null (rolling), go_live_date, billing_frequency (monthly, fortnightly, weekly, on_completion), billing_terms_days null, vat_applies, sla jsonb, status (draft, active, ended), activated_at/by, ended_at, end_reason | Frozen once active except status, activation and end fields. Never deleted (2.4) |
+| contract_sites | contract_id, site_id | Site of the contract's client; changed only on a draft (2.4) |
+| rate_cards / rate_card_lines | contract_id, effective_from, effective_to, note; role, band (default standard), unit (shift, hour, visit, month, job), rate_kobo, currency, ot_rate_kobo null, ot_multiplier_bps null | Dated versions, no overlaps (GiST), inside the contract dates, VAT-exclusive. Written only by `save_draft_rate_card`, `add_rate_card_version`, `cancel_rate_card_version`. Lines are insert-only and matched by rate key (role, band, unit) (2.4) |
+| contract_wht_rates | contract_id, rate_bps (0–2000), effective_from, effective_to | WHT per contract (owner decision), dated like rate cards; the rate valid on the invoice date applies. WHT base (subtotal or total) is a RULES_NIGERIA gap (2.4) |
 | headcount_requirements | contract_id, site_id, role, shift_pattern, count | Drives rosters |
 | contract_documents | contract_id, storage_path, kind | |
 

@@ -50,7 +50,7 @@ Open points (ask before Phase 5 code depends on them):
 
 ## Invoicing
 - VAT 7.5% on taxable services, shown as its own line.
-- Withholding tax: clients may deduct WHT on payment (rate per client in `clients.wht_rate_bps`). Matching must accept amount = total − WHT and record the WHT credit. **Confirm the rate per service type.**
+- Withholding tax: clients may deduct WHT on payment. The rate is set per contract as dated versions (`contract_wht_rates.rate_bps`, slice 2.4, owner decision: the rate depends on the service), and the rate in force on the invoice date applies. Matching must accept amount = total − WHT and record the WHT credit. **Still open: the rate per service type (the app takes 0–20% as entered, no defaults), and the base WHT is computed on (subtotal before VAT, or total).**
 
 ## Rounding
 - Compute in kobo integers. Round once, at the final value of each line, half-up. Use `allocateKobo` when splitting so parts sum to the whole.

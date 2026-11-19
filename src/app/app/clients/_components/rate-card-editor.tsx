@@ -202,7 +202,9 @@ export function RateCardEditor({
   const [lines, setLines] = useState<RateLineInput[]>(
     initialLines.length > 0 ? initialLines : [{ ...EMPTY_LINE }],
   );
-  const [from, setFrom] = useState(state && !state.ok ? (state.values?.effectiveFrom ?? defaultFrom) : defaultFrom);
+  const [from, setFrom] = useState(
+    state && !state.ok ? (state.values?.effectiveFrom ?? defaultFrom) : defaultFrom,
+  );
   const [note, setNote] = useState("");
   const [step, setStep] = useState<"edit" | "review">("edit");
   const [problem, setProblem] = useState<string | null>(null);
@@ -330,7 +332,10 @@ export function RateCardEditor({
             {preview && preview.changes.length > 0 ? (
               <dl className="m-0 flex flex-col divide-y divide-line">
                 {preview.changes.map((change, i) => (
-                  <div key={i} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+                  <div
+                    key={i}
+                    className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5"
+                  >
                     <dt className="text-sm font-medium">{change.label}</dt>
                     <dd className="m-0 text-sm tabular-nums">
                       {change.before ? (
@@ -350,20 +355,28 @@ export function RateCardEditor({
               <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm text-fg-muted">
                 {parsed.lines.map((line, i) => (
                   <li key={i}>
-                    {formatRateKey(line)}: {formatLineRate(line)}, overtime {formatOvertime(line).toLowerCase()}
+                    {formatRateKey(line)}: {formatLineRate(line)}, overtime{" "}
+                    {formatOvertime(line).toLowerCase()}
                   </li>
                 ))}
               </ul>
             </div>
           </section>
-          <FormAlert message={preview && !preview.ok ? preview.summary : (fieldErrors?.lines ?? serverError)} />
+          <FormAlert
+            message={preview && !preview.ok ? preview.summary : (fieldErrors?.lines ?? serverError)}
+          />
           <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
             {preview?.ok ? (
               <SubmitButton pendingLabel="Saving…" className="w-auto px-5">
                 {mode === "change" ? "Save rate change" : "Save rate card"}
               </SubmitButton>
             ) : null}
-            <Button type="button" variant="outline" className="h-11 px-4" onClick={() => setStep("edit")}>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 px-4"
+              onClick={() => setStep("edit")}
+            >
               Back to edit
             </Button>
           </div>
