@@ -143,7 +143,7 @@ export function HeadcountForm({
 
       <section aria-labelledby="headcount-post" className="flex flex-col gap-4">
         <h2 id="headcount-post" className="m-0 type-h3">
-          Post
+          Where and who
         </h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-4">
           <SelectField
