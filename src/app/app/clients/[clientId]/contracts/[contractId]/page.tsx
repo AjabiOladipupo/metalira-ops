@@ -275,8 +275,8 @@ function DetailsTab({ contract, termsLabel }: { contract: ContractDetail; termsL
         description="Set on each rate line by service type: 2% on services, 5% on a management fee, 10% on rent or hire. Whether the client deducts it, and whether it pays the VAT to the tax authority itself, are set on the client."
       >
         <p className="m-0 text-sm text-fg-muted">
-          See the Rate card tab for each line&apos;s WHT. Phase 6 works it out per invoice line on the
-          amount before VAT.
+          See the Rate card tab for each line&apos;s WHT. Phase 6 works it out per invoice line on
+          the amount before VAT.
         </p>
       </Section>
       <Section id="sla" title="Service level">
