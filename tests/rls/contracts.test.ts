@@ -214,6 +214,13 @@ describe("contracts", () => {
   it("lets finance read but not write, and hides contracts from hr and line managers", async () => {
     const id = await newContract(ops);
     await saveDraft(id);
+    const wht = await owner.client.rpc("add_contract_wht_rate", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_rate_bps: 500,
+      p_effective_from: start,
+    });
+    expect(wht.error).toBeNull();
     for (const table of [
       "contracts",
       "rate_cards",

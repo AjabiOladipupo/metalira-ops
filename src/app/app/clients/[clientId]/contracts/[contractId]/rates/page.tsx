@@ -63,7 +63,10 @@ async function RateCardPage({
             : "Adds a new version from a date. The current rates stay on record and end the day before."
         }
       />
+      {/* Keyed on what it edits: a route kept alive by the router (cacheComponents) must not
+          carry the last visit's typed lines into a different card or mode. */}
       <RateCardEditor
+        key={`${mode}:${contract.versions.map((v) => v.id).join(",")}`}
         mode={mode}
         clientId={clientId}
         contractId={contract.id}
