@@ -429,7 +429,7 @@ alter table public.audit_log
       check (channel in ('web', 'worker_app', 'import', 'system', 'lira'));
 
 comment on column public.audit_log.channel is
-  'Which door the change came through: web (manager app), worker_app, import, system (jobs and server tasks), lira (the ops agent, later). Set by private.audit_log_set_channel; a label, not a permission.';
+  'Which door the change came through: web (manager app), worker_app, import, system (jobs and server tasks), lira (the ops agent, later). Set by private.audit_log_set_channel; a label only: never used for permission, rate-limit, billing or alert decisions.';
 
 -- BEFORE INSERT on audit_log. Works out the channel for the row being written, in this order:
 -- 1. `metalira.audit_channel`, a transaction-local setting a SQL function may set
