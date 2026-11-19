@@ -3,7 +3,25 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type Database = {
   
-  "public": {
+  "graphql_public": {
+          Tables: {
+            [_ in never]: never
+          }
+          Views: {
+            [_ in never]: never
+          }
+          Functions: {
+            "graphql":
+{ Args: { "extensions"?: Json,"operationName"?: string,"query"?: string,"variables"?: Json }; Returns: Json
+                           }
+          }
+          Enums: {
+            [_ in never]: never
+          }
+          CompositeTypes: {
+            [_ in never]: never
+          }
+        },"public": {
           Tables: {
             "audit_log": {
                   Row: {
@@ -201,6 +219,38 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "departments_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"headcount_requirements": {
+                  Row: {
+                    "band": string,"contract_id": string,"created_at": string,"created_by": string | null,"days_of_week": (number)[],"duration_minutes": number | null,"end_time": string,"id": string,"kind": string | null,"notes": string | null,"organisation_id": string,"post_name": string | null,"required_count": number,"role": string,"site_id": string,"start_time": string,"unit": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "band"?: string,"contract_id": string,"created_at"?: string,"created_by"?: string | null,"days_of_week": (number)[],"duration_minutes"?: never,"end_time": string,"id"?: string,"kind"?: never,"notes"?: string | null,"organisation_id": string,"post_name"?: string | null,"required_count": number,"role": string,"site_id": string,"start_time": string,"unit": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "band"?: string,"contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"days_of_week"?: (number)[],"duration_minutes"?: never,"end_time"?: string,"id"?: string,"kind"?: never,"notes"?: string | null,"organisation_id"?: string,"post_name"?: string | null,"required_count"?: number,"role"?: string,"site_id"?: string,"start_time"?: string,"unit"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "headcount_requirements_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "headcount_requirements_contract_site_fkey"
+      columns: ["organisation_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "contract_sites"
+      referencedColumns: ["organisation_id","contract_id","site_id"]
+    },{
+      foreignKeyName: "headcount_requirements_organisation_id_fkey"
       columns: ["organisation_id"]
 isOneToOne: false
       referencedRelation: "organisations"
@@ -1017,7 +1067,11 @@ export type CompositeTypes<
   : never
 
 export const Constants = {
-  "public": {
+  "graphql_public": {
+          Enums: {
+            
+          }
+        },"public": {
           Enums: {
             "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"org_bank_account_status": ["pending", "approved", "active", "retired", "rejected", "cancelled"],"owner_change_kind": ["add", "invite", "remove", "demote"],"owner_change_status": ["pending", "approved", "rejected", "cancelled"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
           }
