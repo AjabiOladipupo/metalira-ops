@@ -142,6 +142,13 @@ begin
     if old.status = 'removed' then
       raise exception 'A removed contact can''t be changed. Add it again.' using errcode = 'MLCC3';
     end if;
+    -- A primary stops being primary only when another takes over (the demotion below runs as a
+    -- nested trigger, depth 2) or it is removed. Unticking it directly would leave the role
+    -- without a primary.
+    if old.is_primary and not new.is_primary and new.status = 'active'
+      and pg_trigger_depth() = 1 then
+      raise exception 'Make another contact primary instead.' using errcode = 'MLCC4';
+    end if;
   end if;
 
   if new.status = 'removed' then
@@ -223,20 +230,31 @@ create trigger client_contacts_audit after insert or update or delete on public.
 -- 3. Row-level security and grants
 -- ---------------------------------------------------------------------------
 
--- clients: owner, admin and ops_manager write; hr inserts only (the people import). Read is
--- unchanged from 1.3. No delete for anyone.
+-- clients: owner, admin and ops_manager write; hr inserts name-only clients (the people import),
+-- nothing more. Rows are read as in 1.3, but the billing columns are not granted to signed-in
+-- users: hr, line managers and assigned workers read client rows, and the billing details and
+-- notes are for owner, admin, finance and ops_manager only, through public.client_billing.
+-- No delete for anyone.
 drop policy clients_insert on public.clients;
 drop policy clients_update on public.clients;
 drop policy clients_delete on public.clients;
 
 create policy clients_insert on public.clients for insert to authenticated
-  with check (private.has_role(organisation_id, array['owner', 'admin', 'ops_manager', 'hr']));
+  with check (
+    private.has_role(organisation_id, array['owner', 'admin', 'ops_manager'])
+    or (
+      private.has_role(organisation_id, array['hr'])
+      and legal_name is null and rc_number is null and tin is null and billing_address is null
+      and state is null and billing_terms_days is null and notes is null
+    )
+  );
 create policy clients_update on public.clients for update to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'ops_manager']))
   with check (private.has_role(organisation_id, array['owner', 'admin', 'ops_manager']));
 
 revoke all on table public.clients from anon, authenticated;
-grant select on table public.clients to authenticated;
+grant select (id, organisation_id, name, status, created_at, created_by, updated_at)
+  on table public.clients to authenticated;
 grant insert (
   id, organisation_id, name, legal_name, rc_number, tin, billing_address, state,
   billing_terms_days, notes
@@ -244,6 +262,35 @@ grant insert (
 grant update (
   name, legal_name, rc_number, tin, billing_address, state, billing_terms_days, status, notes
 ) on table public.clients to authenticated;
+
+-- The billing columns, for the roles that work with them. Security definer because the columns
+-- are not granted; it checks the role itself and returns nothing for anyone else.
+create function public.client_billing(p_organisation_id uuid, p_client_id uuid default null)
+returns table (
+  client_id uuid,
+  legal_name text,
+  rc_number text,
+  tin text,
+  billing_address text,
+  state text,
+  billing_terms_days integer,
+  notes text
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select c.id, c.legal_name, c.rc_number, c.tin, c.billing_address, c.state,
+    c.billing_terms_days, c.notes
+  from public.clients c
+  where c.organisation_id = p_organisation_id
+    and (p_client_id is null or c.id = p_client_id)
+    and private.has_role(p_organisation_id, array['owner', 'admin', 'finance', 'ops_manager'])
+$$;
+
+revoke all on function public.client_billing(uuid, uuid) from public, anon;
+grant execute on function public.client_billing(uuid, uuid) to authenticated;
 
 -- sites: the same roles. Phase 2.2 adds the address, geofence and checkpoints.
 drop policy sites_insert on public.sites;
@@ -377,7 +424,7 @@ comment on column public.audit_log.channel is
 create function private.audit_log_set_channel()
 returns trigger
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare

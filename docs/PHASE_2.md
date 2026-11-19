@@ -52,6 +52,7 @@ Nav: **Clients** (`/app/clients`, icon `clients`, group Business, above Projects
 ### 2.1 Clients and contacts, Lira groundwork, 12px corners
 - Migration `20261119100000_clients_contacts.sql`: extends `clients` (1.3) with `legal_name`, `rc_number`, `tin`, `billing_address`, `state`, `billing_terms_days` (null means the organisation's `payment_terms_days`, 0–180), `status` (active, archived) and `notes`, with the same plain-text checks as `name` (RC number and TIN in the organisations formats).
 - New `client_contacts`: client_id, name, email, phone null, role (billing, approver, ops), is_primary, status (active, removed). One primary per client and role (partial unique index), kept by triggers: a new primary demotes the old one, the first active contact of a role becomes primary, removing the primary promotes the next. Email lower-cased and format-checked; one active address per client and role. A contact never moves client or changes role.
+- Billing columns and notes are not granted on `clients` (hr, line managers and assigned workers keep reading the row's name and status); `public.client_billing(org, client?)` returns them to owner, admin, finance and ops_manager. hr may insert name-only clients and nothing else.
 - `public.create_client`: a client with its first billing contact and first site in one transaction, as the caller (Add client and Setup step 4).
 - RLS per the roles table; the delete policies and grants on clients, sites and projects dropped.
 - `audit_log.channel` (Lira groundwork 4).

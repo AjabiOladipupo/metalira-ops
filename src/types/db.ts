@@ -573,6 +573,11 @@ isOneToOne: false
 "choose_company_plan":
 { Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
                            },
+"client_billing":
+{ Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
+              "billing_address": string,"billing_terms_days": number,"client_id": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string
+            }[]
+                           },
 "commit_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string,"p_rows": Json }; Returns: Json
                            },

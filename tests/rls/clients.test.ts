@@ -167,8 +167,10 @@ describe("clients roles", () => {
       .from("clients")
       .update({ tin: "12345678-0001", status: "archived" })
       .eq("id", clientId)
-      .select("tin, status");
-    expect(byOps.data).toEqual([{ tin: "12345678-0001", status: "archived" }]);
+      .select("status");
+    expect(byOps.data).toEqual([{ status: "archived" }]);
+    const saved = await admin.from("clients").select("tin").eq("id", clientId).single();
+    expect(saved.data?.tin).toBe("12345678-0001");
     await ops.client.from("clients").update({ status: "active" }).eq("id", clientId);
 
     for (const reader of [finance, lineManager]) {
@@ -183,6 +185,35 @@ describe("clients roles", () => {
     }
     const audit = await lastAudit(clientId, "clients.update");
     expect(audit.actor_id).toBe(ops.id);
+  });
+
+  it("lets hr add a name only, never billing details", async () => {
+    const { error } = await hr.client
+      .from("clients")
+      .insert({ organisation_id: owner.orgId, name: "Import With TIN Ltd", tin: "1234567890" });
+    expect(error?.code).toBe(PERMISSION_DENIED);
+  });
+
+  it("shows billing details and notes only to owner, admin, finance and ops_manager", async () => {
+    await ops.client.from("clients").update({ notes: "Pays late" }).eq("id", clientId);
+    for (const user of [hr, lineManager]) {
+      const direct = await user.client.from("clients").select("tin, notes").eq("id", clientId);
+      expect(direct.error?.code).toBe(PERMISSION_DENIED);
+      const viaRpc = await user.client.rpc("client_billing", { p_organisation_id: owner.orgId });
+      expect(viaRpc.data ?? []).toEqual([]);
+      // The row itself (name, status) stays readable, as in 1.3.
+      const row = await user.client.from("clients").select("name").eq("id", clientId);
+      expect(row.data).toEqual([{ name: "Coastline Logistics" }]);
+    }
+    const forFinance = await finance.client.rpc("client_billing", {
+      p_organisation_id: owner.orgId,
+      p_client_id: clientId,
+    });
+    expect(forFinance.data).toEqual([
+      expect.objectContaining({ client_id: clientId, notes: "Pays late", state: "Lagos" }),
+    ]);
+    const otherOrg = await other.client.rpc("client_billing", { p_organisation_id: owner.orgId });
+    expect(otherOrg.data ?? []).toEqual([]);
   });
 
   it("refuses bad billing details in the database", async () => {
@@ -270,6 +301,14 @@ describe("client_contacts", () => {
       .select("status, is_primary");
     expect(removed.data).toEqual([{ status: "removed", is_primary: false }]);
     expect(await primaries()).toEqual([{ name: "Ngozi Eze" }]);
+
+    // A primary can't simply be unticked: the role would have none.
+    const untick = await ops.client
+      .from("client_contacts")
+      .update({ is_primary: false })
+      .eq("client_id", clientId)
+      .eq("name", "Ngozi Eze");
+    expect(untick.error?.code).toBe("MLCC4");
 
     // A removed contact can't be changed back.
     const revive = await ops.client

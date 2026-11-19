@@ -35,6 +35,26 @@ export interface ClientRow {
   needsDetails: boolean;
 }
 
+type BillingRow = Database["public"]["Functions"]["client_billing"]["Returns"][number];
+
+/**
+ * The billing columns (registered name, RC number, TIN, address, state, terms, notes) by client.
+ * They are not granted on `clients`: `public.client_billing` returns them to owner, admin,
+ * finance and ops_manager only, and nothing to anyone else.
+ */
+async function loadBilling(
+  supabase: Client,
+  organisationId: string,
+  clientId?: string,
+): Promise<Map<string, BillingRow>> {
+  const { data, error } = await supabase.rpc("client_billing", {
+    p_organisation_id: organisationId,
+    ...(clientId ? { p_client_id: clientId } : {}),
+  });
+  if (error) throw new Error(`Could not read billing details: ${error.message}`);
+  return new Map((data ?? []).map((row) => [row.client_id, row]));
+}
+
 /** Plain text a person typed, folded for a forgiving "contains" match. */
 function fold(value: string): string {
   return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
@@ -51,14 +71,15 @@ export async function listClients(
   organisationId: string,
   options: { query?: string } = {},
 ): Promise<ClientRow[]> {
-  const { data, error } = await supabase
-    .from("clients")
-    .select(
-      "id, name, legal_name, status, billing_address, sites(count), client_contacts(email, role, is_primary, status)",
-    )
-    .eq("organisation_id", organisationId)
-    .order("name")
-    .limit(LIST_LIMIT);
+  const [{ data, error }, billingById] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("id, name, status, sites(count), client_contacts(email, role, is_primary, status)")
+      .eq("organisation_id", organisationId)
+      .order("name")
+      .limit(LIST_LIMIT),
+    loadBilling(supabase, organisationId),
+  ]);
   if (error) throw new Error(`Could not read clients: ${error.message}`);
 
   const rows = (data ?? []).map((row): ClientRow => {
@@ -66,16 +87,17 @@ export async function listClients(
       (c) => c.status === "active" && c.role === "billing",
     );
     const primary = billing.find((c) => c.is_primary) ?? billing[0];
+    const details = billingById.get(row.id);
     return {
       id: row.id,
       name: row.name,
-      legalName: row.legal_name,
+      legalName: details?.legal_name ?? null,
       status: row.status as ClientStatus,
       siteCount: row.sites?.[0]?.count ?? 0,
       activeContractCount: 0,
       primaryBillingEmail: primary?.email ?? null,
       needsDetails: clientNeedsDetails({
-        billingAddress: row.billing_address,
+        billingAddress: details?.billing_address ?? null,
         hasBillingContact: billing.length > 0,
       }),
     };
@@ -167,15 +189,14 @@ export async function loadClient(
   clientId: string,
 ): Promise<ClientDetail | null> {
   if (!/^[0-9a-f-]{36}$/i.test(clientId)) return null;
-  const [client, contacts, sites] = await Promise.all([
+  const [client, billingById, contacts, sites] = await Promise.all([
     supabase
       .from("clients")
-      .select(
-        "id, name, legal_name, rc_number, tin, billing_address, state, billing_terms_days, status, notes, created_at",
-      )
+      .select("id, name, status, created_at")
       .eq("organisation_id", organisationId)
       .eq("id", clientId)
       .maybeSingle(),
+    loadBilling(supabase, organisationId, clientId),
     supabase
       .from("client_contacts")
       .select("id, name, email, phone, role, is_primary")
@@ -195,6 +216,7 @@ export async function loadClient(
   if (sites.error) throw new Error(`Could not read sites: ${sites.error.message}`);
   const row = client.data;
   if (!row) return null;
+  const billing = billingById.get(row.id);
 
   const contactRows = (contacts.data ?? [])
     .map((c): ClientContact => ({
@@ -213,19 +235,19 @@ export async function loadClient(
   return {
     id: row.id,
     name: row.name,
-    legalName: row.legal_name,
-    rcNumber: row.rc_number,
-    tin: row.tin,
-    billingAddress: row.billing_address,
-    state: row.state,
-    billingTermsDays: row.billing_terms_days,
+    legalName: billing?.legal_name ?? null,
+    rcNumber: billing?.rc_number ?? null,
+    tin: billing?.tin ?? null,
+    billingAddress: billing?.billing_address ?? null,
+    state: billing?.state ?? null,
+    billingTermsDays: billing?.billing_terms_days ?? null,
     status: row.status as ClientStatus,
-    notes: row.notes,
+    notes: billing?.notes ?? null,
     createdAt: row.created_at,
     contacts: contactRows,
     sites: (sites.data ?? []).map((s) => ({ id: s.id, name: s.name })),
     needsDetails: clientNeedsDetails({
-      billingAddress: row.billing_address,
+      billingAddress: billing?.billing_address ?? null,
       hasBillingContact: contactRows.some((c) => c.role === "billing"),
     }),
   };

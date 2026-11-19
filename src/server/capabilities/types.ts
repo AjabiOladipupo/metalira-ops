@@ -21,6 +21,11 @@ import type { MutationContext, MutationSpec } from "@/server/identity/mutate";
  *   without changing it, for the screen's confirm step and the agent's confirmation card. Phase 1
  *   entries that predate this rule have no preview yet; they are marked `agent: false` and say why
  *   in `agentNote`, and the registry test holds that line.
+ * - `read` and `preview` do no role check of their own: `roles` is the contract a caller must
+ *   enforce. Call them only with the signed-in user's own client (`createServerSupabase()`), after
+ *   checking the session's role is in `roles` and parsing the input with `input`; never with the
+ *   secret key. The ops agent's dispatcher (docs/LIRA.md stage 1) will be the one place that does
+ *   this; the registry test fails if this folder imports the admin client.
  * - `agent: true` only when the ops agent may one day offer it: never sign-in or password flows,
  *   never revealing personal data, never the second approver of a two-person rule, never
  *   releasing payroll or moving money (docs/LIRA.md "Safety rules").

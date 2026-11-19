@@ -112,6 +112,14 @@ describe("capability registry", () => {
     }
   });
 
+  it("never reaches the secret-key client", () => {
+    const offenders = sourceFiles()
+      .filter(({ file }) => file.startsWith("src/server/capabilities/"))
+      .filter(({ text }) => /supabase\/admin|createAdminSupabase/.test(text))
+      .map(({ file }) => file);
+    expect(offenders).toEqual([]);
+  });
+
   it("takes the roles of the client actions from their specs", () => {
     expect(findCapability("clients.create")?.roles).toEqual(["owner", "admin", "ops_manager"]);
     expect(findCapability("contacts.add")?.roles).toEqual([
