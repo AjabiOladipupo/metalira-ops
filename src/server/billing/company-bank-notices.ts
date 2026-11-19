@@ -26,8 +26,9 @@ import { createAdminSupabase } from "@/server/supabase/admin";
  * so a failed send is retried by the next sweep for up to NOTICE_RETRY_DAYS. Sends carry an
  * idempotency key per row, kind and recipient, so overlapping sweeps send each email once.
  *
- * Sweeps run after every change in the app (`after()`), when the bank account page loads, every
- * 15 minutes (`/api/cron/company-bank`) and daily (`/api/cron/bank-detail-changes`). They read
+ * Sweeps run after every change in the app (`after()`), when the bank account page loads, and
+ * daily (`/api/cron/bank-detail-changes`; Vercel Hobby allows daily crons only), so an approval
+ * made outside the app is announced within a day, well inside the 72-hour hold. They read
  * with the secret key because addresses live in Supabase Auth. A failed send is logged by error
  * name only, never with an address, a name or digits.
  */
@@ -200,7 +201,7 @@ export async function sendCompanyBankNotices(
 }
 
 /**
- * The scheduled job (every 15 minutes, and daily with the bank-change route): applies every
+ * The scheduled job (daily, with the bank-change route): applies every
  * account whose hold has ended, in case pg_cron is not running, then sends every email due.
  */
 export async function runCompanyBankJob(): Promise<{
