@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 
 import { Field, SelectField } from "@/components/form";
@@ -20,7 +21,13 @@ export interface RailCard {
   id: string;
   name: string;
   body: string;
+  /** The account in use, masked, or "No account yet". */
   status: string;
+  connected: boolean;
+  /** A request waiting for approval or on hold, in words. */
+  waiting: string | null;
+  /** Where to add, change or review it; null for roles that can't. */
+  action: { href: string; label: string } | null;
 }
 
 export type InvoiceSettings = Pick<
@@ -110,17 +117,34 @@ export function InvoicesForm({
           {rails.map((rail) => (
             <div
               key={rail.id}
-              className="flex flex-col gap-2.5 rounded-xl border border-line p-[18px]"
+              data-testid={`rail-${rail.id}`}
+              className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-line p-[18px]"
             >
               <span className="text-base font-semibold">{rail.name}</span>
               <span className="text-sm text-fg-muted">{rail.body}</span>
-              <span className="inline-flex items-center gap-2 text-sm font-medium">
+              <span
+                className="inline-flex min-w-0 items-start gap-2 text-sm font-medium break-words"
+                data-testid="rail-status"
+              >
                 <span
                   aria-hidden
-                  className="inline-block size-2 rounded-full border-[1.5px] border-foreground"
+                  className={`mt-1.5 inline-block size-2 shrink-0 rounded-full border-[1.5px] border-foreground${rail.connected ? "bg-foreground" : ""}`}
                 />
-                {rail.status}
+                <span className="min-w-0">{rail.status}</span>
               </span>
+              {rail.waiting ? (
+                <span className="text-sm break-words text-fg-muted" data-testid="rail-waiting">
+                  {rail.waiting}
+                </span>
+              ) : null}
+              {rail.action ? (
+                <Link
+                  href={rail.action.href}
+                  className="text-sm font-medium text-foreground underline"
+                >
+                  {rail.action.label}
+                </Link>
+              ) : null}
             </div>
           ))}
         </div>

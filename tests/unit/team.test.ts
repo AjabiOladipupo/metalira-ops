@@ -25,11 +25,14 @@ describe("who may grant which role", () => {
     expect(grantableRoles("owner")).toEqual([...TEAM_ROLES]);
   });
 
-  it("lets only the owner grant admin", () => {
-    expect(grantableRoles("admin")).not.toContain("admin");
-    expect(inviteRefusal("owner", "admin")).toBeNull();
-    expect(inviteRefusal("admin", "admin")).toBe("owner_only");
-    expect(inviteRefusal("admin", "hr")).toBeNull();
+  it("lets only an owner grant admin, finance or HR (owner decision, 19 Nov 2026)", () => {
+    expect(grantableRoles("admin")).toEqual(["ops_manager", "line_manager"]);
+    for (const role of ["admin", "finance", "hr"] as const) {
+      expect(inviteRefusal("owner", role)).toBeNull();
+      expect(inviteRefusal("admin", role)).toBe("owner_only");
+    }
+    expect(inviteRefusal("admin", "ops_manager")).toBeNull();
+    expect(inviteRefusal("admin", "line_manager")).toBeNull();
   });
 
   it("refuses everyone below admin and roles outside the five", () => {
@@ -58,15 +61,19 @@ describe("changing and removing members", () => {
     );
   });
 
-  it("lets only the owner change or remove an admin, or make someone admin", () => {
-    const otherAdmin = { userId: "u-a2", role: "admin" as const };
-    expect(memberRefusal(admin, otherAdmin)).toBe("owner_only");
-    expect(memberRefusal(owner, otherAdmin)).toBeNull();
-    expect(roleChangeRefusal(admin, { userId: "u-f", role: "finance" }, "admin")).toBe(
-      "owner_only",
-    );
-    expect(roleChangeRefusal(owner, { userId: "u-f", role: "finance" }, "admin")).toBeNull();
-    expect(roleChangeRefusal(admin, { userId: "u-f", role: "finance" }, "hr")).toBeNull();
+  it("lets only an owner change or remove admin, finance or HR, or give those roles", () => {
+    for (const role of ["admin", "finance", "hr"] as const) {
+      const member = { userId: "u-x", role };
+      expect(memberRefusal(admin, member)).toBe("owner_only");
+      expect(memberRefusal(owner, member)).toBeNull();
+      expect(roleChangeRefusal(admin, { userId: "u-o", role: "ops_manager" }, role)).toBe(
+        "owner_only",
+      );
+      expect(roleChangeRefusal(owner, { userId: "u-o", role: "ops_manager" }, role)).toBeNull();
+    }
+    expect(
+      roleChangeRefusal(admin, { userId: "u-o", role: "ops_manager" }, "line_manager"),
+    ).toBeNull();
   });
 
   it("leaves workers and client approvers to People", () => {

@@ -174,3 +174,51 @@ export async function notifyOwnerJoined(
     return 0;
   }
 }
+
+/** Roles only an owner may give or change (owner decision, 19 Nov 2026). */
+const OWNER_GRANTED = new Set(["admin", "finance", "hr"]);
+
+/**
+ * Emails every owner that a member now has the admin, finance or HR role (an invite accepted,
+ * or a role change), since those roles approve bank account and bank-detail changes. Only for
+ * those roles; never throws. `eventId` keys the send (one notice per grant and recipient).
+ */
+export async function notifyOwnerGrantedRole(
+  organisationId: string,
+  memberUserId: string,
+  role: string,
+  actorId: string | null,
+  eventId: string,
+  deps?: Partial<OwnerNoticeDeps>,
+): Promise<number> {
+  if (!OWNER_GRANTED.has(role) || !isRole(role)) return 0;
+  try {
+    const all: OwnerNoticeDeps = {
+      admin: deps?.admin ?? createAdminSupabase(),
+      send: deps?.send ?? sendOwnerChangeEmail,
+    };
+    const { data: org } = await all.admin
+      .from("organisations")
+      .select("name")
+      .eq("id", organisationId)
+      .maybeSingle();
+    if (!org) return 0;
+    const [memberName, actorName] = await Promise.all([
+      nameOf(all.admin, memberUserId),
+      nameOf(all.admin, actorId),
+    ]);
+    const summary = `${memberName ?? "A team member"} is now ${ROLE_LABELS[role]}`;
+    return await sendAll(all, await ownerIds(all.admin, organisationId), (to, recipientId) => ({
+      to,
+      idempotencyKey: `role-given/${eventId}/${role}/${recipientId}`,
+      organisationName: org.name,
+      event: "role_given",
+      summary,
+      actorName,
+      singleOwner: false,
+    }));
+  } catch (error) {
+    logFailure("notice_failed", error);
+    return 0;
+  }
+}

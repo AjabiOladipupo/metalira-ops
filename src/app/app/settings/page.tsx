@@ -18,6 +18,11 @@ const SECTIONS = [
     body: "Business details, logo, pay cycle, invoices and plan.",
   },
   {
+    href: "/app/settings/bank-account",
+    title: "Where clients pay",
+    body: "Your business bank account on invoices, with approvals and history.",
+  },
+  {
     href: "/app/settings/team",
     title: "Team",
     body: "Invite managers, change their roles and remove access.",
@@ -30,8 +35,8 @@ const SECTIONS = [
 ] as const;
 
 /**
- * Settings sections the viewer's role may open (company and team: owner and admin; departments:
- * also hr).
+ * Settings sections the viewer's role may open (company and team: owner and admin; where clients pay:
+ * also finance; departments: also hr).
  */
 async function SettingsSections() {
   const session = await getPageSession();

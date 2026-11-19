@@ -91,11 +91,11 @@ describe("ownerChangeChoices", () => {
 });
 
 describe("1.12 team rules now say 'an owner'", () => {
-  it("any owner grants admin; owners are never changed from the team forms", () => {
+  it("any owner grants admin, finance and HR; owners are never changed from the team forms", () => {
     expect(inviteRefusal("owner", "admin")).toBeNull();
     expect(memberRefusal(ownerA, ownerB)).toBe("owner_protected");
     expect(TEAM_REFUSAL_MESSAGES.owner_only).toBe(
-      "Only an owner can make someone an admin or change an admin.",
+      "Only an owner can give, change or remove the admin, finance or HR role.",
     );
     expect(TEAM_REFUSAL_MESSAGES.not_allowed).toBe(
       "Only an owner or an admin can manage the team.",

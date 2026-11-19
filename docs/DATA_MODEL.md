@@ -25,7 +25,7 @@ Every table below has `id uuid primary key default gen_random_uuid()`, `organisa
 ## Clients and contracts (Phase 2)
 | Table | Key columns | Notes |
 | --- | --- | --- |
-| organisation_bank_accounts | bank_name, account_name, bank_account_enc, bank_account_last4, is_default, status | The company's own collection account, shown on invoices. Changes need a second approver (rule 10). Phase 2 |
+| organisation_bank_accounts | bank_name, account_name, bank_account_enc (sealed for its own row), bank_account_last4, reason, single_approver, status (pending, approved, active, retired, rejected, cancelled), requested_by, approved_by, rejected_by, cancelled_by, decided_at, decision_note, applies_after, activated_at, retired_at, cancelled_at, applied_notified_at | The company's own collection account, shown on invoices; a row is a request that may become the account. One active and one open request per org. Approved by owner or finance, never the requester (`approved_by <> requested_by`), then a 72-hour hold (`applies_after`). The first account an owner adds while setup is unfinished is active at once (single_approver, once, audited). Invoices read `org_bank_account_as_of(org, at)`. Insert-only history, never deleted (2.3) |
 | clients | name, rc_number, tin, billing_terms_days | |
 | client_contacts | client_id, name, email, role (billing, approver, ops) | |
 | sites | client_id, name, address, geofence geography(Polygon), radius_m, checkpoints jsonb | PostGIS |

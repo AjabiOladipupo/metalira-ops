@@ -2,6 +2,12 @@ import "server-only";
 
 import { lagosToday } from "@/lib/dates";
 import { MANAGER_ROLES } from "@/lib/roles";
+import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
+import {
+  decideCompanyBankSpec,
+  requestCompanyBankSpec,
+  withdrawCompanyBankSpec,
+} from "@/server/billing/company-bank";
 import { listClients, loadClientsSummary } from "@/server/business/clients-data";
 import {
   CLIENT_READERS,
@@ -602,6 +608,56 @@ export const CAPABILITIES: readonly Capability[] = [
     input: null,
     changes: "none",
     action: at("people/bank-change-actions", "revealBankChangeAccount"),
+    agent: false,
+    agentNote: REVEAL,
+  },
+
+  // -------------------------------------------------------------------------
+  // Company bank account (billing/company-bank-actions.ts, slice 2.3)
+  // -------------------------------------------------------------------------
+  {
+    name: "company_bank.request",
+    description:
+      "Asks to add or change the account clients pay into; a second person approves, then 72 hours.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(requestCompanyBankSpec),
+    changes: "one",
+    action: at("billing/company-bank-actions", "requestCompanyBankAction"),
+    agent: false,
+    agentNote: `${PERSONAL} The confirm step uses previewCompanyBankRequest (src/lib/company-bank.ts).`,
+  },
+  {
+    name: "company_bank.decide",
+    description:
+      "Approves, rejects or stops a company bank account request raised by someone else.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(decideCompanyBankSpec),
+    changes: "one",
+    action: at("billing/company-bank-actions", "decideCompanyBankAction"),
+    agent: false,
+    agentNote: SECOND_APPROVER,
+  },
+  {
+    name: "company_bank.withdraw",
+    description: "Withdraws one's own pending company bank account request.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(withdrawCompanyBankSpec),
+    changes: "one",
+    action: at("billing/company-bank-actions", "withdrawCompanyBankAction"),
+    agent: true,
+  },
+  {
+    name: "company_bank.reveal",
+    description: "Shows a company bank account number in full, and audits it.",
+    kind: "read",
+    audience: "manager",
+    roles: [...COMPANY_BANK_REVEALERS],
+    input: null,
+    changes: "none",
+    action: at("billing/company-bank-actions", "revealCompanyBankAccount"),
     agent: false,
     agentNote: REVEAL,
   },
