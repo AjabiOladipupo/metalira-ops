@@ -101,8 +101,9 @@ create table public.contract_documents (
       or (file_ext = 'png' and mime_type = 'image/png')
       or (file_ext = 'jpg' and mime_type = 'image/jpeg')
     ),
-  -- Set by the database: {organisation_id}/{contract_id}/{id}.{file_ext}.
-  storage_path text not null
+  -- Set by the database (contract_documents_guard): {organisation_id}/{contract_id}/{id}.{file_ext}.
+  -- The default only lets an insert leave it out; the guard always replaces it.
+  storage_path text not null default ''
     constraint contract_documents_storage_path_key unique,
   -- Known once the upload is confirmed.
   size_bytes bigint
