@@ -594,7 +594,7 @@ export const CAPABILITIES: readonly Capability[] = [
   // Company bank account (billing/company-bank-actions.ts, slice 2.3)
   // -------------------------------------------------------------------------
   {
-    name: "billing.company_bank.request",
+    name: "company_bank.request",
     description:
       "Asks to add or change the account clients pay into; a second person approves, then 72 hours.",
     kind: "write",
@@ -606,7 +606,7 @@ export const CAPABILITIES: readonly Capability[] = [
     agentNote: `${PERSONAL} The confirm step uses previewCompanyBankRequest (src/lib/company-bank.ts).`,
   },
   {
-    name: "billing.company_bank.decide",
+    name: "company_bank.decide",
     description:
       "Approves, rejects or stops a company bank account request raised by someone else.",
     kind: "write",
@@ -618,7 +618,7 @@ export const CAPABILITIES: readonly Capability[] = [
     agentNote: SECOND_APPROVER,
   },
   {
-    name: "billing.company_bank.withdraw",
+    name: "company_bank.withdraw",
     description: "Withdraws one's own pending company bank account request.",
     kind: "write",
     audience: "manager",
@@ -628,7 +628,7 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: true,
   },
   {
-    name: "billing.company_bank.reveal",
+    name: "company_bank.reveal",
     description: "Shows a company bank account number in full, and audits it.",
     kind: "read",
     audience: "manager",
