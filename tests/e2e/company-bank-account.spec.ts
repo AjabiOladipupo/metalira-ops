@@ -215,7 +215,9 @@ test("a close match needs a reason the approver sees; no match is refused", asyn
   await expect(noMatch.result.getByTestId("name-check-status")).toHaveText("Name doesn't match");
   await expect(noMatch.result).toContainText("can't be used");
   await noMatch.form.getByRole("button", { name: "Review" }).click();
-  await expect(noMatch.form.getByRole("alert")).toContainText("doesn't match your company");
+  await expect(
+    noMatch.form.getByRole("alert").filter({ hasText: "doesn't match your company" }),
+  ).toBeVisible();
   await expect(noMatch.form.getByTestId("company-bank-preview")).toHaveCount(0);
   await expectNoHorizontalScroll(page);
 
@@ -227,7 +229,9 @@ test("a close match needs a reason the approver sees; no match is refused", asyn
   await expect(near.getByTestId("name-check-status")).toHaveText("Close match");
   await expect(near).toContainText(`Expected: Harbour Security ${suffix}`);
   await form.getByRole("button", { name: "Review" }).click();
-  await expect(form.getByRole("alert")).toContainText("Say why this is the right account");
+  await expect(
+    form.getByRole("alert").filter({ hasText: "Say why this is the right account" }),
+  ).toBeVisible();
   await form
     .getByLabel("Why is this the right account?", { exact: true })
     .fill("The bank shortened our name; letter on file");
