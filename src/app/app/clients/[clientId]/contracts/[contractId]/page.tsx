@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { loadClient } from "@/server/business/clients-data";
 import { BILLING_FREQUENCY_LABELS, CONTRACT_TYPE_LABELS } from "@/server/business/contract-schemas";
 import { loadContract, type ContractDetail } from "@/server/business/contracts-data";
+import { loadHeadcount } from "@/server/business/headcount-data";
 import { getActiveCompany } from "@/server/identity/company-data";
 
 import { RouteGate } from "../../../../_shell/slots";
@@ -28,6 +29,7 @@ import { DetailList, Section } from "../../../../people/_components/display";
 import { inheritedTermsLabel } from "../../../_components/contract-options";
 import { clientsPageContext } from "../../../_components/context";
 import { ContractStatusChip } from "../../../_components/contract-status";
+import { HeadcountTab } from "../../../_components/headcount-tab";
 import { CancelVersionButton, WhtRateForm } from "../../../_components/rate-forms";
 
 export const metadata: Metadata = { title: "Contract" };
@@ -384,10 +386,11 @@ async function ContractPage({
   const [{ clientId, contractId }, query] = await Promise.all([params, searchParams]);
   const tab = parseTab(query.tab);
   const ctx = await clientsPageContext();
-  const [contract, client, company] = await Promise.all([
+  const [contract, client, company, headcount] = await Promise.all([
     loadContract(ctx.supabase, ctx.organisationId, clientId, contractId),
     loadClient(ctx.supabase, ctx.organisationId, clientId),
     getActiveCompany(),
+    tab === "headcount" ? loadHeadcount(ctx.supabase, ctx.organisationId, contractId) : null,
   ]);
   if (!contract || !client) notFound();
   const today = lagosToday();
@@ -424,7 +427,12 @@ async function ContractPage({
         <RatesTab contract={contract} today={today} canEdit={ctx.canEditContracts} />
       ) : null}
       {tab === "headcount" ? (
-        <EmptyState message="No headcount yet. Posts, shifts and how many people each needs come here next." />
+        <HeadcountTab
+          contract={contract}
+          lines={headcount ?? []}
+          today={today}
+          canEdit={ctx.canEditContracts}
+        />
       ) : null}
       {tab === "documents" ? (
         <EmptyState message="No documents yet. Signed contracts and SLAs are uploaded here next." />

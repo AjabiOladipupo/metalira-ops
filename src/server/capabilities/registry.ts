@@ -31,6 +31,17 @@ import {
 } from "@/server/business/contracts";
 import { listContracts, loadContractsSummary } from "@/server/business/contracts-data";
 import {
+  addHeadcountSpec,
+  removeHeadcountSpec,
+  updateHeadcountSpec,
+} from "@/server/business/headcount";
+import {
+  contractWeek,
+  loadHeadcountContext,
+  loadHeadcountSummary,
+} from "@/server/business/headcount-data";
+import { contractIdSchema } from "@/server/business/headcount-schemas";
+import {
   advanceSetupSpec,
   completeSetupSpec,
   saveBusinessSpec,
@@ -87,13 +98,16 @@ import {
 
 import {
   previewAddContact,
+  previewAddHeadcount,
   previewAddRateCardVersion,
   previewAddWhtRate,
   previewCreateClient,
   previewCreateContract,
   previewQuickAddClient,
+  previewRemoveHeadcount,
   previewSaveDraftRateCard,
   previewUpdateContract,
+  previewUpdateHeadcount,
 } from "./previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
@@ -1010,6 +1024,84 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("business/contract-actions", "cancelWhtRateAction"),
     agent: false,
     agentNote: RATES,
+  },
+
+  // -------------------------------------------------------------------------
+  // Headcount (business/headcount-actions.ts, slice 2.5)
+  // -------------------------------------------------------------------------
+  {
+    name: "headcount.summary",
+    description:
+      "Counts headcount rows and shifts a week, and the contracts with rows that have no rate.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) =>
+      loadHeadcountSummary(supabase, organisationId, lagosToday()),
+    agent: true,
+  },
+  {
+    name: "headcount.for_contract",
+    description:
+      "Lists a contract's headcount by site with shifts a week, the weekly total and rows with no rate.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: contractIdSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { contractId } = contractIdSchema.parse(input);
+      const { contract, lines, siteNames } = await loadHeadcountContext(
+        supabase,
+        organisationId,
+        contractId,
+      );
+      if (!contract) return null;
+      return {
+        status: contract.status,
+        sites: Object.fromEntries(siteNames),
+        week: contractWeek(contract, lines, lagosToday()),
+      };
+    },
+    agent: true,
+  },
+  {
+    name: "headcount.add",
+    description:
+      "Adds a post to a draft contract's headcount: site, role, band, days, hours and people.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addHeadcountSpec),
+    changes: "one",
+    action: at("business/headcount-actions", "addHeadcountAction"),
+    preview: previewAddHeadcount,
+    agent: true,
+  },
+  {
+    name: "headcount.update",
+    description: "Changes one headcount row of a draft contract.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(updateHeadcountSpec),
+    changes: "one",
+    action: at("business/headcount-actions", "updateHeadcountAction"),
+    preview: previewUpdateHeadcount,
+    agent: true,
+  },
+  {
+    name: "headcount.remove",
+    description: "Removes one headcount row from a draft contract.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(removeHeadcountSpec),
+    changes: "one",
+    action: at("business/headcount-actions", "removeHeadcountAction"),
+    preview: previewRemoveHeadcount,
+    agent: true,
   },
 ];
 
