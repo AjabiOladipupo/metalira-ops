@@ -193,6 +193,24 @@ describe("schemas", () => {
     }
   });
 
+  it("keeps account numbers out of free text", () => {
+    expect(
+      requestCompanyBankSchema.safeParse({
+        bankName: "GTBank",
+        accountName: "A",
+        bankAccountNumber: NUBAN,
+        reason: "Moving from 0123456789 to GTBank",
+      }).success,
+    ).toBe(false);
+    expect(
+      decideCompanyBankSchema.safeParse({
+        accountId: ACCOUNT,
+        decision: "approve",
+        note: "Checked against the letter dated 12/11/2026",
+      }).success,
+    ).toBe(true);
+  });
+
   it("knows approve, reject and stop only", () => {
     expect(
       decideCompanyBankSchema.safeParse({ accountId: ACCOUNT, decision: "apply" }).success,

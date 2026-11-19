@@ -344,6 +344,29 @@ describe("two people, then 72 hours", () => {
     await expect(
       db.query("delete from public.organisation_bank_accounts where id = $1", [rows[0]!.id]),
     ).rejects.toMatchObject({ code: "MLOB4" });
+    await expect(db.query("truncate public.organisation_bank_accounts")).rejects.toMatchObject({
+      code: "MLOB4",
+    });
+  });
+
+  it("can only reject a request whose requester has since left", async () => {
+    const leaver = await createTestUser("ob-leaver", "Leaving admin");
+    expect(
+      (
+        await admin
+          .from("memberships")
+          .insert({ organisation_id: c.owner.orgId, user_id: leaver.id, role: "admin" })
+      ).error,
+    ).toBeNull();
+    const pending = await mustRequest(c, leaver.client, "7070");
+    await db.query("delete from public.memberships where organisation_id = $1 and user_id = $2", [
+      c.owner.orgId,
+      leaver.id,
+    ]);
+    const approved = await decide(c, pending.id, "approve", c.people.finance.client);
+    expect(approved.error?.code).toBe("MLOB5");
+    const rejected = await decide(c, pending.id, "reject", c.people.finance.client);
+    expect(rejected.error).toBeNull();
   });
 });
 

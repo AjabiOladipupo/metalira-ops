@@ -70,6 +70,7 @@ function fromDbError(error: PostgrestError, field = "bankAccountNumber"): never 
     case "MLOB1":
     case "MLOB3":
     case "MLOB4":
+    case "MLOB5":
       throw new MutationError("invalid", error.message);
     case "23505":
       if (text.includes("organisation_bank_accounts_one_open_key")) {

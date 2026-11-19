@@ -31,7 +31,9 @@
 -- * Encryption: bank_account_enc is sealed by the server for this row
 --   (organisation, `organisation_bank_accounts`, `bank_account_enc`, row id), so it never moves.
 --   The database has no key and can't check that bank_account_last4 belongs to it; the server
---   does on approval and on every reveal (src/server/billing/company-bank.ts).
+--   does on approval (src/server/billing/company-bank.ts). The first account skips approval, so
+--   invoice code (Phase 6) must decrypt org_bank_account_as_of's ciphertext and refuse a
+--   last-4 mismatch before printing it.
 -- * Who reads what: the table (requests, history, ciphertext) is readable by owner, admin and
 --   finance only. Every manager reads the account in force, masked to its last four digits,
 --   through public.org_bank_account_masked. The full number is shown only to owner and finance
@@ -39,8 +41,11 @@
 -- * Personal data never reaches audit_log in clear: the row audit drops `_enc` and
 --   `bank_account*` keys (private.audit_secret_key).
 --
+-- * Free text (reason, decision note) can't hold 10 digits in a row, so an account number
+--   never lands in it (and so in audit_log) in clear.
+--
 -- Refusals: MLOB1 (requester deciding), MLOB3 (hold), MLOB4 (already decided, edited or
--- deleted).
+-- deleted), MLOB5 (the requester no longer raises requests in this company).
 
 -- ---------------------------------------------------------------------------
 -- 1. Table
@@ -84,6 +89,7 @@ create table public.organisation_bank_accounts (
       reason = btrim(reason)
       and char_length(reason) between 1 and 500
       and reason !~ '[\x01-\x1f\x7f-\x9f<>]'
+      and reason !~ '[0-9]{10}'
     ),
 
   -- True only for the first account an owner added alone during setup (set by the trigger).
@@ -99,6 +105,7 @@ create table public.organisation_bank_accounts (
       decision_note = btrim(decision_note)
       and char_length(decision_note) between 1 and 500
       and decision_note !~ '[\x01-\x1f\x7f-\x9f<>]'
+      and decision_note !~ '[0-9]{10}'
     ),
   -- When the account takes effect: decided_at + 72 hours (decided_at for the first account).
   applies_after timestamptz,
@@ -352,6 +359,18 @@ begin
       raise exception 'You raised this request, so someone else must approve or reject it.'
         using errcode = 'MLOB1';
     end if;
+    -- A request from someone who has since left, or no longer raises requests, can only be
+    -- rejected (as for owner changes, MLOW5).
+    if new.status = 'approved' and not exists (
+      select 1
+      from public.memberships m
+      where m.organisation_id = old.organisation_id
+        and m.user_id = old.requested_by
+        and m.role in ('owner', 'admin', 'finance')
+    ) then
+      raise exception 'The person who raised this request no longer manages the company bank account. Reject it.'
+        using errcode = 'MLOB5';
+    end if;
     new.decided_at := now();
     if new.status = 'approved' then
       new.approved_by := v_actor;
@@ -380,6 +399,9 @@ begin
     end if;
     new.cancelled_by := v_actor;
     new.cancelled_at := now();
+    -- The approver's note stays; a note given when stopping is used only when there was none
+    -- (the row audit keeps both).
+    new.decision_note := coalesce(old.decision_note, new.decision_note);
 
   elsif old.status = 'approved' and new.status = 'active' then
     if now() < old.applies_after then
@@ -443,6 +465,9 @@ create trigger organisation_bank_accounts_set_updated_at
 create trigger organisation_bank_accounts_no_delete
   before delete on public.organisation_bank_accounts
   for each row execute function private.organisation_bank_accounts_no_delete();
+create trigger organisation_bank_accounts_no_truncate
+  before truncate on public.organisation_bank_accounts
+  for each statement execute function private.organisation_bank_accounts_no_delete();
 create trigger organisation_bank_accounts_audit
   after insert or update or delete on public.organisation_bank_accounts
   for each row execute function private.audit_row_change();
@@ -487,6 +512,7 @@ create policy organisation_bank_accounts_update on public.organisation_bank_acco
   );
 
 revoke all on table public.organisation_bank_accounts from anon, authenticated;
+revoke truncate on table public.organisation_bank_accounts from service_role;
 grant select on table public.organisation_bank_accounts to authenticated;
 grant insert (
   id, organisation_id, bank_name, account_name, bank_account_enc, bank_account_last4, reason

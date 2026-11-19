@@ -30,6 +30,8 @@ const note = (label: string) =>
       .trim()
       .max(500, `${label} must be 500 characters or fewer`)
       .regex(/^[^\p{Cc}<>]*$/u, `${label} must be plain text, without < or >`)
+      // Never an account number in clear: free text reaches the audit log as written.
+      .refine((value) => !/\d{10}/.test(value), `${label} can't contain an account number`)
       .nullish(),
   );
 

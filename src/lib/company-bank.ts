@@ -58,7 +58,7 @@ export function formatCompanyAccount(account: {
 
 /**
  * True when `shownLast4` is the last four digits of `accountNumber`. The database has no key, so
- * the server runs this on approval and on every reveal: what the approver saw is what clients
+ * the server runs this on approval (and invoice code must, before printing it): what the approver saw is what clients
  * will pay into.
  */
 export function last4Matches(accountNumber: string, shownLast4: string): boolean {
