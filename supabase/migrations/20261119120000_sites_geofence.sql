@@ -143,7 +143,7 @@ begin
       new.geofence_set_by := null;
     else
       new.geofence_set_at := now();
-      new.geofence_set_by := auth.uid();
+      new.geofence_set_by := (select private.session_uid());
     end if;
   else
     new.geofence := old.geofence;
@@ -262,7 +262,7 @@ comment on table public.site_checkpoints is
 -- * a checkpoint never moves site; a retired one never changes again;
 -- * retiring records when and by whom.
 -- Refusals: MLCP1 (retired), MLCP2 (archived site), MLCP3 (moved), MLCP4 (location outside
--- Nigeria).
+-- Nigeria), MLCP5 (more than 200 active checkpoints at a site).
 create function private.site_checkpoints_before_write()
 returns trigger
 language plpgsql
@@ -278,7 +278,7 @@ begin
     end if;
     if new.status = 'retired' then
       new.retired_at := now();
-      new.retired_by := auth.uid();
+      new.retired_by := (select private.session_uid());
     end if;
   else
     if exists (
@@ -286,6 +286,13 @@ begin
       where s.organisation_id = new.organisation_id and s.id = new.site_id and s.status = 'archived'
     ) then
       raise exception 'This site is archived. Restore it to add checkpoints.' using errcode = 'MLCP2';
+    end if;
+    if (
+      select count(*) from public.site_checkpoints c
+      where c.organisation_id = new.organisation_id and c.site_id = new.site_id and c.status = 'active'
+    ) >= 200 then
+      raise exception 'A site can have 200 checkpoints or fewer. Retire some first.'
+        using errcode = 'MLCP5';
     end if;
     new.status := 'active';
     new.retired_at := null;
@@ -494,9 +501,11 @@ grant execute on function public.move_site_checkpoint(uuid, uuid, text) to authe
 -- ---------------------------------------------------------------------------
 -- 'inside' when the site's geofence covers the point; 'near' when the point is within
 -- `p_accuracy_m` metres of it (the phone's reported accuracy); else 'outside'. Null when the
--- site has no geofence, or the caller can't see the site (security invoker: RLS applies), or no
--- point was given. It only reports: Phase 3 decides what each answer means for a clock-in.
+-- site has no geofence, isn't in `p_organisation_id`, or the caller can't see it (security
+-- invoker: RLS applies; the organisation filter matters when Phase 3 calls it with the secret
+-- key), or no point was given. It only reports: Phase 3 decides what each answer means.
 create function private.site_geofence_check(
+  p_organisation_id uuid,
   p_site_id uuid,
   p_point extensions.geography,
   p_accuracy_m integer default 0
@@ -516,10 +525,10 @@ as $$
     else 'outside'
   end
   from public.sites s
-  where s.id = p_site_id
+  where s.organisation_id = p_organisation_id and s.id = p_site_id
 $$;
 
-revoke all on function private.site_geofence_check(uuid, extensions.geography, integer)
+revoke all on function private.site_geofence_check(uuid, uuid, extensions.geography, integer)
   from public, anon;
-grant execute on function private.site_geofence_check(uuid, extensions.geography, integer)
+grant execute on function private.site_geofence_check(uuid, uuid, extensions.geography, integer)
   to authenticated, service_role;

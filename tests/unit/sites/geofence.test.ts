@@ -303,9 +303,9 @@ describe("QR checkpoint codes", () => {
     };
   }
 
-  it("points at the worker app's scan page", () => {
+  it("points at the worker app's scan page, token in the fragment", () => {
     expect(checkpointUrl("https://ops.metaliratech.com/", "ab".repeat(32))).toBe(
-      `https://ops.metaliratech.com/m/checkpoint/${"ab".repeat(32)}`,
+      `https://ops.metaliratech.com/m/checkpoint#${"ab".repeat(32)}`,
     );
   });
 

@@ -6,13 +6,25 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { appOrigin } from "@/server/identity/origin";
-import { loadCheckpointSheet, loadSite } from "@/server/sites/sites-data";
+import { PRODUCTION_ORIGIN, loadCheckpointSheet, loadSite } from "@/server/sites/sites-data";
 
 import { RouteGate } from "../../../../../../_shell/slots";
 import { clientsPageContext } from "../../../../../_components/context";
 import { PrintButton } from "./print-button";
 
 export const metadata: Metadata = { title: "Checkpoint QR sheet" };
+
+/**
+ * The origin printed in the codes. Stickers outlive deployments, so production never takes it
+ * from the request: NEXT_PUBLIC_APP_URL when set, else the production app. Previews and local
+ * runs use their own origin so the codes can be tried there.
+ */
+async function checkpointOrigin(): Promise<string> {
+  if (process.env.VERCEL_ENV === "production" && !process.env.NEXT_PUBLIC_APP_URL) {
+    return PRODUCTION_ORIGIN;
+  }
+  return appOrigin();
+}
 
 async function CheckpointSheet({
   params,
@@ -27,7 +39,7 @@ async function CheckpointSheet({
     ctx.supabase,
     ctx.organisationId,
     site.id,
-    await appOrigin(),
+    await checkpointOrigin(),
   );
   const back = `/app/clients/${site.clientId}/sites/${site.id}`;
 

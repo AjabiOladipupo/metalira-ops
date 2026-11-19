@@ -248,10 +248,17 @@ export async function listSitesWithoutGeofence(
     );
 }
 
-/** Where a checkpoint's QR code points. The scan page arrives in Phase 3. */
+/**
+ * Where a checkpoint's QR code points. The token is in the fragment, which browsers never send to
+ * a server, so scans don't write it into request logs, history or Referer headers; the Phase 3
+ * scan page reads it in the browser and posts it with the signed-in worker's session.
+ */
 export function checkpointUrl(origin: string, token: string): string {
-  return `${origin.replace(/\/+$/, "")}/m/checkpoint/${token}`;
+  return `${origin.replace(/\/+$/, "")}/m/checkpoint#${token}`;
 }
+
+/** The production app, for codes printed where no app URL is configured. */
+export const PRODUCTION_ORIGIN = "https://ops.metaliratech.com";
 
 export interface CheckpointCard {
   id: string;

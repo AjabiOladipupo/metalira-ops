@@ -45,6 +45,10 @@ const DB_REFUSALS: Record<string, { message: string; field?: string }> = {
   MLCP2: { message: "This site is archived. Restore it to add checkpoints." },
   MLCP3: { message: "A checkpoint can't move to another site." },
   MLCP4: { message: "The checkpoint must be in Nigeria." },
+  MLCP5: {
+    message: "A site can have 200 checkpoints or fewer. Retire some first.",
+    field: "name",
+  },
 };
 
 /** Database refusals in plain English, under the field they belong to. */

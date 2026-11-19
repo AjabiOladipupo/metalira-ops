@@ -80,10 +80,10 @@ async function geofenceOf(id: string) {
   return rows[0]!;
 }
 
-async function check(id: string, p: { lat: number; lng: number }, accuracy: number) {
+async function check(id: string, p: { lat: number; lng: number }, accuracy: number, org?: string) {
   const { rows } = await db.query<{ answer: string | null }>(
-    "select private.site_geofence_check($1, $2::extensions.geography, $3) as answer",
-    [id, point(p), accuracy],
+    "select private.site_geofence_check($1, $2, $3::extensions.geography, $4) as answer",
+    [org ?? owner.orgId, id, point(p), accuracy],
   );
   return rows[0]!.answer;
 }
@@ -263,6 +263,8 @@ describe("geofence", () => {
     expect(await check(siteId, north(APAPA, 115), 30)).toBe("near");
     expect(await check(siteId, north(APAPA, 115), 5)).toBe("outside");
     expect(await check(siteId, north(APAPA, 500), 30)).toBe("outside");
+    // Another company's id gets no answer, even as the database owner.
+    expect(await check(siteId, APAPA, 0, other.orgId)).toBeNull();
     // No geofence yet: nothing to check against.
     expect(await check(otherSiteId, APAPA, 30)).toBeNull();
   });
@@ -510,6 +512,20 @@ describe("checkpoints", () => {
       .insert({ organisation_id: owner.orgId, site_id: otherSiteId, name: "Gate C" });
     expect(error?.code).toBe("MLCP2");
     await ops.client.from("sites").update({ status: "active" }).eq("id", otherSiteId);
+  });
+});
+
+describe("checkpoint cap", () => {
+  it("stops at 200 active checkpoints a site", async () => {
+    await db.query(
+      `insert into public.site_checkpoints (organisation_id, site_id, name)
+       select $1, $2, 'Post ' || g from generate_series(1, 200) g`,
+      [owner.orgId, otherSiteId],
+    );
+    const { error } = await ops.client
+      .from("site_checkpoints")
+      .insert({ organisation_id: owner.orgId, site_id: otherSiteId, name: "Post 201" });
+    expect(error?.code).toBe("MLCP5");
   });
 });
 
