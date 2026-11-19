@@ -70,7 +70,7 @@ describe("nav by role", () => {
     const all = NAV_ITEMS.map((i) => i.label);
     expect(labels("owner")).toEqual(all);
     expect(labels("admin")).toEqual(all);
-    expect(all).toHaveLength(13);
+    expect(all).toHaveLength(14);
   });
 
   it("matches the decision for hr, finance, ops_manager and line_manager", () => {
@@ -87,6 +87,7 @@ describe("nav by role", () => {
       "Home",
       "Timesheets",
       "Payroll run",
+      "Clients",
       "Unbilled work",
       "Collections",
       "Revenue",
@@ -100,6 +101,7 @@ describe("nav by role", () => {
       "People",
       "My team",
       "Leave",
+      "Clients",
       "Projects",
       "Unbilled work",
     ]);
@@ -161,6 +163,25 @@ describe("nav by role", () => {
     expect(canAccessHref("finance", "/app/settings")).toBe(true);
     // A prefix that only looks like an extra page is not one.
     expect(canAccessHref("owner", "/app/setup-elsewhere")).toBe(false);
+  });
+
+  it("opens Clients to readers and its edit pages to owner, admin and ops_manager", () => {
+    const id = "c0000000-0000-4000-8000-000000000001";
+    for (const role of ["owner", "admin", "finance", "ops_manager"] as const) {
+      expect(canAccessHref(role, "/app/clients"), role).toBe(true);
+      expect(canAccessHref(role, `/app/clients/${id}`), role).toBe(true);
+    }
+    for (const role of ["hr", "line_manager", "worker"] as const) {
+      expect(canAccessHref(role, "/app/clients"), role).toBe(false);
+    }
+    for (const path of ["/app/clients/new", `/app/clients/${id}/edit`]) {
+      for (const role of ["owner", "admin", "ops_manager"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(true);
+      }
+      for (const role of ["finance", "hr", "line_manager"] as const) {
+        expect(canAccessHref(role, path), `${role} ${path}`).toBe(false);
+      }
+    }
   });
 
   it("opens the people import to owner, admin and hr only", () => {

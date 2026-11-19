@@ -1,6 +1,7 @@
 import {
   Activity,
   Banknote,
+  Building2,
   CalendarDays,
   CalendarMinus,
   ClipboardCheck,
@@ -26,6 +27,7 @@ export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
   team: UserCheck,
   leave: CalendarMinus,
   payroll: Wallet,
+  clients: Building2,
   projects: FolderKanban,
   unbilled: FileText,
   collections: Banknote,

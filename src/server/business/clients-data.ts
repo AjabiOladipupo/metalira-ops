@@ -61,7 +61,6 @@ export async function listClients(
     .limit(LIST_LIMIT);
   if (error) throw new Error(`Could not read clients: ${error.message}`);
 
-  const needle = fold(options.query?.trim() ?? "");
   const rows = (data ?? []).map((row): ClientRow => {
     const billing = (row.client_contacts ?? []).filter(
       (c) => c.status === "active" && c.role === "billing",
@@ -81,11 +80,18 @@ export async function listClients(
       }),
     };
   });
-  const filtered = needle
-    ? rows.filter((r) => fold(r.name).includes(needle) || fold(r.legalName ?? "").includes(needle))
-    : rows;
   // Active first, then archived; each by name.
-  return filtered.sort((a, b) => Number(a.status === "archived") - Number(b.status === "archived"));
+  rows.sort((a, b) => Number(a.status === "archived") - Number(b.status === "archived"));
+  return filterClients(rows, options.query);
+}
+
+/** The rows whose name or registered name contains `query`, ignoring case and accents. */
+export function filterClients(rows: readonly ClientRow[], query = ""): ClientRow[] {
+  const needle = fold(query.trim());
+  if (!needle) return [...rows];
+  return rows.filter(
+    (r) => fold(r.name).includes(needle) || fold(r.legalName ?? "").includes(needle),
+  );
 }
 
 /**
