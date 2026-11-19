@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
 import { PII_FIELDS, type PiiField } from "@/lib/mask";
 import type { Role } from "@/lib/roles";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -37,7 +38,17 @@ export function canSeePii(role: Role, field: PiiField): boolean {
 const PII_COLUMNS = {
   workers: { nin: "nin_enc", bank_account: "bank_account_enc", rsa_pin: "rsa_pin_enc" },
   bank_detail_changes: { bank_account: "bank_account_enc" },
+  // The company's own collection account (slice 2.3), sealed for its own row.
+  organisation_bank_accounts: { bank_account: "bank_account_enc" },
 } as const satisfies Record<string, Partial<Record<PiiField, `${string}_enc`>>>;
+
+/**
+ * Tables whose values only some of the roles in UNMASKED may see. The company bank account is
+ * shown in full to owner and finance only (Phase 2 roles table), not hr.
+ */
+const ENTITY_ROLES: Partial<Record<keyof typeof PII_COLUMNS, readonly Role[]>> = {
+  organisation_bank_accounts: COMPANY_BANK_REVEALERS,
+};
 
 export type PiiEntity = keyof typeof PII_COLUMNS;
 export const PII_ENTITIES = Object.keys(PII_COLUMNS) as [PiiEntity, ...PiiEntity[]];
@@ -124,6 +135,8 @@ export async function revealPii(input: RevealPiiInput): Promise<string | null> {
   const session = await getSession();
   const membership = session?.memberships.find((m) => m.organisationId === organisationId);
   if (!membership || !canSeePii(membership.role, field)) throw new PiiAccessError(field);
+  const narrowed = ENTITY_ROLES[entity];
+  if (narrowed && !narrowed.includes(membership.role)) throw new PiiAccessError(field);
 
   const supabase = await createServerSupabase();
   // The table and column come from PII_COLUMNS, so the read goes through an untyped view of the

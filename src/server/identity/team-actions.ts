@@ -24,7 +24,7 @@ import { emailLinkAllowed } from "./email-link-limit";
 import { chooseOwnPassword, invitePasswordStepFor } from "./invite-password";
 import { appOrigin } from "./origin";
 import { formFields, newPasswordSchema } from "./schemas";
-import { notifyOwnerChange, notifyOwnerJoined } from "./owner-notices";
+import { notifyOwnerChange, notifyOwnerGrantedRole, notifyOwnerJoined } from "./owner-notices";
 import {
   decideOwnerChangeSpec,
   requestOwnerChangeSpec,
@@ -353,6 +353,18 @@ export async function changeRoleAction(
   const session = await getSession();
   if (session?.active) {
     noticeAfter(member, session.active.organisationId, session.user.fullName);
+    // Every owner hears when someone is given admin, finance or HR (owner decision, 19 Nov 2026).
+    const organisationId = session.active.organisationId;
+    const actorId = session.user.id;
+    const newRole = member.newRole;
+    const eventId = `${member.membershipId}/${Date.now()}`;
+    if (newRole) {
+      after(() =>
+        notifyOwnerGrantedRole(organisationId, member.userId, newRole, actorId, eventId).then(
+          () => undefined,
+        ),
+      );
+    }
   }
   revalidatePath(TEAM_PATH);
   return {
@@ -475,6 +487,14 @@ export async function acceptTeamInviteAction(
   if (invite.state === "pending" && invite.role === "owner") {
     const organisationId = data;
     after(() => notifyOwnerJoined(organisationId, session.user.id).then(() => undefined));
+  } else if (invite.state === "pending") {
+    const organisationId = data;
+    const { inviteId, role } = invite;
+    after(() =>
+      notifyOwnerGrantedRole(organisationId, session.user.id, role, null, inviteId).then(
+        () => undefined,
+      ),
+    );
   }
   // Best effort: the invite path parked at sign-up (for the confirmation link) is spent now.
   await supabase.auth.updateUser({ data: { [NEXT_PATH_KEY]: null } });

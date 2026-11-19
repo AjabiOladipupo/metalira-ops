@@ -165,6 +165,27 @@ describe("notifyOwnerChange", () => {
     );
   });
 
+  it("tells every owner when someone is given admin, finance or HR, and only then", async () => {
+    const { notifyOwnerGrantedRole } = await import("@/server/identity/owner-notices");
+    const send = vi.fn(async () => ({ status: "sent" as const }));
+    const deps = { admin: fakeAdmin({}) as never, send: send as never };
+    const sent = await notifyOwnerGrantedRole(ORG, "u-gone", "finance", "u-a", "inv-1", deps);
+    expect(sent).toBe(2);
+    const calls = send.mock.calls as unknown as [Record<string, unknown>][];
+    expect(calls.map((c) => c[0].to)).toEqual(["ada@example.ng", "bola@example.ng"]);
+    expect(calls[0]![0]).toMatchObject({
+      event: "role_given",
+      summary: "Gbenga Ade is now Finance",
+      actorName: "Ada Okafor",
+      idempotencyKey: "role-given/inv-1/finance/u-a",
+    });
+    send.mockClear();
+    expect(await notifyOwnerGrantedRole(ORG, "u-gone", "line_manager", "u-a", "inv-2", deps)).toBe(
+      0,
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("keys each notice by change, event and recipient", async () => {
     const { sendOwnerChangeEmail } = await import("@/server/email/team");
     await sendOwnerChangeEmail({
