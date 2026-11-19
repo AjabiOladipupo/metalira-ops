@@ -178,7 +178,10 @@ export async function checkRequestedAccount(
   const request = rows?.find((r) => r.id === accountId);
   if (request?.status !== "pending") throw new MutationError("invalid", NOT_FOUND_OR_DECIDED);
 
-  const number = readNumber(request.bank_account_enc, companyBankContext(organisationId, accountId));
+  const number = readNumber(
+    request.bank_account_enc,
+    companyBankContext(organisationId, accountId),
+  );
   if (number === null) {
     throw new MutationError(
       "invalid",
@@ -273,7 +276,10 @@ export function withdrawCompanyBank(input: unknown): Promise<string> {
  * the page still shows the account as approved and due, and invoices read the account in force
  * from the rows themselves (`org_bank_account_as_of`).
  */
-export async function applyDueCompanyBank(supabase: Client, organisationId: string): Promise<number> {
+export async function applyDueCompanyBank(
+  supabase: Client,
+  organisationId: string,
+): Promise<number> {
   const session = await getSession();
   if (session?.active?.organisationId !== organisationId) return 0;
   const { data, error } = await supabase.rpc("apply_due_org_bank_accounts", {
@@ -452,7 +458,13 @@ export function companyBankState(
  */
 export interface CompanyBankSummary {
   /** The account in force now, masked, or null when the company has none yet. */
-  current: { bankName: string; accountName: string; last4: string; label: string; since: string } | null;
+  current: {
+    bankName: string;
+    accountName: string;
+    last4: string;
+    label: string;
+    since: string;
+  } | null;
   /** A request waiting for a second person or on hold; null when none, or not visible. */
   open: {
     status: "pending" | "approved";

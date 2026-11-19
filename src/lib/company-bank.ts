@@ -20,9 +20,15 @@ export const COMPANY_BANK_REQUESTERS = [
   "finance",
 ] as const satisfies readonly ManagerRole[];
 /** Who may approve, reject or stop a request (never their own). */
-export const COMPANY_BANK_APPROVERS = ["owner", "finance"] as const satisfies readonly ManagerRole[];
+export const COMPANY_BANK_APPROVERS = [
+  "owner",
+  "finance",
+] as const satisfies readonly ManagerRole[];
 /** Who may see the account number in full, through an audited reveal. */
-export const COMPANY_BANK_REVEALERS = ["owner", "finance"] as const satisfies readonly ManagerRole[];
+export const COMPANY_BANK_REVEALERS = [
+  "owner",
+  "finance",
+] as const satisfies readonly ManagerRole[];
 
 /** Hours between approval and the account taking effect. */
 export const COMPANY_BANK_HOLD_HOURS = 72;

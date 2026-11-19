@@ -3,8 +3,10 @@ import { redirect } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { previousSetupStep, resumeSetupSlug, setupStepHref, type SetupSlug } from "@/lib/company";
-import { COLLECTION_RAILS } from "@/server/billing/collection-rails";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { loadCollectionRails } from "@/server/billing/collection-rails";
 import { continueFromClients, finishSetup } from "@/server/identity/company-actions";
+import { getPageSession } from "@/server/identity/session";
 import {
   getActiveCompany,
   getActiveCompanyLogoUrl,
@@ -71,7 +73,14 @@ export async function BusinessStep() {
 }
 
 export async function InvoicesStep() {
-  const company = await requireCompany();
+  const [company, session] = await Promise.all([requireCompany(), getPageSession()]);
+  if (!session?.active) redirect("/no-access");
+  const rails = await loadCollectionRails(
+    await createServerSupabase(),
+    company.id,
+    session.active.role,
+    { fromSetup: company.setupCompletedAt === null },
+  );
   return (
     <SetupFrame
       current="invoices"
@@ -79,12 +88,7 @@ export async function InvoicesStep() {
       title="Invoices and getting paid"
       description="Invoices go out from your email. Clients pay into accounts you own; Metalira never holds the money."
     >
-      <InvoicesForm
-        mode="setup"
-        company={company}
-        rails={COLLECTION_RAILS}
-        backHref={backHref("invoices")}
-      />
+      <InvoicesForm mode="setup" company={company} rails={rails} backHref={backHref("invoices")} />
     </SetupFrame>
   );
 }

@@ -212,6 +212,8 @@ export function navForRole(role: Role): NavGroup[] {
 export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
+  // Slice 2.3: the company's collection bank account. Finance approves changes to it.
+  { href: "/app/settings/bank-account", roles: ["owner", "admin", "finance"] },
   { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },
   // Slice 1.12: inviting, re-roling and removing managers.
   { href: "/app/settings/team", roles: ["owner", "admin"] },
