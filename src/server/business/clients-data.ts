@@ -28,7 +28,10 @@ export interface ClientRow {
   name: string;
   legalName: string | null;
   status: ClientStatus;
+  /** Active sites. */
   siteCount: number;
+  /** Active sites with no geofence yet (slice 2.2). */
+  sitesWithoutGeofence: number;
   /** Active contracts arrive in slice 2.4; 0 until then. */
   activeContractCount: number;
   primaryBillingEmail: string | null;
@@ -74,7 +77,9 @@ export async function listClients(
   const [{ data, error }, billingById] = await Promise.all([
     supabase
       .from("clients")
-      .select("id, name, status, sites(count), client_contacts(email, role, is_primary, status)")
+      .select(
+        "id, name, status, sites(status, geofence_set_at), client_contacts(email, role, is_primary, status)",
+      )
       .eq("organisation_id", organisationId)
       .order("name")
       .limit(LIST_LIMIT),
@@ -88,12 +93,14 @@ export async function listClients(
     );
     const primary = billing.find((c) => c.is_primary) ?? billing[0];
     const details = billingById.get(row.id);
+    const sites = (row.sites ?? []).filter((s) => s.status === "active");
     return {
       id: row.id,
       name: row.name,
       legalName: details?.legal_name ?? null,
       status: row.status as ClientStatus,
-      siteCount: row.sites?.[0]?.count ?? 0,
+      siteCount: sites.length,
+      sitesWithoutGeofence: sites.filter((s) => !s.geofence_set_at).length,
       activeContractCount: 0,
       primaryBillingEmail: primary?.email ?? null,
       needsDetails: clientNeedsDetails({
@@ -128,6 +135,8 @@ export interface ClientsSummary {
   needsDetails: number;
   /** Sites across active clients. */
   sites: number;
+  /** Of those, sites with no geofence yet (slice 2.2). */
+  sitesWithoutGeofence: number;
 }
 
 export function summariseClients(rows: readonly ClientRow[]): ClientsSummary {
@@ -138,6 +147,7 @@ export function summariseClients(rows: readonly ClientRow[]): ClientsSummary {
     archived: rows.length - active.length,
     needsDetails: active.filter((r) => r.needsDetails).length,
     sites: active.reduce((sum, r) => sum + r.siteCount, 0),
+    sitesWithoutGeofence: active.reduce((sum, r) => sum + r.sitesWithoutGeofence, 0),
   };
 }
 
@@ -160,6 +170,7 @@ export interface ClientContact {
 export interface ClientSite {
   id: string;
   name: string;
+  status: string;
 }
 
 export interface ClientDetail {
@@ -206,7 +217,7 @@ export async function loadClient(
       .order("created_at"),
     supabase
       .from("sites")
-      .select("id, name")
+      .select("id, name, status")
       .eq("organisation_id", organisationId)
       .eq("client_id", clientId)
       .order("name"),
@@ -245,7 +256,7 @@ export async function loadClient(
     notes: billing?.notes ?? null,
     createdAt: row.created_at,
     contacts: contactRows,
-    sites: (sites.data ?? []).map((s) => ({ id: s.id, name: s.name })),
+    sites: (sites.data ?? []).map((s) => ({ id: s.id, name: s.name, status: s.status })),
     needsDetails: clientNeedsDetails({
       billingAddress: billing?.billing_address ?? null,
       hasBillingContact: contactRows.some((c) => c.role === "billing"),

@@ -66,8 +66,25 @@ import {
   endEmploymentSpec,
   updateWorkerSpec,
 } from "@/server/people/workers";
+import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
+import {
+  addCheckpointSpec,
+  createSiteSpec,
+  moveCheckpointSpec,
+  renameCheckpointSpec,
+  retireCheckpointSpec,
+  rotateCheckpointQrSpec,
+  setGeofenceSpec,
+  setSiteStatusSpec,
+  updateSiteSpec,
+} from "@/server/sites/sites";
 
-import { previewAddContact, previewCreateClient, previewQuickAddClient } from "./previews";
+import {
+  previewAddContact,
+  previewCreateClient,
+  previewMoveCheckpoint,
+  previewQuickAddClient,
+} from "./previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -822,9 +839,129 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: "Promotes another contact; needs a preview first.",
   },
+
+  // -------------------------------------------------------------------------
+  // Sites, geofences and checkpoints (sites/actions.ts, slice 2.2)
+  // -------------------------------------------------------------------------
+  {
+    name: "sites.summary",
+    description: "Counts active sites, those without a geofence or address, and their checkpoints.",
+    kind: "read",
+    audience: "manager",
+    roles: CLIENT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadSitesSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "sites.without_geofence",
+    description: "Lists active sites with no geofence yet, by client, with a link to each.",
+    kind: "read",
+    audience: "manager",
+    roles: CLIENT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => listSitesWithoutGeofence(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "sites.create",
+    description: "Adds a site to a client with its address, state and landmark.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(createSiteSpec),
+    changes: "one",
+    action: at("sites/actions", "createSiteAction"),
+    agent: true,
+  },
+  {
+    name: "sites.update",
+    description: "Changes a site's name, address, state or landmark.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(updateSiteSpec),
+    changes: "one",
+    action: at("sites/actions", "updateSiteAction"),
+    agent: true,
+  },
+  {
+    name: "sites.set_geofence",
+    description: "Sets a site's geofence: a pin with a radius of 25 to 2,000 m, or a drawn outline.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(setGeofenceSpec),
+    changes: "one",
+    action: at("sites/actions", "setGeofenceAction"),
+    agent: true,
+  },
+  {
+    name: "sites.set_status",
+    description: "Archives a site, or restores an archived one.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(setSiteStatusSpec),
+    changes: "one",
+    action: at("sites/actions", "setSiteStatusAction"),
+    agent: true,
+  },
+  {
+    name: "checkpoints.add",
+    description: "Adds a QR checkpoint at the end of a site's patrol round.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addCheckpointSpec),
+    changes: "one",
+    action: at("sites/actions", "addCheckpointAction"),
+    agent: true,
+  },
+  {
+    name: "checkpoints.rename",
+    description: "Renames a site's QR checkpoint.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(renameCheckpointSpec),
+    changes: "one",
+    action: at("sites/actions", "renameCheckpointAction"),
+    agent: true,
+  },
+  {
+    name: "checkpoints.move",
+    description: "Moves a checkpoint one place earlier or later in the site's patrol round.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(moveCheckpointSpec),
+    changes: "many",
+    action: at("sites/actions", "moveCheckpointAction"),
+    preview: previewMoveCheckpoint,
+    agent: true,
+  },
+  {
+    name: "checkpoints.retire",
+    description: "Retires a checkpoint for good; its history stays and its code stops counting.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(retireCheckpointSpec),
+    changes: "one",
+    action: at("sites/actions", "retireCheckpointAction"),
+    agent: true,
+  },
+  {
+    name: "checkpoints.rotate_qr",
+    description: "Gives a checkpoint a new QR code so the old printout stops working.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(rotateCheckpointQrSpec),
+    changes: "one",
+    action: at("sites/actions", "rotateCheckpointQrAction"),
+    agent: false,
+    agentNote: "Voids the code posted at the site until a new sheet is printed: kept to people.",
+  },
 ];
 
-/** The capability with this name, or undefined. */
+/** The capability with this name, or undefined. */ */
 export function findCapability(name: string): Capability | undefined {
   return CAPABILITIES.find((c) => c.name === name);
 }

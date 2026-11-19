@@ -52,6 +52,12 @@ const COLUMNS: Column<ClientRow>[] = [
   },
   { key: "sites", header: "Sites", kind: "number", cell: (row) => row.siteCount },
   {
+    key: "geofence",
+    header: "No geofence",
+    kind: "number",
+    cell: (row) => row.sitesWithoutGeofence,
+  },
+  {
     key: "contracts",
     header: "Active contracts",
     kind: "number",
@@ -143,6 +149,10 @@ async function ClientsList({
         eyebrow="Business"
         title={`${plural(summary.active, "client", "clients")} · ${details}`}
         description={`${plural(summary.sites, "site", "sites")} across active clients${
+          summary.sitesWithoutGeofence
+            ? ` (${summary.sitesWithoutGeofence.toLocaleString("en-NG")} without a geofence)`
+            : ""
+        }${
           summary.archived ? `, ${summary.archived.toLocaleString("en-NG")} archived` : ""
         }. A client needs a billing address and a billing contact before it can be invoiced.`}
         actions={addAction}
