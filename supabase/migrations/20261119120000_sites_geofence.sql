@@ -103,14 +103,24 @@ begin
   end if;
 
   if new.boundary is not null then
+    -- Cheap checks first, so an oversized outline costs nothing before it is refused: only the
+    -- writers may send one (RLS would refuse anyone else, but only after this trigger ran), and
+    -- the corner count and ring count are read before any geometry work.
+    if auth.uid() is not null
+      and not private.has_role(new.organisation_id, array['owner', 'admin', 'ops_manager']) then
+      raise exception 'Your role can''t change geofences.' using errcode = '42501';
+    end if;
     v_shape := extensions.geometry(new.boundary);
+    -- A closed ring repeats its first point.
+    if extensions.st_npoints(v_shape) > 201 then
+      raise exception 'An outline can have 200 corners or fewer.' using errcode = 'MLST2';
+    end if;
+    if extensions.st_nrings(v_shape) <> 1 then
+      raise exception 'An outline is one line around the site, with no holes.' using errcode = 'MLST1';
+    end if;
     if not extensions.st_isvalid(v_shape) then
       raise exception 'The outline crosses itself. Draw it again around the site.'
         using errcode = 'MLST1';
-    end if;
-    -- A closed ring repeats its first point.
-    if extensions.st_npoints(v_shape) - 1 > 200 then
-      raise exception 'An outline can have 200 corners or fewer.' using errcode = 'MLST2';
     end if;
     if extensions.st_area(new.boundary) > 4000000 then
       raise exception 'An outline can cover 4 square kilometres or less.' using errcode = 'MLST3';
@@ -500,14 +510,17 @@ grant execute on function public.move_site_checkpoint(uuid, uuid, text) to authe
 -- 3. The geofence check for Phase 3
 -- ---------------------------------------------------------------------------
 -- 'inside' when the site's geofence covers the point; 'near' when the point is within
--- `p_accuracy_m` metres of it (the phone's reported accuracy); else 'outside'. Null when the
--- site has no geofence, isn't in `p_organisation_id`, or the caller can't see it (security
--- invoker: RLS applies; the organisation filter matters when Phase 3 calls it with the secret
--- key), or no point was given. It only reports: Phase 3 decides what each answer means.
+-- `p_accuracy_m` metres of it (the phone's reported accuracy, capped at 5,000 m); else 'outside'.
+-- Null when the site has no geofence, isn't in `p_organisation_id`, or the caller can't see it
+-- (security invoker: RLS applies), or no point was given. It only reports: Phase 3 decides what
+-- each answer means for a clock-in.
+-- Phase 3: `p_organisation_id` must come from the verified session (the active membership on
+-- the server, or the worker's own membership), never from client input. With the secret key RLS
+-- does not apply, and this filter is the only thing keeping the answer to one company.
 create function private.site_geofence_check(
   p_organisation_id uuid,
   p_site_id uuid,
-  p_point extensions.geography,
+  p_point extensions.geography(Point, 4326),
   p_accuracy_m integer default 0
 )
 returns text
@@ -518,9 +531,12 @@ set search_path = ''
 as $$
   select case
     when s.geofence is null or p_point is null then null
+    -- Postgres drops the typmod on an argument, so the point type is checked here too.
+    when extensions.st_geometrytype(extensions.geometry(p_point)) <> 'ST_Point'
+      or extensions.st_srid(p_point) <> 4326 then null
     when extensions.st_covers(s.geofence, p_point) then 'inside'
     when extensions.st_dwithin(
-      s.geofence, p_point, greatest(coalesce(p_accuracy_m, 0), 0)::double precision
+      s.geofence, p_point, least(greatest(coalesce(p_accuracy_m, 0), 0), 5000)::double precision
     ) then 'near'
     else 'outside'
   end

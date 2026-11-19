@@ -257,9 +257,6 @@ export function checkpointUrl(origin: string, token: string): string {
   return `${origin.replace(/\/+$/, "")}/m/checkpoint#${token}`;
 }
 
-/** The production app, for codes printed where no app URL is configured. */
-export const PRODUCTION_ORIGIN = "https://ops.metaliratech.com";
-
 export interface CheckpointCard {
   id: string;
   name: string;

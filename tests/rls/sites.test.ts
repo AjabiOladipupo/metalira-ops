@@ -309,6 +309,59 @@ describe("geofence", () => {
     expect(pin.error?.code).toBe("MLST4");
   });
 
+  it("refuses an oversized outline on its corner count, before any geometry work", async () => {
+    // 5,000 corners that also cross themselves: the count is what refuses it.
+    const ring = Array.from({ length: 5000 }, (_, i) => {
+      const t = (4 * Math.PI * i) / 5000;
+      return `${3.36 + 0.001 * Math.cos(t)} ${6.45 + 0.0005 * Math.sin(2 * t)}`;
+    });
+    const started = Date.now();
+    const { error } = await ops.client
+      .from("sites")
+      .update({ boundary: `SRID=4326;POLYGON((${[...ring, ring[0]].join(",")}))` })
+      .eq("id", otherSiteId);
+    expect(error?.code).toBe("MLST2");
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("refuses an outline with a hole", async () => {
+    const outer = "3.36 6.44,3.37 6.44,3.37 6.45,3.36 6.45,3.36 6.44";
+    const hole = "3.362 6.442,3.364 6.442,3.364 6.444,3.362 6.444,3.362 6.442";
+    const { error } = await ops.client
+      .from("sites")
+      .update({ boundary: `SRID=4326;POLYGON((${outer}),(${hole}))` })
+      .eq("id", otherSiteId);
+    expect(error?.code).toBe("MLST1");
+  });
+
+  it("refuses an outline from anyone but the writers before checking it", async () => {
+    const { error } = await hr.client.from("sites").insert({
+      organisation_id: owner.orgId,
+      client_id: clientId,
+      name: "Outlined by hr",
+      boundary: squareEwkt(100),
+    });
+    expect(error?.code).toBe(PERMISSION_DENIED);
+    const abroad = await other.client.from("sites").insert({
+      organisation_id: owner.orgId,
+      client_id: clientId,
+      name: "Outlined by another company",
+      boundary: squareEwkt(100),
+    });
+    expect(abroad.error?.code).toBe(PERMISSION_DENIED);
+  });
+
+  it("caps the accuracy tolerance at 5,000 m and only takes a point", async () => {
+    // 6 km out with a claimed 1,000 km accuracy is still outside.
+    expect(await check(siteId, north(APAPA, 6000), 1_000_000)).toBe("outside");
+    expect(await check(siteId, north(APAPA, 4000), 1_000_000)).toBe("near");
+    const { rows } = await db.query<{ answer: string | null }>(
+      "select private.site_geofence_check($1, $2, $3::extensions.geography, 0) as answer",
+      [owner.orgId, siteId, squareEwkt(10)],
+    );
+    expect(rows[0]!.answer).toBeNull();
+  });
+
   it("can't be written directly", async () => {
     const { error } = await ops.client
       .from("sites")
