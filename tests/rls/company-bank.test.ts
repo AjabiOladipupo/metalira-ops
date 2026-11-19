@@ -374,8 +374,9 @@ describe("email marks (sweeps over the rows)", () => {
   it("lets the secret key mark each email once, for its own status, and nobody else", async () => {
     const c = await company("marks", true);
     const pending = await mustRequest(c, c.people.admin.client);
-    const mark = (patch: Record<string, string>) =>
-      admin.from("organisation_bank_accounts").update(patch).eq("id", pending.id).select("id");
+    const mark = (
+      patch: Partial<Record<"requested_notified_at" | "approved_notified_at", string>>,
+    ) => admin.from("organisation_bank_accounts").update(patch).eq("id", pending.id).select("id");
     const now = new Date().toISOString();
 
     // Signed-in users can't write the marks at all (column grants).
