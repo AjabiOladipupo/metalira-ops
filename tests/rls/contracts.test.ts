@@ -290,13 +290,11 @@ describe("rate cards", () => {
   it("has no table writes for anyone: only the functions write", async () => {
     const id = await newContract(ops);
     const card = await saveDraft(id);
-    const insert = await owner.client
-      .from("rate_cards")
-      .insert({
-        organisation_id: owner.orgId,
-        contract_id: id,
-        effective_from: addDays(today, 60),
-      });
+    const insert = await owner.client.from("rate_cards").insert({
+      organisation_id: owner.orgId,
+      contract_id: id,
+      effective_from: addDays(today, 60),
+    });
     expect(insert.error?.code).toBe(PERMISSION_DENIED);
     const update = await owner.client
       .from("rate_card_lines")
