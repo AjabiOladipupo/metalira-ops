@@ -29,7 +29,7 @@
 -- Refusals (SQLSTATE), mapped to plain English in src/server/business/contract-documents.ts:
 --   MLCD1 not found, or not yours to confirm       MLCD2 not pending / not active any more
 --   MLCD3 the upload isn't in Storage or doesn't match what was stated
---   MLCD4 a change the guard never allows
+--   MLCD4 a change the guard never allows          MLCD5 too many unfinished uploads
 
 -- ---------------------------------------------------------------------------
 -- 1. Bucket
@@ -154,6 +154,8 @@ create index contract_documents_sweep_idx
 
 comment on table public.contract_documents is
   'Files kept against a contract (signed contract, SLA, amendments, purchase orders, insurance). Never deleted: removed rows keep who, when and why; the file is deleted 30 days after removal.';
+comment on column public.contract_documents.sha256 is
+  'SHA-256 of the file, worked out by the app server from the bytes it read back. confirm_contract_document checks the object''s size, type and owner in Storage, but takes this value from its caller (an owner, admin or ops_manager): not proof of what was uploaded.';
 comment on column public.contract_documents.storage_path is
   'Object name in the private contract-docs bucket: {organisation_id}/{contract_id}/{id}.{file_ext}. Opened only by 60-second signed URLs.';
 
@@ -191,6 +193,18 @@ begin
       || new.id::text || '.' || new.file_ext;
     if new.uploaded_by is null then
       raise exception 'A document needs the person who uploads it.' using errcode = 'MLCD4';
+    end if;
+    -- Unconfirmed uploads are swept daily; until then cap how many one person can start, so
+    -- the bucket can't be filled with files nobody confirms.
+    if (
+      select count(*)
+      from public.contract_documents d
+      where d.uploaded_by = new.uploaded_by
+        and d.status = 'pending'
+        and d.created_at > now() - interval '1 hour'
+    ) >= 10 then
+      raise exception 'Too many uploads are still unfinished. Wait an hour and try again.'
+        using errcode = 'MLCD5';
     end if;
     return new;
   end if;
@@ -278,7 +292,7 @@ revoke all on table public.contract_documents from anon, authenticated;
 grant select on table public.contract_documents to authenticated;
 -- Everything else is set by the guard (path, status, uploader) or by the functions below.
 grant insert (
-  id, organisation_id, contract_id, kind, title, file_name, file_ext, mime_type
+  organisation_id, contract_id, kind, title, file_name, file_ext, mime_type
 ) on table public.contract_documents to authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -319,7 +333,11 @@ create policy contract_docs_select on storage.objects
         and d.storage_path = name
         and (
           d.status = 'active'
-          or (d.status = 'pending' and d.uploaded_by = (select private.session_uid()))
+          or (
+            d.status = 'pending'
+            and d.uploaded_by = (select private.session_uid())
+            and d.created_at > now() - interval '1 hour'
+          )
         )
     )
   );

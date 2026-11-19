@@ -180,11 +180,9 @@ describe("who uploads", () => {
   });
 
   it("takes the uploader from the session and the state from nobody", async () => {
-    const id = randomUUID();
     const { data, error } = await ops.client
       .from("contract_documents")
       .insert({
-        id,
         organisation_id: owner.orgId,
         contract_id: contractId,
         kind: "sla",
@@ -210,6 +208,24 @@ describe("who uploads", () => {
       storage_path: `${other.orgId}/${otherContractId}/${randomUUID()}.pdf`,
     } as never);
     expect(forged.error?.code).toBe(PERMISSION_DENIED);
+  });
+
+  it("lets nobody choose the id, and caps unfinished uploads at 10 an hour per person", async () => {
+    const chosen = await ops2.client.from("contract_documents").insert({
+      id: randomUUID(),
+      organisation_id: owner.orgId,
+      contract_id: contractId,
+      kind: "other",
+      title: "Chosen id",
+      file_name: "a.pdf",
+      file_ext: "pdf",
+      mime_type: "application/pdf",
+    } as never);
+    expect(chosen.error?.code).toBe(PERMISSION_DENIED);
+    const capped = await createTestUser("cd-cap", "Cap Ops");
+    await addMember(capped, "ops_manager");
+    for (let i = 0; i < 10; i += 1) expect((await start(capped.client)).error).toBeNull();
+    expect((await start(capped.client)).error?.code).toBe("MLCD5");
   });
 
   it("refuses finance, hr, line managers and another company", async () => {

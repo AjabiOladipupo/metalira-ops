@@ -263,7 +263,7 @@ export function removeContractDocument(input: unknown) {
 // ---------------------------------------------------------------------------
 
 export type DocumentLink =
-  | { ok: true; url: string; fileName: string; mimeType: string }
+  | { ok: true; url: string; fileName: string; mimeType: string; contractId: string }
   | { ok: false; reason: "not_found" | "removed" };
 
 /**
@@ -276,15 +276,19 @@ export async function contractDocumentLink(
   supabase: Client,
   organisationId: string,
   documentId: string,
-  options: { download?: boolean } = {},
+  options: { download?: boolean; contractId?: string } = {},
 ): Promise<DocumentLink> {
   if (!z.uuid().safeParse(documentId).success) return { ok: false, reason: "not_found" };
-  const { data: row, error } = await supabase
+  if (options.contractId !== undefined && !z.uuid().safeParse(options.contractId).success) {
+    return { ok: false, reason: "not_found" };
+  }
+  let query = supabase
     .from("contract_documents")
-    .select("status, storage_path, file_name, mime_type")
+    .select("contract_id, status, storage_path, file_name, mime_type")
     .eq("organisation_id", organisationId)
-    .eq("id", documentId)
-    .maybeSingle();
+    .eq("id", documentId);
+  if (options.contractId !== undefined) query = query.eq("contract_id", options.contractId);
+  const { data: row, error } = await query.maybeSingle();
   if (error) throw new Error(`Could not read the document (${error.code})`);
   if (!row) return { ok: false, reason: "not_found" };
   if (row.status !== "active") return { ok: false, reason: "removed" };
@@ -294,5 +298,11 @@ export async function contractDocumentLink(
       download: options.download ? row.file_name : false,
     });
   if (signError || !data?.signedUrl) return { ok: false, reason: "not_found" };
-  return { ok: true, url: data.signedUrl, fileName: row.file_name, mimeType: row.mime_type };
+  return {
+    ok: true,
+    url: data.signedUrl,
+    fileName: row.file_name,
+    mimeType: row.mime_type,
+    contractId: row.contract_id,
+  };
 }

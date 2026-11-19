@@ -5,7 +5,7 @@ import { getSession } from "@/server/identity/session";
 
 /**
  * Opens a contract document (slice 2.6): checks the signed-in user (owner, admin, finance or
- * ops_manager of the active company), reads the row under RLS and redirects to a 60-second
+ * ops_manager of the active company), reads the row of this contract under RLS and redirects to a 60-second
  * signed URL for the file. `?download=1` saves it under its file name instead. The URL is never
  * logged, cached or shown on the page; a removed document no longer opens.
  */
@@ -27,13 +27,13 @@ export async function GET(
   if (!session.active || !role || !(CONTRACT_READERS as readonly string[]).includes(role)) {
     return plain("Your role can't open contract documents.", 403);
   }
-  const { documentId } = await params;
+  const { contractId, documentId } = await params;
   const download = new URL(request.url).searchParams.get("download") === "1";
   const link = await contractDocumentLink(
     await createServerSupabase(),
     session.active.organisationId,
     documentId,
-    { download },
+    { download, contractId },
   );
   if (!link.ok) {
     return plain(

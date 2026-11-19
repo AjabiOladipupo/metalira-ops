@@ -9,9 +9,9 @@ import type { ContractStatus } from "./contract-schemas";
 
 /**
  * Reads for contract documents (slice 2.6), with the signed-in user's own client, scoped to the
- * active organisation: RLS shows them to owner, admin, finance and ops_manager only. Object
- * paths are never returned to the browser; a document opens through its route, which signs a
- * 60-second URL on the server.
+ * active organisation: RLS shows them to owner, admin, finance and ops_manager only. These reads
+ * never return object paths (only the upload step hands the uploader the path of their own
+ * pending row); a document opens through its route, which signs a 60-second URL on the server.
  */
 
 type Client = SupabaseClient<Database>;
