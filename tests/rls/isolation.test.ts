@@ -173,7 +173,7 @@ describe.each(TABLES)("$table", (spec) => {
         .from(spec.table)
         .select(spec.selectColumns ?? "*");
       expect(error).toBeNull();
-      const rows = (data ?? []) as Record<string, unknown>[];
+      const rows = (data ?? []) as unknown as Record<string, unknown>[];
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.filter((row) => row[spec.tenantColumn] === victimValue)).toEqual([]);
     });
