@@ -106,9 +106,28 @@ test("a new owner completes company setup and every save is audited", async ({ p
   await page.getByRole("combobox", { name: "Payment terms" }).selectOption({ label: "14 days" });
   await cont(page).click();
 
-  // 4. Clients (Phase 2) and 5. Employees (the import itself is covered by people-import.spec.ts).
+  // 4. Clients: a quick add (client, billing email, first site) lands in the board's table.
   await expectStep(page, "clients", "Clients and contracts", 3);
+  const quickAdd = page.getByRole("form", { name: "Add client" });
+  await quickAdd.getByRole("textbox", { name: "Client", exact: true }).fill("Coastline Logistics");
+  await quickAdd.getByRole("textbox", { name: "Billing email" }).fill("bad");
+  await quickAdd.getByRole("button", { name: "Add client" }).click();
+  await expect(quickAdd.getByText("Enter a valid email address")).toBeVisible();
+  await quickAdd
+    .getByRole("textbox", { name: "Billing email" })
+    .fill(`accounts-${suffix}@coastline.example`);
+  await quickAdd.getByRole("textbox", { name: "First site" }).fill("Apapa Warehouse 3");
+  await quickAdd.getByRole("button", { name: "Add client" }).click();
+  await expect(quickAdd.getByText("Coastline Logistics added")).toBeVisible({ timeout: 15_000 });
+  const added = page.getByRole("region", { name: "Clients added table" });
+  await expect(added.getByRole("row", { name: /Coastline Logistics/ })).toContainText(
+    "Apapa Warehouse 3",
+  );
+  await expect(added.getByText("Add a contract")).toBeVisible();
+  await expectNoHorizontalScroll(page);
   await cont(page).click();
+
+  // 5. Employees (the import itself is covered by people-import.spec.ts).
   await expectStep(page, "employees", "Bring in your employees", 4);
   await expect(page.getByRole("link", { name: "Download template (.csv)" })).toBeVisible();
   await page.getByRole("button", { name: "Finish setup" }).click();
@@ -159,6 +178,10 @@ test("a new owner completes company setup and every save is audited", async ({ p
     .neq("action", "organisations.insert");
   const actions = (audit ?? []).map((row) => row.action);
   expect(actions).toContain("company.logo_uploaded");
+  // The quick add: client, primary billing contact and site, in one transaction.
+  expect(actions).toEqual(
+    expect.arrayContaining(["clients.insert", "client_contacts.insert", "sites.insert"]),
+  );
   // Plan, progress, logo path, business details, invoices, progress twice, completion.
   expect(actions.filter((a) => a === "organisations.update").length).toBeGreaterThanOrEqual(7);
   expect((audit ?? []).every((row) => row.actor_id === owner.userId)).toBe(true);

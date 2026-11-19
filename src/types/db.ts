@@ -7,14 +7,14 @@ export type Database = {
           Tables: {
             "audit_log": {
                   Row: {
-                    "action": string,"actor_id": string | null,"after": Json | null,"at": string,"before": Json | null,"entity": string,"entity_id": string | null,"id": string,"organisation_id": string,"reason": string | null
+                    "action": string,"actor_id": string | null,"after": Json | null,"at": string,"before": Json | null,"channel": string,"entity": string,"entity_id": string | null,"id": string,"organisation_id": string,"reason": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "action": string,"actor_id"?: string | null,"after"?: Json | null,"at"?: string,"before"?: Json | null,"entity": string,"entity_id"?: string | null,"id"?: string,"organisation_id": string,"reason"?: string | null
+                    "action": string,"actor_id"?: string | null,"after"?: Json | null,"at"?: string,"before"?: Json | null,"channel"?: string,"entity": string,"entity_id"?: string | null,"id"?: string,"organisation_id": string,"reason"?: string | null
                   }
                   Update: {
-                    "action"?: string,"actor_id"?: string | null,"after"?: Json | null,"at"?: string,"before"?: Json | null,"entity"?: string,"entity_id"?: string | null,"id"?: string,"organisation_id"?: string,"reason"?: string | null
+                    "action"?: string,"actor_id"?: string | null,"after"?: Json | null,"at"?: string,"before"?: Json | null,"channel"?: string,"entity"?: string,"entity_id"?: string | null,"id"?: string,"organisation_id"?: string,"reason"?: string | null
                   }
                   Relationships: [
                     {
@@ -51,16 +51,42 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
-                },"clients": {
+                },"client_contacts": {
                   Row: {
-                    "created_at": string,"created_by": string | null,"id": string,"name": string,"organisation_id": string,"updated_at": string
+                    "client_id": string,"created_at": string,"created_by": string | null,"email": string,"id": string,"is_primary": boolean,"name": string,"organisation_id": string,"phone": string | null,"role": string,"status": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"name": string,"organisation_id": string,"updated_at"?: string
+                    "client_id": string,"created_at"?: string,"created_by"?: string | null,"email": string,"id"?: string,"is_primary"?: boolean,"name": string,"organisation_id": string,"phone"?: string | null,"role": string,"status"?: string,"updated_at"?: string
                   }
                   Update: {
-                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"updated_at"?: string
+                    "client_id"?: string,"created_at"?: string,"created_by"?: string | null,"email"?: string,"id"?: string,"is_primary"?: boolean,"name"?: string,"organisation_id"?: string,"phone"?: string | null,"role"?: string,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "client_contacts_client_fkey"
+      columns: ["organisation_id","client_id"]
+isOneToOne: false
+      referencedRelation: "clients"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "client_contacts_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"clients": {
+                  Row: {
+                    "billing_address": string | null,"billing_terms_days": number | null,"created_at": string,"created_by": string | null,"id": string,"legal_name": string | null,"name": string,"notes": string | null,"organisation_id": string,"rc_number": string | null,"state": string | null,"status": string,"tin": string | null,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"id"?: string,"legal_name"?: string | null,"name": string,"notes"?: string | null,"organisation_id": string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string
+                  }
+                  Update: {
+                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"id"?: string,"legal_name"?: string | null,"name"?: string,"notes"?: string | null,"organisation_id"?: string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -570,11 +596,19 @@ isOneToOne: false
 "choose_company_plan":
 { Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
                            },
+"client_billing":
+{ Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
+              "billing_address": string,"billing_terms_days": number,"client_id": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string
+            }[]
+                           },
 "commit_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string,"p_rows": Json }; Returns: Json
                            },
 "complete_company_setup":
 { Args: { "p_organisation_id": string }; Returns: string
+                           },
+"create_client":
+{ Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
                            },
 "create_first_organisation":
 { Args: { "p_name": string }; Returns: string

@@ -18,6 +18,7 @@ Ten phases, about 24 weeks for one person building with Claude Code. Do not star
 ## Every phase
 
 - Illustrations: every phase's empty states and onboarding use their illustration slot from the slot table in `docs/DESIGN_SYSTEM.md` ("Illustrations"), rendered with `<Illustration name>` at the slot size and beside a sentence of copy. When a phase needs a screen that has no slot, add the slot to that table and draw the scene in `src/components/illustrations/` in the same pull request.
+- Lira groundwork (docs/LIRA.md, from Phase 2): register every new Server Action in `src/server/capabilities/registry.ts`; give each area's main reads a compact summary (counts, masked values only); give every write that changes several rows or money a preview; set the audit channel on new server paths; add 5–10 manager requests with expected outcomes to `fixtures/lira/<area>.md`. No AI calls or API keys until the owner decides.
 
 ## Running costs
 

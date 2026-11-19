@@ -17,6 +17,7 @@ export type NavIcon =
   | "team"
   | "leave"
   | "payroll"
+  | "clients"
   | "projects"
   | "unbilled"
   | "collections"
@@ -127,6 +128,14 @@ export const NAV: NavGroup[] = [
     label: "Business",
     items: [
       {
+        label: "Clients",
+        href: "/app/clients",
+        roles: ["owner", "admin", "finance", "ops_manager"],
+        icon: "clients",
+        description: "The companies you work for, their billing details and contacts.",
+        empty: "No clients yet. Add the first company you work for.",
+      },
+      {
         label: "Projects",
         href: "/app/projects",
         roles: ["owner", "admin", "ops_manager"],
@@ -218,6 +227,10 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // Slice 1.12: inviting, re-roling and removing managers.
   { href: "/app/settings/team", roles: ["owner", "admin"] },
   { href: "/app/people/new", roles: ["owner", "admin", "hr"] },
+  // Slice 2.1: adding and editing clients. Contacts are changed on the client page, which
+  // finance opens too.
+  { href: "/app/clients/new", roles: ["owner", "admin", "ops_manager"] },
+  { href: "/app/clients/[id]/edit", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },

@@ -105,6 +105,8 @@
   --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-display);
 
+  /* 12px for every control and card (owner decision, 19 Nov 2026): use rounded-lg or
+     rounded-xl. md is for rows inside menus and nav links only; sm for small chips. */
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;

@@ -111,7 +111,7 @@ export const saveInvoicesSpec = {
   },
 } satisfies MutationSpec<typeof invoicesSchema, void>;
 
-/** Clients and contracts (step 4) has nothing to save until Phase 2: Continue records progress. */
+/** Clients and contracts (step 4): clients are saved by their own action; Continue records progress. */
 export const advanceSetupSpec = {
   schema: advanceStepSchema,
   roles: COMPANY_ROLES,

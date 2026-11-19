@@ -67,7 +67,7 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
 
   let admin: ReturnType<typeof createAdminSupabase>;
   try {
-    admin = createAdminSupabase();
+    admin = createAdminSupabase({ channel: "worker_app" });
   } catch (error) {
     logFailure("worker_auth.sign_in_unavailable:", error);
     return { ok: false, formError: copy.signIn.notConfigured, values };
@@ -95,7 +95,7 @@ export async function signInWorker(_prev: FormState, formData: FormData): Promis
     return { ok: false, formError: copy.signIn.ipBlocked, values };
   if (result.status === "invalid") return { ok: false, formError: copy.signIn.invalid, values };
 
-  const supabase = await createServerSupabase();
+  const supabase = await createServerSupabase({ channel: "worker_app" });
   const opened = await openWorkerSession(admin, supabase, result).catch((error: unknown) => {
     logFailure("worker_auth.session_failed:", error);
     return false;
@@ -147,7 +147,7 @@ export async function acceptWorkerInvite(_prev: FormState, formData: FormData): 
   let authUserId: string;
   let admin: ReturnType<typeof createAdminSupabase>;
   try {
-    admin = createAdminSupabase();
+    admin = createAdminSupabase({ channel: "worker_app" });
     const lookup = await admin.rpc("worker_invite_lookup", { p_token: token }).maybeSingle();
     if (lookup.error) throw new Error(`Invite lookup failed: ${lookup.error.code}`);
     const invite = lookup.data;
@@ -177,7 +177,7 @@ export async function acceptWorkerInvite(_prev: FormState, formData: FormData): 
     return { ok: false, formError: copy.invite.failed };
   }
 
-  const supabase = await createServerSupabase();
+  const supabase = await createServerSupabase({ channel: "worker_app" });
   const opened = await openWorkerSession(admin, supabase, { workerId, authUserId }).catch(
     (error: unknown) => {
       logFailure("worker_auth.session_failed:", error);
@@ -189,7 +189,7 @@ export async function acceptWorkerInvite(_prev: FormState, formData: FormData): 
 
 export async function signOutWorker(): Promise<void> {
   if (configured()) {
-    const supabase = await createServerSupabase();
+    const supabase = await createServerSupabase({ channel: "worker_app" });
     await supabase.auth.signOut({ scope: "local" });
   }
   redirect(WORKER_SIGN_IN_PATH);

@@ -31,6 +31,8 @@ export const tables: TableSpec[] = [
   {
     table: "clients",
     ...byOrg,
+    // Billing columns are not granted to signed-in users (slice 2.1).
+    selectColumns: "id, organisation_id, name, status",
     seed: async ({ admin, side }) => {
       check(
         (

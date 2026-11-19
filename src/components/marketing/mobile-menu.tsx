@@ -50,7 +50,7 @@ export function MobileMenu({
         aria-controls={panelId}
         aria-label={open ? "Close menu" : "Open menu"}
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex size-11 items-center justify-center rounded-md border border-line bg-background text-foreground hover:bg-surface"
+        className="inline-flex size-11 items-center justify-center rounded-lg border border-line bg-background text-foreground hover:bg-surface"
       >
         {open ? (
           <X className="size-5" strokeWidth={1.75} aria-hidden />

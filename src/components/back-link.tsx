@@ -18,7 +18,7 @@ export function BackLink({ href, label, className }: BackTarget & { className?: 
       aria-label={`Back to ${label}`}
       data-testid="back-link"
       className={cn(
-        "-ml-2.5 flex size-11 shrink-0 items-center justify-center rounded-md text-foreground no-underline hover:bg-surface hover:text-foreground",
+        "-ml-2.5 flex size-11 shrink-0 items-center justify-center rounded-lg text-foreground no-underline hover:bg-surface hover:text-foreground",
         className,
       )}
     >
