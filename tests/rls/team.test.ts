@@ -69,7 +69,11 @@ async function pendingInviteId(orgId: string, email: string): Promise<string> {
   return data.id;
 }
 
-async function join(by: TestUser, user: TestUser, role: "admin" | "hr" | "finance") {
+async function join(
+  by: TestUser,
+  user: TestUser,
+  role: "admin" | "hr" | "finance" | "ops_manager" | "line_manager",
+) {
   const { data: token, error } = await by.client.rpc("create_membership_invite", {
     p_organisation_id: owner.orgId,
     p_email: user.email,
@@ -90,7 +94,8 @@ beforeAll(async () => {
   worker = await createTestUser("t-worker");
   await join(owner, orgAdmin, "admin");
   await join(owner, hr, "hr");
-  await join(orgAdmin, finance, "finance");
+  // Only owners give finance (owner decision, 19 Nov 2026).
+  await join(owner, finance, "finance");
   const { error } = await admin
     .from("memberships")
     .insert({ organisation_id: owner.orgId, user_id: worker.id, role: "worker" });
@@ -195,7 +200,8 @@ describe("invites", () => {
     const { data: first } = await owner.client.rpc("create_membership_invite", {
       p_organisation_id: owner.orgId,
       p_email: invitee.email,
-      p_role: "finance",
+      // An admin resends only roles an admin may give (owner decision, 19 Nov 2026).
+      p_role: "ops_manager",
     });
     const inviteId = await pendingInviteId(owner.orgId, invitee.email);
     await admin
@@ -211,14 +217,14 @@ describe("invites", () => {
     const row = data?.[0];
     expect(row?.token).toMatch(/^[0-9a-f]{64}$/);
     expect(row?.token).not.toBe(first);
-    expect(row?.invite_role).toBe("finance");
+    expect(row?.invite_role).toBe("ops_manager");
     expect(Date.parse(row!.invite_expires_at)).toBeGreaterThan(Date.now() + 6.9 * 86_400_000);
 
     const old = await invitee.client.rpc("accept_membership_invite", { p_token: first! });
     expect(old.error?.code).toBe(INVALID);
     const accept = await invitee.client.rpc("accept_membership_invite", { p_token: row!.token });
     expect(accept.error).toBeNull();
-    expect(await roleOf(invitee.id, owner.orgId)).toBe("finance");
+    expect(await roleOf(invitee.id, owner.orgId)).toBe("ops_manager");
 
     // The audit log keeps the resend without the token hash.
     const { data: audit } = await admin
@@ -340,7 +346,8 @@ describe("change_member_role and remove_member", () => {
 
   it("a role change is audited with who, before and after", async () => {
     const hrId = await membershipId(hr.id, owner.orgId);
-    const { data, error } = await orgAdmin.client.rpc("change_member_role", {
+    // Changing someone from HR is an owner's call (owner decision, 19 Nov 2026).
+    const { data, error } = await owner.client.rpc("change_member_role", {
       p_organisation_id: owner.orgId,
       p_membership_id: hrId,
       p_role: "line_manager",
@@ -359,7 +366,7 @@ describe("change_member_role and remove_member", () => {
       .eq("action", "memberships.update")
       .eq("entity_id", hrId);
     expect(audit).toHaveLength(1);
-    expect(audit?.[0]?.actor_id).toBe(orgAdmin.id);
+    expect(audit?.[0]?.actor_id).toBe(owner.id);
     expect(audit?.[0]?.before).toMatchObject({ role: "hr" });
     expect(audit?.[0]?.after).toMatchObject({ role: "line_manager" });
 
@@ -373,14 +380,17 @@ describe("change_member_role and remove_member", () => {
 
   it("removing a manager deletes the membership, audited", async () => {
     const leaver = await createTestUser("t-leaver", "Lola Leaver");
-    await join(owner, leaver, "hr");
+    await join(owner, leaver, "line_manager");
     const id = await membershipId(leaver.id, owner.orgId);
     const { data, error } = await orgAdmin.client.rpc("remove_member", {
       p_organisation_id: owner.orgId,
       p_membership_id: id,
     });
     expect(error).toBeNull();
-    expect(data?.[0]).toMatchObject({ member_email: leaver.email.toLowerCase(), old_role: "hr" });
+    expect(data?.[0]).toMatchObject({
+      member_email: leaver.email.toLowerCase(),
+      old_role: "line_manager",
+    });
     expect(await roleOf(leaver.id, owner.orgId)).toBeNull();
     const { data: audit } = await admin
       .from("audit_log")
@@ -389,7 +399,7 @@ describe("change_member_role and remove_member", () => {
       .eq("entity_id", id);
     expect(audit).toHaveLength(1);
     expect(audit?.[0]?.actor_id).toBe(orgAdmin.id);
-    expect(audit?.[0]?.before).toMatchObject({ role: "hr", user_id: leaver.id });
+    expect(audit?.[0]?.before).toMatchObject({ role: "line_manager", user_id: leaver.id });
 
     // The removed manager no longer sees the company's people.
     const after = await leaver.client
@@ -453,7 +463,12 @@ describe("another company", () => {
 });
 
 describe("security review follow-ups", () => {
-  async function inviteToken(by: TestUser, orgId: string, email: string, role: "admin" | "hr") {
+  async function inviteToken(
+    by: TestUser,
+    orgId: string,
+    email: string,
+    role: "admin" | "hr" | "line_manager",
+  ) {
     const { data, error } = await by.client.rpc("create_membership_invite", {
       p_organisation_id: orgId,
       p_email: email,
@@ -583,7 +598,7 @@ describe("security review follow-ups", () => {
     const tempAdmin = await createTestUser("t-temp-admin");
     await join(owner, tempAdmin, "admin");
     const invitee = await createTestUser("t-demoted-invitee");
-    const token = await inviteToken(tempAdmin, owner.orgId, invitee.email, "hr");
+    const token = await inviteToken(tempAdmin, owner.orgId, invitee.email, "line_manager");
     const demote = await owner.client.rpc("change_member_role", {
       p_organisation_id: owner.orgId,
       p_membership_id: await membershipId(tempAdmin.id, owner.orgId),

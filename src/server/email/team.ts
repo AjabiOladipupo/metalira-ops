@@ -149,7 +149,7 @@ const ownerChangeSchema = z.object({
   /** changeId/event/recipient: a retry never sends the same notice twice. */
   idempotencyKey: z.string().min(1).max(256),
   organisationName: emailSafeName,
-  event: z.enum(["requested", "done", "rejected", "withdrawn", "joined"]),
+  event: z.enum(["requested", "done", "rejected", "withdrawn", "joined", "role_given"]),
   summary: z
     .string()
     .min(1)

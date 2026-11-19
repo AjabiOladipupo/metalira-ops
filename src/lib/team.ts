@@ -31,10 +31,20 @@ export const TEAM_ROLE_HINTS: Record<TeamRole, string> = {
   line_manager: "Their own team's timesheets and leave.",
 };
 
-/** The roles `actor` may offer in an invite or a role change: only owners grant admin. */
+/**
+ * Roles only an owner may give, change or take away (admin since 1.12; finance and HR from
+ * 19 Nov 2026, because they approve bank account and bank-detail changes).
+ */
+export const OWNER_ONLY_ROLES = ["admin", "hr", "finance"] as const satisfies readonly TeamRole[];
+
+export function isOwnerOnlyRole(role: string): boolean {
+  return (OWNER_ONLY_ROLES as readonly string[]).includes(role);
+}
+
+/** The roles `actor` may offer in an invite or a role change. */
 export function grantableRoles(actor: Role): TeamRole[] {
   if (actor === "owner") return [...TEAM_ROLES];
-  if (actor === "admin") return TEAM_ROLES.filter((r) => r !== "admin");
+  if (actor === "admin") return TEAM_ROLES.filter((r) => !isOwnerOnlyRole(r));
   return [];
 }
 
@@ -55,7 +65,7 @@ export type TeamRefusal =
 export function inviteRefusal(actor: Role, role: string): TeamRefusal | null {
   if (!canManageTeam(actor)) return "not_allowed";
   if (!isTeamRole(role)) return "bad_role";
-  if (role === "admin" && actor !== "owner") return "owner_only";
+  if (isOwnerOnlyRole(role) && actor !== "owner") return "owner_only";
   return null;
 }
 
@@ -73,7 +83,7 @@ export function memberRefusal(
   if (target.userId === actor.userId) return "own_membership";
   if (target.role === "owner") return "owner_protected";
   if (!isTeamRole(target.role)) return "not_a_manager";
-  if (target.role === "admin" && actor.role !== "owner") return "owner_only";
+  if (isOwnerOnlyRole(target.role) && actor.role !== "owner") return "owner_only";
   return null;
 }
 
@@ -86,14 +96,14 @@ export function roleChangeRefusal(
   const refusal = memberRefusal(actor, target);
   if (refusal) return refusal;
   if (!isTeamRole(next)) return "bad_role";
-  if (next === "admin" && actor.role !== "owner") return "owner_only";
+  if (isOwnerOnlyRole(next) && actor.role !== "owner") return "owner_only";
   if (next === target.role) return "same_role";
   return null;
 }
 
 export const TEAM_REFUSAL_MESSAGES: Record<TeamRefusal, string> = {
   not_allowed: "Only an owner or an admin can manage the team.",
-  owner_only: "Only an owner can make someone an admin or change an admin.",
+  owner_only: "Only an owner can give, change or remove the admin, finance or HR role.",
   own_membership: "You can't change your own role or remove yourself.",
   owner_protected:
     "Owners are changed with an owner request: make someone an owner, or ask another owner to approve a removal.",

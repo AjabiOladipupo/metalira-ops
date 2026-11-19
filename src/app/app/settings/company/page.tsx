@@ -3,8 +3,10 @@ import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { planName } from "@/lib/company";
-import { COLLECTION_RAILS } from "@/server/billing/collection-rails";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { loadCollectionRails } from "@/server/billing/collection-rails";
 import { getActiveCompany, getActiveCompanyLogoUrl } from "@/server/identity/company-data";
+import { getPageSession } from "@/server/identity/session";
 
 import { BusinessForm } from "../../_company/business-form";
 import { InvoicesForm } from "../../_company/invoices-form";
@@ -40,8 +42,17 @@ function Section({
 
 /** The setup wizard's forms on one page, each saved on its own. Owner and admin only. */
 async function CompanySettings() {
-  const [company, logoUrl] = await Promise.all([getActiveCompany(), getActiveCompanyLogoUrl()]);
-  if (!company) redirect("/no-access");
+  const [company, logoUrl, session] = await Promise.all([
+    getActiveCompany(),
+    getActiveCompanyLogoUrl(),
+    getPageSession(),
+  ]);
+  if (!company || !session?.active) redirect("/no-access");
+  const rails = await loadCollectionRails(
+    await createServerSupabase(),
+    company.id,
+    session.active.role,
+  );
 
   return (
     <>
@@ -81,7 +92,7 @@ async function CompanySettings() {
         title="Invoices and payments"
         description="Invoices go out from your email. Clients pay into accounts you own."
       >
-        <InvoicesForm mode="settings" company={company} rails={COLLECTION_RAILS} />
+        <InvoicesForm mode="settings" company={company} rails={rails} />
       </Section>
 
       <Section id="plan" title="Plan">

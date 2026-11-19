@@ -227,6 +227,26 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"organisation_bank_accounts": {
+                  Row: {
+                    "account_name": string,"activated_at": string | null,"applied_notified_at": string | null,"applies_after": string | null,"approved_by": string | null,"approved_notified_at": string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"cancelled_at": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"organisation_id": string,"reason": string | null,"rejected_by": string | null,"requested_by": string,"requested_notified_at": string | null,"retired_at": string | null,"single_approver": boolean,"status": Database["public"]['Enums']["org_bank_account_status"],"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "account_name": string,"activated_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"approved_notified_at"?: string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"organisation_id": string,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"requested_notified_at"?: string | null,"retired_at"?: string | null,"single_approver"?: boolean,"status"?: Database["public"]['Enums']["org_bank_account_status"],"updated_at"?: string
+                  }
+                  Update: {
+                    "account_name"?: string,"activated_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"approved_notified_at"?: string | null,"bank_account_enc"?: string,"bank_account_last4"?: string,"bank_name"?: string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"organisation_id"?: string,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"requested_notified_at"?: string | null,"retired_at"?: string | null,"single_approver"?: boolean,"status"?: Database["public"]['Enums']["org_bank_account_status"],"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "organisation_bank_accounts_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"organisations": {
                   Row: {
                     "address": string | null,"auto_email_receipts": boolean,"company_code": string,"created_at": string,"created_by": string | null,"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"legal_name": string | null,"logo_path": string | null,"name": string,"pay_cycle_start_day": number,"pay_day": number,"payment_terms_days": number,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
@@ -559,6 +579,9 @@ isOneToOne: false
 "apply_due_bank_detail_changes":
 { Args: { "p_organisation_id": string }; Returns: number
                            },
+"apply_due_org_bank_accounts":
+{ Args: { "p_organisation_id": string }; Returns: number
+                           },
 "cancel_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
                            },
@@ -604,6 +627,11 @@ isOneToOne: false
               "invite_expires_at": string,"invite_id": string,"invite_worker_id": string,"token": string
             }[]
                            },
+"decide_org_bank_account":
+{ Args: { "p_decision": string,"p_id": string,"p_note"?: string,"p_organisation_id": string }; Returns: {
+              "applies_after": string,"bank_account_last4": string,"id": string,"status": Database["public"]['Enums']["org_bank_account_status"]
+            }[]
+                           },
 "decide_owner_change":
 { Args: { "p_change_id": string,"p_decision": string,"p_organisation_id": string }; Returns: {
               "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
@@ -636,9 +664,24 @@ isOneToOne: false
               "has_line_manager": boolean,"name": string
             }[]
                            },
+"org_bank_account_as_of":
+{ Args: { "p_at"?: string,"p_organisation_id": string }; Returns: {
+              "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
+            }[]
+                           },
+"org_bank_account_masked":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
+            }[]
+                           },
 "remove_member":
 { Args: { "p_membership_id": string,"p_organisation_id": string }; Returns: {
               "member_email": string,"member_name": string,"member_user_id": string,"old_role": Database["public"]['Enums']["membership_role"]
+            }[]
+                           },
+"request_org_bank_account":
+{ Args: { "p_account_name": string,"p_bank_account_enc": string,"p_bank_account_last4": string,"p_bank_name": string,"p_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: {
+              "id": string,"single_approver": boolean,"status": Database["public"]['Enums']["org_bank_account_status"]
             }[]
                            },
 "request_owner_change":
@@ -667,6 +710,9 @@ isOneToOne: false
                            },
 "unlock_worker_sign_in":
 { Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: string
+                           },
+"withdraw_org_bank_account":
+{ Args: { "p_id": string,"p_organisation_id": string }; Returns: string
                            },
 "worker_bank_details_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string,"p_worker_id": string }; Returns: {
@@ -700,7 +746,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","owner_change_kind": "add"|"invite"|"remove"|"demote","owner_change_status": "pending"|"approved"|"rejected"|"cancelled","pay_type": "monthly"|"daily"|"hourly","staff_id_correction_status": "pending"|"approved"|"rejected"|"cancelled","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
+            "bank_detail_change_status": "pending"|"approved"|"rejected"|"applied"|"cancelled","employment_type": "permanent"|"contract"|"casual"|"daily","import_batch_status": "uploaded"|"validated"|"committed"|"cancelled","import_row_status": "ready"|"held"|"fixed"|"imported","membership_role": "owner"|"admin"|"hr"|"finance"|"ops_manager"|"line_manager"|"worker"|"client_approver","org_bank_account_status": "pending"|"approved"|"active"|"retired"|"rejected"|"cancelled","owner_change_kind": "add"|"invite"|"remove"|"demote","owner_change_status": "pending"|"approved"|"rejected"|"cancelled","pay_type": "monthly"|"daily"|"hourly","staff_id_correction_status": "pending"|"approved"|"rejected"|"cancelled","worker_change_request_status": "open"|"done"|"declined","worker_change_topic": "name"|"phone"|"email"|"next_of_kin"|"nin"|"tax_pension"|"work"|"other","worker_status": "active"|"ended"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -816,7 +862,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"owner_change_kind": ["add", "invite", "remove", "demote"],"owner_change_status": ["pending", "approved", "rejected", "cancelled"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
+            "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"org_bank_account_status": ["pending", "approved", "active", "retired", "rejected", "cancelled"],"owner_change_kind": ["add", "invite", "remove", "demote"],"owner_change_status": ["pending", "approved", "rejected", "cancelled"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
           }
         }
 } as const
