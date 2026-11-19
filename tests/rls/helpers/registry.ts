@@ -44,6 +44,12 @@ export interface TableSpec {
   rowOf: (ctx: SideContext) => Promise<string>;
   /** A plausible insert, aimed at the victim's tenant. Must be rejected. */
   attackInsert: (ctx: AttackContext) => Record<string, unknown>;
+  /**
+   * Columns a signed-in user may select, when the table grants only some (`clients`, slice 2.1:
+   * the billing columns are read through `client_billing`). Defaults to `*`. Must include
+   * `key` and `tenantColumn`.
+   */
+  selectColumns?: string;
   /** A harmless update patch. Must change nothing on the victim's row. */
   patch: Record<string, unknown>;
 }

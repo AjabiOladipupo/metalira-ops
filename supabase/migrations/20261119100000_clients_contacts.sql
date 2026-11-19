@@ -264,8 +264,9 @@ grant update (
 ) on table public.clients to authenticated;
 
 -- The billing columns, for the roles that work with them. Security definer because the columns
--- are not granted; it checks the role itself and returns nothing for anyone else.
-create function public.client_billing(p_organisation_id uuid, p_client_id uuid default null)
+-- are not granted; it checks the role itself and returns nothing for anyone else. A public
+-- invoker wrapper is what the Data API exposes, as for the other definer functions.
+create function private.client_billing(p_organisation_id uuid, p_client_id uuid default null)
 returns table (
   client_id uuid,
   legal_name text,
@@ -287,6 +288,28 @@ as $$
   where c.organisation_id = p_organisation_id
     and (p_client_id is null or c.id = p_client_id)
     and private.has_role(p_organisation_id, array['owner', 'admin', 'finance', 'ops_manager'])
+$$;
+
+revoke all on function private.client_billing(uuid, uuid) from public, anon;
+grant execute on function private.client_billing(uuid, uuid) to authenticated;
+
+create function public.client_billing(p_organisation_id uuid, p_client_id uuid default null)
+returns table (
+  client_id uuid,
+  legal_name text,
+  rc_number text,
+  tin text,
+  billing_address text,
+  state text,
+  billing_terms_days integer,
+  notes text
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.client_billing(p_organisation_id, p_client_id)
 $$;
 
 revoke all on function public.client_billing(uuid, uuid) from public, anon;
