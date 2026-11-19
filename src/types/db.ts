@@ -347,16 +347,42 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
-                },"sites": {
+                },"site_checkpoints": {
                   Row: {
-                    "client_id": string,"created_at": string,"created_by": string | null,"id": string,"name": string,"organisation_id": string,"updated_at": string
+                    "created_at": string,"created_by": string | null,"id": string,"location": unknown,"name": string,"organisation_id": string,"qr_rotated_at": string | null,"qr_token": string,"retired_at": string | null,"retired_by": string | null,"site_id": string,"sort_order": number,"status": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "client_id": string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"name": string,"organisation_id": string,"updated_at"?: string
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name": string,"organisation_id": string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id": string,"sort_order"?: number,"status"?: string,"updated_at"?: string
                   }
                   Update: {
-                    "client_id"?: string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"updated_at"?: string
+                    "created_at"?: string,"created_by"?: string | null,"id"?: string,"location"?: unknown,"name"?: string,"organisation_id"?: string,"qr_rotated_at"?: string | null,"qr_token"?: string,"retired_at"?: string | null,"retired_by"?: string | null,"site_id"?: string,"sort_order"?: number,"status"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "site_checkpoints_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "site_checkpoints_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"sites": {
+                  Row: {
+                    "address": string | null,"boundary": unknown,"centre": unknown,"client_id": string,"created_at": string,"created_by": string | null,"geofence": unknown,"geofence_set_at": string | null,"geofence_set_by": string | null,"id": string,"landmark": string | null,"name": string,"organisation_id": string,"radius_m": number,"state": string | null,"status": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id": string,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"landmark"?: string | null,"name": string,"organisation_id": string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
+                  }
+                  Update: {
+                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id"?: string,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"landmark"?: string | null,"name"?: string,"organisation_id"?: string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
                   }
                   Relationships: [
                     {
@@ -659,6 +685,9 @@ isOneToOne: false
               "email": string,"expires_at": string,"invite_id": string,"invited_at": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
             }[]
                            },
+"move_site_checkpoint":
+{ Args: { "p_checkpoint_id": string,"p_direction": string,"p_organisation_id": string }; Returns: number
+                           },
 "my_line_manager":
 { Args: { "p_organisation_id": string }; Returns: {
               "has_line_manager": boolean,"name": string
@@ -697,11 +726,24 @@ isOneToOne: false
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"rotate_checkpoint_qr":
+{ Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
 "save_import_check":
 { Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            },
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
+                           },
+"site_checkpoint_tokens":
+{ Args: { "p_organisation_id": string,"p_site_id": string }; Returns: {
+              "checkpoint_id": string,"name": string,"qr_token": string,"sort_order": number
+            }[]
+                           },
+"site_geofences":
+{ Args: { "p_organisation_id": string,"p_site_id"?: string }; Returns: {
+              "area_m2": number,"boundary": Json,"centre_lat": number,"centre_lng": number,"radius_m": number,"site_id": string
+            }[]
                            },
 "team_members":
 { Args: { "p_organisation_id": string }; Returns: {

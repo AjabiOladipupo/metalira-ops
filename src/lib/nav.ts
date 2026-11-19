@@ -231,6 +231,13 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // finance opens too.
   { href: "/app/clients/new", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/clients/[id]/edit", roles: ["owner", "admin", "ops_manager"] },
+  // Slice 2.2: adding a site, and the checkpoint QR sheet (only these roles read the codes).
+  // The site page itself follows Clients, so finance reads it.
+  { href: "/app/clients/[id]/sites/new", roles: ["owner", "admin", "ops_manager"] },
+  {
+    href: "/app/clients/[id]/sites/[id]/checkpoints/print",
+    roles: ["owner", "admin", "ops_manager"],
+  },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },

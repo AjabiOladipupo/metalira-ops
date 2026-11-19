@@ -174,7 +174,15 @@ describe("nav by role", () => {
     for (const role of ["hr", "line_manager", "worker"] as const) {
       expect(canAccessHref(role, "/app/clients"), role).toBe(false);
     }
-    for (const path of ["/app/clients/new", `/app/clients/${id}/edit`]) {
+    // Slice 2.2: finance reads a site page; only the writers add sites or print QR codes.
+    expect(canAccessHref("finance", `/app/clients/${id}/sites/${id}`)).toBe(true);
+    expect(canAccessHref("hr", `/app/clients/${id}/sites/${id}`)).toBe(false);
+    for (const path of [
+      "/app/clients/new",
+      `/app/clients/${id}/edit`,
+      `/app/clients/${id}/sites/new`,
+      `/app/clients/${id}/sites/${id}/checkpoints/print`,
+    ]) {
       for (const role of ["owner", "admin", "ops_manager"] as const) {
         expect(canAccessHref(role, path), `${role} ${path}`).toBe(true);
       }

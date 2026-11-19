@@ -357,34 +357,56 @@ export interface MappingTargets {
   projects: Option[];
 }
 
-/** Every site and project in the organisation, by name, with their client for context. */
+/**
+ * The sites and projects a worker can be mapped to, by name, with their client for context.
+ * Archived clients and archived sites are left out (slice 2.2), except the ones in `keep` (the
+ * worker's current mapping), so saving the panel never drops a mapping silently.
+ */
 export async function loadMappingTargets(
   supabase: Client,
   organisationId: string,
+  keep: readonly string[] = [],
 ): Promise<MappingTargets> {
-  const read = (table: "sites" | "projects") =>
-    readAll<{ id: string; name: string; client_id: string }>(table, (from, to) =>
+  const [clients, sites, projects] = await Promise.all([
+    readAll<{ id: string; name: string; status: string }>("clients", (from, to) =>
       supabase
-        .from(table)
+        .from("clients")
+        .select("id, name, status")
+        .eq("organisation_id", organisationId)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll<{ id: string; name: string; client_id: string; status: string }>("sites", (from, to) =>
+      supabase
+        .from("sites")
+        .select("id, name, client_id, status")
+        .eq("organisation_id", organisationId)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll<{ id: string; name: string; client_id: string }>("projects", (from, to) =>
+      supabase
+        .from("projects")
         .select("id, name, client_id")
         .eq("organisation_id", organisationId)
         .order("id")
         .range(from, to),
-    );
-  const [clients, sites, projects] = await Promise.all([
-    loadNames(supabase, "clients", organisationId),
-    read("sites"),
-    read("projects"),
+    ),
   ]);
+  const clientOf = new Map(clients.map((c) => [c.id, c]));
+  const kept = new Set(keep);
+  const open = (row: { id: string; client_id: string; status?: string }) =>
+    kept.has(row.id) ||
+    (row.status !== "archived" && clientOf.get(row.client_id)?.status !== "archived");
   const toOption = (row: { id: string; name: string; client_id: string }): Option => {
-    const client = clients.get(row.client_id);
+    const client = clientOf.get(row.client_id)?.name;
     return { value: row.id, label: client ? `${row.name} · ${client}` : row.name };
   };
   const byLabel = (a: Option, b: Option) =>
     a.label.localeCompare(b.label, "en", { sensitivity: "base" });
   return {
-    sites: sites.map(toOption).sort(byLabel),
-    projects: projects.map(toOption).sort(byLabel),
+    sites: sites.filter(open).map(toOption).sort(byLabel),
+    projects: projects.filter(open).map(toOption).sort(byLabel),
   };
 }
 

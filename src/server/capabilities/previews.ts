@@ -6,6 +6,7 @@ import {
   type createClientSchema,
   type quickAddClientSchema,
 } from "@/server/business/schemas";
+import type { moveCheckpointSchema } from "@/server/sites/schemas";
 
 import type { CapabilityPreview, PreviewFn } from "./types";
 
@@ -83,5 +84,47 @@ export const previewAddContact: PreviewFn<typeof addContactSchema> = async ({
       ? `Adds ${data.name} as the primary ${role} contact.`
       : `Adds ${data.name} as a ${role} contact.`,
     changes,
+  };
+};
+
+/** Names the two checkpoints that swap places in the site's round, or says nothing moves. */
+export const previewMoveCheckpoint: PreviewFn<typeof moveCheckpointSchema> = async ({
+  supabase,
+  organisationId,
+  data,
+}) => {
+  const { data: target, error } = await supabase
+    .from("site_checkpoints")
+    .select("site_id")
+    .eq("organisation_id", organisationId)
+    .eq("id", data.checkpointId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error) throw new Error(`Could not read checkpoints: ${error.message}`);
+  if (!target) return { summary: "That checkpoint wasn't found.", changes: [] };
+  const { data: rows, error: listError } = await supabase
+    .from("site_checkpoints")
+    .select("id, name")
+    .eq("organisation_id", organisationId)
+    .eq("site_id", target.site_id)
+    .eq("status", "active")
+    .order("sort_order")
+    .order("created_at")
+    .order("id");
+  if (listError) throw new Error(`Could not read checkpoints: ${listError.message}`);
+  const list = rows ?? [];
+  const at = list.findIndex((c) => c.id === data.checkpointId);
+  const to = data.direction === "up" ? at - 1 : at + 1;
+  const moving = list[at];
+  const other = list[to];
+  if (!moving || !other) {
+    return { summary: "Nothing moves: the checkpoint is already at that end.", changes: [] };
+  }
+  return {
+    summary: `Moves ${moving.name} to place ${to + 1} and ${other.name} to place ${at + 1}.`,
+    changes: [
+      { label: moving.name, before: `Place ${at + 1}`, after: `Place ${to + 1}` },
+      { label: other.name, before: `Place ${to + 1}`, after: `Place ${at + 1}` },
+    ],
   };
 };

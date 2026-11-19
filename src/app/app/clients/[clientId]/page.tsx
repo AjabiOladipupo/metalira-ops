@@ -11,11 +11,12 @@ import { cn } from "@/lib/utils";
 import { loadClient, type ClientDetail } from "@/server/business/clients-data";
 import { CONTACT_ROLE_HINTS, CONTACT_ROLE_LABELS, CONTACT_ROLES } from "@/server/business/schemas";
 import { getActiveCompany } from "@/server/identity/company-data";
+import { listClientSites, summariseSites, type SiteRow } from "@/server/sites/sites-data";
 
 import { RouteGate } from "../../_shell/slots";
-import { DetailList, Section } from "../../people/_components/display";
+import { DetailList, Section, plural } from "../../people/_components/display";
 import { AddContactForm, ClientStatusForm, ContactRowForm } from "../_components/contact-forms";
-import { clientsPageContext } from "../_components/context";
+import { clientsPageContext, type ClientsPageContext } from "../_components/context";
 
 export const metadata: Metadata = { title: "Client" };
 
@@ -154,20 +155,81 @@ function Overview({
   );
 }
 
-function Sites({ client }: { client: ClientDetail }) {
-  if (client.sites.length === 0) {
-    return <EmptyState message="No sites yet. Add the places your people work." />;
+function SiteState({ site }: { site: SiteRow }) {
+  if (site.status === "archived") return <Status tone="pending">Archived</Status>;
+  if (site.needsDetails) return <Status tone="action">Needs details</Status>;
+  return <Status tone="done">Ready</Status>;
+}
+
+function firstLine(text: string | null): string | null {
+  return text ? (text.split(/\r?\n/)[0] ?? null) : null;
+}
+
+function geofenceLabel(site: SiteRow): string {
+  if (site.geofence === "outline") return "Drawn outline";
+  if (site.geofence === "circle") return `${site.radiusM.toLocaleString("en-NG")} m circle`;
+  return "No geofence";
+}
+
+async function Sites({
+  client,
+  canEdit,
+  supabase,
+  organisationId,
+}: {
+  client: ClientDetail;
+  canEdit: boolean;
+  supabase: ClientsPageContext["supabase"];
+  organisationId: string;
+}) {
+  const sites = await listClientSites(supabase, organisationId, client.id);
+  const addSite =
+    canEdit && client.status === "active" ? (
+      <Button asChild className="h-11 px-5">
+        <Link href={`/app/clients/${client.id}/sites/new`}>Add site</Link>
+      </Button>
+    ) : null;
+  if (sites.length === 0) {
+    return <EmptyState message="No sites yet. Add the places your people work." action={addSite} />;
   }
+  const summary = summariseSites(sites);
   return (
     <div className="flex flex-col gap-3">
-      <p className="m-0 text-sm text-fg-muted">
-        Addresses, geofences and QR checkpoints come with the site pages.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="m-0 text-sm text-fg-muted" data-testid="sites-summary">
+          {plural(summary.active, "active site", "active sites")}
+          {summary.withoutGeofence
+            ? ` · ${summary.withoutGeofence.toLocaleString("en-NG")} without a geofence`
+            : " · all with a geofence"}
+          {summary.checkpoints
+            ? ` · ${plural(summary.checkpoints, "checkpoint", "checkpoints")}`
+            : ""}
+        </p>
+        {addSite}
+      </div>
       <ul className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0">
-        {client.sites.map((site) => (
-          <li key={site.id} className="flex min-h-12 items-center justify-between gap-3 px-4">
-            <span className="font-medium">{site.name}</span>
-            <span className="text-sm text-fg-muted">No geofence</span>
+        {sites.map((site) => (
+          <li key={site.id}>
+            <Link
+              href={`/app/clients/${client.id}/sites/${site.id}`}
+              className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-foreground no-underline hover:bg-surface"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="font-semibold">{site.name}</span>
+                <span className="text-xs text-fg-muted">
+                  {[firstLine(site.address), site.state].filter(Boolean).join(", ") || "No address"}
+                </span>
+              </span>
+              <span className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="text-fg-muted" data-testid="site-geofence">
+                  {geofenceLabel(site)}
+                </span>
+                <span className="text-fg-muted tabular-nums">
+                  {plural(site.checkpointCount, "checkpoint", "checkpoints")}
+                </span>
+                <SiteState site={site} />
+              </span>
+            </Link>
           </li>
         ))}
       </ul>
@@ -234,6 +296,7 @@ async function ClientPage({
   ]);
   if (!client) notFound();
 
+  const activeSites = client.sites.filter((s) => s.status === "active").length;
   const status =
     client.status === "archived" ? (
       <Status tone="pending">Archived</Status>
@@ -249,8 +312,8 @@ async function ClientPage({
         back={{ href: "/app/clients", label: "Clients" }}
         eyebrow="Client"
         title={client.name}
-        description={`${client.sites.length.toLocaleString("en-NG")} ${
-          client.sites.length === 1 ? "site" : "sites"
+        description={`${activeSites.toLocaleString("en-NG")} ${
+          activeSites === 1 ? "site" : "sites"
         } · ${client.contacts.length.toLocaleString("en-NG")} ${
           client.contacts.length === 1 ? "contact" : "contacts"
         } · no contracts yet`}
@@ -264,7 +327,14 @@ async function ClientPage({
           canEdit={ctx.canEdit}
         />
       ) : null}
-      {tab === "sites" ? <Sites client={client} /> : null}
+      {tab === "sites" ? (
+        <Sites
+          client={client}
+          canEdit={ctx.canEdit}
+          supabase={ctx.supabase}
+          organisationId={ctx.organisationId}
+        />
+      ) : null}
       {tab === "contracts" ? (
         <EmptyState message="No contracts yet. Contracts and rate cards are added here next." />
       ) : null}

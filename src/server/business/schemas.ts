@@ -36,7 +36,7 @@ export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 export const CLIENT_TERMS_DAYS = [0, 7, 14, 30, 45, 60, 90] as const;
 
 /** "" (an empty input) or a missing field becomes null; anything else goes through `schema`. */
-function optional<T extends z.ZodType<unknown, string>>(schema: T) {
+export function optional<T extends z.ZodType<unknown, string>>(schema: T) {
   return z
     .string()
     .optional()
@@ -52,7 +52,7 @@ function optional<T extends z.ZodType<unknown, string>>(schema: T) {
     });
 }
 
-function text(label: string, max: number, required = true) {
+export function text(label: string, max: number, required = true) {
   return plainText(
     z
       .string()
@@ -105,7 +105,7 @@ function multiline(max: number, label: string) {
 }
 
 /** Billing address: plain text over several lines, and no web address (it goes on invoices). */
-const address = multiline(300, "Address").refine(
+export const address = multiline(300, "Address").refine(
   (value) => !/:\/\/|www\./i.test(value),
   "An address can't contain a web address",
 );
