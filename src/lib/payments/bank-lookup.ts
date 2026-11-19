@@ -38,13 +38,19 @@ export type ResolveBankAccountError =
   /** No provider keys here, and test answers aren't allowed (production). */
   | "not_configured";
 
+/**
+ * Where an answer came from: the provider's live service, its sandbox (previews), or the test
+ * resolver. Only `bank` is a real bank's answer.
+ */
+export type LookupSource = "bank" | "sandbox" | "test";
+
 export type ResolveBankAccountResult =
-  | { ok: true; accountName: string; source: "bank" | "test" }
+  | { ok: true; accountName: string; source: LookupSource }
   | { ok: false; error: ResolveBankAccountError };
 
 export interface BankAccountResolver {
-  /** "bank" for a real provider, "test" for the deterministic test resolver. */
-  readonly source: "bank" | "test";
+  /** "bank" for the provider's live service, "sandbox" for its sandbox, "test" for the test resolver. */
+  readonly source: LookupSource;
   resolveBankAccount(input: ResolveBankAccountInput): Promise<ResolveBankAccountResult>;
 }
 

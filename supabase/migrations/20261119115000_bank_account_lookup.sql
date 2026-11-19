@@ -32,7 +32,8 @@
 --   signed-in users.
 -- * Rows from before this slice keep bank_code and name_check null ("Not checked").
 --
--- Refusals: MLBL1 (your hourly limit), MLBL2 (the company's hourly limit), MLBL3 (lookup not
+-- Refusals: MLBL1 (your hourly limit), MLBL2 (the company's limit: 100 an hour, or 40 a day
+-- while setup is unfinished), MLBL9 (the platform's hourly ceiling), MLBL3 (lookup not
 -- found or not yours), MLBL4 (expired), MLBL5 (already used), MLBL6 (account changed after the
 -- check), MLBL7 (the company account needs a check), MLBL8 (fixed after insert).
 
@@ -71,10 +72,11 @@ create table public.bank_account_lookups (
       and account_name !~ '[\x01-\x1f\x7f-\x9f<>]'
       and account_name !~* '(://|www\.)'
     ),
-  -- `bank`: the provider answered. `test`: the deterministic test resolver (never in
-  -- production; labelled "Test lookup" wherever it shows).
+  -- `bank`: the provider's live service answered. `sandbox`: its sandbox (previews). `test`:
+  -- the deterministic test resolver. Only `bank` is accepted on approval in production; the
+  -- others are labelled "Test lookup" wherever they show.
   source text
-    constraint bank_account_lookups_source check (source in ('bank', 'test')),
+    constraint bank_account_lookups_source check (source in ('bank', 'sandbox', 'test')),
   created_at timestamptz not null default now(),
   finished_at timestamptz,
   used_at timestamptz,
@@ -181,8 +183,9 @@ begin
     raise exception 'That employee wasn''t found.' using errcode = 'P0002';
   end if;
 
-  -- One lock per company, so parallel lookups can't pass a limit together.
-  perform pg_advisory_xact_lock(hashtextextended('bank_account_lookups:' || p_organisation_id::text, 0));
+  -- One lock for all lookups, so parallel lookups can't pass a limit together (a lookup is a
+  -- network call made after this returns, so the lock is held only for the counts).
+  perform pg_advisory_xact_lock(hashtextextended('bank_account_lookups', 0));
   if (
     select count(*) from public.bank_account_lookups l
     where l.requested_by = p_user_id and l.created_at > now() - interval '1 hour'
@@ -196,6 +199,26 @@ begin
   ) >= 100 then
     raise exception 'Your company has checked 100 bank accounts in the last hour. Try again later.'
       using errcode = 'MLBL2';
+  end if;
+  -- A company still in setup (anyone can create one) gets a smaller allowance, so new sign-ups
+  -- can't use Metalira's lookup to find out who owns account numbers in bulk.
+  if exists (
+    select 1 from public.organisations o
+    where o.id = p_organisation_id and o.setup_completed_at is null
+  ) and (
+    select count(*) from public.bank_account_lookups l
+    where l.organisation_id = p_organisation_id and l.created_at > now() - interval '24 hours'
+  ) >= 40 then
+    raise exception 'Your company can check 40 bank accounts a day until setup is finished.'
+      using errcode = 'MLBL2';
+  end if;
+  -- And a ceiling for the whole platform, which also protects Metalira's provider account.
+  if (
+    select count(*) from public.bank_account_lookups l
+    where l.created_at > now() - interval '1 hour'
+  ) >= 2000 then
+    raise exception 'Bank account checks are busy right now. Try again in a few minutes.'
+      using errcode = 'MLBL9';
   end if;
 
   insert into public.bank_account_lookups (
@@ -317,7 +340,7 @@ alter table public.organisation_bank_accounts
       and name_check_reason !~ '[0-9]{10}'
     ),
   add column name_check_source text
-    constraint organisation_bank_accounts_name_check_source check (name_check_source in ('bank', 'test')),
+    constraint organisation_bank_accounts_name_check_source check (name_check_source in ('bank', 'sandbox', 'test')),
   -- null: raised before slice 2.3b. Otherwise checked (match or near, with the lookup) or not.
   add constraint organisation_bank_accounts_name_check_columns check (
     name_check is null
@@ -343,7 +366,7 @@ alter table public.bank_detail_changes
       and name_check_reason !~ '[0-9]{10}'
     ),
   add column name_check_source text
-    constraint bank_detail_changes_name_check_source check (name_check_source in ('bank', 'test')),
+    constraint bank_detail_changes_name_check_source check (name_check_source in ('bank', 'sandbox', 'test')),
   add constraint bank_detail_changes_name_check_columns check (
     name_check is null
     or (name_check in ('match', 'near')
@@ -376,7 +399,7 @@ alter table public.workers
   add column bank_checked_code text
     constraint workers_bank_checked_code_format check (bank_checked_code ~ '^[0-9]{3,6}$'),
   add column bank_checked_source text
-    constraint workers_bank_checked_source check (bank_checked_source in ('bank', 'test')),
+    constraint workers_bank_checked_source check (bank_checked_source in ('bank', 'sandbox', 'test')),
   add constraint workers_bank_checked_columns check (
     (bank_checked_name is null) = (bank_checked_at is null)
     and (bank_checked_name is null) = (bank_checked_source is null)

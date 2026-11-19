@@ -56,8 +56,17 @@ describe("Monnify account name lookup", () => {
     await expect(resolver.resolveBankAccount(input)).resolves.toEqual({
       ok: true,
       accountName: "ADEYEMI JOHN OLUWASEUN",
-      source: "bank",
+      // The sandbox's answer is labelled as such; only the live host is a real bank's.
+      source: "sandbox",
     });
+    const live = createMonnifyBankAccountResolver(creds, {
+      fetch: vi
+        .fn<typeof globalThis.fetch>()
+        .mockResolvedValueOnce(LOGIN_OK.clone())
+        .mockResolvedValueOnce(VALIDATE_OK.clone()),
+      baseUrl: MONNIFY_LIVE_BASE_URL,
+    });
+    await expect(live.resolveBankAccount(input)).resolves.toMatchObject({ source: "bank" });
 
     const [loginUrl, loginInit] = fetch.mock.calls[0]!;
     expect(loginUrl).toBe(`${MONNIFY_SANDBOX_BASE_URL}/api/v1/auth/login`);

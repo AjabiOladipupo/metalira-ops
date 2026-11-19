@@ -206,7 +206,7 @@ export async function checkRequestedAccount(
   const { data: rows, error } = await supabase
     .from("organisation_bank_accounts")
     .select(
-      "id, status, bank_name, account_name, bank_account_enc, bank_account_last4, bank_code, bank_lookup_id, bank_account_digest, name_check, name_check_reason",
+      "id, status, bank_name, account_name, bank_account_enc, bank_account_last4, bank_code, bank_lookup_id, bank_account_digest, name_check, name_check_reason, name_check_source",
     )
     .eq("organisation_id", organisationId)
     .in("status", ["pending", "active"]);

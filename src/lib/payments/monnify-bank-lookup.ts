@@ -87,6 +87,8 @@ export function createMonnifyBankAccountResolver(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const now = opts.now ?? Date.now;
   let token: { value: string; expiresAt: number } | null = null;
+  // A sandbox answer is not a real bank's: it is labelled, and refused on approval in production.
+  const source = baseUrl === MONNIFY_LIVE_BASE_URL ? "bank" : "sandbox";
 
   async function call(url: string, init: RequestInit): Promise<{ status: number; json: Envelope }> {
     let response: Response;
@@ -141,7 +143,7 @@ export function createMonnifyBankAccountResolver(
   }
 
   return {
-    source: "bank",
+    source,
     async resolveBankAccount(input): Promise<ResolveBankAccountResult> {
       if (!validResolveInput(input)) return { ok: false, error: "not_found" };
       if (!creds.apiKey.trim() || !creds.secretKey.trim()) {
@@ -167,7 +169,7 @@ export function createMonnifyBankAccountResolver(
           name
         ) {
           // Only the name leaves this function; the response body is dropped.
-          return { ok: true, accountName: name.replace(/\s+/g, " ").slice(0, 200), source: "bank" };
+          return { ok: true, accountName: name.replace(/\s+/g, " ").slice(0, 200), source };
         }
         if (status >= 500 || status === 429 || status === 401 || status === 403) {
           return { ok: false, error: "unavailable" };

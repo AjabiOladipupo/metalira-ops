@@ -55,6 +55,14 @@ describe("which resolver runs", () => {
     expect(
       lookupMode({ ...keys, VERCEL_ENV: "preview", MONNIFY_BASE_URL: "https://api.monnify.com/" }),
     ).toMatchObject({ baseUrl: "https://api.monnify.com" });
+    // Production never takes sandbox answers.
+    expect(
+      lookupMode({
+        ...keys,
+        VERCEL_ENV: "production",
+        MONNIFY_BASE_URL: "https://sandbox.monnify.com",
+      }),
+    ).toEqual({ mode: "off" });
   });
 
   it("uses the test resolver without keys outside production, and refuses in production", () => {
@@ -191,6 +199,31 @@ describe("refuseCheckedRequest (on approval)", () => {
     name_check: nameCheck,
     name_check_reason: reason,
     account_name: accountName,
+  });
+
+  it("refuses test or sandbox answers in production, and a worker's unchecked request", () => {
+    expect(
+      refuseCheckedRequest(ORG, stored("ADEYEMI JOHN", "match"), number, person, {
+        production: true,
+      }),
+    ).toMatch(/test lookup/);
+    expect(
+      refuseCheckedRequest(
+        ORG,
+        { ...stored("ADEYEMI JOHN", "match"), name_check_source: "bank" },
+        number,
+        person,
+        { production: true },
+      ),
+    ).toBeNull();
+    expect(
+      refuseCheckedRequest(
+        ORG,
+        { ...stored("Anyone", "not_checked"), raised_by_worker: true },
+        number,
+        person,
+      ),
+    ).toMatch(/wasn't checked/);
   });
 
   it("lets a match through, and requests without a check", () => {

@@ -82,12 +82,10 @@ export function lookupMode(
   const production = isProductionLookupEnv(env);
   if (apiKey && secretKey) {
     const configured = env.MONNIFY_BASE_URL?.trim().replace(/\/+$/, "");
-    return {
-      mode: "provider",
-      apiKey,
-      secretKey,
-      baseUrl: configured || (production ? LIVE : SANDBOX),
-    };
+    const baseUrl = configured || (production ? LIVE : SANDBOX);
+    // Production never takes sandbox answers for real bank details.
+    if (production && baseUrl !== LIVE) return { mode: "off" };
+    return { mode: "provider", apiKey, secretKey, baseUrl };
   }
   return production ? { mode: "off" } : { mode: "test" };
 }
@@ -205,7 +203,7 @@ export type BankLookupView =
       bankCode: string;
       bankName: string;
       accountName: string;
-      /** From the test resolver: show "Test lookup". */
+      /** Not a real bank's answer (test resolver or provider sandbox): show "Test lookup". */
       test: boolean;
       result: NameMatch["result"];
       expected: string;
@@ -303,7 +301,7 @@ export async function runBankLookup(input: RunBankLookupInput): Promise<BankLook
     bankCode: bank.code,
     bankName: bank.name,
     accountName: answer.accountName,
-    test: answer.source === "test",
+    test: answer.source !== "bank",
     result: check.result,
     expected: check.expected,
   };
@@ -407,6 +405,9 @@ export async function takeCheckedName(
 // ---------------------------------------------------------------------------
 
 export interface StoredCheck {
+  name_check_source?: string | null;
+  /** Bank changes only: the worker raised it from their own login. */
+  raised_by_worker?: boolean;
   bank_code: string | null;
   bank_lookup_id: string | null;
   bank_account_digest: string | null;
@@ -426,8 +427,16 @@ export function refuseCheckedRequest(
   stored: StoredCheck,
   accountNumber: string,
   expected: ExpectedNames,
+  { production = isProductionLookupEnv() }: { production?: boolean } = {},
 ): string | null {
+  if (stored.name_check === "not_checked" && stored.raised_by_worker) {
+    // The worker app always checks: an unchecked request from a worker came round the app.
+    return "This request wasn't checked with the bank, so it can't be approved. Reject it and ask the employee to send it again from the app.";
+  }
   if (stored.name_check !== "match" && stored.name_check !== "near") return null;
+  if (production && stored.name_check_source !== "bank") {
+    return "This request was checked with a test lookup, not the bank, so it can't be approved here. Reject it and raise a new one.";
+  }
   if (
     !stored.bank_code ||
     !stored.bank_account_digest ||
@@ -478,6 +487,6 @@ export function nameCheckView(
     status: check.result,
     expected: check.expected,
     reason: row.name_check_reason,
-    test: row.name_check_source === "test",
+    test: row.name_check_source !== "bank",
   };
 }

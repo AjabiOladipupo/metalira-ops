@@ -706,7 +706,7 @@ export async function loadWorkerProfile(
         ? {
             accountName: w.bank_checked_name,
             at: w.bank_checked_at,
-            test: w.bank_checked_source === "test",
+            test: w.bank_checked_source !== "bank",
           }
         : null,
     ninOnFile: w.nin_enc !== null,

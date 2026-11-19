@@ -222,7 +222,7 @@ async function checkRequestedAccount(
   const { data: change, error } = await supabase
     .from("bank_detail_changes")
     .select(
-      "worker_id, status, bank_name, account_name, bank_account_enc, bank_account_last4, bank_code, bank_lookup_id, bank_account_digest, name_check, name_check_reason, workers!bank_detail_changes_worker_fkey ( first_name, last_name, bank_name, account_name, bank_account_enc )",
+      "worker_id, status, raised_by_worker, bank_name, account_name, bank_account_enc, bank_account_last4, bank_code, bank_lookup_id, bank_account_digest, name_check, name_check_reason, name_check_source, workers!bank_detail_changes_worker_fkey ( first_name, last_name, bank_name, account_name, bank_account_enc )",
     )
     .eq("id", changeId)
     .eq("organisation_id", organisationId)
