@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 
+import type { SendableAuditChannel } from "@/lib/audit-channel";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { ManagerRole } from "@/lib/roles";
 import type { Database } from "@/types/db";
@@ -52,6 +53,11 @@ export interface MutationSpec<S extends z.ZodType, R> {
   schema: S;
   /** Roles in the active organisation that may make this change. */
   roles: readonly ManagerRole[];
+  /**
+   * Audit channel for the rows this change writes (src/lib/audit-channel.ts). Leave out for
+   * the manager app (`web`); the people import commit sets `import`.
+   */
+  channel?: SendableAuditChannel;
   /** Makes the change. Scope every query to `organisationId`. */
   run: (args: MutationContext & { data: z.output<S> }) => Promise<R>;
   /** Optional app-level audit entry, written after `run()` succeeds. Not for row changes. */
@@ -106,7 +112,7 @@ export async function mutate<S extends z.ZodType, R>(
   if (!session) throw new MutationError("unauthenticated", "Sign in to make changes.");
   if (!session.active) throw new MutationError("forbidden", "Your role can't make this change.");
 
-  const supabase = await createServerSupabase();
+  const supabase = await createServerSupabase({ channel: spec.channel });
   return runMutation(
     {
       supabase,

@@ -3,6 +3,7 @@ import "server-only";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+import { auditChannelHeaders, type SendableAuditChannel } from "@/lib/audit-channel";
 import type { Database } from "@/types/db";
 
 import { getSupabasePublicEnv } from "./env";
@@ -15,12 +16,16 @@ import { getSupabasePublicEnv } from "./env";
  * With `cacheComponents` on, this reads `cookies()`: call it inside a
  * `<Suspense>` boundary (or from a Server Function or Route Handler), and never
  * inside `"use cache"`.
+ *
+ * `channel` labels the audit rows this client's writes produce (src/lib/audit-channel.ts):
+ * `web` unless the caller is the worker app or an import.
  */
-export async function createServerSupabase() {
+export async function createServerSupabase(options: { channel?: SendableAuditChannel } = {}) {
   const { url, publishableKey } = getSupabasePublicEnv();
   const cookieStore = await cookies();
 
   return createServerClient<Database>(url, publishableKey, {
+    global: { headers: auditChannelHeaders(options.channel ?? "web") },
     cookies: {
       getAll() {
         return cookieStore.getAll();

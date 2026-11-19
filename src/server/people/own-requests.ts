@@ -200,7 +200,7 @@ export async function ownContext(): Promise<OwnContext> {
   }
   if (lookup.type === "unlinked") throw new MutationError("forbidden", copy.failed);
   return {
-    supabase: await createServerSupabase(),
+    supabase: await createServerSupabase({ channel: "worker_app" }),
     organisationId: lookup.session.organisationId,
     workerId: lookup.session.workerId,
   };
