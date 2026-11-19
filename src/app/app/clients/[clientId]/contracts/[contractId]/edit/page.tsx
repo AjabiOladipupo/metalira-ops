@@ -76,7 +76,6 @@ async function EditContract({
           company?.paymentTermsDays ?? 30,
         )}
         defaultVat={contract.vatApplies}
-        canSetWht={false}
         defaultStart={contract.startDate}
       />
     </>

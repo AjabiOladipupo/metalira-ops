@@ -13,7 +13,7 @@
  */
 
 import { addDays, formatDate, isWithin } from "@/lib/dates";
-import { formatNaira, parseNairaToKobo, type Currency, type Kobo } from "@/lib/money";
+import { formatNaira, parseNairaToKobo, roundHalfUp, type Currency, type Kobo } from "@/lib/money";
 
 export const RATE_UNITS = ["shift", "hour", "visit", "month", "job"] as const;
 export type RateUnit = (typeof RATE_UNITS)[number];
@@ -37,6 +37,34 @@ const PER_UNIT: Record<RateUnit, string> = {
 
 export const STANDARD_BAND = "standard";
 
+/**
+ * What a line pays for, which sets its withholding tax (owner's accountant, 19 Nov 2026). Split
+ * facility management into service lines and a separate management fee line.
+ */
+export const SERVICE_TYPES = ["services", "management_fee", "rent_hire", "goods", "other"] as const;
+export type ServiceType = (typeof SERVICE_TYPES)[number];
+
+export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
+  services: "Services",
+  management_fee: "Management fee",
+  rent_hire: "Rent or hire",
+  goods: "Goods",
+  other: "Other",
+};
+
+/**
+ * The WHT rate each service type starts with, in basis points (the database's
+ * private.default_wht_rate_bps gives the same): services 2%, management fee 5%, rent or hire 10%,
+ * goods 2%, other 2%. A person may change it per line.
+ */
+export const DEFAULT_WHT_BPS: Record<ServiceType, number> = {
+  services: 200,
+  management_fee: 500,
+  rent_hire: 1000,
+  goods: 200,
+  other: 200,
+};
+
 /** ₦1,000,000,000 in kobo: the largest rate a line takes (the database checks it too). */
 export const MAX_RATE_KOBO = 100_000_000_000n;
 export const MAX_RATE_LINES = 100;
@@ -52,6 +80,9 @@ export interface RateLine {
   otRateKobo: Kobo | null;
   /** 15000 = 1.5×, shown when there is no hourly overtime rate. */
   otMultiplierBps: number | null;
+  serviceType: ServiceType;
+  /** The WHT the client deducts on this line, on its amount before VAT (Phase 6). */
+  whtRateBps: number;
 }
 
 export interface RateCardVersion {
@@ -135,11 +166,16 @@ function byStart<T extends DatedVersion>(versions: readonly T[]): T[] {
   return [...versions].sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1));
 }
 
-/** The version in force on `date`, or null. */
+/**
+ * The version in force on `date`, or null. Pass the contract's end date: a version left open
+ * (`effectiveTo` null) still ends with the contract, so nothing is in force after it.
+ */
 export function rateCardInForce<T extends DatedVersion>(
   versions: readonly T[],
   date: string,
+  contractEndDate: string | null = null,
 ): T | null {
+  if (contractEndDate !== null && date > contractEndDate) return null;
   return versions.find((v) => isWithin(date, v.effectiveFrom, v.effectiveTo)) ?? null;
 }
 
@@ -291,6 +327,9 @@ export interface RateLineInput {
   rate: string;
   otRate: string;
   otMultiplier: string;
+  serviceType: string;
+  /** Percent text, like "2" or "7.5"; blank takes the service type's default. */
+  whtRate: string;
 }
 
 export type ParsedRateLine =
@@ -380,7 +419,11 @@ export function parseRateLine(input: RateLineInput): ParsedRateLine {
   if (input.otRate.trim() !== "") {
     otRateKobo = parseRateKobo(input.otRate);
     if (otRateKobo === null) {
-      return { ok: false, field: "otRate", message: "Enter the overtime rate an hour, like 1,600" };
+      return {
+        ok: false,
+        field: "otRate",
+        message: "Enter the overtime rate per hour, like 1,600",
+      };
     }
   }
   let otMultiplierBps: number | null = null;
@@ -394,6 +437,31 @@ export function parseRateLine(input: RateLineInput): ParsedRateLine {
       };
     }
   }
+  // What bills is the overtime rate per hour; the multiplier only helps enter it. On an hourly
+  // line it works the rate out (rounded half up, once); on any other unit a multiplier can't
+  // make an hourly rate, so the rate itself is needed.
+  if (otMultiplierBps !== null && otRateKobo === null) {
+    if (input.unit !== "hour") {
+      return {
+        ok: false,
+        field: "otRate",
+        message: "Enter the overtime rate per hour. A multiplier alone works only on hourly lines",
+      };
+    }
+    otRateKobo = overtimeFromMultiplier(rateKobo, otMultiplierBps);
+  }
+  const serviceType = (input.serviceType.trim() || "services") as ServiceType;
+  if (!(SERVICE_TYPES as readonly string[]).includes(serviceType)) {
+    return { ok: false, field: "serviceType", message: "Choose what the line pays for" };
+  }
+  let whtRateBps = DEFAULT_WHT_BPS[serviceType];
+  if (input.whtRate.trim() !== "") {
+    const parsed = parsePercentBps(input.whtRate);
+    if (parsed === null) {
+      return { ok: false, field: "whtRate", message: "Enter WHT from 0 to 20%, like 2" };
+    }
+    whtRateBps = parsed;
+  }
   return {
     ok: true,
     line: {
@@ -404,8 +472,18 @@ export function parseRateLine(input: RateLineInput): ParsedRateLine {
       currency: "NGN",
       otRateKobo,
       otMultiplierBps,
+      serviceType,
+      whtRateBps,
     },
   };
+}
+
+/**
+ * An hourly line's overtime rate from its multiplier: rate × bps / 10000, rounded half up once
+ * (RULES_NIGERIA "Rounding"). 1,250,050 kobo at 1.5× gives 1,875,075 kobo.
+ */
+export function overtimeFromMultiplier(rateKobo: Kobo, bps: number): Kobo {
+  return roundHalfUp(rateKobo * BigInt(bps), 10_000n);
 }
 
 /** The line as the editor shows it: amounts as plain naira text ("12500", "12500.50"). */
@@ -418,6 +496,8 @@ export function toRateLineInput(line: RateLine): RateLineInput {
     otRate: line.otRateKobo === null ? "" : koboToInput(line.otRateKobo),
     otMultiplier:
       line.otMultiplierBps === null ? "" : formatMultiplier(line.otMultiplierBps).replace("×", ""),
+    serviceType: line.serviceType,
+    whtRate: formatPercentBps(line.whtRateBps).replace("%", ""),
   };
 }
 
@@ -435,6 +515,8 @@ export interface RateLinePayload {
   rate_kobo: string;
   ot_rate_kobo: string | null;
   ot_multiplier_bps: number | null;
+  service_type: ServiceType;
+  wht_rate_bps: number;
 }
 
 export function toRateLinePayload(line: RateLine): RateLinePayload {
@@ -445,6 +527,8 @@ export function toRateLinePayload(line: RateLine): RateLinePayload {
     rate_kobo: line.rateKobo.toString(),
     ot_rate_kobo: line.otRateKobo === null ? null : line.otRateKobo.toString(),
     ot_multiplier_bps: line.otMultiplierBps,
+    service_type: line.serviceType,
+    wht_rate_bps: line.whtRateBps,
   };
 }
 
@@ -461,12 +545,20 @@ function bandWord(line: Pick<RateLine, "band">): string {
   return line.band.trim().toLowerCase() === STANDARD_BAND ? "" : line.band.trim().toLowerCase();
 }
 
+/** "WHT 2%". */
+export function formatWht(line: Pick<RateLine, "whtRateBps">): string {
+  return `WHT ${formatPercentBps(line.whtRateBps)}`;
+}
+
 /** "₦12,500 a shift". */
 export function formatLineRate(line: Pick<RateLine, "rateKobo" | "unit">): string {
   return `${formatRate(line.rateKobo)} ${PER_UNIT[line.unit]}`;
 }
 
-/** "₦1,600 an hour", "1.5×", or "None". */
+/**
+ * "₦1,600 an hour" (what bills), or "None". A multiplier is shown only for a line saved without
+ * an hourly rate, which the database allows on hourly lines alone.
+ */
 export function formatOvertime(line: Pick<RateLine, "otRateKobo" | "otMultiplierBps">): string {
   if (line.otRateKobo !== null) return `${formatRate(line.otRateKobo)} an hour`;
   if (line.otMultiplierBps !== null) return formatMultiplier(line.otMultiplierBps);
@@ -480,12 +572,14 @@ export function formatOvertime(line: Pick<RateLine, "otRateKobo" | "otMultiplier
  *   lines with the same unit names the unit once, after its last line.
  * - Overtime the lines share is said once at the end ("overtime 1.5×", "overtime ₦1,600 an
  *   hour"); overtime that differs is said on each line.
+ * - WHT the same way: "WHT 2%" once at the end when every line shares it, else on each line.
  */
 export function formatRateSummary(lines: readonly RateLine[]): string {
   if (lines.length === 0) return "No rates yet";
   const roles = new Set(lines.map((l) => l.role.trim().toLowerCase()));
   const overtime = lines.map((l) => formatOvertime(l));
   const shared = overtime.every((o) => o === overtime[0]);
+  const sharedWht = lines.every((l) => l.whtRateBps === lines[0]?.whtRateBps);
 
   const parts = lines.map((line, i) => {
     const label = [roles.size > 1 ? line.role.trim().toLowerCase() : "", bandWord(line)]
@@ -493,10 +587,15 @@ export function formatRateSummary(lines: readonly RateLine[]): string {
       .join(" ");
     const next = lines[i + 1];
     const unit = !next || next.unit !== line.unit ? unitWord(line.unit, label !== "") : "";
-    const ot = !shared && overtime[i] !== "None" ? ` (overtime ${overtime[i]})` : "";
-    return [formatRate(line.rateKobo), label, unit].filter(Boolean).join(" ") + ot;
+    const extras = [
+      !shared && overtime[i] !== "None" ? `overtime ${overtime[i]}` : "",
+      !sharedWht ? formatWht(line) : "",
+    ].filter(Boolean);
+    const tail = extras.length ? ` (${extras.join(", ")})` : "";
+    return [formatRate(line.rateKobo), label, unit].filter(Boolean).join(" ") + tail;
   });
   if (shared && overtime[0] !== "None") parts.push(`overtime ${overtime[0]}`);
+  if (sharedWht && lines[0]) parts.push(formatWht(lines[0]));
   return parts.join(" · ");
 }
 
@@ -533,7 +632,9 @@ export function diffRateLines(
     } else if (
       previous.rateKobo !== line.rateKobo ||
       previous.otRateKobo !== line.otRateKobo ||
-      previous.otMultiplierBps !== line.otMultiplierBps
+      previous.otMultiplierBps !== line.otMultiplierBps ||
+      previous.serviceType !== line.serviceType ||
+      previous.whtRateBps !== line.whtRateBps
     ) {
       changes.push({ key: line, kind: "changed", before: previous, after: line });
     } else {
@@ -548,7 +649,7 @@ export function diffRateLines(
 
 function describeLine(line: RateLine): string {
   const ot = formatOvertime(line);
-  return `${formatLineRate(line)}${ot === "None" ? "" : `, overtime ${ot}`}`;
+  return `${formatLineRate(line)}${ot === "None" ? "" : `, overtime ${ot}`}, ${formatWht(line)}`;
 }
 
 export interface RateChangePreview {

@@ -36,7 +36,7 @@ export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 export const CLIENT_TERMS_DAYS = [0, 7, 14, 30, 45, 60, 90] as const;
 
 /** "" (an empty input) or a missing field becomes null; anything else goes through `schema`. */
-function optional<T extends z.ZodType<unknown, string>>(schema: T) {
+export function optional<T extends z.ZodType<unknown, string>>(schema: T) {
   return z
     .string()
     .optional()
@@ -52,7 +52,7 @@ function optional<T extends z.ZodType<unknown, string>>(schema: T) {
     });
 }
 
-function text(label: string, max: number, required = true) {
+export function text(label: string, max: number, required = true) {
   return plainText(
     z
       .string()
@@ -105,7 +105,7 @@ function multiline(max: number, label: string) {
 }
 
 /** Billing address: plain text over several lines, and no web address (it goes on invoices). */
-const address = multiline(300, "Address").refine(
+export const address = multiline(300, "Address").refine(
   (value) => !/:\/\/|www\./i.test(value),
   "An address can't contain a web address",
 );
@@ -207,6 +207,23 @@ export const quickAddClientSchema = z.object({
   name: clientNameSchema,
   billingEmail: optional(contactEmailSchema),
   siteName: optional(text("Site name", 200)),
+});
+
+/** Whether a client is expected to deduct WHT from its payments (owner's accountant, 19 Nov 2026). */
+export const DEDUCTS_WHT = ["expected", "not_deducted"] as const;
+export type DeductsWht = (typeof DEDUCTS_WHT)[number];
+
+export const DEDUCTS_WHT_LABELS: Record<DeductsWht, string> = {
+  expected: "Deducts WHT",
+  not_deducted: "Doesn't deduct WHT",
+};
+
+/** A client's tax settings: owner, admin and finance. */
+export const clientTaxSchema = z.object({
+  clientId: id("client"),
+  deductsWht: z.enum(DEDUCTS_WHT, "Choose whether the client deducts WHT"),
+  withholdsVat: checkbox,
+  reason: optional(text("Reason", 300, false)),
 });
 
 export type CreateClientInput = z.output<typeof createClientSchema>;

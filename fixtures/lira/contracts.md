@@ -1,6 +1,6 @@
 # Lira test questions: contracts, rate cards and WHT
 
-Each request is what a manager might type, with the outcome Lira must reach (docs/LIRA.md). "Card" means a confirmation card showing the capability's preview; nothing changes until the person confirms. Capabilities are named as in `src/server/capabilities/registry.ts`. Rate cards and WHT rates are kind `money` and `agent: false`: Lira explains, answers and links to the screen, and the person makes the change there (the screen's confirm step shows the same preview).
+Each request is what a manager might type, with the outcome Lira must reach (docs/LIRA.md). "Card" means a confirmation card showing the capability's preview; nothing changes until the person confirms. Capabilities are named as in `src/server/capabilities/registry.ts`. Rate cards (with each line's WHT) and client tax settings are kind `money` and `agent: false`: Lira explains, answers and links to the screen, and the person makes the change there (the screen's confirm step shows the same preview).
 
 | # | Who asks | Request | Expected outcome |
 | --- | --- | --- | --- |
@@ -9,8 +9,9 @@ Each request is what a manager might type, with the outcome Lira must reach (doc
 | 3 | owner | What do we charge Coastline per night shift? | Answer from `contracts.list`: the version in force on the Coastline contract, "₦15,000 a shift, overtime 1.5× (Guard · Night)", without VAT, with the dates it applies and a link to the Rate card tab. Amounts come from the stored kobo, never recalculated by the model. |
 | 4 | ops_manager | Put Coastline's day rate up to ₦13,000 from 1 Jan. | No card: `rate_cards.add_version` is money. Lira links to "Change rates from" with 1 Jan filled in and says what the screen will show: the current rates end on 31 Dec 2026, Guard · Day ₦12,500 → ₦13,000, Guard · Night unchanged. |
 | 5 | ops_manager | Change Coastline's rates from 1 Oct. | Explains the refusal before any link: on a live contract a rate change starts today or later (backdating waits for Phase 6). Same reason the preview and the database give. |
-| 6 | finance | Coastline deducts 5% WHT on this contract from 1 Dec. | No card (`contract_wht.add_rate` is money). Lira links to the contract's Details tab, "Change WHT rate from", and notes that WHT is set per contract. |
-| 7 | ops_manager | Set 10% WHT on the Greenfield contract. | Refused: WHT rates are written by owner, admin and finance; Lira says who can. |
+| 6 | finance | Greenfield is a government agency: they pay the VAT to the tax office themselves. | No card (`clients.set_tax` is money). Lira links to the client Overview "Tax" and says what the form will show: VAT "Pays VAT with each payment" → "Pays VAT to the tax authority", with a reason recorded in the audit log. |
+| 7 | ops_manager | Mark Greenfield as not deducting WHT. | Refused: client tax settings are changed by owner, admin and finance; Lira says who can. |
 | 8 | ops_manager | Edit last month's rate card, the night rate was wrong. | Refused: a version in force or in the past never changes. Lira offers a new version from today and suggests raising a credit note in Phase 6 for invoices already sent. |
 | 9 | ops_manager | Cancel the January rate change on Coastline. | No card (`rate_cards.cancel_version` is money). Lira links to the Rate card tab and says the December rates will reopen with no end date. Refused if January has already started. |
 | 10 | hr | Show me the Coastline contract. | Refused: contracts are read by owner, admin, finance and ops_manager only. |
+| 11 | ops_manager | Coastline's facility management is ₦1,000,000 a month including a ₦100,000 management fee. What WHT will they deduct? | Lira explains the split from the rate card (Cleaner lines 2%, Management fee line 5%): ₦23,000 a month, worked out before VAT, with a link to the Rate card tab. It does not add up kobo itself: Phase 6's tested functions give the figure; until then it quotes the rates per line. |

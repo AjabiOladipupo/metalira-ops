@@ -10,16 +10,14 @@ import { formFields } from "@/server/identity/schemas";
 
 import {
   addRateCardVersion,
-  addWhtRate,
   cancelRateCardVersion,
-  cancelWhtRate,
   createContract,
   saveDraftRateCard,
   updateContract,
 } from "./contracts";
 
 /**
- * Server Actions for contracts, rate cards and WHT rates (slice 2.4). Each goes through a helper
+ * Server Actions for contracts and rate cards (slice 2.4). Each goes through a helper
  * that runs `mutate()`: the caller's role is checked on the server, the input is validated with
  * Zod, and the write uses the caller's own client (the rate functions check the role again in
  * the database). Every action is registered in src/server/capabilities/registry.ts.
@@ -147,32 +145,4 @@ export async function cancelRateCardVersionAction(
   }
   refreshClient(clientIdOf(fields));
   return { ok: true, status: 200, message: "Rate change cancelled" };
-}
-
-export async function addWhtRateAction(
-  _prev: ContractFormState,
-  formData: FormData,
-): Promise<ContractFormState> {
-  const fields = formFields(formData);
-  try {
-    await addWhtRate(fields);
-  } catch (error) {
-    return refusal(error, fields);
-  }
-  refreshClient(clientIdOf(fields));
-  return { ok: true, status: 200, message: "WHT rate saved" };
-}
-
-export async function cancelWhtRateAction(
-  _prev: ContractFormState,
-  formData: FormData,
-): Promise<ContractFormState> {
-  const fields = formFields(formData);
-  try {
-    await cancelWhtRate(fields);
-  } catch (error) {
-    return refusal(error);
-  }
-  refreshClient(clientIdOf(fields));
-  return { ok: true, status: 200, message: "WHT rate cancelled" };
 }

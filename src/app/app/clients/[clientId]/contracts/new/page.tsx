@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
-import { lagosToday } from "@/lib/dates";
 import { loadClient } from "@/server/business/clients-data";
 import { getActiveCompany } from "@/server/identity/company-data";
 
@@ -50,8 +49,7 @@ async function NewContract({
           company?.paymentTermsDays ?? 30,
         )}
         defaultVat={company?.vatRegistered ?? false}
-        canSetWht={ctx.canEditWht}
-        defaultStart={lagosToday()}
+        defaultStart={ctx.today}
       />
     </>
   );

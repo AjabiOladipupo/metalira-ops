@@ -10,11 +10,14 @@
 --    has left draft, a version in force or in the past is never changed except to close
 --    effective_to, and lines are never edited: a change is a new version (rule 3). Lines are found
 --    by their rate key (role, band, unit), never by id, so a new version never touches posts.
--- 4. `contract_wht_rates`: the withholding tax rate a client deducts on this contract, dated the
---    same way (owner decision: WHT is per contract, because the rate depends on the service).
---    Phase 6 applies it; the base (subtotal or total) is still a RULES_NIGERIA gap.
+-- 4. Withholding tax is set per rate line (owner's accountant, 19 Nov 2026): each line has a
+--    service type (services, management_fee, rent_hire, goods, other) and its WHT rate, which
+--    defaults from the type (2%, 5%, 10%, 2%, 2%) and is versioned with the card. Phase 6 works out
+--    the expected WHT per invoice line on the amount before VAT. Whether a client deducts WHT, and
+--    whether it pays the VAT to the tax authority itself, are client settings (`clients.deducts_wht`,
+--    `clients.withholds_vat`) written by owner, admin and finance through set_client_tax_settings.
 -- 5. Writes. Contracts and their sites are written by owner, admin and ops_manager under RLS
---    (create_contract and update_draft_contract run as the caller). Rate cards and WHT rates have
+--    (create_contract and update_draft_contract run as the caller). Rate cards have
 --    no insert, update or delete grants: only the functions below write them. Each is a private
 --    security definer function that checks the caller's role itself (through private.has_role,
 --    so an untrusted session is refused) behind a public invoker wrapper, as for the other
@@ -30,7 +33,7 @@
 --   MLRC3 a version from this date or later exists  MLRC4 version outside the contract dates
 --   MLRC5 rate key missing for an open post         MLRC6 contract ended, or draft-only call
 --   MLRC7 no rate card yet / last one can't go      MLRC8 lines invalid
---   MLWH1-MLWH3 as MLRC1-MLRC3 for WHT rates        MLWH4 WHT outside the contract dates
+--   MLCL1 client tax settings refused
 -- (MLCT1-MLCT9 are kept for slice 2.7's activation checklist.)
 
 -- ---------------------------------------------------------------------------
@@ -344,15 +347,31 @@ create table public.rate_card_lines (
   -- The line's own overtime rate per hour (owner decision), or null.
   ot_rate_kobo bigint
     constraint rate_card_lines_ot_rate_range check (ot_rate_kobo between 1 and 100000000000),
-  -- Shown as "overtime 1.5×" when there is no hourly overtime rate. 10000 = 1.0×. When a line has
-  -- both, the hourly rate is what bills (Phase 6) and the multiplier is for display only.
+  -- An entry helper, 10000 = 1.0×. What bills is ot_rate_kobo per overtime hour; on an hourly line
+  -- the app works it out from the multiplier (rounded half up once) and stores both. On any other
+  -- unit a multiplier can't make an hourly rate, so it needs ot_rate_kobo with it.
   ot_multiplier_bps integer
     constraint rate_card_lines_ot_multiplier_range check (ot_multiplier_bps between 10000 and 30000),
+  -- What the line pays for, which sets its withholding tax (owner's accountant, 19 Nov 2026):
+  -- services 2%, management_fee 5%, rent_hire 10%, goods 2%, other 2%. Facility management is
+  -- split into service lines and a separate management fee line.
+  service_type text not null default 'services'
+    constraint rate_card_lines_service_type_value check (
+      service_type in ('services', 'management_fee', 'rent_hire', 'goods', 'other')
+    ),
+  -- The WHT a client deducts on this line, 0 to 20% (twice the rate when the payee has no TIN).
+  -- Left out, it follows the service type (rate_card_lines_guard). Phase 6 applies it to the
+  -- line's amount before VAT.
+  wht_rate_bps integer not null
+    constraint rate_card_lines_wht_rate_range check (wht_rate_bps between 0 and 2000),
   sort_order integer not null default 0
     constraint rate_card_lines_sort_order_range check (sort_order between 0 and 1000),
   created_at timestamptz not null default now(),
   created_by uuid default auth.uid(),
   constraint rate_card_lines_organisation_id_id_key unique (organisation_id, id),
+  constraint rate_card_lines_ot_needs_rate check (
+    ot_multiplier_bps is null or ot_rate_kobo is not null or unit = 'hour'
+  ),
   constraint rate_card_lines_rate_card_fkey foreign key (organisation_id, rate_card_id)
     references public.rate_cards (organisation_id, id)
 );
@@ -496,7 +515,25 @@ create trigger rate_cards_set_updated_at before update on public.rate_cards
 create trigger rate_cards_audit after insert or update or delete on public.rate_cards
   for each row execute function private.audit_row_change();
 
--- BEFORE INSERT/UPDATE/DELETE on rate_card_lines. Lines are never edited. While the contract is
+-- The WHT rate a service type starts with (owner's accountant, 19 Nov 2026). The app shows the
+-- same defaults (src/lib/rate-cards.ts DEFAULT_WHT_BPS).
+create function private.default_wht_rate_bps(p_service_type text)
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$
+  select case p_service_type
+    when 'management_fee' then 500
+    when 'rent_hire' then 1000
+    else 200
+  end
+$$;
+
+revoke all on function private.default_wht_rate_bps(text) from public, anon, authenticated;
+
+-- BEFORE INSERT/UPDATE/DELETE on rate_card_lines. A line left without a WHT rate takes its
+-- service type's default. Lines are never edited. While the contract is
 -- a draft they are replaced with the card. Once it has left draft, lines are added only to a
 -- scheduled version or to a version created in this same transaction (add_rate_card_version
 -- from today: created_at is the transaction's now()), and removed only with a scheduled version.
@@ -515,6 +552,9 @@ begin
   if tg_op = 'UPDATE' then
     raise exception 'Rate card lines are never edited. Add a new version instead.'
       using errcode = 'MLRC1';
+  end if;
+  if tg_op = 'INSERT' and new.wht_rate_bps is null then
+    new.wht_rate_bps := private.default_wht_rate_bps(new.service_type);
   end if;
 
   select r.effective_from, r.created_at, c.status into v_from, v_created, v_status
@@ -540,162 +580,7 @@ create trigger rate_card_lines_guard before insert or update or delete on public
 create trigger rate_card_lines_audit after insert or update or delete on public.rate_card_lines
   for each row execute function private.audit_row_change();
 
--- ---------------------------------------------------------------------------
--- 4. contract_wht_rates
--- ---------------------------------------------------------------------------
-
-create table public.contract_wht_rates (
-  id uuid primary key default gen_random_uuid(),
-  organisation_id uuid not null references public.organisations (id),
-  contract_id uuid not null,
-  -- 0 to 20%. 500 = 5%.
-  rate_bps integer not null
-    constraint contract_wht_rates_rate_range check (rate_bps between 0 and 2000),
-  effective_from date not null,
-  effective_to date,
-  created_at timestamptz not null default now(),
-  created_by uuid default auth.uid(),
-  updated_at timestamptz not null default now(),
-  constraint contract_wht_rates_organisation_id_id_key unique (organisation_id, id),
-  constraint contract_wht_rates_contract_fkey foreign key (organisation_id, contract_id)
-    references public.contracts (organisation_id, id),
-  constraint contract_wht_rates_dates check (effective_to >= effective_from),
-  constraint contract_wht_rates_no_overlap exclude using gist (
-    contract_id with =,
-    daterange(effective_from, effective_to, '[]') with &&
-  )
-);
-
-create index contract_wht_rates_contract_from_idx
-  on public.contract_wht_rates (contract_id, effective_from);
-
-comment on table public.contract_wht_rates is
-  'Withholding tax the client deducts on this contract, dated (rule 3). Phase 6 applies the rate in force on the invoice date; the base is a RULES_NIGERIA gap.';
-
--- BEFORE INSERT/UPDATE/DELETE on contract_wht_rates: the rate_cards rules.
-create function private.contract_wht_rates_guard()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-declare
-  v_contract uuid := coalesce(new.contract_id, old.contract_id);
-  v_today date := private.org_today(coalesce(new.organisation_id, old.organisation_id));
-  v_status text;
-  v_start date;
-  v_end date;
-begin
-  select c.status, c.start_date, c.end_date into v_status, v_start, v_end
-  from public.contracts c
-  where c.id = v_contract;
-
-  if tg_op = 'UPDATE' and (
-    new.contract_id is distinct from old.contract_id
-    or new.organisation_id is distinct from old.organisation_id
-  ) then
-    raise exception 'A WHT rate can''t move to another contract.' using errcode = 'MLWH1';
-  end if;
-
-  if tg_op in ('INSERT', 'UPDATE') and v_start is not null and (
-    new.effective_from < v_start
-    or (v_end is not null and coalesce(new.effective_to, new.effective_from) > v_end)
-  ) then
-    raise exception 'A WHT rate must sit inside the contract''s dates.' using errcode = 'MLWH4';
-  end if;
-
-  if v_status = 'draft' then
-    return coalesce(new, old);
-  end if;
-  if v_status = 'ended' then
-    raise exception 'This contract has ended and its WHT rate can''t change.' using errcode = 'MLWH1';
-  end if;
-
-  if tg_op = 'INSERT' then
-    if new.effective_from < v_today then
-      raise exception 'A WHT change starts today or later.' using errcode = 'MLWH2';
-    end if;
-    return new;
-  end if;
-
-  if tg_op = 'DELETE' then
-    if old.effective_from <= v_today then
-      raise exception 'This WHT rate is already in force and can''t be removed.' using errcode = 'MLWH1';
-    end if;
-    if exists (
-      select 1 from public.contract_wht_rates w
-      where w.contract_id = old.contract_id and w.effective_from > old.effective_from
-    ) then
-      raise exception 'A later WHT rate is scheduled after this one. Cancel that one first.'
-        using errcode = 'MLWH1';
-    end if;
-    return old;
-  end if;
-
-  if new.effective_to is distinct from old.effective_to and exists (
-    select 1 from public.contract_wht_rates w
-    where w.contract_id = old.contract_id and w.effective_from > old.effective_from
-  ) then
-    raise exception 'A later WHT rate follows this one, so its end date can''t change. Cancel the later one first.'
-      using errcode = 'MLWH1';
-  end if;
-
-  if new.effective_from is distinct from old.effective_from then
-    raise exception 'A WHT rate''s start date can''t move. Cancel it and add it again.'
-      using errcode = 'MLWH1';
-  end if;
-
-  if old.effective_from <= v_today then
-    if (new.rate_bps, new.created_at, new.created_by)
-      is distinct from (old.rate_bps, old.created_at, old.created_by) then
-      raise exception 'This WHT rate is already in force and can''t be changed. Add a new version instead.'
-        using errcode = 'MLWH1';
-    end if;
-    if new.effective_to is distinct from old.effective_to then
-      if old.effective_to is not null and old.effective_to < v_today then
-        raise exception 'This WHT rate has ended and can''t be changed.' using errcode = 'MLWH1';
-      end if;
-      if new.effective_to is not null and new.effective_to < v_today - 1 then
-        raise exception 'A WHT rate in force can be closed from yesterday at the earliest.'
-          using errcode = 'MLWH1';
-      end if;
-    end if;
-  elsif new.rate_bps is distinct from old.rate_bps then
-    raise exception 'Cancel the scheduled WHT rate and add it again.' using errcode = 'MLWH1';
-  end if;
-
-  return new;
-end;
-$$;
-
-revoke all on function private.contract_wht_rates_guard() from public, anon, authenticated;
-
-create function private.contract_wht_rates_reopen_previous()
-returns trigger
-language plpgsql
-set search_path = ''
-as $$
-begin
-  update public.contract_wht_rates w
-  set effective_to = old.effective_to
-  where w.contract_id = old.contract_id
-    and w.effective_to = old.effective_from - 1;
-  return null;
-end;
-$$;
-
-revoke all on function private.contract_wht_rates_reopen_previous() from public, anon, authenticated;
-
-create trigger contract_wht_rates_guard before insert or update or delete on public.contract_wht_rates
-  for each row execute function private.contract_wht_rates_guard();
-create trigger contract_wht_rates_reopen_previous after delete on public.contract_wht_rates
-  for each row execute function private.contract_wht_rates_reopen_previous();
-create trigger contract_wht_rates_set_updated_at before update on public.contract_wht_rates
-  for each row execute function private.set_updated_at();
-create trigger contract_wht_rates_audit after insert or update or delete on public.contract_wht_rates
-  for each row execute function private.audit_row_change();
-
--- AFTER UPDATE on contracts: moving a draft's start date moves its first rate card and WHT
--- version with it (they start on the contract's start date), and any version left outside the
+-- AFTER UPDATE on contracts: moving a draft's start date moves its first rate card with it (they start on the contract's start date), and any version left outside the
 -- new dates is refused with a plain reason. Definer: signed-in users have no grants on the
 -- dated tables; the guards above still check every change.
 create function private.contracts_after_dates_change()
@@ -715,10 +600,6 @@ begin
       select 1 from public.rate_cards r
       where r.contract_id = new.id
         and r.effective_from > old.start_date and r.effective_from <= new.start_date
-    ) or exists (
-      select 1 from public.contract_wht_rates w
-      where w.contract_id = new.id
-        and w.effective_from > old.start_date and w.effective_from <= new.start_date
     ) then
       raise exception 'A scheduled rate change starts before the new start date. Cancel it first.'
         using errcode = 'MLCO4';
@@ -726,9 +607,6 @@ begin
     update public.rate_cards r
     set effective_from = new.start_date
     where r.contract_id = new.id and r.effective_from = old.start_date;
-    update public.contract_wht_rates w
-    set effective_from = new.start_date
-    where w.contract_id = new.id and w.effective_from = old.start_date;
   end if;
 
   if exists (
@@ -739,20 +617,13 @@ begin
         or coalesce(r.effective_to, r.effective_from) > coalesce(new.end_date, 'infinity')
       )
   ) or exists (
-    select 1 from public.contract_wht_rates w
-    where w.contract_id = new.id
-      and (
-        w.effective_from < new.start_date
-        or coalesce(w.effective_to, w.effective_from) > coalesce(new.end_date, 'infinity')
-      )
-  ) or exists (
     -- The first rate card starts on the start date (save_draft_rate_card), so no day goes unpriced.
     select 1 from public.rate_cards r
     where r.contract_id = new.id
       and r.effective_from = (select min(f.effective_from) from public.rate_cards f where f.contract_id = new.id)
       and r.effective_from <> new.start_date
   ) then
-    raise exception 'A rate card or WHT rate starts outside the new dates. Cancel it first.'
+    raise exception 'A rate card starts outside the new dates. Cancel it first.'
       using errcode = 'MLCO4';
   end if;
   return null;
@@ -775,7 +646,6 @@ alter table public.contracts enable row level security;
 alter table public.contract_sites enable row level security;
 alter table public.rate_cards enable row level security;
 alter table public.rate_card_lines enable row level security;
-alter table public.contract_wht_rates enable row level security;
 
 create policy contracts_select on public.contracts for select to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'finance', 'ops_manager']));
@@ -812,15 +682,11 @@ create policy rate_cards_select on public.rate_cards for select to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'finance', 'ops_manager']));
 create policy rate_card_lines_select on public.rate_card_lines for select to authenticated
   using (private.has_role(organisation_id, array['owner', 'admin', 'finance', 'ops_manager']));
-create policy contract_wht_rates_select on public.contract_wht_rates for select to authenticated
-  using (private.has_role(organisation_id, array['owner', 'admin', 'finance', 'ops_manager']));
 
 revoke all on table public.rate_cards from anon, authenticated;
 revoke all on table public.rate_card_lines from anon, authenticated;
-revoke all on table public.contract_wht_rates from anon, authenticated;
 grant select on table public.rate_cards to authenticated;
 grant select on table public.rate_card_lines to authenticated;
-grant select on table public.contract_wht_rates to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 6. Writes
@@ -860,7 +726,9 @@ as $$
         'rate_kobo', l.rate_kobo::text,
         'currency', l.currency,
         'ot_rate_kobo', l.ot_rate_kobo::text,
-        'ot_multiplier_bps', l.ot_multiplier_bps
+        'ot_multiplier_bps', l.ot_multiplier_bps,
+        'service_type', l.service_type,
+        'wht_rate_bps', l.wht_rate_bps
       ) order by l.sort_order, l.id)
       from public.rate_card_lines l
       where l.rate_card_id = r.id
@@ -874,7 +742,8 @@ revoke all on function private.rate_card_snapshot(uuid) from public, anon, authe
 
 -- Inserts the lines of a version from a JSON array of
 --   { role, band?, unit, rate_kobo: "1250000", ot_rate_kobo?: "160000" | null,
---     ot_multiplier_bps?: 15000 | null }
+--     ot_multiplier_bps?: 15000 | null, service_type?: "services", wht_rate_bps?: 200 | null }
+-- A missing WHT rate follows the service type.
 -- Amounts must be JSON strings of whole kobo. 1 to 100 lines; the table checks the rest
 -- (ranges, currency, a rate key once per version).
 create function private.rate_card_insert_lines(
@@ -903,12 +772,19 @@ begin
       or jsonb_typeof(v_line -> 'rate_kobo') is distinct from 'string'
       or (v_line ? 'ot_rate_kobo' and jsonb_typeof(v_line -> 'ot_rate_kobo') not in ('string', 'null'))
       or (v_line ? 'ot_multiplier_bps' and jsonb_typeof(v_line -> 'ot_multiplier_bps') not in ('number', 'null'))
+      or (v_line ? 'wht_rate_bps' and jsonb_typeof(v_line -> 'wht_rate_bps') not in ('number', 'null'))
     then
       raise exception 'Rate line % is not in the expected shape.', v_index + 1 using errcode = 'MLRC8';
     end if;
+    -- Whole kobo as digits only, checked before the cast so junk gets a plain reason.
+    if (v_line ->> 'rate_kobo') !~ '^[0-9]{1,12}$'
+      or ((v_line ->> 'ot_rate_kobo') is not null and (v_line ->> 'ot_rate_kobo') !~ '^[0-9]{1,12}$')
+    then
+      raise exception 'Rate line % needs amounts in whole kobo.', v_index + 1 using errcode = 'MLRC8';
+    end if;
     insert into public.rate_card_lines (
       organisation_id, rate_card_id, role, band, unit, rate_kobo, ot_rate_kobo,
-      ot_multiplier_bps, sort_order
+      ot_multiplier_bps, service_type, wht_rate_bps, sort_order
     )
     values (
       p_organisation_id,
@@ -919,6 +795,8 @@ begin
       (v_line ->> 'rate_kobo')::bigint,
       (v_line ->> 'ot_rate_kobo')::bigint,
       (v_line ->> 'ot_multiplier_bps')::integer,
+      coalesce(nullif(v_line ->> 'service_type', ''), 'services'),
+      (v_line ->> 'wht_rate_bps')::integer,
       v_index
     );
     v_index := v_index + 1;
@@ -1179,132 +1057,12 @@ begin
 end;
 $$;
 
--- add_contract_wht_rate: a WHT rate from p_effective_from, closing the one before it the day
--- before. owner, admin and finance. The same dating rules as rate cards.
-create function private.add_contract_wht_rate(
-  p_organisation_id uuid,
-  p_contract_id uuid,
-  p_rate_bps integer,
-  p_effective_from date
-)
-returns uuid
-language plpgsql
-volatile
-security definer
-set search_path = ''
-as $$
-declare
-  v_status text;
-  v_id uuid;
-  v_previous uuid;
-  v_previous_to date;
-begin
-  v_status := private.lock_contract_for_rates(
-    p_organisation_id, p_contract_id, array['owner', 'admin', 'finance']
-  );
-  if v_status = 'ended' then
-    raise exception 'This contract has ended and its WHT rate can''t change.' using errcode = 'MLWH1';
-  end if;
-  if p_effective_from is null or p_rate_bps is null then
-    raise exception 'Enter the WHT rate and the date it starts.' using errcode = '22023';
-  end if;
-  if exists (
-    select 1 from public.contract_wht_rates w
-    where w.contract_id = p_contract_id and w.effective_from >= p_effective_from
-  ) then
-    raise exception 'A WHT rate from this date or later already exists. Cancel it first.'
-      using errcode = 'MLWH3';
-  end if;
-  if v_status <> 'draft' and p_effective_from < private.org_today(p_organisation_id) then
-    raise exception 'A WHT change starts today or later.' using errcode = 'MLWH2';
-  end if;
-
-  select w.id, w.effective_to into v_previous, v_previous_to
-  from public.contract_wht_rates w
-  where w.contract_id = p_contract_id
-  order by w.effective_from desc
-  limit 1;
-  if v_previous is not null then
-    update public.contract_wht_rates w
-    set effective_to = p_effective_from - 1
-    where w.id = v_previous;
-  end if;
-
-  insert into public.contract_wht_rates (
-    organisation_id, contract_id, rate_bps, effective_from, effective_to
-  )
-  values (p_organisation_id, p_contract_id, p_rate_bps, p_effective_from, v_previous_to)
-  returning id into v_id;
-
-  perform private.log_audit_impl(
-    p_organisation_id, 'contract_wht.rate_added', 'contract_wht_rates', v_id,
-    case when v_previous is null then null else jsonb_build_object(
-      'closes', v_previous, 'effective_to_before', v_previous_to,
-      'effective_to_after', p_effective_from - 1
-    ) end,
-    jsonb_build_object('rate_bps', p_rate_bps, 'effective_from', p_effective_from),
-    null
-  );
-  return v_id;
-end;
-$$;
-
-create function private.cancel_contract_wht_rate(p_organisation_id uuid, p_wht_rate_id uuid)
-returns void
-language plpgsql
-volatile
-security definer
-set search_path = ''
-as $$
-declare
-  v_contract uuid;
-  v_status text;
-  v_from date;
-  v_bps integer;
-begin
-  select w.contract_id, w.effective_from, w.rate_bps into v_contract, v_from, v_bps
-  from public.contract_wht_rates w
-  where w.id = p_wht_rate_id and w.organisation_id = p_organisation_id;
-  if v_contract is null then
-    perform private.lock_contract_for_rates(
-      p_organisation_id, null, array['owner', 'admin', 'finance']
-    );
-  end if;
-  v_status := private.lock_contract_for_rates(
-    p_organisation_id, v_contract, array['owner', 'admin', 'finance']
-  );
-
-  if exists (
-    select 1 from public.contract_wht_rates w
-    where w.contract_id = v_contract and w.effective_from > v_from
-  ) then
-    raise exception 'A later WHT rate is scheduled after this one. Cancel that one first.'
-      using errcode = 'MLWH1';
-  end if;
-  if v_status <> 'draft' and v_from <= private.org_today(p_organisation_id) then
-    raise exception 'This WHT rate is already in force and can''t be cancelled.'
-      using errcode = 'MLWH1';
-  end if;
-
-  delete from public.contract_wht_rates w where w.id = p_wht_rate_id;
-
-  perform private.log_audit_impl(
-    p_organisation_id, 'contract_wht.rate_cancelled', 'contract_wht_rates', p_wht_rate_id,
-    jsonb_build_object('rate_bps', v_bps, 'effective_from', v_from), null, null
-  );
-end;
-$$;
-
 revoke all on function private.save_draft_rate_card(uuid, uuid, date, jsonb, text) from public, anon;
 revoke all on function private.add_rate_card_version(uuid, uuid, date, jsonb, text) from public, anon;
 revoke all on function private.cancel_rate_card_version(uuid, uuid) from public, anon;
-revoke all on function private.add_contract_wht_rate(uuid, uuid, integer, date) from public, anon;
-revoke all on function private.cancel_contract_wht_rate(uuid, uuid) from public, anon;
 grant execute on function private.save_draft_rate_card(uuid, uuid, date, jsonb, text) to authenticated;
 grant execute on function private.add_rate_card_version(uuid, uuid, date, jsonb, text) to authenticated;
 grant execute on function private.cancel_rate_card_version(uuid, uuid) to authenticated;
-grant execute on function private.add_contract_wht_rate(uuid, uuid, integer, date) to authenticated;
-grant execute on function private.cancel_contract_wht_rate(uuid, uuid) to authenticated;
 
 -- Public invoker wrappers: what the Data API exposes.
 create function public.save_draft_rate_card(
@@ -1353,52 +1111,19 @@ as $$
   select private.cancel_rate_card_version(p_organisation_id, p_rate_card_id)
 $$;
 
-create function public.add_contract_wht_rate(
-  p_organisation_id uuid,
-  p_contract_id uuid,
-  p_rate_bps integer,
-  p_effective_from date
-)
-returns uuid
-language sql
-volatile
-security invoker
-set search_path = ''
-as $$
-  select private.add_contract_wht_rate(
-    p_organisation_id, p_contract_id, p_rate_bps, p_effective_from
-  )
-$$;
-
-create function public.cancel_contract_wht_rate(p_organisation_id uuid, p_wht_rate_id uuid)
-returns void
-language sql
-volatile
-security invoker
-set search_path = ''
-as $$
-  select private.cancel_contract_wht_rate(p_organisation_id, p_wht_rate_id)
-$$;
-
 revoke all on function public.save_draft_rate_card(uuid, uuid, date, jsonb, text) from public, anon;
 revoke all on function public.add_rate_card_version(uuid, uuid, date, jsonb, text) from public, anon;
 revoke all on function public.cancel_rate_card_version(uuid, uuid) from public, anon;
-revoke all on function public.add_contract_wht_rate(uuid, uuid, integer, date) from public, anon;
-revoke all on function public.cancel_contract_wht_rate(uuid, uuid) from public, anon;
 grant execute on function public.save_draft_rate_card(uuid, uuid, date, jsonb, text) to authenticated;
 grant execute on function public.add_rate_card_version(uuid, uuid, date, jsonb, text) to authenticated;
 grant execute on function public.cancel_rate_card_version(uuid, uuid) to authenticated;
-grant execute on function public.add_contract_wht_rate(uuid, uuid, integer, date) to authenticated;
-grant execute on function public.cancel_contract_wht_rate(uuid, uuid) to authenticated;
 
--- create_contract: a draft contract with its sites (and, for owner and admin, a first WHT rate
--- from the start date) in one transaction, as the caller. p_contract carries the contracts
+-- create_contract: a draft contract with its sites in one transaction, as the caller. p_contract carries the contracts
 -- columns by name; reference left blank gets the next CTR number.
 create function public.create_contract(
   p_organisation_id uuid,
   p_contract jsonb,
-  p_site_ids uuid[] default '{}',
-  p_wht_rate_bps integer default null
+  p_site_ids uuid[] default '{}'
 )
 returns uuid
 language plpgsql
@@ -1432,11 +1157,6 @@ begin
   select p_organisation_id, v_id, s.site_id
   from (select distinct unnest(coalesce(p_site_ids, '{}')) as site_id) s;
 
-  if p_wht_rate_bps is not null then
-    perform public.add_contract_wht_rate(
-      p_organisation_id, v_id, p_wht_rate_bps, (p_contract ->> 'start_date')::date
-    );
-  end if;
   return v_id;
 end;
 $$;
@@ -1489,7 +1209,154 @@ begin
 end;
 $$;
 
-revoke all on function public.create_contract(uuid, jsonb, uuid[], integer) from public, anon;
+revoke all on function public.create_contract(uuid, jsonb, uuid[]) from public, anon;
 revoke all on function public.update_draft_contract(uuid, uuid, jsonb, uuid[]) from public, anon;
-grant execute on function public.create_contract(uuid, jsonb, uuid[], integer) to authenticated;
+grant execute on function public.create_contract(uuid, jsonb, uuid[]) to authenticated;
 grant execute on function public.update_draft_contract(uuid, uuid, jsonb, uuid[]) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 7. Client tax settings (owner's accountant, 19 Nov 2026)
+-- ---------------------------------------------------------------------------
+-- deducts_wht: whether the client is expected to deduct WHT from its payments ('expected', the
+-- default) or doesn't ('not_deducted'). The app applies no turnover threshold: whether a client
+-- counts as small is its own decision, and Phase 6 learns it from the payments and flags
+-- differences.
+-- withholds_vat: government MDAs and appointed VAT withholding agents pay the VAT to the tax
+-- authority themselves, so their payments arrive without it, on every contract.
+-- Like the other billing columns (slice 2.1) they are not granted to signed-in users: they are
+-- read through public.client_billing (owner, admin, finance, ops_manager; not hr or line
+-- managers) and written by set_client_tax_settings (owner, admin, finance), audited by the row
+-- trigger and an app event with the reason.
+alter table public.clients
+  add column deducts_wht text not null default 'expected'
+    constraint clients_deducts_wht_value check (deducts_wht in ('expected', 'not_deducted')),
+  add column withholds_vat boolean not null default false;
+
+comment on column public.clients.deducts_wht is
+  'Whether the client is expected to deduct WHT (expected) or does not (not_deducted). Phase 6 learns it from payments; no threshold is applied.';
+comment on column public.clients.withholds_vat is
+  'The client pays the VAT to the tax authority itself (government MDAs, appointed VAT withholding agents).';
+
+drop function public.client_billing(uuid, uuid);
+drop function private.client_billing(uuid, uuid);
+
+create function private.client_billing(p_organisation_id uuid, p_client_id uuid default null)
+returns table (
+  client_id uuid,
+  legal_name text,
+  rc_number text,
+  tin text,
+  billing_address text,
+  state text,
+  billing_terms_days integer,
+  notes text,
+  deducts_wht text,
+  withholds_vat boolean
+)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select c.id, c.legal_name, c.rc_number, c.tin, c.billing_address, c.state,
+    c.billing_terms_days, c.notes, c.deducts_wht, c.withholds_vat
+  from public.clients c
+  where c.organisation_id = p_organisation_id
+    and (p_client_id is null or c.id = p_client_id)
+    and private.has_role(p_organisation_id, array['owner', 'admin', 'finance', 'ops_manager'])
+$$;
+
+revoke all on function private.client_billing(uuid, uuid) from public, anon;
+grant execute on function private.client_billing(uuid, uuid) to authenticated;
+
+create function public.client_billing(p_organisation_id uuid, p_client_id uuid default null)
+returns table (
+  client_id uuid,
+  legal_name text,
+  rc_number text,
+  tin text,
+  billing_address text,
+  state text,
+  billing_terms_days integer,
+  notes text,
+  deducts_wht text,
+  withholds_vat boolean
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.client_billing(p_organisation_id, p_client_id)
+$$;
+
+revoke all on function public.client_billing(uuid, uuid) from public, anon;
+grant execute on function public.client_billing(uuid, uuid) to authenticated;
+
+-- Sets a client's tax settings: owner, admin and finance (finance does not otherwise update
+-- clients). The clients row trigger audits the change; the app event carries the reason.
+create function private.set_client_tax_settings(
+  p_organisation_id uuid,
+  p_client_id uuid,
+  p_deducts_wht text,
+  p_withholds_vat boolean,
+  p_reason text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_before jsonb;
+begin
+  if p_organisation_id is null
+    or not private.has_role(p_organisation_id, array['owner', 'admin', 'finance']) then
+    raise exception 'Your role can''t change a client''s tax settings.' using errcode = '42501';
+  end if;
+  if p_deducts_wht is null or p_withholds_vat is null then
+    raise exception 'Choose both tax settings.' using errcode = 'MLCL1';
+  end if;
+  select jsonb_build_object('deducts_wht', c.deducts_wht, 'withholds_vat', c.withholds_vat)
+  into v_before
+  from public.clients c
+  where c.id = p_client_id and c.organisation_id = p_organisation_id
+  for update;
+  if v_before is null then
+    raise exception 'That client wasn''t found.' using errcode = 'P0002';
+  end if;
+  update public.clients c
+  set deducts_wht = p_deducts_wht, withholds_vat = p_withholds_vat
+  where c.id = p_client_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'clients.tax_settings_changed', 'clients', p_client_id, v_before,
+    jsonb_build_object('deducts_wht', p_deducts_wht, 'withholds_vat', p_withholds_vat),
+    p_reason
+  );
+end;
+$$;
+
+revoke all on function private.set_client_tax_settings(uuid, uuid, text, boolean, text) from public, anon;
+grant execute on function private.set_client_tax_settings(uuid, uuid, text, boolean, text) to authenticated;
+
+create function public.set_client_tax_settings(
+  p_organisation_id uuid,
+  p_client_id uuid,
+  p_deducts_wht text,
+  p_withholds_vat boolean,
+  p_reason text default null
+)
+returns void
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.set_client_tax_settings(
+    p_organisation_id, p_client_id, p_deducts_wht, p_withholds_vat, p_reason
+  )
+$$;
+
+revoke all on function public.set_client_tax_settings(uuid, uuid, text, boolean, text) from public, anon;
+grant execute on function public.set_client_tax_settings(uuid, uuid, text, boolean, text) to authenticated;

@@ -8,6 +8,7 @@ import {
   type RateCardVersion,
   type RateLine,
   type RateUnit,
+  type ServiceType,
 } from "@/lib/rate-cards";
 import { koboFromText } from "@/server/people/pay-rates";
 import type { Database } from "@/types/db";
@@ -15,7 +16,7 @@ import type { Database } from "@/types/db";
 import type { BillingFrequency, ContractStatus, ContractType, Sla } from "./contract-schemas";
 
 /**
- * Reads for contracts, rate cards and WHT rates (slice 2.4). Every query runs with the
+ * Reads for contracts and rate cards (slice 2.4). Every query runs with the
  * signed-in user's own client and is scoped to the active organisation, so RLS decides who sees
  * them (owner, admin, finance and ops_manager). Kobo columns are selected cast to text and read
  * with `koboFromText`, never as the raw number the generated types suggest.
@@ -24,7 +25,7 @@ import type { BillingFrequency, ContractStatus, ContractType, Sla } from "./cont
 type Client = SupabaseClient<Database>;
 
 const LINE_SELECT =
-  "role, band, unit, rate_kobo::text, currency, ot_rate_kobo::text, ot_multiplier_bps, sort_order" as const;
+  "role, band, unit, rate_kobo::text, currency, ot_rate_kobo::text, ot_multiplier_bps, service_type, wht_rate_bps, sort_order" as const;
 
 const VERSION_SELECT =
   `id, effective_from, effective_to, note, rate_card_lines(${LINE_SELECT})` as const;
@@ -37,6 +38,8 @@ interface LineTextRow {
   currency: string;
   ot_rate_kobo: string | null;
   ot_multiplier_bps: number | null;
+  service_type: string;
+  wht_rate_bps: number;
   sort_order: number;
 }
 
@@ -60,6 +63,8 @@ export function toRateLine(row: LineTextRow): RateLine {
     currency: row.currency as Currency,
     otRateKobo: koboFromText(row.ot_rate_kobo),
     otMultiplierBps: row.ot_multiplier_bps,
+    serviceType: row.service_type as ServiceType,
+    whtRateBps: row.wht_rate_bps,
   };
 }
 
@@ -76,13 +81,6 @@ export function toRateCardVersion(row: VersionTextRow): RateCardVersion {
 
 function sortVersions(versions: RateCardVersion[]): RateCardVersion[] {
   return versions.sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1));
-}
-
-export interface WhtRateVersion {
-  id: string;
-  rateBps: number;
-  effectiveFrom: string;
-  effectiveTo: string | null;
 }
 
 export interface ContractRow {
@@ -174,7 +172,7 @@ export function summariseContracts(rows: readonly ContractRow[], today: string):
     ended: rows.filter((r) => r.status === "ended").length,
     noRateCard: open.filter((r) => r.versions.length === 0).length,
     activeWithoutRatesToday: rows.filter(
-      (r) => r.status === "active" && !rateCardInForce(r.versions, today),
+      (r) => r.status === "active" && !rateCardInForce(r.versions, today, r.endDate),
     ).length,
     scheduledRateChanges: open.filter(
       (r) => r.versions.length > 1 && r.versions.some((v) => v.effectiveFrom > today),
@@ -214,8 +212,6 @@ export interface ContractDetail {
   sites: ContractSite[];
   /** Oldest first. */
   versions: RateCardVersion[];
-  /** Oldest first. */
-  whtRates: WhtRateVersion[];
 }
 
 /** One contract of a client, or null when it isn't there (or RLS hides it). */
@@ -229,7 +225,7 @@ export async function loadContract(
   const { data: row, error } = await supabase
     .from("contracts")
     .select(
-      `id, client_id, reference, name, type, status, start_date, end_date, go_live_date, billing_frequency, billing_terms_days, vat_applies, sla, created_at, clients(name), contract_sites(site_id, sites(id, name)), rate_cards(${VERSION_SELECT}), contract_wht_rates(id, rate_bps, effective_from, effective_to)`,
+      `id, client_id, reference, name, type, status, start_date, end_date, go_live_date, billing_frequency, billing_terms_days, vat_applies, sla, created_at, clients(name), contract_sites(site_id, sites(id, name)), rate_cards(${VERSION_SELECT})`,
     )
     .eq("organisation_id", organisationId)
     .eq("client_id", clientId)
@@ -259,14 +255,6 @@ export async function loadContract(
     createdAt: row.created_at,
     sites,
     versions: sortVersions((row.rate_cards ?? []).map(toRateCardVersion)),
-    whtRates: (row.contract_wht_rates ?? [])
-      .map((w) => ({
-        id: w.id,
-        rateBps: w.rate_bps,
-        effectiveFrom: w.effective_from,
-        effectiveTo: w.effective_to,
-      }))
-      .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1)),
   };
 }
 

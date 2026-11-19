@@ -8,13 +8,11 @@ import { MutationError, mutate, type MutationSpec } from "@/server/identity/muta
 import type { Json } from "@/types/db";
 
 import {
-  addWhtRateSchema,
   createContractSchema,
   rateCardIdSchema,
   saveRateCardSchema,
   toSla,
   updateContractSchema,
-  whtRateIdSchema,
 } from "./contract-schemas";
 
 /**
@@ -22,12 +20,12 @@ import {
  * with the signed-in user's own client:
  * - a contract with its sites is one SQL function as the caller (`create_contract`,
  *   `update_draft_contract`), so RLS and the column grants apply and it saves whole;
- * - rate cards and WHT rates have no table grants at all: `save_draft_rate_card`,
- *   `add_rate_card_version`, `cancel_rate_card_version`, `add_contract_wht_rate` and
- *   `cancel_contract_wht_rate` check the caller's role themselves and refuse any change to a
+ * - rate cards have no table grants at all: `save_draft_rate_card`, `add_rate_card_version` and
+ *   `cancel_rate_card_version` check the caller's role themselves and refuse any change to a
  *   version in force or in the past on a live contract. They write the audit events
- *   (`rate_card.draft_saved`, `rate_card.version_added`, `rate_card.version_cancelled`,
- *   `contract_wht.rate_added`, `contract_wht.rate_cancelled`) in the same transaction.
+ *   (`rate_card.draft_saved`, `rate_card.version_added`, `rate_card.version_cancelled`) in the
+ *   same transaction. Each line carries its service type and WHT rate (per line, owner's
+ *   accountant 19 Nov 2026).
  * Amounts go to the database as strings of whole kobo (`toRateLinePayload`), never numbers.
  */
 
@@ -38,7 +36,7 @@ export const CONTRACT_EDITORS = [
   "ops_manager",
 ] as const satisfies readonly ManagerRole[];
 
-/** Read contracts, rate cards and WHT rates. */
+/** Read contracts and rate cards. */
 export const CONTRACT_READERS = [
   "owner",
   "admin",
@@ -46,15 +44,8 @@ export const CONTRACT_READERS = [
   "ops_manager",
 ] as const satisfies readonly ManagerRole[];
 
-/** Add and cancel a contract's WHT rates. */
-export const WHT_EDITORS = ["owner", "admin", "finance"] as const satisfies readonly ManagerRole[];
-
 export function canEditContracts(role: ManagerRole): boolean {
   return (CONTRACT_EDITORS as readonly ManagerRole[]).includes(role);
-}
-
-export function canEditWht(role: ManagerRole): boolean {
-  return (WHT_EDITORS as readonly ManagerRole[]).includes(role);
 }
 
 const DUPLICATE_REFERENCE = "Another contract already has this reference.";
@@ -76,7 +67,7 @@ export function fromContractDbError(error: PostgrestError): never {
     throw new MutationError("invalid", "That contract wasn't found. Reload the page.");
   }
   // Our own refusals carry a plain-English message (migration 20261119130000).
-  if (/^ML(CO|RC|WH)\d$/.test(error.code)) {
+  if (/^ML(CO|RC)\d$/.test(error.code)) {
     const field =
       error.code === "MLCO2" || error.code === "MLCO3"
         ? "siteIds"
@@ -84,7 +75,7 @@ export function fromContractDbError(error: PostgrestError): never {
           ? "startDate"
           : error.code === "MLRC5" || error.code === "MLRC8"
             ? "lines"
-            : error.code.startsWith("MLRC") || error.code.startsWith("MLWH")
+            : error.code.startsWith("MLRC")
               ? "effectiveFrom"
               : "";
     throw new MutationError("invalid", error.message, field ? { [field]: error.message } : {});
@@ -133,16 +124,11 @@ export const createContractSpec: MutationSpec<
 > = {
   schema: createContractSchema,
   roles: CONTRACT_EDITORS,
-  run: async ({ supabase, organisationId, role, data }) => {
-    if (data.whtRate !== null && !canEditWht(role)) {
-      const message = "Owners, admins and finance set the WHT rate. Leave it blank.";
-      throw new MutationError("invalid", message, { whtRate: message });
-    }
+  run: async ({ supabase, organisationId, data }) => {
     const { data: id, error } = await supabase.rpc("create_contract", {
       p_organisation_id: organisationId,
       p_contract: { ...contractRow(data), client_id: data.clientId, reference: data.reference },
       p_site_ids: data.siteIds,
-      ...(data.whtRate === null ? {} : { p_wht_rate_bps: data.whtRate }),
     });
     if (error) fromContractDbError(error);
     return { id, clientId: data.clientId };
@@ -235,44 +221,4 @@ export const cancelRateCardVersionSpec: MutationSpec<typeof rateCardIdSchema, { 
 
 export function cancelRateCardVersion(input: unknown) {
   return mutate(cancelRateCardVersionSpec, input);
-}
-
-// ---------------------------------------------------------------------------
-// WHT rates
-// ---------------------------------------------------------------------------
-
-export const addWhtRateSpec: MutationSpec<typeof addWhtRateSchema, { id: string }> = {
-  schema: addWhtRateSchema,
-  roles: WHT_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
-    const { data: id, error } = await supabase.rpc("add_contract_wht_rate", {
-      p_organisation_id: organisationId,
-      p_contract_id: data.contractId,
-      p_rate_bps: data.rate,
-      p_effective_from: data.effectiveFrom,
-    });
-    if (error) fromContractDbError(error);
-    return { id };
-  },
-};
-
-export function addWhtRate(input: unknown) {
-  return mutate(addWhtRateSpec, input);
-}
-
-export const cancelWhtRateSpec: MutationSpec<typeof whtRateIdSchema, { id: string }> = {
-  schema: whtRateIdSchema,
-  roles: WHT_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
-    const { error } = await supabase.rpc("cancel_contract_wht_rate", {
-      p_organisation_id: organisationId,
-      p_wht_rate_id: data.whtRateId,
-    });
-    if (error) fromContractDbError(error);
-    return { id: data.whtRateId };
-  },
-};
-
-export function cancelWhtRate(input: unknown) {
-  return mutate(cancelWhtRateSpec, input);
 }

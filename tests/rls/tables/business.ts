@@ -10,7 +10,7 @@ type BusinessTable =
   | "contract_sites"
   | "rate_cards"
   | "rate_card_lines"
-  | "contract_wht_rates";
+  | "site_checkpoints";
 
 async function firstId(admin: Client, table: BusinessTable, orgId: string) {
   const { data, error } = await admin
@@ -64,8 +64,40 @@ export const tables: TableSpec[] = [
     }),
     patch: { name: "Hijacked" },
   },
-  // Slice 2.4: one draft contract per organisation with a site, a rate card of one line and a
-  // WHT rate. Seeded with the secret key (the rate tables have no write grants).
+  {
+    table: "site_checkpoints",
+    ...byOrg,
+    // Slice 2.2. Seeds its own client and site (this file loads before people.ts). qr_token is
+    // not granted to signed-in users; it is read through site_checkpoint_tokens.
+    seed: async ({ admin, side }) => {
+      const client = await admin
+        .from("clients")
+        .insert({ organisation_id: side.orgId, name: "Marina VI Tower" })
+        .select("id")
+        .single();
+      if (client.error) throw new Error(client.error.message);
+      const site = await admin
+        .from("sites")
+        .insert({ organisation_id: side.orgId, client_id: client.data.id, name: "Tower lobby" })
+        .select("id")
+        .single();
+      if (site.error) throw new Error(site.error.message);
+      const { error } = await admin
+        .from("site_checkpoints")
+        .insert({ organisation_id: side.orgId, site_id: site.data.id, name: "Gate A" });
+      if (error) throw new Error(error.message);
+    },
+    rowOf: ({ admin, side }) => firstId(admin, "site_checkpoints", side.orgId),
+    attackInsert: ({ victim }) => ({
+      organisation_id: victim.orgId,
+      site_id: randomUUID(),
+      name: "Hijack",
+    }),
+    selectColumns: "id, organisation_id, site_id, name, sort_order, status",
+    patch: { name: "Hijacked" },
+  },
+  // Slice 2.4: one draft contract per organisation with a site and a rate card of one line.
+  // Seeded with the secret key (the rate tables have no write grants).
   {
     table: "contracts",
     ...byOrg,
@@ -81,7 +113,7 @@ export const tables: TableSpec[] = [
       const clientId = client.data.id;
       const site = await admin
         .from("sites")
-        .insert({ organisation_id: side.orgId, client_id: clientId, name: "Gate B" })
+        .insert({ organisation_id: side.orgId, client_id: clientId, name: "Contract Gate" })
         .select("id")
         .single();
       if (site.error) throw new Error(site.error.message);
@@ -120,15 +152,9 @@ export const tables: TableSpec[] = [
         band: "Day",
         unit: "shift",
         rate_kobo: 1_250_000,
+        wht_rate_bps: 200,
       });
       if (line.error) throw new Error(line.error.message);
-      const wht = await admin.from("contract_wht_rates").insert({
-        organisation_id: side.orgId,
-        contract_id: contractId,
-        rate_bps: 500,
-        effective_from: "2026-11-01",
-      });
-      if (wht.error) throw new Error(wht.error.message);
     },
     rowOf: ({ admin, side }) => firstId(admin, "contracts", side.orgId),
     attackInsert: ({ victim }) => ({
@@ -175,17 +201,5 @@ export const tables: TableSpec[] = [
       rate_kobo: 1,
     }),
     patch: { rate_kobo: 1 },
-  },
-  {
-    table: "contract_wht_rates",
-    ...byOrg,
-    rowOf: ({ admin, side }) => firstId(admin, "contract_wht_rates", side.orgId),
-    attackInsert: ({ victim }) => ({
-      organisation_id: victim.orgId,
-      contract_id: randomUUID(),
-      rate_bps: 0,
-      effective_from: "2027-01-01",
-    }),
-    patch: { rate_bps: 0 },
   },
 ];

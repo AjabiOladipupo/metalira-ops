@@ -1,8 +1,8 @@
 /**
- * Slice 2.4: contracts, dated rate cards and WHT rates.
- * - owner, admin and ops_manager write contracts and rate cards; finance reads them and writes
- *   WHT rates; hr and line managers see none of it.
- * - Rate cards and WHT rates have no write grants: only the SQL functions write them, and the
+ * Slice 2.4: contracts, dated rate cards (WHT per line) and client tax settings.
+ * - owner, admin and ops_manager write contracts and rate cards; finance reads them and sets a
+ *   client's tax settings; hr and line managers see none of it.
+ * - Rate cards have no write grants: only the SQL functions write them, and the
  *   database refuses editing a version in force or in the past on a live contract, overlaps and
  *   backdated changes.
  * - Another company can't read or write any of it, through the tables or the functions.
@@ -47,6 +47,7 @@ const DAY = {
   band: "Day",
   unit: "shift",
   rate_kobo: "1250000",
+  ot_rate_kobo: "160000",
   ot_multiplier_bps: 15000,
 };
 const NIGHT = {
@@ -167,7 +168,10 @@ afterAll(async () => {
 describe("contracts", () => {
   it("creates a draft with its sites, the next CTR reference and VAT from the company", async () => {
     const first = await newContract(ops, {}, [siteA, siteB]);
-    const second = await newContract(ops, { name: "Gate B patrols", type: "per_visit" });
+    const second = await newContract(ops, {
+      name: "Gate B patrols",
+      type: "per_visit",
+    });
     const { data } = await admin
       .from("contracts")
       .select("id, reference, status, vat_applies, contract_sites(site_id)")
@@ -214,19 +218,7 @@ describe("contracts", () => {
   it("lets finance read but not write, and hides contracts from hr and line managers", async () => {
     const id = await newContract(ops);
     await saveDraft(id);
-    const wht = await owner.client.rpc("add_contract_wht_rate", {
-      p_organisation_id: owner.orgId,
-      p_contract_id: id,
-      p_rate_bps: 500,
-      p_effective_from: start,
-    });
-    expect(wht.error).toBeNull();
-    for (const table of [
-      "contracts",
-      "rate_cards",
-      "contract_wht_rates",
-      "contract_sites",
-    ] as const) {
+    for (const table of ["contracts", "rate_cards", "contract_sites"] as const) {
       const fin = await finance.client.from(table).select("id").eq("organisation_id", owner.orgId);
       expect(fin.data?.length, table).toBeGreaterThan(0);
       for (const who of [hr, lineManager]) {
@@ -322,7 +314,7 @@ describe("rate cards", () => {
       .eq("rate_card_id", card)
       .order("sort_order");
     expect(lines).toEqual([
-      { band: "Day", rate_kobo: "1250000", ot_rate_kobo: null, currency: "NGN" },
+      { band: "Day", rate_kobo: "1250000", ot_rate_kobo: "160000", currency: "NGN" },
       { band: "Night", rate_kobo: "1500000", ot_rate_kobo: "190000", currency: "NGN" },
     ]);
     const audit = await lastAudit(card, "rate_card.draft_saved");
@@ -344,6 +336,32 @@ describe("rate cards", () => {
     expect(await versions(id)).toEqual([]);
   });
 
+  it("says why when an amount isn't whole kobo, and takes a multiplier alone on hourly lines", async () => {
+    const id = await newContract(ops);
+    const junk = await ops.client.rpc("save_draft_rate_card", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: start,
+      p_lines: [{ ...DAY, rate_kobo: "1,250,000" }] as Json,
+    });
+    expect(junk.error?.code).toBe("MLRC8");
+    const hourly = await ops.client.rpc("save_draft_rate_card", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: start,
+      p_lines: [
+        {
+          role: "Guard",
+          band: "Relief",
+          unit: "hour",
+          rate_kobo: "150000",
+          ot_multiplier_bps: 15000,
+        },
+      ] as Json,
+    });
+    expect(hourly.error).toBeNull();
+  });
+
   it("refuses fractions, floats and duplicate keys in the lines", async () => {
     const id = await newContract(ops);
     for (const lines of [
@@ -351,6 +369,9 @@ describe("rate cards", () => {
       [{ ...DAY, rate_kobo: 1250000 }],
       [DAY, { ...DAY, role: "guard", band: "DAY" }],
       [{ ...DAY, rate_kobo: "0" }],
+      [{ ...DAY, rate_kobo: "12e5" }],
+      // A multiplier on a shift line can't make an hourly overtime rate.
+      [{ ...DAY, ot_rate_kobo: null }],
       [],
     ]) {
       const { error } = await ops.client.rpc("save_draft_rate_card", {
@@ -507,101 +528,113 @@ describe("rate cards", () => {
   });
 });
 
-describe("contract WHT rates", () => {
-  it("is written by owner, admin and finance only", async () => {
+describe("WHT per rate line and client tax settings", () => {
+  it("defaults each line's WHT from its service type, keeps a typed rate, and refuses junk", async () => {
     const id = await newContract(ops);
-    const byOps = await ops.client.rpc("add_contract_wht_rate", {
-      p_organisation_id: owner.orgId,
-      p_contract_id: id,
-      p_rate_bps: 500,
-      p_effective_from: start,
-    });
-    expect(byOps.error?.code).toBe(PERMISSION_DENIED);
-    const withWht = await ops.client.rpc("create_contract", {
-      p_organisation_id: owner.orgId,
-      p_contract: {
-        client_id: clientId,
-        name: "Ops WHT",
-        type: "per_job",
-        start_date: start,
-      } as Json,
-      p_wht_rate_bps: 500,
-    });
-    expect(withWht.error?.code).toBe(PERMISSION_DENIED);
-    const { data: wht, error } = await finance.client.rpc("add_contract_wht_rate", {
-      p_organisation_id: owner.orgId,
-      p_contract_id: id,
-      p_rate_bps: 500,
-      p_effective_from: start,
-    });
-    expect(error).toBeNull();
-    expect((await lastAudit(wht!, "contract_wht.rate_added"))?.actor_id).toBe(finance.id);
-    const direct = await owner.client
-      .from("contract_wht_rates")
-      .update({ rate_bps: 0 })
-      .eq("id", wht!);
-    expect(direct.error?.code).toBe(PERMISSION_DENIED);
+    const card = await saveDraft(id, [
+      { role: "Cleaner", unit: "month", rate_kobo: "90000000" },
+      { role: "Management", unit: "month", rate_kobo: "10000000", service_type: "management_fee" },
+      { role: "Generator", unit: "month", rate_kobo: "5000000", service_type: "rent_hire" },
+      {
+        role: "Consumables",
+        unit: "job",
+        rate_kobo: "1000000",
+        service_type: "goods",
+        wht_rate_bps: 0,
+      },
+    ]);
+    const { data } = await admin
+      .from("rate_card_lines")
+      .select("role, service_type, wht_rate_bps")
+      .eq("rate_card_id", card)
+      .order("sort_order");
+    expect(data).toEqual([
+      { role: "Cleaner", service_type: "services", wht_rate_bps: 200 },
+      { role: "Management", service_type: "management_fee", wht_rate_bps: 500 },
+      { role: "Generator", service_type: "rent_hire", wht_rate_bps: 1000 },
+      { role: "Consumables", service_type: "goods", wht_rate_bps: 0 },
+    ]);
+    for (const bad of [
+      { ...DAY, service_type: "lunch" },
+      { ...DAY, wht_rate_bps: 2500 },
+      { ...DAY, wht_rate_bps: "200" },
+    ]) {
+      const { error } = await ops.client.rpc("save_draft_rate_card", {
+        p_organisation_id: owner.orgId,
+        p_contract_id: id,
+        p_effective_from: start,
+        p_lines: [bad] as Json,
+      });
+      expect(error, JSON.stringify(bad)).not.toBeNull();
+    }
   });
 
-  it("dates versions, refuses overlaps and freezes the past once live", async () => {
-    const { data: id, error } = await owner.client.rpc("create_contract", {
+  it("freezes a live line's WHT like the rest of the line", async () => {
+    const id = await newContract(ops);
+    const card = await saveDraft(id);
+    await activate(id);
+    await expect(
+      db.query("update public.rate_card_lines set wht_rate_bps = 500 where rate_card_id = $1", [
+        card,
+      ]),
+    ).rejects.toThrow(/never edited/);
+  });
+
+  it("is set by owner, admin and finance, audited with the reason; hr can't read it", async () => {
+    const byOps = await ops.client.rpc("set_client_tax_settings", {
       p_organisation_id: owner.orgId,
-      p_contract: {
-        client_id: clientId,
-        name: "Owner WHT",
-        type: "manned_post",
-        start_date: start,
-      } as Json,
-      p_wht_rate_bps: 500,
+      p_client_id: clientId,
+      p_deducts_wht: "not_deducted",
+      p_withholds_vat: true,
+    });
+    expect(byOps.error?.code).toBe(PERMISSION_DENIED);
+    const direct = await owner.client
+      .from("clients")
+      .update({ withholds_vat: true } as never)
+      .eq("id", clientId);
+    expect(direct.error?.code).toBe(PERMISSION_DENIED);
+
+    const { error } = await finance.client.rpc("set_client_tax_settings", {
+      p_organisation_id: owner.orgId,
+      p_client_id: clientId,
+      p_deducts_wht: "not_deducted",
+      p_withholds_vat: true,
+      p_reason: "Government client",
     });
     expect(error).toBeNull();
-    await activate(id!);
-    const { data: rows } = await admin
-      .from("contract_wht_rates")
-      .select("id, rate_bps, effective_from")
-      .eq("contract_id", id!);
-    expect(rows?.map((r) => [r.rate_bps, r.effective_from])).toEqual([[500, start]]);
-    const firstId = rows![0]!.id;
+    const { data: billing } = await ops.client.rpc("client_billing", {
+      p_organisation_id: owner.orgId,
+      p_client_id: clientId,
+    });
+    expect(billing?.[0]).toMatchObject({ deducts_wht: "not_deducted", withholds_vat: true });
+    const hidden = await hr.client.rpc("client_billing", {
+      p_organisation_id: owner.orgId,
+      p_client_id: clientId,
+    });
+    expect(hidden.data ?? []).toEqual([]);
+    const audit = await lastAudit(clientId, "clients.tax_settings_changed");
+    expect(audit?.actor_id).toBe(finance.id);
+    expect(audit?.before).toEqual({ deducts_wht: "expected", withholds_vat: false });
 
-    await expect(
-      db.query("update public.contract_wht_rates set rate_bps = 1000 where id = $1", [firstId]),
-    ).rejects.toThrow(/already in force/);
-    const past = await finance.client.rpc("add_contract_wht_rate", {
+    const bad = await finance.client.rpc("set_client_tax_settings", {
       p_organisation_id: owner.orgId,
-      p_contract_id: id!,
-      p_rate_bps: 1000,
-      p_effective_from: addDays(today, -2),
+      p_client_id: clientId,
+      p_deducts_wht: "sometimes",
+      p_withholds_vat: false,
     });
-    expect(past.error?.code).toBe("MLWH2");
-    const from = addDays(today, 10);
-    const next = await finance.client.rpc("add_contract_wht_rate", {
+    expect(bad.error?.code).toBe("23514");
+    const foreign = await other.client.rpc("set_client_tax_settings", {
       p_organisation_id: owner.orgId,
-      p_contract_id: id!,
-      p_rate_bps: 1000,
-      p_effective_from: from,
+      p_client_id: clientId,
+      p_deducts_wht: "expected",
+      p_withholds_vat: false,
     });
-    expect(next.error).toBeNull();
-    const again = await finance.client.rpc("add_contract_wht_rate", {
-      p_organisation_id: owner.orgId,
-      p_contract_id: id!,
-      p_rate_bps: 750,
-      p_effective_from: from,
-    });
-    expect(again.error?.code).toBe("MLWH3");
-    const { data: after } = await admin
-      .from("contract_wht_rates")
-      .select("rate_bps, effective_from, effective_to")
-      .eq("contract_id", id!)
-      .order("effective_from");
-    expect(after).toEqual([
-      { rate_bps: 500, effective_from: start, effective_to: addDays(from, -1) },
-      { rate_bps: 1000, effective_from: from, effective_to: null },
-    ]);
+    expect(foreign.error?.code).toBe(PERMISSION_DENIED);
   });
 });
 
 describe("another company", () => {
-  it("can't read or write contracts, rate cards or WHT through the functions", async () => {
+  it("can't read or write contracts or rate cards through the functions", async () => {
     const id = await newContract(ops);
     const card = await saveDraft(id);
     for (const org of [owner.orgId, other.orgId]) {
@@ -621,12 +654,6 @@ describe("another company", () => {
         other.client.rpc("cancel_rate_card_version", {
           p_organisation_id: org,
           p_rate_card_id: card,
-        }),
-        other.client.rpc("add_contract_wht_rate", {
-          p_organisation_id: org,
-          p_contract_id: id,
-          p_rate_bps: 500,
-          p_effective_from: start,
         }),
         other.client.rpc("update_draft_contract", {
           p_organisation_id: org,
