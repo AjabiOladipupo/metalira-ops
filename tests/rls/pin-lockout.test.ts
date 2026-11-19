@@ -205,7 +205,7 @@ describe("the hold after 3 lockouts in 24 hours", () => {
     expect(await begin(worker.staffId)).toMatchObject({ outcome: "held", pin_hash: null });
 
     const { rows } = await db.query<{ action: string }>(
-      "select action from public.audit_log where entity_id = $1 and action like 'worker_auth.%' order by at",
+      "select action from public.audit_log where entity_id = $1 and action like 'worker_auth.%' order by at, action desc",
       [worker.id],
     );
     expect(rows.map((r) => r.action)).toEqual([
