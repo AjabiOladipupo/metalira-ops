@@ -94,7 +94,7 @@ test("the owner asks, finance approves, and the account shows masked after the h
   await ownerPage.goto("/app/settings");
   await ownerPage.getByRole("link", { name: /Where clients pay/ }).click();
   await expect(ownerPage).toHaveURL(/\/app\/settings\/bank-account$/);
-  await expect(ownerPage.getByTestId("back-link")).toBeVisible();
+  await expect(ownerPage.getByRole("link", { name: "Back to Settings" })).toBeVisible();
   await expect(ownerPage.getByTestId("company-bank-none")).toBeVisible();
 
   const form = await fillAccount(ownerPage, "GTBank", "COASTLINE GUARDS LTD", NUBAN);
@@ -104,9 +104,7 @@ test("the owner asks, finance approves, and the account shows masked after the h
   await expect(preview).not.toContainText(NUBAN);
   await expectNoHorizontalScroll(ownerPage);
   await form.getByRole("button", { name: "Send for approval" }).click();
-  await expect(ownerPage.getByTestId("company-bank-sent")).toContainText("Sent for approval");
-
-  await ownerPage.reload();
+  // The page refreshes with the request waiting (the form goes: one open request at a time).
   const waiting = ownerPage.getByTestId("company-bank-account").filter({ hasText: "New account" });
   await expect(waiting).toHaveAttribute("data-status", "pending");
   // The requester gets no approve button, only withdraw.
