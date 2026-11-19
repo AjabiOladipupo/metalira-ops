@@ -30,7 +30,7 @@ export function ThemeButton({ className }: { className?: string }) {
           aria-label={`Theme: ${current.label}`}
           data-testid="theme-button"
           className={cn(
-            "inline-flex size-11 shrink-0 items-center justify-center rounded-md text-fg-muted hover:bg-surface hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal",
+            "inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-fg-muted hover:bg-surface hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal",
             className,
           )}
         >

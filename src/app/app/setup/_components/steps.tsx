@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
 import { previousSetupStep, resumeSetupSlug, setupStepHref, type SetupSlug } from "@/lib/company";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { COLLECTION_RAILS } from "@/server/billing/collection-rails";
+import { listSetupClients, type SetupClientRow } from "@/server/business/clients-data";
 import { continueFromClients, finishSetup } from "@/server/identity/company-actions";
 import {
   getActiveCompany,
@@ -16,6 +19,7 @@ import { InvoicesForm } from "../../_company/invoices-form";
 import { LogoForm } from "../../_company/logo-form";
 import { PlanForm } from "../../_company/plan-form";
 import { ImportWorkspace } from "../../people/import/_components/import-workspace";
+import { QuickAddClientForm } from "./quick-add-client";
 import { SetupFrame } from "./setup-frame";
 import { StepForm } from "./step-form";
 
@@ -89,22 +93,60 @@ export async function InvoicesStep() {
   );
 }
 
+function SetupClientsTable({ rows }: { rows: SetupClientRow[] }) {
+  return (
+    <DataTable
+      caption="Clients added"
+      columns={[
+        { key: "client", header: "Client", cell: (row) => <strong>{row.name}</strong> },
+        {
+          key: "email",
+          header: "Billing email",
+          cell: (row) => row.billingEmail ?? <span className="text-fg-muted">Not set</span>,
+        },
+        {
+          key: "site",
+          header: "Site",
+          cell: (row) =>
+            row.siteNames.length ? (
+              row.siteNames.join(", ")
+            ) : (
+              <span className="text-fg-muted">Not set</span>
+            ),
+        },
+        {
+          key: "rate",
+          header: "Rate",
+          cell: () => <span className="text-fg-muted">Add a contract</span>,
+        },
+      ]}
+      rows={rows}
+      getRowId={(row) => row.id}
+      empty={
+        <p className="m-0 px-4 py-6 text-center text-sm text-fg-muted">
+          No clients yet. Add the first company you work for, or skip this step.
+        </p>
+      }
+    />
+  );
+}
+
 export async function ClientsStep() {
   const company = await requireCompany();
+  const clients = await listSetupClients(await createServerSupabase(), company.id);
   return (
     <SetupFrame
       current="clients"
       company={company}
       title="Clients and contracts"
-      description="The companies you service. Rates here price every invoice; the billing email is where those invoices go."
+      description="The companies you service. The billing email is where invoices go; rates come with each contract."
     >
-      <div className="flex flex-col gap-3 rounded-xl border border-dashed border-line px-6 py-10 text-center">
-        <p className="m-0 type-body-lg">Clients, sites and rates arrive in Phase 2.</p>
-        <p className="m-0 text-sm text-fg-muted">
-          Client, project and site names in your employee file are kept. New names become new
-          clients you can finish later.
-        </p>
-      </div>
+      <QuickAddClientForm />
+      <SetupClientsTable rows={clients} />
+      <p className="m-0 text-sm text-fg-muted">
+        Client, project and site names in your employee file are kept. New names become clients you
+        can finish later under Clients.
+      </p>
       <StepForm action={continueFromClients} backHref={setupStepHref("invoices")} />
     </SetupFrame>
   );

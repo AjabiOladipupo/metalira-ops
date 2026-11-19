@@ -57,7 +57,7 @@ export function OrgSwitcher({
 
   if (options.length === 1) {
     return (
-      <span className="inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-md border border-line px-3 text-sm font-medium">
+      <span className="inline-flex h-10 max-w-full min-w-0 items-center gap-2 rounded-lg border border-line px-3 text-sm font-medium">
         {logoUrl ? <CompanyLogo src={logoUrl} /> : null}
         <span data-testid="org-switcher" className="truncate">
           {active.name}

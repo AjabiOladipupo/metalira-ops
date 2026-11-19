@@ -579,6 +579,8 @@ const commitResultSchema = z.object({
 export const commitImportSpec: MutationSpec<typeof commitImportSchema, CommittedImport> = {
   schema: commitImportSchema,
   roles: PEOPLE_EDITORS,
+  // Workers, pay rates and name-only clients created here are logged as coming from an import.
+  channel: "import",
   run: async ({ supabase, organisationId, userId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
     if (batch.status === "uploaded") {

@@ -80,7 +80,7 @@ export function TopBar({
         </Select>
       </div>
 
-      <label className="order-last flex h-10 min-w-0 basis-full items-center gap-2 rounded-md bg-surface px-3 text-fg-muted md:order-none md:grow md:basis-60">
+      <label className="order-last flex h-10 min-w-0 basis-full items-center gap-2 rounded-lg bg-surface px-3 text-fg-muted md:order-none md:grow md:basis-60">
         <Search strokeWidth={1.75} className="size-4 shrink-0" aria-hidden />
         <span className="sr-only">Search</span>
         <input
@@ -103,5 +103,5 @@ export function TopBar({
 
 /** Same footprint as the company switcher, while the session loads. */
 export function OrgSwitcherSkeleton() {
-  return <span aria-hidden className="h-10 w-40 max-w-full rounded-md border border-line" />;
+  return <span aria-hidden className="h-10 w-40 max-w-full rounded-lg border border-line" />;
 }

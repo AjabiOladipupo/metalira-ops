@@ -144,7 +144,7 @@ describe.each(TABLES)("$table", (spec) => {
       const id = await spec.rowOf({ admin, side: me });
       const { data, error } = await untyped(me.client)
         .from(spec.table)
-        .select("*")
+        .select(spec.selectColumns ?? "*")
         .eq(spec.key, id);
       expect(error).toBeNull();
       expect(data).toHaveLength(1);
@@ -160,7 +160,7 @@ describe.each(TABLES)("$table", (spec) => {
       const victimId = await spec.rowOf({ admin, side: user(victimKey) });
       const { data, error } = await untyped(attacker.client)
         .from(spec.table)
-        .select("*")
+        .select(spec.selectColumns ?? "*")
         .eq(spec.key, victimId);
       expect(error).toBeNull();
       expect(data).toEqual([]);
@@ -169,9 +169,11 @@ describe.each(TABLES)("$table", (spec) => {
     it("unfiltered select returns none of the victim's rows", async () => {
       const attacker = user(attackerKey);
       const victimValue = spec.tenantValue(user(victimKey));
-      const { data, error } = await untyped(attacker.client).from(spec.table).select("*");
+      const { data, error } = await untyped(attacker.client)
+        .from(spec.table)
+        .select(spec.selectColumns ?? "*");
       expect(error).toBeNull();
-      const rows = (data ?? []) as Record<string, unknown>[];
+      const rows = (data ?? []) as unknown as Record<string, unknown>[];
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.filter((row) => row[spec.tenantColumn] === victimValue)).toEqual([]);
     });
@@ -197,7 +199,7 @@ describe.each(TABLES)("$table", (spec) => {
         .from(spec.table)
         .update(spec.patch)
         .eq(spec.key, victimId)
-        .select();
+        .select(spec.selectColumns ?? "*");
       if (error) {
         expect(error.code).toBe(PERMISSION_DENIED);
       } else {
@@ -216,7 +218,7 @@ describe.each(TABLES)("$table", (spec) => {
         .from(spec.table)
         .delete()
         .eq(spec.key, victimId)
-        .select();
+        .select(spec.selectColumns ?? "*");
       if (error) {
         expect(error.code).toBe(PERMISSION_DENIED);
       } else {
