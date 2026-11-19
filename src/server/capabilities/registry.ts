@@ -1,5 +1,6 @@
 import "server-only";
 
+import { lagosToday } from "@/lib/dates";
 import { MANAGER_ROLES } from "@/lib/roles";
 import { listClients, loadClientsSummary } from "@/server/business/clients-data";
 import {
@@ -12,6 +13,17 @@ import {
   updateClientSpec,
   updateContactSpec,
 } from "@/server/business/clients";
+import {
+  CONTRACT_READERS,
+  addRateCardVersionSpec,
+  addWhtRateSpec,
+  cancelRateCardVersionSpec,
+  cancelWhtRateSpec,
+  createContractSpec,
+  saveDraftRateCardSpec,
+  updateContractSpec,
+} from "@/server/business/contracts";
+import { listContracts, loadContractsSummary } from "@/server/business/contracts-data";
 import {
   advanceSetupSpec,
   completeSetupSpec,
@@ -67,7 +79,16 @@ import {
   updateWorkerSpec,
 } from "@/server/people/workers";
 
-import { previewAddContact, previewCreateClient, previewQuickAddClient } from "./previews";
+import {
+  previewAddContact,
+  previewAddRateCardVersion,
+  previewAddWhtRate,
+  previewCreateClient,
+  previewCreateContract,
+  previewQuickAddClient,
+  previewSaveDraftRateCard,
+  previewUpdateContract,
+} from "./previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -90,6 +111,7 @@ const AUTH = "Sign-in and account flows are never run by the agent.";
 const NO_PREVIEW = "Changes several rows or money and has no preview yet.";
 const SECOND_APPROVER = "Decides a two-person request: the agent is never the second approver.";
 const REVEAL = "Shows personal data in full: the agent sees masked values only.";
+const RATES = "Changes what clients are billed (kind money): kept to people.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -822,9 +844,119 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: "Promotes another contact; needs a preview first.",
   },
+
+  // -------------------------------------------------------------------------
+  // Contracts, rate cards and WHT (business/contract-actions.ts, slice 2.4)
+  // -------------------------------------------------------------------------
+  {
+    name: "contracts.summary",
+    description:
+      "Counts contracts by status, and those with no rate card or a rate change scheduled.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) =>
+      loadContractsSummary(supabase, organisationId, lagosToday()),
+    agent: true,
+  },
+  {
+    name: "contracts.list",
+    description: "Lists contracts with their client, type, status, dates and rate card versions.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => listContracts(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "contracts.create",
+    description: "Adds a draft contract for a client with its type, dates, terms, VAT and sites.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(createContractSpec),
+    changes: "many",
+    action: at("business/contract-actions", "createContractAction"),
+    preview: previewCreateContract,
+    agent: true,
+  },
+  {
+    name: "contracts.update",
+    description: "Changes a draft contract's terms, dates and sites.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(updateContractSpec),
+    changes: "many",
+    action: at("business/contract-actions", "updateContractAction"),
+    preview: previewUpdateContract,
+    agent: true,
+  },
+  {
+    name: "rate_cards.save_draft",
+    description: "Saves the rate card of a draft contract, replacing what was there.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(saveDraftRateCardSpec),
+    changes: "many",
+    action: at("business/contract-actions", "saveDraftRateCardAction"),
+    preview: previewSaveDraftRateCard,
+    agent: false,
+    agentNote: RATES,
+  },
+  {
+    name: "rate_cards.add_version",
+    description: "Changes a contract's rates from a date; the current rates end the day before.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(addRateCardVersionSpec),
+    changes: "many",
+    action: at("business/contract-actions", "addRateCardVersionAction"),
+    preview: previewAddRateCardVersion,
+    agent: false,
+    agentNote: RATES,
+  },
+  {
+    name: "rate_cards.cancel_version",
+    description: "Cancels a rate change that hasn't started and reopens the rates before it.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(cancelRateCardVersionSpec),
+    changes: "many",
+    action: at("business/contract-actions", "cancelRateCardVersionAction"),
+    agent: false,
+    agentNote: RATES,
+  },
+  {
+    name: "contract_wht.add_rate",
+    description: "Sets a contract's withholding tax rate from a date; the current rate ends before.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(addWhtRateSpec),
+    changes: "many",
+    action: at("business/contract-actions", "addWhtRateAction"),
+    preview: previewAddWhtRate,
+    agent: false,
+    agentNote: RATES,
+  },
+  {
+    name: "contract_wht.cancel_rate",
+    description: "Cancels a WHT rate that hasn't started and reopens the rate before it.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(cancelWhtRateSpec),
+    changes: "many",
+    action: at("business/contract-actions", "cancelWhtRateAction"),
+    agent: false,
+    agentNote: RATES,
+  },
 ];
 
-/** The capability with this name, or undefined. */
+/** The capability with this name, or undefined. */ */
 export function findCapability(name: string): Capability | undefined {
   return CAPABILITIES.find((c) => c.name === name);
 }

@@ -7,6 +7,7 @@ import { NO_ACCESS_PATH } from "@/lib/auth/routes";
 import type { ManagerRole } from "@/lib/roles";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { canEditClients, canEditContacts } from "@/server/business/clients";
+import { canEditContracts, canEditWht } from "@/server/business/contracts";
 import { getPageSession } from "@/server/identity/session";
 import type { Database } from "@/types/db";
 
@@ -18,6 +19,10 @@ export interface ClientsPageContext {
   canEdit: boolean;
   /** Also finance. */
   canEditContacts: boolean;
+  /** Contracts, their sites and rate cards: owner, admin, ops_manager (slice 2.4). */
+  canEditContracts: boolean;
+  /** A contract's WHT rates: owner, admin, finance. */
+  canEditWht: boolean;
 }
 
 /**
@@ -34,5 +39,7 @@ export async function clientsPageContext(): Promise<ClientsPageContext> {
     role,
     canEdit: canEditClients(role),
     canEditContacts: canEditContacts(role),
+    canEditContracts: canEditContracts(role),
+    canEditWht: canEditWht(role),
   };
 }
