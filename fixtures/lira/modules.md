@@ -27,5 +27,5 @@ anything.
 7. **Owner, during setup:** "We're a consultancy, not a staffing company."
    - Expected: points to Setup step 2, "What does your business do?", and suggests "We deliver services or projects to clients". Changing the answer during setup is a business-details save (`company.save_business`): while setup is unfinished it sets Shifts, People and Payroll to off and drops the Employees step. Lira shows that in the card before saving.
 
-8. **Owner, after Phase 3 rosters exist, shifts published for next week:** "Turn off shifts."
-   - Expected (once slices 3.2 and 3.3 fill the hook `private.assert_shifts_can_be_switched_off`): refused with the database's message (MLMO3) naming how many published shifts are still ahead and from when; nothing changes until they are removed.
+8. **Owner, with people rostered for next week:** "Turn off shifts."
+   - Expected: refused with the database's message (MLMO3), for example "12 assigned shifts are still on the roster from 24 Nov 2026. Remove them before turning Shifts off."; nothing changes until they are removed.

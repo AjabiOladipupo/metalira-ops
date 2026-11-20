@@ -348,3 +348,85 @@ describe("function grants", () => {
     }
   });
 });
+
+describe("turning Shifts off while people are rostered (MLMO3, after slice 3.2)", () => {
+  /**
+   * One shift_assignments row for company A, written as the database owner with triggers and
+   * foreign keys off (session_replication_role = replica): the guard reads only the
+   * organisation, status and date, so no contract, post or worker is needed.
+   */
+  async function assignment(offsetDays: number, status: "assigned" | "removed" = "assigned") {
+    const db = await pgClient();
+    try {
+      await db.query("begin");
+      await db.query("set local session_replication_role = replica");
+      const { rows } = await db.query<{ id: string }>(
+        `insert into public.shift_assignments
+           (organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status)
+         select $1, gen_random_uuid(), gen_random_uuid(), d, gen_random_uuid(),
+                d + time '06:00', d + time '18:00', $3
+         from (select private.org_today($1) + $2::int as d) t
+         returning id`,
+        [a.orgId, offsetDays, status],
+      );
+      await db.query("commit");
+      return rows[0]!.id;
+    } finally {
+      await db.end();
+    }
+  }
+
+  async function drop(ids: string[]) {
+    const db = await pgClient();
+    try {
+      await db.query("begin");
+      await db.query("set local session_replication_role = replica");
+      await db.query("delete from public.shift_assignments where id = any($1::uuid[])", [ids]);
+      await db.query("commit");
+    } finally {
+      await db.end();
+    }
+  }
+
+  it("refuses while someone is assigned today or later, naming the count and first date", async () => {
+    await reset(a.orgId);
+    const ids = [await assignment(0), await assignment(3)];
+    try {
+      const { error } = await setModules(a.client, a.orgId, {
+        shifts: false,
+        people: true,
+        payroll: true,
+      });
+      expect(error?.code).toBe("MLMO3");
+      expect(error?.message).toMatch(
+        /^2 assigned shifts are still on the roster from \d{1,2} \w{3} \d{4}\./,
+      );
+      expect(await switches(a.orgId)).toMatchObject(ALL_ON);
+      // A setup change to services hits the same guard.
+      const services = await a.client.rpc("set_company_business_type", {
+        p_organisation_id: a.orgId,
+        p_business_type: "services",
+      });
+      expect(services.error?.code).toBe("MLMO3");
+    } finally {
+      await drop(ids);
+    }
+  });
+
+  it("allows it with only past or removed assignments", async () => {
+    await reset(a.orgId);
+    const ids = [await assignment(-1), await assignment(2, "removed")];
+    try {
+      const { error } = await setModules(a.client, a.orgId, {
+        shifts: false,
+        people: true,
+        payroll: true,
+      });
+      expect(error).toBeNull();
+      expect(await switches(a.orgId)).toMatchObject({ shifts_enabled: false });
+    } finally {
+      await drop(ids);
+      await reset(a.orgId);
+    }
+  });
+});
