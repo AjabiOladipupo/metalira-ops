@@ -45,7 +45,7 @@ export function NoShiftToday() {
  */
 export async function ShiftTodayCard() {
   const lookup = await lookupWorkerPageSession();
-  if (lookup.type !== "worker") return <NoShiftToday />;
+  if (lookup.type !== "worker" || !lookup.session.shiftsEnabled) return <NoShiftToday />;
   const supabase = await createServerSupabase();
   const { timeZone, today, nowMs } = await loadCompanyClock(
     supabase,

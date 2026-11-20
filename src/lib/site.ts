@@ -20,4 +20,5 @@ export const MARKETING_PATHS = [
   "/for/finance",
   "/for/operations",
   "/for/workers",
+  "/for/freelancers",
 ] as const;

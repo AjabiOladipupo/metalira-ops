@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 
 import { workerMessages } from "@/lib/messages/worker";
 import { cn } from "@/lib/utils";
-import { WORKER_NAV, activeWorkerNav, type WorkerNavKey } from "@/lib/worker-nav";
+import { activeWorkerNav, workerNavFor, type WorkerNavKey } from "@/lib/worker-nav";
 
 const ICONS: Record<WorkerNavKey, LucideIcon> = {
   home: House,
@@ -41,16 +41,23 @@ function ItemContent({ Icon, label }: { Icon: LucideIcon; label: string }) {
 /**
  * The worker app's bottom nav: five items, 20px icons, the active one in signal violet
  * (DESIGN_SYSTEM.md). Fixed to the bottom of the phone column, clear of the home indicator.
+ * Clock is left out when the company has Shifts off (slice 3.0), leaving four.
  */
-export function BottomNav() {
+export function BottomNav({ shiftsEnabled = true }: { shiftsEnabled?: boolean }) {
   const active = activeWorkerNav(usePathname());
+  const items = workerNavFor(shiftsEnabled);
   return (
     <nav
       aria-label={workerMessages.nav.label}
       className="fixed inset-x-0 bottom-0 z-20 flex justify-center border-t border-line bg-background pb-[env(safe-area-inset-bottom)]"
     >
-      <ul className="m-0 grid w-full max-w-[430px] list-none grid-cols-5 p-0">
-        {WORKER_NAV.map((item) => {
+      <ul
+        className={cn(
+          "m-0 grid w-full max-w-[430px] list-none p-0",
+          items.length === 5 ? "grid-cols-5" : "grid-cols-4",
+        )}
+      >
+        {items.map((item) => {
           const current = item.key === active;
           return (
             <li key={item.key} className="min-w-0">

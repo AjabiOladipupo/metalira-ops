@@ -1,4 +1,14 @@
+import { Suspense } from "react";
+
+import { lookupWorkerPageSession } from "@/server/identity/worker-session";
+
 import { BottomNav } from "../_components/bottom-nav";
+
+/** The bottom nav without Clock when the worker's company has Shifts off (slice 3.0). */
+async function WorkerBottomNav() {
+  const lookup = await lookupWorkerPageSession();
+  return <BottomNav shiftsEnabled={lookup.type !== "worker" || lookup.session.shiftsEnabled} />;
+}
 
 /**
  * Signed-in worker screens (slice 1.10): the page above, the bottom nav below. Sign-in and
@@ -11,7 +21,9 @@ export default function WorkerAppLayout({ children }: { children: React.ReactNod
       <div className="flex flex-1 flex-col pb-[calc(4rem+env(safe-area-inset-bottom))]">
         {children}
       </div>
-      <BottomNav />
+      <Suspense fallback={<BottomNav />}>
+        <WorkerBottomNav />
+      </Suspense>
     </>
   );
 }

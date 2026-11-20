@@ -88,6 +88,7 @@ export interface AssignResult {
 }
 
 export const assignShiftSpec: MutationSpec<typeof assignShiftSchema, AssignResult> = {
+  module: "shifts",
   schema: assignShiftSchema,
   roles: ROSTER_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -111,6 +112,7 @@ export const removeAssignmentSpec: MutationSpec<
   typeof removeAssignmentSchema,
   { assignmentId: string }
 > = {
+  module: "shifts",
   schema: removeAssignmentSchema,
   roles: ROSTER_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -170,6 +172,7 @@ export function toCopyWeekResult(value: unknown, weekStart: string): CopyWeekRes
 }
 
 export const copyLastWeekSpec: MutationSpec<typeof copyLastWeekSchema, CopyWeekResult> = {
+  module: "shifts",
   schema: copyLastWeekSchema,
   roles: ROSTER_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -203,6 +206,7 @@ export const publishRosterSpec: MutationSpec<
 > = {
   schema: publishRosterSchema,
   roles: ROSTER_EDITORS,
+  module: "shifts",
   run: async ({ supabase, organisationId, data }) => {
     const { data: result, error } = await supabase.rpc("publish_roster", {
       p_organisation_id: organisationId,

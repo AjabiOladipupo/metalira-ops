@@ -15,6 +15,7 @@ import {
   saveBusinessSpec,
   saveInvoicesSpec,
   savePlanSpec,
+  setModulesSpec,
   uploadLogoSpec,
 } from "./company-mutations";
 import { MutationError, mutate, type MutationSpec } from "./mutate";
@@ -85,15 +86,16 @@ export async function saveInvoices(_prev: CompanyFormState, formData: FormData) 
   return saveStep(saveInvoicesSpec, formData, "clients");
 }
 
-/** Step 4 Continue. */
+/** Step 4 Continue: Employees next, or Ready for a services business (no Employees step). */
 export async function continueFromClients(): Promise<CompanyFormState> {
+  let next: SetupSlug;
   try {
-    await mutate(advanceSetupSpec, { step: "clients" });
+    next = await mutate(advanceSetupSpec, { step: "clients" });
   } catch (error) {
     return refusal(error);
   }
   refreshApp();
-  redirect(setupStepHref("employees"));
+  redirect(setupStepHref(next));
 }
 
 /** Step 5 Continue: marks setup complete and shows Ready. */
@@ -127,4 +129,23 @@ export async function uploadLogo(
   }
   refreshApp();
   return { ok: true, status: 200, message: "Logo saved" };
+}
+
+/**
+ * Settings > Company > Modules (slice 3.0): switches Shifts, People and Payroll on or off.
+ * Turning a part off needs the form's confirm step; nothing is deleted.
+ */
+export async function saveModules(
+  _prev: CompanyFormState,
+  formData: FormData,
+): Promise<CompanyFormState> {
+  const values = formFields(formData);
+  let changed: boolean;
+  try {
+    ({ changed } = await mutate(setModulesSpec, values));
+  } catch (error) {
+    return refusal(error, values);
+  }
+  refreshApp();
+  return { ok: true, status: 200, message: changed ? "Saved" : "Nothing changed" };
 }

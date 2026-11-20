@@ -71,6 +71,13 @@ function DayGroup({
 
 async function Shifts() {
   const session = await requireWorkerPageSession();
+  if (!session.shiftsEnabled) {
+    return (
+      <p className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]" data-testid="shifts-off">
+        {workerMessages.shiftsOff}
+      </p>
+    );
+  }
   const supabase = await createServerSupabase();
   const { timeZone, today } = await loadCompanyClock(supabase, session.organisationId);
   const shifts = await loadMyPublishedShifts(supabase, addDays(today, -7), addDays(today, 13));

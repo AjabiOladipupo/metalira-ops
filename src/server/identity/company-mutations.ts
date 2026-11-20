@@ -2,17 +2,20 @@ import "server-only";
 
 import { z } from "zod";
 
+import { modulesProblem, modulesTurnedOff, type Modules } from "@/lib/modules";
 import type { ManagerRole } from "@/lib/roles";
 import type { Database } from "@/types/db";
 
 import {
   ORG_ASSETS_BUCKET,
   advanceStepSchema,
-  businessStepSchema,
+  businessStepFields,
   checkLogo,
   invoicesStepSchema,
   logoObjectPath,
+  modulesSchema,
   planStepSchema,
+  requirePayDays,
 } from "./company";
 import { MutationError, type MutationContext, type MutationSpec } from "./mutate";
 
@@ -55,7 +58,7 @@ async function reachStep(ctx: MutationContext, step: number): Promise<void> {
 const advance = { advance: z.enum(["yes", "no"]).optional() };
 
 const planSchema = planStepSchema.extend(advance);
-const businessSchema = businessStepSchema.extend(advance);
+const businessSchema = businessStepFields.extend(advance).superRefine(requirePayDays);
 const invoicesSchema = invoicesStepSchema.extend(advance);
 
 export const savePlanSpec = {
@@ -88,9 +91,25 @@ export const saveBusinessSpec = {
       head_office_state: data.headOfficeState,
       address: data.address,
       phone: data.phone,
-      pay_cycle_start_day: data.payCycleStartDay,
-      pay_day: data.payDay,
+      // Left out by a services business (no pay fields on its form): the saved days stay.
+      ...(data.payCycleStartDay !== undefined
+        ? { pay_cycle_start_day: data.payCycleStartDay }
+        : {}),
+      ...(data.payDay !== undefined ? { pay_day: data.payDay } : {}),
     });
+    // What the business does (slice 3.0) goes through its own function: while setup is
+    // unfinished, a change of type also sets the module switches to the type's defaults. It runs
+    // last, so a save refused above never changes the type or the switches.
+    const { error } = await ctx.supabase.rpc("set_company_business_type", {
+      p_organisation_id: ctx.organisationId,
+      p_business_type: data.businessType,
+    });
+    if (error) {
+      if (error.code === "42501") {
+        throw new MutationError("forbidden", "Your role can't make this change.");
+      }
+      throw new Error(`Could not save the business type: ${error.message}`);
+    }
     if (data.advance === "yes") await reachStep(ctx, 3);
   },
 } satisfies MutationSpec<typeof businessSchema, void>;
@@ -111,14 +130,52 @@ export const saveInvoicesSpec = {
   },
 } satisfies MutationSpec<typeof invoicesSchema, void>;
 
-/** Clients and contracts (step 4): clients are saved by their own action; Continue records progress. */
+/** What the company has set up, read as the caller (RLS: members only). */
+async function loadSetupState(
+  ctx: MutationContext,
+): Promise<{ businessType: string; modules: Modules }> {
+  const { data, error } = await ctx.supabase
+    .from("organisations")
+    .select("business_type, shifts_enabled, people_enabled, payroll_enabled")
+    .eq("id", ctx.organisationId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not load the company: ${error.message}`);
+  if (!data) throw new MutationError("forbidden", "Your role can't make this change.");
+  return {
+    businessType: data.business_type,
+    modules: {
+      shifts: data.shifts_enabled,
+      people: data.people_enabled,
+      payroll: data.payroll_enabled,
+    },
+  };
+}
+
+/**
+ * Clients and contracts (step 4) Continue: clients are saved by their own action; this records
+ * progress. A services business has no Employees step (slice 3.0), so for it this finishes setup
+ * and returns "ready"; a workforce business moves on to Employees.
+ */
 export const advanceSetupSpec = {
   schema: advanceStepSchema,
   roles: COMPANY_ROLES,
-  run: async (ctx) => {
-    await reachStep(ctx, ctx.data.step === "clients" ? 5 : 6);
+  run: async (ctx): Promise<"employees" | "ready"> => {
+    if (ctx.data.step === "employees") {
+      await reachStep(ctx, 6);
+      return "ready";
+    }
+    const { businessType } = await loadSetupState(ctx);
+    if (businessType === "services") {
+      const { error } = await ctx.supabase.rpc("complete_company_setup", {
+        p_organisation_id: ctx.organisationId,
+      });
+      if (error) throw new Error(`Could not finish setup: ${error.message}`);
+      return "ready";
+    }
+    await reachStep(ctx, 5);
+    return "employees";
   },
-} satisfies MutationSpec<typeof advanceStepSchema, void>;
+} satisfies MutationSpec<typeof advanceStepSchema, "employees" | "ready">;
 
 const noInput = z.object({});
 
@@ -133,6 +190,51 @@ export const completeSetupSpec = {
     if (error) throw new Error(`Could not finish setup: ${error.message}`);
   },
 } satisfies MutationSpec<typeof noInput, void>;
+
+export interface ModulesResult {
+  organisationId: string;
+  changed: boolean;
+}
+
+/**
+ * Settings > Company > Modules (slice 3.0): the three switches, through set_company_modules
+ * (owner or admin, audited as company.modules_changed; the database repeats every check).
+ * Turning a part off needs the confirm step (`confirmed=yes`); nothing is deleted either way.
+ */
+export const setModulesSpec = {
+  schema: modulesSchema,
+  roles: COMPANY_ROLES,
+  run: async (ctx): Promise<ModulesResult> => {
+    const next: Modules = {
+      shifts: ctx.data.shifts,
+      people: ctx.data.people,
+      payroll: ctx.data.payroll,
+    };
+    const problem = modulesProblem(next);
+    if (problem) throw new MutationError("invalid", problem);
+    const { modules: before } = await loadSetupState(ctx);
+    if (modulesTurnedOff(before, next).length > 0 && ctx.data.confirmed !== "yes") {
+      throw new MutationError("invalid", "Confirm before turning a part off.");
+    }
+    const { data, error } = await ctx.supabase.rpc("set_company_modules", {
+      p_organisation_id: ctx.organisationId,
+      p_shifts_enabled: next.shifts,
+      p_people_enabled: next.people,
+      p_payroll_enabled: next.payroll,
+    });
+    if (error) {
+      if (error.code === "42501") {
+        throw new MutationError("forbidden", "Your role can't make this change.");
+      }
+      // MLMO1-MLMO3 carry plain-English messages written for the person.
+      if (error.code?.startsWith("MLMO")) throw new MutationError("invalid", error.message);
+      throw new Error(`Could not save the modules: ${error.message}`);
+    }
+    const changed =
+      typeof data === "object" && data !== null && !Array.isArray(data) && data.changed === true;
+    return { organisationId: ctx.organisationId, changed };
+  },
+} satisfies MutationSpec<typeof modulesSchema, ModulesResult>;
 
 const logoSchema = z.object({
   file: z.instanceof(Uint8Array, { message: "Choose a PNG or SVG file." }),

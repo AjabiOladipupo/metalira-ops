@@ -80,6 +80,7 @@ export const resolveChangeRequestSpec: MutationSpec<
   typeof resolveChangeRequestSchema,
   { id: string; workerId: string; status: WorkerChangeRequestStatus }
 > = {
+  module: "people",
   schema: resolveChangeRequestSchema,
   roles: CHANGE_REQUEST_HANDLERS,
   run: async ({ supabase, organisationId, data }) => {

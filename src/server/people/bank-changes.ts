@@ -132,6 +132,7 @@ export interface RaisedBankChange {
 
 export const requestBankChangeSpec: MutationSpec<typeof requestBankChangeSchema, RaisedBankChange> =
   {
+    module: "people",
     schema: requestBankChangeSchema,
     roles: BANK_CHANGE_REQUESTERS,
     run: async ({ supabase, organisationId, data }) => {
@@ -287,6 +288,7 @@ export const UNCHECKED_NOTE =
 
 export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, DecidedBankChange> =
   {
+    module: "people",
     schema: decideBankChangeSchema,
     roles: BANK_CHANGE_APPROVERS,
     run: async ({ supabase, organisationId, data }) => {
@@ -333,6 +335,7 @@ export const withdrawBankChangeSpec: MutationSpec<
   typeof withdrawBankChangeSchema,
   { id: string; workerId: string }
 > = {
+  module: "people",
   schema: withdrawBankChangeSchema,
   roles: BANK_CHANGE_REQUESTERS,
   run: async ({ supabase, organisationId, data }) => {

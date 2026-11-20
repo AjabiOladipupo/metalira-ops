@@ -80,7 +80,7 @@ function fakeClient(result: Result, auth?: { claimsSub?: string | null; userId?:
 const linkedRow = {
   organisation_id: ORG,
   worker_id: WORKER,
-  organisations: { name: "Coastline Guards" },
+  organisations: { name: "Coastline Guards", shifts_enabled: true },
   workers: { first_name: "Musa", last_name: "Ibrahim", staff_id: "MO-0001" },
 };
 
@@ -98,6 +98,7 @@ describe("resolveWorkerSession", () => {
         firstName: "Musa",
         lastName: "Ibrahim",
         staffId: "MO-0001",
+        shiftsEnabled: true,
       },
     });
     expect(calls.from).toEqual(["memberships"]);
@@ -106,6 +107,16 @@ describe("resolveWorkerSession", () => {
       ["user_id", USER],
       ["role", "worker"],
     ]);
+  });
+
+  it("carries the company's Shifts switch (slice 3.0)", async () => {
+    const { client, calls } = fakeClient({
+      data: [{ ...linkedRow, organisations: { name: "Coastline Guards", shifts_enabled: false } }],
+      error: null,
+    });
+    const lookup = await resolveWorkerSession(client, USER);
+    expect(lookup.type === "worker" && lookup.session.shiftsEnabled).toBe(false);
+    expect(calls.select[0]).toContain("organisations ( name, shifts_enabled )");
   });
 
   it("is not a worker when the user has no worker membership", async () => {

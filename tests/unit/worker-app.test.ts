@@ -9,7 +9,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { workerMessages } from "@/lib/messages/worker";
-import { WORKER_NAV, activeWorkerNav } from "@/lib/worker-nav";
+import { WORKER_NAV, activeWorkerNav, workerNavFor } from "@/lib/worker-nav";
 import { myProfileSections, type MyProfileInput } from "@/lib/worker-profile";
 import {
   REQUEST_CHOICES,
@@ -265,5 +265,12 @@ describe("worker reads use the worker's own session", () => {
     for (const file of worker) {
       expect(file.text, file.file).not.toMatch(/supabase\/admin|createAdminSupabase|SECRET_KEY/);
     }
+  });
+});
+
+describe("bottom nav with Shifts off (slice 3.0)", () => {
+  it("leaves out Clock and keeps the other four in order", () => {
+    expect(workerNavFor(true)).toEqual(WORKER_NAV);
+    expect(workerNavFor(false).map((i) => i.key)).toEqual(["home", "leave", "payslips", "me"]);
   });
 });

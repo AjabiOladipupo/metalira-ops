@@ -2,10 +2,11 @@ import { Check } from "lucide-react";
 import Link from "next/link";
 
 import {
-  SETUP_STEPS,
   setupDoneCount,
   setupStep,
   setupStepHref,
+  setupStepsFor,
+  setupTotal,
   type SetupSlug,
 } from "@/lib/company";
 import { BackLink } from "@/components/back-link";
@@ -25,7 +26,7 @@ export function SetupFrame({
   children,
 }: {
   current: SetupSlug;
-  company: Pick<Company, "setupStep" | "setupCompletedAt">;
+  company: Pick<Company, "setupStep" | "setupCompletedAt" | "businessType">;
   title: string;
   description?: string;
   children: React.ReactNode;
@@ -33,6 +34,11 @@ export function SetupFrame({
   const completed = company.setupCompletedAt !== null;
   const furthest = completed ? 6 : company.setupStep;
   const step = setupStep(current);
+  // A services business has no Employees step (slice 3.0); its steps keep their numbers in the
+  // database but are shown 1 to 4 here.
+  const steps = setupStepsFor(company.businessType);
+  const total = setupTotal(company.businessType);
+  const position = (slug: SetupSlug) => steps.findIndex((s) => s.slug === slug) + 1;
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
@@ -40,7 +46,7 @@ export function SetupFrame({
         <div className="flex flex-col gap-1">
           <span className="type-label text-fg-muted">Setup</span>
           <span className="font-display text-[22px] font-bold" data-testid="setup-progress">
-            {setupDoneCount(company.setupStep, completed)} of 5 done
+            {setupDoneCount(company.setupStep, completed, company.businessType)} of {total} done
           </span>
         </div>
         {/* On phones the steps are a row of numbered badges with only the current step named, so
@@ -49,9 +55,9 @@ export function SetupFrame({
           aria-label="Setup steps"
           className="m-0 flex list-none flex-wrap gap-1 p-0 lg:flex-col lg:flex-nowrap"
         >
-          {SETUP_STEPS.map((s) => {
+          {steps.map((s) => {
             const isCurrent = s.slug === current;
-            const done = completed ? s.number <= 5 : s.number < furthest;
+            const done = completed ? s.slug !== "ready" : s.number < furthest;
             const reachable = s.number <= furthest;
             const badge = (
               <span
@@ -63,7 +69,11 @@ export function SetupFrame({
                     : "border-[1.5px] border-fg-muted text-fg-muted",
                 )}
               >
-                {done && !isCurrent ? <Check strokeWidth={2.5} className="size-3.5" /> : s.number}
+                {done && !isCurrent ? (
+                  <Check strokeWidth={2.5} className="size-3.5" />
+                ) : (
+                  position(s.slug)
+                )}
               </span>
             );
             const rowClass = cn(
@@ -105,8 +115,8 @@ export function SetupFrame({
         <div className="flex flex-col gap-1.5">
           {/* Until setup is done the dashboard sends the owner back here, so no arrow yet. */}
           {completed ? <BackLink href="/app" label="dashboard" className="-mt-2" /> : null}
-          {step.number <= 5 ? (
-            <span className="type-label text-fg-muted">Step {step.number}</span>
+          {step.slug !== "ready" ? (
+            <span className="type-label text-fg-muted">Step {position(step.slug)}</span>
           ) : null}
           <h1 className="m-0 type-h1">{title}</h1>
           {description ? <p className="m-0 type-body-lg text-fg-muted">{description}</p> : null}

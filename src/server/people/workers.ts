@@ -162,6 +162,7 @@ export interface CreatedWorker {
 const STAFF_ID_ATTEMPTS = 3;
 
 export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWorker> = {
+  module: "people",
   schema: createWorkerSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -334,6 +335,7 @@ async function loadEditedMapping(
 }
 
 export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWorker> = {
+  module: "people",
   schema: updateWorkerSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, userId, data }) => {
@@ -429,6 +431,7 @@ export function updateWorker(input: unknown): Promise<UpdatedWorker> {
 // ---------------------------------------------------------------------------
 
 export const addPayRateSpec: MutationSpec<typeof addPayRateSchema, { id: string }> = {
+  module: "people",
   schema: addPayRateSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -455,6 +458,7 @@ export function addPayRate(input: unknown): Promise<{ id: string }> {
 // ---------------------------------------------------------------------------
 
 export const cancelPayRateSpec: MutationSpec<typeof cancelPayRateSchema, { id: string }> = {
+  module: "people",
   schema: cancelPayRateSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -481,6 +485,7 @@ export function cancelPayRate(input: unknown): Promise<{ id: string }> {
 // ---------------------------------------------------------------------------
 
 export const endEmploymentSpec: MutationSpec<typeof endEmploymentSchema, { id: string }> = {
+  module: "people",
   schema: endEmploymentSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, data }) => {

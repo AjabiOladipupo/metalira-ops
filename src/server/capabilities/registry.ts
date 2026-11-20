@@ -76,6 +76,7 @@ import {
   saveBusinessSpec,
   saveInvoicesSpec,
   savePlanSpec,
+  setModulesSpec,
   uploadLogoSpec,
 } from "@/server/identity/company-mutations";
 import { decideOwnerChangeSpec, requestOwnerChangeSpec } from "@/server/identity/owners";
@@ -184,6 +185,7 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
+import { previewSetModules } from "./company-previews";
 import {
   previewAddPost,
   previewCancelRequirementChange,
@@ -356,7 +358,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "company.save_business",
-    description: "Saves the company's business details: names, RC number, TIN, address.",
+    description:
+      "Saves the company's business details: what it does, names, RC number, TIN, address, pay days.",
     kind: "write",
     audience: "manager",
     ...fromSpec(saveBusinessSpec),
@@ -375,8 +378,21 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: true,
   },
   {
+    name: "company.set_modules",
+    description:
+      "Switches Shifts, People and Payroll on or off for the company. Turning one off hides its pages and deletes nothing.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(setModulesSpec),
+    changes: "one",
+    action: at("identity/company-actions", "saveModules"),
+    preview: previewSetModules,
+    agent: true,
+  },
+  {
     name: "setup.continue_from_clients",
-    description: "Moves company setup on from the clients step.",
+    description:
+      "Moves company setup on from the clients step (to Employees, or finishes setup for a services business).",
     kind: "write",
     audience: "manager",
     ...fromSpec(advanceSetupSpec),

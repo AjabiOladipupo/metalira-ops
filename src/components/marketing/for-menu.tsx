@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 import { navLinkClass } from "./primitives";
 
-/** Desktop "For" menu: the five role pages. */
+/** Desktop "For" menu: the role pages. */
 export function ForMenu({ roles }: { roles: readonly { href: string; nav: string }[] }) {
   return (
     <DropdownMenu modal={false}>
