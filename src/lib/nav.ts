@@ -231,6 +231,13 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // finance opens too.
   { href: "/app/clients/new", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/clients/[id]/edit", roles: ["owner", "admin", "ops_manager"] },
+  // Slice 2.2: adding a site, and the checkpoint QR sheet (only these roles read the codes).
+  // The site page itself follows Clients, so finance reads it.
+  { href: "/app/clients/[id]/sites/new", roles: ["owner", "admin", "ops_manager"] },
+  {
+    href: "/app/clients/[id]/sites/[id]/checkpoints/print",
+    roles: ["owner", "admin", "ops_manager"],
+  },
   // Slice 2.4: adding and editing contracts and their rate cards. The contract page itself is
   // read by every Clients reader (finance sets WHT rates there).
   { href: "/app/clients/[id]/contracts/new", roles: ["owner", "admin", "ops_manager"] },

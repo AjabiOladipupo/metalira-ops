@@ -8,13 +8,14 @@ import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { paymentTermsLabel } from "@/lib/company";
 import { DOCUMENT_KIND_LABELS, formatFileSize } from "@/lib/contract-documents";
-import { addDays, formatDate, formatDateTime, lagosToday } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import {
   formatLineRate,
   formatOvertime,
   formatPercentBps,
   formatRateKey,
   formatRateSummary,
+  SERVICE_TYPE_LABELS,
   versionState,
   type RateCardVersion,
 } from "@/lib/rate-cards";
@@ -34,7 +35,7 @@ import { inheritedTermsLabel } from "../../../_components/contract-options";
 import { clientsPageContext } from "../../../_components/context";
 import { ContractStatusChip } from "../../../_components/contract-status";
 import { DocumentUploadForm, RemoveDocumentForm } from "../../../_components/document-forms";
-import { CancelVersionButton, WhtRateForm } from "../../../_components/rate-forms";
+import { CancelVersionButton } from "../../../_components/rate-forms";
 
 export const metadata: Metadata = { title: "Contract" };
 
@@ -124,7 +125,6 @@ function VersionCard({
           </Status>
           {cancellable ? (
             <CancelVersionButton
-              kind="rate_card"
               id={version.id}
               clientId={contract.clientId}
               label={`Cancel the rates from ${formatDate(version.effectiveFrom)}`}
@@ -144,8 +144,11 @@ function VersionCard({
               <th scope="col" className="py-2 pr-3 text-right font-semibold">
                 Rate
               </th>
-              <th scope="col" className="py-2 text-right font-semibold">
+              <th scope="col" className="py-2 pr-3 text-right font-semibold">
                 Overtime
+              </th>
+              <th scope="col" className="py-2 text-right font-semibold">
+                Service · WHT
               </th>
             </tr>
           </thead>
@@ -156,8 +159,11 @@ function VersionCard({
                 <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
                   {formatLineRate(line)}
                 </td>
-                <td className="py-2 text-right whitespace-nowrap tabular-nums">
+                <td className="py-2 pr-3 text-right whitespace-nowrap tabular-nums">
                   {formatOvertime(line)}
+                </td>
+                <td className="py-2 text-right whitespace-nowrap tabular-nums">
+                  {SERVICE_TYPE_LABELS[line.serviceType]} · {formatPercentBps(line.whtRateBps)}
                 </td>
               </tr>
             ))}
@@ -234,27 +240,8 @@ function RatesTab({
   );
 }
 
-function DetailsTab({
-  contract,
-  termsLabel,
-  today,
-  canEditWht,
-}: {
-  contract: ContractDetail;
-  termsLabel: string;
-  today: string;
-  canEditWht: boolean;
-}) {
+function DetailsTab({ contract, termsLabel }: { contract: ContractDetail; termsLabel: string }) {
   const sla = contract.sla;
-  const whtNewestFirst = [...contract.whtRates].reverse();
-  const latestWht = contract.whtRates[contract.whtRates.length - 1];
-  const minFrom = contract.status === "draft" ? contract.startDate : today;
-  const defaultWhtFrom =
-    contract.status === "draft"
-      ? latestWht
-        ? addDays(latestWht.effectiveFrom > today ? latestWht.effectiveFrom : today, 1)
-        : contract.startDate
-      : addDays(today, 1);
   return (
     <div className="flex flex-col gap-8">
       <Section id="terms" title="Terms">
@@ -288,6 +275,16 @@ function DetailsTab({
           ]}
         />
       </Section>
+      <Section
+        id="wht"
+        title="Withholding tax"
+        description="Set on each rate line by service type: 2% on services, 5% on a management fee, 10% on rent or hire. Whether the client deducts it, and whether it pays the VAT to the tax authority itself, are set on the client."
+      >
+        <p className="m-0 text-sm text-fg-muted">
+          See the Rate card tab for each line&apos;s WHT. Phase 6 works it out per invoice line on
+          the amount before VAT.
+        </p>
+      </Section>
       <Section id="sla" title="Service level">
         <DetailList
           items={[
@@ -305,76 +302,6 @@ function DetailsTab({
             { label: "Notes", value: sla.notes ?? null },
           ]}
         />
-      </Section>
-      <Section
-        id="wht"
-        title="Withholding tax"
-        description="The rate the client deducts on payment. Applied to invoices from Phase 6."
-      >
-        {whtNewestFirst.length === 0 ? (
-          <p className="m-0 text-sm text-fg-muted" data-testid="wht-none">
-            No WHT rate yet.
-          </p>
-        ) : (
-          <ul
-            className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0"
-            aria-label="WHT history"
-          >
-            {whtNewestFirst.map((rate, index) => {
-              const state = versionState(rate, today);
-              const cancellable =
-                canEditWht &&
-                index === 0 &&
-                contract.status !== "ended" &&
-                (contract.status === "draft" || state === "scheduled");
-              return (
-                <li
-                  key={rate.id}
-                  className="flex min-h-12 flex-wrap items-center justify-between gap-2 px-4 py-2"
-                >
-                  <span>
-                    <span className="font-medium tabular-nums">
-                      {formatPercentBps(rate.rateBps)}
-                    </span>{" "}
-                    <span className="text-sm text-fg-muted">
-                      {dateRange(rate.effectiveFrom, rate.effectiveTo)}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-3">
-                    <Status
-                      tone={
-                        state === "in_force"
-                          ? "done"
-                          : state === "scheduled"
-                            ? "pending"
-                            : "partial"
-                      }
-                    >
-                      {STATE_LABEL[state]}
-                    </Status>
-                    {cancellable ? (
-                      <CancelVersionButton
-                        kind="wht"
-                        id={rate.id}
-                        clientId={contract.clientId}
-                        label={`Cancel the WHT rate from ${formatDate(rate.effectiveFrom)}`}
-                      />
-                    ) : null}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {canEditWht && contract.status !== "ended" ? (
-          <WhtRateForm
-            clientId={contract.clientId}
-            contractId={contract.id}
-            defaultFrom={defaultWhtFrom}
-            minFrom={minFrom}
-            hasRate={contract.whtRates.length > 0}
-          />
-        ) : null}
       </Section>
     </div>
   );
@@ -526,7 +453,7 @@ async function ContractPage({
       : Promise.resolve([]),
   ]);
   if (!contract || !client) notFound();
-  const today = lagosToday();
+  const today = ctx.today;
   const base = `/app/clients/${clientId}/contracts/${contract.id}`;
 
   return (
@@ -552,8 +479,6 @@ async function ContractPage({
         <DetailsTab
           contract={contract}
           termsLabel={inheritedTermsLabel(client.billingTermsDays, company?.paymentTermsDays ?? 30)}
-          today={today}
-          canEditWht={ctx.canEditWht}
         />
       ) : null}
       {tab === "rates" ? (

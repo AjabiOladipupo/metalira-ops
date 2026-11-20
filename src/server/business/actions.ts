@@ -14,6 +14,7 @@ import {
   quickAddClient,
   removeContact,
   setClientStatus,
+  setClientTax,
   updateClient,
   updateContact,
 } from "./clients";
@@ -159,4 +160,19 @@ export async function quickAddClientAction(
   refreshClients();
   revalidatePath("/app/setup/clients");
   return { ok: true, status: 200, message: `${fields.name?.trim() ?? "Client"} added` };
+}
+
+/** A client's tax settings (owner, admin, finance): stays on the client page. */
+export async function setClientTaxAction(
+  _prev: ClientFormState,
+  formData: FormData,
+): Promise<ClientFormState> {
+  const fields = formFields(formData);
+  try {
+    await setClientTax(fields);
+  } catch (error) {
+    return refusal(error, fields);
+  }
+  refreshClients();
+  return { ok: true, status: 200, message: "Tax settings saved" };
 }

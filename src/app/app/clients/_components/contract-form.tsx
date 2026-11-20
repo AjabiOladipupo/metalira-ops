@@ -45,7 +45,6 @@ export function ContractForm({
   terms,
   companyTermsLabel,
   defaultVat,
-  canSetWht,
   defaultStart,
 }: {
   mode: "create" | "edit";
@@ -58,8 +57,6 @@ export function ContractForm({
   /** "Client terms (30 days)". */
   companyTermsLabel: string;
   defaultVat: boolean;
-  /** Owner and admin set a first WHT rate here; finance sets it on the contract page. */
-  canSetWht: boolean;
   defaultStart: string;
 }) {
   const [state, action] = useActionState<CompanyFormState, FormData>(
@@ -189,17 +186,6 @@ export function ContractForm({
             defaultValue={value("billingTermsDays", contract?.billingTermsDays)}
             error={errors?.billingTermsDays}
           />
-          {mode === "create" && canSetWht ? (
-            <Field
-              label="WHT rate (%)"
-              name="whtRate"
-              inputMode="decimal"
-              placeholder="5"
-              hint="What the client withholds, from the start date. Leave blank if none yet."
-              defaultValue={value("whtRate", null)}
-              error={errors?.whtRate}
-            />
-          ) : null}
         </div>
         <label className="flex min-h-11 items-center gap-3 text-[15px]">
           <input
