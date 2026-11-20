@@ -132,6 +132,10 @@ import {
   updateWorkerSpec,
 } from "@/server/people/workers";
 import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
+import { saveAttendanceSpec, loadAttendanceSettings } from "@/server/identity/attendance-settings";
+import { consentKindSchema } from "@/server/workforce/consents";
+import { CONSENT_READERS, loadConsentsSummary } from "@/server/workforce/consents-data";
+import { markReadSchema } from "@/server/workforce/inbox";
 import {
   addCheckpointSpec,
   createSiteSpec,
@@ -390,6 +394,30 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("identity/company-actions", "uploadLogo"),
     agent: false,
     agentNote: "Takes a file upload.",
+  },
+
+  {
+    name: "company.save_attendance",
+    description:
+      "Sets how many minutes late a clock-in may be, and when a missing one is a no-show.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(saveAttendanceSpec),
+    changes: "one",
+    action: at("identity/attendance-actions", "saveAttendance"),
+    agent: true,
+  },
+  {
+    name: "company.attendance_settings",
+    description: "Reads the late grace period and the no-show time, in minutes.",
+    kind: "read",
+    audience: "manager",
+    roles: ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"],
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ organisationId }) => loadAttendanceSettings(organisationId),
+    agent: true,
   },
 
   // -------------------------------------------------------------------------
@@ -960,6 +988,59 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/staff-id-actions", "unlockSignInAction"),
     agent: false,
     agentNote: "Restores sign-in access: kept to people.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Consents and inbox (workforce/consent-actions.ts, inbox-actions.ts, slice 3.1)
+  // -------------------------------------------------------------------------
+  {
+    name: "me.accept_consent",
+    description: "A worker agrees to share their location or take a selfie at clock-in.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: consentKindSchema,
+    changes: "one",
+    action: at("workforce/consent-actions", "acceptConsentAction"),
+    agent: false,
+    agentNote: "Consent is the worker's own choice, made in the worker app.",
+  },
+  {
+    name: "me.withdraw_consent",
+    description:
+      "A worker withdraws their location or selfie consent; their supervisor clocks them in.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: consentKindSchema,
+    changes: "one",
+    action: at("workforce/consent-actions", "withdrawConsentAction"),
+    agent: false,
+    agentNote: "Consent is the worker's own choice, made in the worker app.",
+  },
+  {
+    name: "me.mark_inbox_read",
+    description: "A worker marks one inbox message, or all of them, as read.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: markReadSchema,
+    changes: "many",
+    action: at("workforce/inbox-actions", "markInboxReadAction"),
+    agent: false,
+    agentNote: "Worker app only.",
+  },
+  {
+    name: "consents.summary",
+    description: "Counts active workers who agreed to location and to selfies at clock-in.",
+    kind: "read",
+    audience: "manager",
+    roles: CONSENT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadConsentsSummary(supabase, organisationId),
+    agent: true,
   },
 
   // -------------------------------------------------------------------------

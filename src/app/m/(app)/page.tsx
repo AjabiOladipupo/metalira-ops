@@ -14,6 +14,8 @@ import { initials } from "@/lib/people";
 import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 
+import { InboxLink } from "../_components/inbox-link";
+
 export const metadata: Metadata = { title: "Home" };
 
 const copy = workerMessages.home;
@@ -60,6 +62,7 @@ async function Header() {
         </h1>
       </span>
       <span className="flex shrink-0 items-center gap-1">
+        <InboxLink />
         <ThemeButton />
         <Link
           href="/m/me"

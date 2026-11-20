@@ -21,6 +21,7 @@ const NOT_WORK_RECORDS: Record<string, string> = {
   bank_account_lookups:
     "account name lookups from the bank network (slice 2.3b); nothing worked or paid",
   import_rows: "the import row that created the worker",
+  inbox_items: "messages to the worker in the worker app (slice 3.1); nothing worked or paid",
   memberships: "the worker's login",
   pay_rates: "rates of pay, not payments",
   shift_assignments:
@@ -28,6 +29,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
   staff_id_corrections: "the corrections themselves",
   worker_assignments: "mapping to clients, sites and projects",
   worker_change_requests: "profile change requests from the worker app",
+  worker_consents:
+    "location and selfie consents (slice 3.1); the punches they allow are the work records",
   worker_credentials: "the phone login",
   worker_invites: "invite links",
 };
