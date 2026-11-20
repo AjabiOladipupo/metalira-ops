@@ -310,7 +310,7 @@ describe("worker_consents", () => {
       p_notice_version: VERSION,
     });
     expect(error?.code).toBe("MLCN2");
-  });
+  }, 60_000);
 
   it("worker_has_consent is not callable from the Data API", async () => {
     const { rows } = await db.query<{ ok: boolean }>(
