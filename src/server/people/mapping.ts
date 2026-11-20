@@ -86,6 +86,9 @@ function fromDbError(error: PostgrestError): never {
       return invalid("lineManagerWorkerId", error.message);
     case "MLAS1":
     case "MLAS4":
+    // Slice 2.7: an archived site or client takes no new assignments.
+    case "MLAS6":
+    case "MLAS7":
       return invalid("siteId", error.message);
     case "MLAS5":
       return invalid("projectIds", error.message);

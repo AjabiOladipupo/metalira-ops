@@ -63,7 +63,7 @@ export async function loadImportContext(
       readAll("clients", (from, to) =>
         supabase
           .from("clients")
-          .select("id, name")
+          .select("id, name, status")
           .eq("organisation_id", organisationId)
           .order("id")
           .range(from, to),
@@ -79,7 +79,7 @@ export async function loadImportContext(
       readAll("sites", (from, to) =>
         supabase
           .from("sites")
-          .select("id, client_id, name")
+          .select("id, client_id, name, status")
           .eq("organisation_id", organisationId)
           .order("id")
           .range(from, to),
@@ -134,9 +134,14 @@ export async function loadImportContext(
       name: m.full_name || m.email,
     })),
     departments,
-    clients,
+    clients: clients.map((c) => ({ id: c.id, name: c.name, archived: c.status === "archived" })),
     projects: projects.map((p) => ({ id: p.id, clientId: p.client_id, name: p.name })),
-    sites: sites.map((s) => ({ id: s.id, clientId: s.client_id, name: s.name })),
+    sites: sites.map((s) => ({
+      id: s.id,
+      clientId: s.client_id,
+      name: s.name,
+      archived: s.status === "archived",
+    })),
     retiredStaffIds: retired,
   };
 }

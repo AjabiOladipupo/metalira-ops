@@ -11,7 +11,9 @@ type BusinessTable =
   | "rate_cards"
   | "rate_card_lines"
   | "site_checkpoints"
-  | "headcount_requirements";
+  | "headcount_requirements"
+  | "posts"
+  | "roster_requirements";
 
 async function firstId(admin: Client, table: BusinessTable, orgId: string) {
   const { data, error } = await admin
@@ -238,6 +240,102 @@ export const tables: TableSpec[] = [
       site_id: randomUUID(),
       role: "Guard",
       unit: "shift",
+      days_of_week: [1],
+      start_time: "06:00",
+      end_time: "18:00",
+      required_count: 1,
+    }),
+    patch: { required_count: 2 },
+  },
+  // Slice 2.7: a live contract of its own per organisation (the 2.4 one stays a draft), with one
+  // post and its roster requirement, written with the secret key (no role has write grants).
+  {
+    table: "posts",
+    ...byOrg,
+    seed: async ({ admin, side }) => {
+      const link = await admin
+        .from("contract_sites")
+        .select("site_id, contracts(client_id)")
+        .eq("organisation_id", side.orgId)
+        .order("created_at")
+        .limit(1)
+        .single();
+      if (link.error) throw new Error(link.error.message);
+      const contract = await admin
+        .from("contracts")
+        .insert({
+          organisation_id: side.orgId,
+          client_id: link.data.contracts!.client_id,
+          reference: "",
+          name: "Live guarding",
+          type: "manned_post",
+          start_date: "2026-11-01",
+        } as never)
+        .select("id")
+        .single();
+      if (contract.error) throw new Error(contract.error.message);
+      const contractId = contract.data.id;
+      const site = await admin.from("contract_sites").insert({
+        organisation_id: side.orgId,
+        contract_id: contractId,
+        site_id: link.data.site_id,
+      });
+      if (site.error) throw new Error(site.error.message);
+      const live = await admin
+        .from("contracts")
+        .update({ status: "active", go_live_date: "2026-11-01" } as never)
+        .eq("id", contractId);
+      if (live.error) throw new Error(live.error.message);
+      const post = await admin
+        .from("posts")
+        .insert({
+          organisation_id: side.orgId,
+          contract_id: contractId,
+          site_id: link.data.site_id,
+          name: "Gate A · Day",
+          role: "Guard",
+          band: "Day",
+          unit: "shift",
+          opened_on: "2026-11-01",
+        })
+        .select("id")
+        .single();
+      if (post.error) throw new Error(post.error.message);
+      const req = await admin.from("roster_requirements").insert({
+        organisation_id: side.orgId,
+        post_id: post.data.id,
+        contract_id: contractId,
+        site_id: link.data.site_id,
+        effective_from: "2026-11-01",
+        days_of_week: [1, 2, 3, 4, 5, 6, 7],
+        start_time: "06:00",
+        end_time: "18:00",
+        required_count: 1,
+      });
+      if (req.error) throw new Error(req.error.message);
+    },
+    rowOf: ({ admin, side }) => firstId(admin, "posts", side.orgId),
+    attackInsert: ({ victim }) => ({
+      organisation_id: victim.orgId,
+      contract_id: randomUUID(),
+      site_id: randomUUID(),
+      name: "Hijack",
+      role: "Guard",
+      unit: "shift",
+      opened_on: "2026-11-01",
+    }),
+    patch: { name: "Hijacked" },
+  },
+  {
+    table: "roster_requirements",
+    ...byOrg,
+    rowOf: ({ admin, side }) => firstId(admin, "roster_requirements", side.orgId),
+    attackInsert: ({ victim }) => ({
+      organisation_id: victim.orgId,
+      post_id: randomUUID(),
+      contract_id: randomUUID(),
+      site_id: randomUUID(),
+      effective_from: "2026-11-01",
       days_of_week: [1],
       start_time: "06:00",
       end_time: "18:00",

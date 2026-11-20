@@ -56,6 +56,8 @@ import {
   loadHeadcountSummary,
 } from "@/server/business/headcount-data";
 import { contractIdSchema } from "@/server/business/headcount-schemas";
+import { activateContractSpec, endContractSpec } from "@/server/business/activation";
+import { loadPosts, loadRequiredShiftsSummary } from "@/server/business/activation-data";
 import {
   advanceSetupSpec,
   completeSetupSpec,
@@ -145,6 +147,7 @@ import {
   previewRemoveHeadcount,
   previewUpdateHeadcount,
 } from "./previews";
+import { previewActivateContract, previewEndContract } from "./activation-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -172,12 +175,17 @@ const LOOKUP =
 const RATES = "Changes what clients are billed (kind money): kept to people.";
 const FILES = "Takes a file from the person's device: uploads are made on the screen.";
 const OPEN_FILE = "Hands out a link to a stored file: the agent never opens or passes on files.";
+const GO_LIVE =
+  "Makes a contract live or ends it, which starts or stops rosters and billing: kept to people for now (the owner may enable it later).";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
 /** A contract's id, for the document reads. */
 const contractIdInput = z.object({ contractId: z.uuid("Choose a contract") });
 const documentIdInput = z.object({ documentId: z.uuid("Choose a document") });
+
+/** Posts, roster requirements and required shifts are read by every manager role (slice 2.7). */
+const POST_READERS = ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"] as const;
 
 export const CAPABILITIES: readonly Capability[] = [
   // -------------------------------------------------------------------------
@@ -1389,6 +1397,70 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "one",
     action: at("business/headcount-actions", "removeHeadcountAction"),
     preview: previewRemoveHeadcount,
+    agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Activation, posts and required shifts (business/activation-actions.ts, slice 2.7)
+  // -------------------------------------------------------------------------
+  {
+    name: "contracts.activate",
+    description:
+      "Makes a draft contract live: checks it, then opens a post and roster requirement per headcount row.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(activateContractSpec),
+    changes: "many",
+    action: at("business/activation-actions", "activateContractAction"),
+    preview: previewActivateContract,
+    agent: false,
+    agentNote: GO_LIVE,
+  },
+  {
+    name: "contracts.end",
+    description:
+      "Ends a live contract on a last day, closing its posts, roster requirements and rate card.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(endContractSpec),
+    changes: "many",
+    action: at("business/activation-actions", "endContractAction"),
+    preview: previewEndContract,
+    agent: false,
+    agentNote: GO_LIVE,
+  },
+  {
+    name: "posts.for_contract",
+    description:
+      "Lists a live contract's posts with the site, days, hours and people required in force today.",
+    kind: "read",
+    audience: "manager",
+    roles: POST_READERS,
+    input: contractIdSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { contractId } = contractIdSchema.parse(input);
+      return loadPosts(
+        supabase,
+        organisationId,
+        contractId,
+        await organisationToday(supabase, organisationId),
+      );
+    },
+    agent: true,
+  },
+  {
+    name: "required_shifts.summary",
+    description:
+      "Counts the shifts and people required over the next 7 days across live contracts.",
+    kind: "read",
+    audience: "manager",
+    roles: POST_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadRequiredShiftsSummary(supabase, organisationId),
     agent: true,
   },
 ];

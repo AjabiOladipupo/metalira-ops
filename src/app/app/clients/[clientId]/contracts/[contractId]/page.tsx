@@ -28,6 +28,7 @@ import {
 import { BILLING_FREQUENCY_LABELS, CONTRACT_TYPE_LABELS } from "@/server/business/contract-schemas";
 import { loadContract, type ContractDetail } from "@/server/business/contracts-data";
 import { loadHeadcount } from "@/server/business/headcount-data";
+import { loadPosts, type PostRow } from "@/server/business/activation-data";
 import { getActiveCompany } from "@/server/identity/company-data";
 
 import { RouteGate } from "../../../../_shell/slots";
@@ -45,6 +46,7 @@ const TABS = [
   { id: "details", label: "Details" },
   { id: "rates", label: "Rate card" },
   { id: "headcount", label: "Headcount" },
+  { id: "posts", label: "Posts" },
   { id: "documents", label: "Documents" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -54,11 +56,20 @@ function parseTab(value: string | string[] | undefined): TabId {
   return TABS.find((t) => t.id === raw)?.id ?? "details";
 }
 
-function TabLinks({ base, current }: { base: string; current: TabId }) {
+function TabLinks({
+  base,
+  current,
+  live,
+}: {
+  base: string;
+  current: TabId;
+  /** Posts exist once the contract is live (slice 2.7). */
+  live: boolean;
+}) {
   return (
     <nav aria-label="Contract sections" className="-mx-1 overflow-x-auto border-b border-line">
       <ul className="m-0 flex list-none gap-1 p-0 px-1">
-        {TABS.map((tab) => {
+        {TABS.filter((tab) => live || tab.id !== "posts").map((tab) => {
           const active = tab.id === current;
           return (
             <li key={tab.id}>
@@ -309,6 +320,82 @@ function DetailsTab({ contract, termsLabel }: { contract: ContractDetail; termsL
   );
 }
 
+/** The live contract's posts with the requirement in force (slice 2.7). */
+function PostsTab({ contract, posts }: { contract: ContractDetail; posts: PostRow[] }) {
+  if (posts.length === 0) {
+    return <EmptyState message="No posts. Activation creates one post per headcount row." />;
+  }
+  const open = posts.filter((p) => p.status === "open").length;
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="m-0 text-sm text-fg-muted" data-testid="posts-summary">
+        {open} open {open === 1 ? "post" : "posts"}
+        {contract.goLiveDate ? ` · live from ${formatDate(contract.goLiveDate)}` : ""}
+        {contract.endReason && contract.endDate
+          ? ` · ends ${formatDate(contract.endDate)} (${contract.endReason})`
+          : ""}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-sm" data-testid="posts-table">
+          <caption className="sr-only">Posts</caption>
+          <thead>
+            <tr className="border-b border-line text-left">
+              <th scope="col" className="py-2 pr-3 font-semibold">
+                Post
+              </th>
+              <th scope="col" className="py-2 pr-3 font-semibold">
+                Site
+              </th>
+              <th scope="col" className="hidden py-2 pr-3 font-semibold sm:table-cell">
+                Days
+              </th>
+              <th scope="col" className="py-2 pr-3 font-semibold">
+                Hours
+              </th>
+              <th scope="col" className="py-2 pr-3 text-right font-semibold">
+                Required
+              </th>
+              <th scope="col" className="hidden py-2 font-semibold sm:table-cell">
+                From
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {posts.map((post) => (
+              <tr
+                key={post.id}
+                className="border-b border-line last:border-0"
+                data-testid="post-row"
+                aria-label={`${post.name} at ${post.siteName}`}
+              >
+                <td className="py-2 pr-3">
+                  <span className="font-medium">{post.name}</span>
+                  {post.status === "closed" && post.closedOn ? (
+                    <span className="block text-xs text-fg-muted">
+                      Closes after {formatDate(post.closedOn)}
+                    </span>
+                  ) : null}
+                </td>
+                <td className="py-2 pr-3">{post.siteName}</td>
+                <td className="hidden py-2 pr-3 sm:table-cell">{post.current?.days ?? ""}</td>
+                <td className="py-2 pr-3 whitespace-nowrap tabular-nums">
+                  {post.current?.hours ?? ""}
+                </td>
+                <td className="py-2 pr-3 text-right tabular-nums">
+                  {post.current?.requiredCount ?? ""}
+                </td>
+                <td className="hidden py-2 whitespace-nowrap sm:table-cell">
+                  {post.current ? formatDate(post.current.effectiveFrom) : ""}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function uploadedLine(doc: ContractDocument): string {
   const parts = [doc.fileName];
   if (doc.sizeBytes !== null) parts.push(formatFileSize(doc.sizeBytes));
@@ -446,14 +533,15 @@ async function ContractPage({
   const [{ clientId, contractId }, query] = await Promise.all([params, searchParams]);
   const tab = parseTab(query.tab);
   const ctx = await clientsPageContext();
-  const [contract, client, company, documents, headcount] = await Promise.all([
+  const [contract, client, company, headcount, posts, documents] = await Promise.all([
     loadContract(ctx.supabase, ctx.organisationId, clientId, contractId),
     loadClient(ctx.supabase, ctx.organisationId, clientId),
     getActiveCompany(),
+    tab === "headcount" ? loadHeadcount(ctx.supabase, ctx.organisationId, contractId) : null,
+    tab === "posts" ? loadPosts(ctx.supabase, ctx.organisationId, contractId, ctx.today) : null,
     tab === "documents" && /^[0-9a-f-]{36}$/i.test(contractId)
       ? listContractDocuments(ctx.supabase, ctx.organisationId, contractId)
       : Promise.resolve([]),
-    tab === "headcount" ? loadHeadcount(ctx.supabase, ctx.organisationId, contractId) : null,
   ]);
   if (!contract || !client) notFound();
   const today = ctx.today;
@@ -470,14 +558,24 @@ async function ContractPage({
           <>
             <ContractStatusChip status={contract.status} />
             {ctx.canEditContracts && contract.status === "draft" ? (
+              <>
+                <Button asChild variant="outline" className="h-11 px-4">
+                  <Link href={`${base}/edit`}>Edit contract</Link>
+                </Button>
+                <Button asChild className="h-11 px-4">
+                  <Link href={`${base}/activate`}>Activate contract</Link>
+                </Button>
+              </>
+            ) : null}
+            {ctx.canEditContracts && contract.status === "active" && !contract.endReason ? (
               <Button asChild variant="outline" className="h-11 px-4">
-                <Link href={`${base}/edit`}>Edit contract</Link>
+                <Link href={`${base}/end`}>End contract</Link>
               </Button>
             ) : null}
           </>
         }
       />
-      <TabLinks base={base} current={tab} />
+      <TabLinks base={base} current={tab} live={contract.status !== "draft"} />
       {tab === "details" ? (
         <DetailsTab
           contract={contract}
@@ -495,6 +593,7 @@ async function ContractPage({
           canEdit={ctx.canEditContracts}
         />
       ) : null}
+      {tab === "posts" ? <PostsTab contract={contract} posts={posts ?? []} /> : null}
       {tab === "documents" ? (
         <DocumentsTab contract={contract} documents={documents} canEdit={ctx.canEditContracts} />
       ) : null}

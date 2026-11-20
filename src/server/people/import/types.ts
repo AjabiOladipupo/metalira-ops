@@ -40,7 +40,16 @@ export const importContextSchema = z.object({
     )
     .default([]),
   departments: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).default([]),
-  clients: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).default([]),
+  /** `archived` (slice 2.7): rows naming an archived client or site are held back. */
+  clients: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        archived: z.boolean().default(false),
+      }),
+    )
+    .default([]),
   projects: z
     .array(
       z.object({ id: z.string().min(1), clientId: z.string().min(1), name: z.string().min(1) }),
@@ -48,7 +57,12 @@ export const importContextSchema = z.object({
     .default([]),
   sites: z
     .array(
-      z.object({ id: z.string().min(1), clientId: z.string().min(1), name: z.string().min(1) }),
+      z.object({
+        id: z.string().min(1),
+        clientId: z.string().min(1),
+        name: z.string().min(1),
+        archived: z.boolean().default(false),
+      }),
     )
     .default([]),
   /**
@@ -103,7 +117,9 @@ export type ProblemCode =
   | "client_not_found"
   | "project_not_found"
   | "site_not_found"
-  | "client_missing";
+  | "client_missing"
+  | "client_archived"
+  | "site_archived";
 
 /** A reason the row is held back. Copy is plain English and never shows NIN, bank or PIN. */
 export interface ImportProblem {
