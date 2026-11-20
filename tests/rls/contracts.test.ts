@@ -345,21 +345,42 @@ describe("rate cards", () => {
       p_lines: [{ ...DAY, rate_kobo: "1,250,000" }] as Json,
     });
     expect(junk.error?.code).toBe("MLRC8");
-    const hourly = await ops.client.rpc("save_draft_rate_card", {
-      p_organisation_id: owner.orgId,
-      p_contract_id: id,
-      p_effective_from: start,
-      p_lines: [
-        {
-          role: "Guard",
-          band: "Relief",
-          unit: "hour",
-          rate_kobo: "150000",
-          ot_multiplier_bps: 15000,
-        },
-      ] as Json,
-    });
+    const save = (lines: unknown[]) =>
+      ops.client.rpc("save_draft_rate_card", {
+        p_organisation_id: owner.orgId,
+        p_contract_id: id,
+        p_effective_from: start,
+        p_lines: lines as Json,
+      });
+    const hour = { role: "Guard", unit: "hour", ot_multiplier_bps: 15000 };
+    // A typed hourly overtime rate must match the multiplier.
+    expect(
+      (await save([{ ...hour, band: "A", rate_kobo: "150050", ot_rate_kobo: "225000" }])).error
+        ?.code,
+    ).toBe("MLRC8");
+    // A multiplier on a shift line needs its hourly rate.
+    expect((await save([{ ...DAY, ot_rate_kobo: null }])).error?.code).toBe("23514");
+    // Basis points are whole numbers.
+    expect((await save([{ ...DAY, wht_rate_bps: 2.5 }])).error?.code).toBe("MLRC8");
+    expect((await save([{ ...DAY, ot_multiplier_bps: 15000.5 }])).error?.code).toBe("MLRC8");
+
+    const hourly = await save([
+      { ...hour, band: "A", rate_kobo: "150050" },
+      { ...hour, band: "B", rate_kobo: "1" },
+      { ...hour, band: "C", rate_kobo: "3", ot_multiplier_bps: 12500 },
+    ]);
     expect(hourly.error).toBeNull();
+    // The database works the overtime rate out exactly as overtimeFromMultiplier does.
+    const { data: worked } = await admin
+      .from("rate_card_lines")
+      .select("band, ot_rate_kobo::text")
+      .eq("rate_card_id", hourly.data!)
+      .order("sort_order");
+    expect(worked).toEqual([
+      { band: "A", ot_rate_kobo: "225075" },
+      { band: "B", ot_rate_kobo: "2" },
+      { band: "C", ot_rate_kobo: "4" },
+    ]);
   });
 
   it("refuses fractions, floats and duplicate keys in the lines", async () => {

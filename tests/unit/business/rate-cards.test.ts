@@ -234,10 +234,8 @@ describe("rate keys", () => {
 });
 
 describe("summary text", () => {
-  it("reads like the Setup board without an hourly overtime rate", () => {
-    expect(formatRateSummary([DAY, NIGHT])).toBe(
-      "₦12,500 day · ₦15,000 night shift · overtime 1.5× · WHT 2%",
-    );
+  it("shows no overtime for a multiplier without its hourly rate", () => {
+    expect(formatRateSummary([DAY, NIGHT])).toBe("₦12,500 day · ₦15,000 night shift · WHT 2%");
   });
 
   it("names the hourly overtime rate when the lines have one", () => {
@@ -302,8 +300,8 @@ describe("preview of a rate change", () => {
     });
     expect(preview.changes).toContainEqual({
       label: "Guard · Day (shift)",
-      before: "₦12,500 a shift, overtime 1.5×, WHT 2%",
-      after: "₦13,000 a shift, overtime 1.5×, WHT 2%",
+      before: "₦12,500 a shift, WHT 2%",
+      after: "₦13,000 a shift, WHT 2%",
     });
     const removed = diffRateLines(v1.lines, [DAY]);
     expect(removed.changes).toEqual([{ key: NIGHT, kind: "removed", before: NIGHT, after: null }]);
@@ -338,6 +336,20 @@ describe("overtime and the contract's end (money review)", () => {
       ok: true,
       line: { otRateKobo: 225_075n, otMultiplierBps: 15_000 },
     });
+  });
+
+  it("refuses a typed hourly overtime rate that disagrees with the multiplier, or one over ₦1bn", () => {
+    expect(parseRateLine({ ...typed, unit: "hour", otRate: "2,250.75" })).toMatchObject({
+      ok: true,
+      line: { otRateKobo: 225_075n },
+    });
+    expect(parseRateLine({ ...typed, unit: "hour", otRate: "2,250" })).toMatchObject({
+      ok: false,
+      field: "otRate",
+    });
+    expect(
+      parseRateLine({ ...typed, unit: "hour", rate: "900,000,000", otMultiplier: "1.5" }),
+    ).toMatchObject({ ok: false, field: "otMultiplier" });
   });
 
   it("needs the hourly overtime rate on other units when a multiplier is given", () => {
