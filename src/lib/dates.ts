@@ -33,7 +33,8 @@ export function lagosToday(now: Date = new Date()): string {
 
 /**
  * Today's date in an IANA time zone as `YYYY-MM-DD`: the company's calendar day, as the database's
- * `private.org_today` sees it. An unknown zone falls back to Lagos, as the database does.
+ * `private.org_today` sees it (which falls back to Lagos only when the company has no zone). An
+ * unknown zone, which the database would refuse, falls back to Lagos here rather than throw.
  */
 export function todayIn(timeZone: string, now: Date = new Date()): string {
   const format = (zone: string) =>

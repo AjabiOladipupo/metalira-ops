@@ -78,7 +78,7 @@ export interface RateLine {
   currency: Currency;
   /** The line's own overtime rate per hour, or null. */
   otRateKobo: Kobo | null;
-  /** 15000 = 1.5×, shown when there is no hourly overtime rate. */
+  /** 15000 = 1.5×: an entry helper. On hourly lines it gives otRateKobo; elsewhere display only. */
   otMultiplierBps: number | null;
   serviceType: ServiceType;
   /** The WHT the client deducts on this line, on its amount before VAT (Phase 6). */
@@ -438,17 +438,34 @@ export function parseRateLine(input: RateLineInput): ParsedRateLine {
     }
   }
   // What bills is the overtime rate per hour; the multiplier only helps enter it. On an hourly
-  // line it works the rate out (rounded half up, once); on any other unit a multiplier can't
-  // make an hourly rate, so the rate itself is needed.
-  if (otMultiplierBps !== null && otRateKobo === null) {
-    if (input.unit !== "hour") {
+  // line it works the rate out (rounded half up, once), and a typed rate must agree with it. On
+  // any other unit a multiplier can't make an hourly rate: the rate is needed and the multiplier
+  // is kept for display only.
+  if (otMultiplierBps !== null) {
+    if (input.unit === "hour") {
+      const worked = overtimeFromMultiplier(rateKobo, otMultiplierBps);
+      if (worked > MAX_RATE_KOBO) {
+        return {
+          ok: false,
+          field: "otMultiplier",
+          message: "That overtime comes to more than ₦1,000,000,000 an hour",
+        };
+      }
+      if (otRateKobo !== null && otRateKobo !== worked) {
+        return {
+          ok: false,
+          field: "otRate",
+          message: `The overtime rate doesn't match the multiplier (${formatRate(worked)} an hour). Clear one of them`,
+        };
+      }
+      otRateKobo = worked;
+    } else if (otRateKobo === null) {
       return {
         ok: false,
         field: "otRate",
         message: "Enter the overtime rate per hour. A multiplier alone works only on hourly lines",
       };
     }
-    otRateKobo = overtimeFromMultiplier(rateKobo, otMultiplierBps);
   }
   const serviceType = (input.serviceType.trim() || "services") as ServiceType;
   if (!(SERVICE_TYPES as readonly string[]).includes(serviceType)) {
@@ -555,23 +572,18 @@ export function formatLineRate(line: Pick<RateLine, "rateKobo" | "unit">): strin
   return `${formatRate(line.rateKobo)} ${PER_UNIT[line.unit]}`;
 }
 
-/**
- * "₦1,600 an hour" (what bills), or "None". A multiplier is shown only for a line saved without
- * an hourly rate, which the database allows on hourly lines alone.
- */
-export function formatOvertime(line: Pick<RateLine, "otRateKobo" | "otMultiplierBps">): string {
-  if (line.otRateKobo !== null) return `${formatRate(line.otRateKobo)} an hour`;
-  if (line.otMultiplierBps !== null) return formatMultiplier(line.otMultiplierBps);
-  return "None";
+/** "₦1,600 an hour" (what bills), or "None". A multiplier never stands without its rate. */
+export function formatOvertime(line: Pick<RateLine, "otRateKobo">): string {
+  return line.otRateKobo === null ? "None" : `${formatRate(line.otRateKobo)} an hour`;
 }
 
 /**
  * One line for the setup table and the client page, as on the Setup board:
- * "₦12,500 day · ₦15,000 night shift · overtime 1.5×".
+ * "₦12,500 day · ₦15,000 night shift · overtime ₦1,600 an hour · WHT 2%".
  * - Each line is its rate and band (the role too when the card has more than one role); a run of
  *   lines with the same unit names the unit once, after its last line.
- * - Overtime the lines share is said once at the end ("overtime 1.5×", "overtime ₦1,600 an
- *   hour"); overtime that differs is said on each line.
+ * - Overtime the lines share is said once at the end ("overtime ₦1,600 an hour"); overtime
+ *   that differs is said on each line.
  * - WHT the same way: "WHT 2%" once at the end when every line shares it, else on each line.
  */
 export function formatRateSummary(lines: readonly RateLine[]): string {

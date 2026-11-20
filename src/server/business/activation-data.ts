@@ -3,12 +3,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { planActivation, type ActivationPlan, type ActivationSite } from "@/lib/activation";
-import { addDays, LAGOS_TIME_ZONE, todayIn } from "@/lib/dates";
+import { addDays } from "@/lib/dates";
 import { formatDays, formatHours, toHourMinute } from "@/lib/headcount";
 import type { Database } from "@/types/db";
 
 import type { ContractStatus, ContractType } from "./contract-schemas";
-import { loadRateCardVersions } from "./contracts-data";
+import { loadRateCardVersions, organisationToday } from "./contracts-data";
 import { loadHeadcount } from "./headcount-data";
 
 /**
@@ -22,15 +22,6 @@ type Client = SupabaseClient<Database>;
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
-/** The company's calendar day in its own time zone, as `private.org_today` gives it. */
-export async function companyToday(supabase: Client, organisationId: string): Promise<string> {
-  const { data } = await supabase
-    .from("organisations")
-    .select("timezone")
-    .eq("id", organisationId)
-    .maybeSingle();
-  return todayIn(data?.timezone ?? LAGOS_TIME_ZONE);
-}
 
 export interface ActivationContext {
   contract: {
@@ -117,7 +108,7 @@ export async function loadActivationPlan(
     loadActivationContext(supabase, organisationId, contractId),
     loadRateCardVersions(supabase, organisationId, contractId),
     loadHeadcount(supabase, organisationId, contractId),
-    options.today ? Promise.resolve(options.today) : companyToday(supabase, organisationId),
+    options.today ? Promise.resolve(options.today) : organisationToday(supabase, organisationId),
   ]);
   if (!context) return null;
   const plan = planActivation({
@@ -300,7 +291,7 @@ export async function loadRequiredShiftsSummary(
   organisationId: string,
   from?: string,
 ): Promise<RequiredShiftsSummary> {
-  const start = from ?? (await companyToday(supabase, organisationId));
+  const start = from ?? (await organisationToday(supabase, organisationId));
   const to = addDays(start, 6);
   const rows = await loadRequiredShifts(supabase, organisationId, start, to);
   return {

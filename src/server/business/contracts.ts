@@ -16,7 +16,7 @@ import {
 } from "./contract-schemas";
 
 /**
- * Contracts, dated rate cards and WHT rates (slice 2.4), as `mutate()` specs. Every write runs
+ * Contracts and dated rate cards, WHT per line (slice 2.4), as `mutate()` specs. Every write runs
  * with the signed-in user's own client:
  * - a contract with its sites is one SQL function as the caller (`create_contract`,
  *   `update_draft_contract`), so RLS and the column grants apply and it saves whole;

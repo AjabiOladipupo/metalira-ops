@@ -1,6 +1,5 @@
 import "server-only";
 
-import { lagosToday } from "@/lib/dates";
 import { MANAGER_ROLES } from "@/lib/roles";
 import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
 import {
@@ -28,7 +27,11 @@ import {
   saveDraftRateCardSpec,
   updateContractSpec,
 } from "@/server/business/contracts";
-import { listContracts, loadContractsSummary } from "@/server/business/contracts-data";
+import {
+  listContracts,
+  loadContractsSummary,
+  organisationToday,
+} from "@/server/business/contracts-data";
 import {
   addHeadcountSpec,
   removeHeadcountSpec,
@@ -1073,8 +1076,12 @@ export const CAPABILITIES: readonly Capability[] = [
     input: null,
     changes: "none",
     action: null,
-    read: ({ supabase, organisationId }) =>
-      loadContractsSummary(supabase, organisationId, lagosToday()),
+    read: async ({ supabase, organisationId }) =>
+      loadContractsSummary(
+        supabase,
+        organisationId,
+        await organisationToday(supabase, organisationId),
+      ),
     agent: true,
   },
   {
@@ -1159,8 +1166,12 @@ export const CAPABILITIES: readonly Capability[] = [
     input: null,
     changes: "none",
     action: null,
-    read: ({ supabase, organisationId }) =>
-      loadHeadcountSummary(supabase, organisationId, lagosToday()),
+    read: async ({ supabase, organisationId }) =>
+      loadHeadcountSummary(
+        supabase,
+        organisationId,
+        await organisationToday(supabase, organisationId),
+      ),
     agent: true,
   },
   {
@@ -1184,7 +1195,7 @@ export const CAPABILITIES: readonly Capability[] = [
       return {
         status: contract.status,
         sites: Object.fromEntries(siteNames),
-        week: contractWeek(contract, lines, lagosToday()),
+        week: contractWeek(contract, lines, await organisationToday(supabase, organisationId)),
       };
     },
     agent: true,

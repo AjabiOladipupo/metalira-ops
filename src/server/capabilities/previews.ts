@@ -1,6 +1,6 @@
 import "server-only";
 
-import { formatDate, lagosToday } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 import { diffRateLines, formatLineRate, formatRateKey, previewRateChange } from "@/lib/rate-cards";
 import {
   CONTRACT_TYPE_LABELS,
@@ -8,7 +8,7 @@ import {
   type saveRateCardSchema,
   type updateContractSchema,
 } from "@/server/business/contract-schemas";
-import { loadRateCardVersions } from "@/server/business/contracts-data";
+import { loadRateCardVersions, organisationToday } from "@/server/business/contracts-data";
 import { loadHeadcountContext, pricingFor } from "@/server/business/headcount-data";
 import type {
   addHeadcountSchema,
@@ -194,7 +194,7 @@ async function rateContext(
   ctx: Parameters<PreviewFn<typeof saveRateCardSchema>>[0],
 ): Promise<Awaited<ReturnType<typeof loadRateCardVersions>> & { today: string }> {
   const loaded = await loadRateCardVersions(ctx.supabase, ctx.organisationId, ctx.data.contractId);
-  return { ...loaded, today: lagosToday() };
+  return { ...loaded, today: await organisationToday(ctx.supabase, ctx.organisationId) };
 }
 
 /** "Change rates from": what closes, what starts, which lines change. */
@@ -257,7 +257,7 @@ async function previewHeadcount(
   }
   const after = change(lines);
   if (typeof after === "string") return { summary: after, changes: [] };
-  const pricing = pricingFor(contract, lagosToday());
+  const pricing = pricingFor(contract, await organisationToday(ctx.supabase, ctx.organisationId));
   return previewHeadcountChange({
     before: lines,
     after,
