@@ -415,6 +415,44 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"posts": {
+                  Row: {
+                    "band": string,"closed_on": string | null,"closed_reason": string | null,"contract_id": string,"created_at": string,"created_by": string | null,"headcount_requirement_id": string | null,"id": string,"kind": string | null,"name": string,"opened_on": string,"organisation_id": string,"role": string,"site_id": string,"status": string,"unit": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "band"?: string,"closed_on"?: string | null,"closed_reason"?: string | null,"contract_id": string,"created_at"?: string,"created_by"?: string | null,"headcount_requirement_id"?: string | null,"id"?: string,"kind"?: never,"name": string,"opened_on": string,"organisation_id": string,"role": string,"site_id": string,"status"?: string,"unit": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "band"?: string,"closed_on"?: string | null,"closed_reason"?: string | null,"contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"headcount_requirement_id"?: string | null,"id"?: string,"kind"?: never,"name"?: string,"opened_on"?: string,"organisation_id"?: string,"role"?: string,"site_id"?: string,"status"?: string,"unit"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "posts_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "posts_contract_site_fkey"
+      columns: ["organisation_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "contract_sites"
+      referencedColumns: ["organisation_id","contract_id","site_id"]
+    },{
+      foreignKeyName: "posts_headcount_fkey"
+      columns: ["organisation_id","headcount_requirement_id"]
+isOneToOne: false
+      referencedRelation: "headcount_requirements"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "posts_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"profiles": {
                   Row: {
                     "created_at": string,"full_name": string | null,"updated_at": string,"user_id": string
@@ -505,6 +543,32 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "organisations"
       referencedColumns: ["id"]
+    }
+                  ]
+                },"roster_requirements": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"created_by": string | null,"days_of_week": (number)[],"duration_minutes": number | null,"effective_from": string,"effective_to": string | null,"end_time": string,"id": string,"organisation_id": string,"post_id": string,"required_count": number,"site_id": string,"start_time": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"days_of_week": (number)[],"duration_minutes"?: never,"effective_from": string,"effective_to"?: string | null,"end_time": string,"id"?: string,"organisation_id": string,"post_id": string,"required_count": number,"site_id": string,"start_time": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"days_of_week"?: (number)[],"duration_minutes"?: never,"effective_from"?: string,"effective_to"?: string | null,"end_time"?: string,"id"?: string,"organisation_id"?: string,"post_id"?: string,"required_count"?: number,"site_id"?: string,"start_time"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "roster_requirements_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "roster_requirements_post_fkey"
+      columns: ["organisation_id","post_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "posts"
+      referencedColumns: ["organisation_id","id","contract_id","site_id"]
     }
                   ]
                 },"site_checkpoints": {
@@ -759,6 +823,9 @@ isOneToOne: false
               "organisation_id": string,"pin_reset": boolean,"worker_id": string
             }[]
                            },
+"activate_contract":
+{ Args: { "p_contract_id": string,"p_go_live_date"?: string,"p_organisation_id": string,"p_send_welcome"?: boolean }; Returns: Json
+                           },
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
@@ -835,6 +902,9 @@ isOneToOne: false
 "email_link_allowed":
 { Args: { "p_keys": (string)[] }; Returns: boolean
                            },
+"end_contract":
+{ Args: { "p_contract_id": string,"p_end_date": string,"p_organisation_id": string,"p_reason": string }; Returns: Json
+                           },
 "end_employment":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_id": string }; Returns: undefined
                            },
@@ -885,6 +955,11 @@ isOneToOne: false
 "request_owner_change":
 { Args: { "p_email"?: string,"p_kind": Database["public"]['Enums']["owner_change_kind"],"p_membership_id"?: string,"p_new_role"?: Database["public"]['Enums']["membership_role"],"p_organisation_id": string,"p_reason"?: string }; Returns: {
               "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
+            }[]
+                           },
+"required_shifts":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
+              "band": string,"contract_id": string,"ends_at": string,"kind": string,"post_id": string,"post_name": string,"required_count": number,"requirement_id": string,"role": string,"shift_date": string,"site_id": string,"starts_at": string,"unit": string
             }[]
                            },
 "resend_membership_invite":

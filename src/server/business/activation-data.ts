@@ -193,12 +193,22 @@ export async function loadPosts(
   const { data, error } = await supabase
     .from("posts")
     .select(
-      "id, name, site_id, role, band, unit, status, opened_on, closed_on, closed_reason, sites(name), roster_requirements(id, effective_from, effective_to, days_of_week, start_time, end_time, required_count)",
+      "id, name, site_id, role, band, unit, status, opened_on, closed_on, closed_reason, roster_requirements(id, effective_from, effective_to, days_of_week, start_time, end_time, required_count)",
     )
     .eq("organisation_id", organisationId)
     .eq("contract_id", contractId)
     .limit(1000);
   if (error) throw new Error(`Could not read posts: ${error.message}`);
+  const siteIds = [...new Set((data ?? []).map((p) => p.site_id))];
+  const sites = siteIds.length
+    ? await supabase
+        .from("sites")
+        .select("id, name")
+        .eq("organisation_id", organisationId)
+        .in("id", siteIds)
+    : { data: [], error: null };
+  if (sites.error) throw new Error(`Could not read sites: ${sites.error.message}`);
+  const siteName = new Map((sites.data ?? []).map((s) => [s.id, s.name] as const));
   return (data ?? [])
     .map((row) => {
       const requirements = [...(row.roster_requirements ?? [])]
@@ -215,7 +225,7 @@ export async function loadPosts(
         id: row.id,
         name: row.name,
         siteId: row.site_id,
-        siteName: row.sites?.name ?? "",
+        siteName: siteName.get(row.site_id) ?? "",
         role: row.role,
         band: row.band,
         unit: row.unit,

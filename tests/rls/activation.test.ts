@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addDays, lagosToday } from "@/lib/dates";
 import { isoWeekday } from "@/lib/headcount";
+import { loadImportContext } from "@/server/people/imports/context";
 import type { Json } from "@/types/db";
 
 import {
@@ -818,6 +819,13 @@ describe("assignments to archived sites and clients (owner decision, 19 Nov 2026
     await admin.from("clients").update({ status: "archived" }).eq("id", client);
     expect((await assign(second, { site_id: kept })).error?.code).toBe("MLAS7");
     expect((await assign(second, { client_id: client })).error?.code).toBe("MLAS7");
+
+    // The people import reads the same statuses, so it holds such rows back before the database
+    // would refuse them ("Client archived" / "Site archived", src/server/people/import/validate.ts).
+    const context = await loadImportContext(hr.client, owner.orgId);
+    expect(context.clients?.find((c) => c.id === client)).toMatchObject({ archived: true });
+    expect(context.sites?.find((x) => x.id === site)).toMatchObject({ archived: true });
+    expect(context.sites?.find((x) => x.id === apapa)).toMatchObject({ archived: false });
 
     // Moving an existing row onto an archived site is refused for the database owner too.
     const free = await newSite("Free Site");
