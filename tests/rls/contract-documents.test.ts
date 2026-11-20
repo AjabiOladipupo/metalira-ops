@@ -14,7 +14,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type pg from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { sweepContractDocuments } from "@/server/business/contract-document-sweep";
 import type { Json } from "@/types/db";
@@ -98,12 +98,30 @@ function upload(by: Client, path: string, body: Buffer = PDF, upsert = false) {
   return by.storage.from(BUCKET).upload(path, body, { contentType: "application/pdf", upsert });
 }
 
-function confirm(by: Client, id: string, size = PDF.length, digest = sha(PDF)) {
+/** The server's confirm: the secret key, naming the actor (or `by`, to show others are refused). */
+function confirm(
+  actor: string,
+  id: string,
+  {
+    size = PDF.length,
+    digest = sha(PDF),
+    by = admin,
+  }: { size?: number; digest?: string; by?: Client } = {},
+) {
   return by.rpc("confirm_contract_document", {
     p_organisation_id: owner.orgId,
     p_document_id: id,
+    p_actor: actor,
     p_size_bytes: size,
     p_sha256: digest,
+  });
+}
+
+function reject(actor: string, id: string, by: Client = admin) {
+  return by.rpc("reject_contract_document", {
+    p_organisation_id: owner.orgId,
+    p_document_id: id,
+    p_actor: actor,
   });
 }
 
@@ -112,7 +130,7 @@ async function activeDocument() {
   const row = await start();
   expect(row.error).toBeNull();
   expect((await upload(ops.client, row.data!.storage_path)).error).toBeNull();
-  expect((await confirm(ops.client, row.data!.id)).error).toBeNull();
+  expect((await confirm(ops.id, row.data!.id)).error).toBeNull();
   return row.data!;
 }
 
@@ -151,18 +169,22 @@ beforeAll(async () => {
   db = await pgClient();
   owner = await createTenantUser("cd-owner", "Documents Org");
   other = await createTenantUser("cd-other", "Other Documents Org");
-  ops = await createTestUser("cd-ops", "Tunde Ops");
   ops2 = await createTestUser("cd-ops2", "Bola Ops");
   finance = await createTestUser("cd-fin", "Femi Finance");
   hr = await createTestUser("cd-hr", "Hauwa HR");
   lineManager = await createTestUser("cd-lm", "Lara Line");
-  await addMember(ops, "ops_manager");
   await addMember(ops2, "ops_manager");
   await addMember(finance, "finance");
   await addMember(hr, "hr");
   await addMember(lineManager, "line_manager");
   contractId = await newContract(owner, "Coastline guarding");
   otherContractId = await newContract(other, "Rival guarding");
+});
+
+// Uploads are capped at 10 an hour per person, so each test gets its own ops manager.
+beforeEach(async () => {
+  ops = await createTestUser("cd-ops", "Tunde Ops");
+  await addMember(ops, "ops_manager");
 });
 
 afterAll(async () => {
@@ -344,25 +366,32 @@ describe("confirm", () => {
     expect((audit?.after as { sha256?: string })?.sha256).toBe(sha(PDF));
   });
 
-  it("refuses a size that isn't what Storage holds, a missing upload and someone else's row", async () => {
+  it("can't be called by signed-in users, so the server's byte check can't be skipped", async () => {
     const pending = await start();
-    expect((await confirm(ops.client, pending.data!.id)).error?.code).toBe("MLCD3");
     expect((await upload(ops.client, pending.data!.storage_path)).error).toBeNull();
-    expect((await confirm(ops.client, pending.data!.id, PDF.length + 1)).error?.code).toBe("MLCD3");
-    expect((await confirm(ops2.client, pending.data!.id)).error?.code).toBe("MLCD1");
-    expect((await confirm(finance.client, pending.data!.id)).error?.code).toBe(PERMISSION_DENIED);
-    expect((await confirm(other.client, pending.data!.id)).error?.code).toBe(PERMISSION_DENIED);
+    for (const by of [ops.client, owner.client, finance.client, other.client]) {
+      expect((await confirm(ops.id, pending.data!.id, { by })).error?.code).toBe(PERMISSION_DENIED);
+      expect((await reject(ops.id, pending.data!.id, by)).error?.code).toBe(PERMISSION_DENIED);
+    }
+    expect((await row(pending.data!.id))?.status).toBe("pending");
+  });
+
+  it("refuses a size that isn't what Storage holds, a missing upload and the wrong actor", async () => {
+    const pending = await start();
+    expect((await confirm(ops.id, pending.data!.id)).error?.code).toBe("MLCD3");
+    expect((await upload(ops.client, pending.data!.storage_path)).error).toBeNull();
+    expect((await confirm(ops.id, pending.data!.id, { size: PDF.length + 1 })).error?.code).toBe(
+      "MLCD3",
+    );
+    // Another ops manager didn't upload it; finance, hr and another company's owner can't upload.
+    expect((await confirm(ops2.id, pending.data!.id)).error?.code).toBe("MLCD1");
+    for (const actor of [finance.id, hr.id, other.id]) {
+      expect((await confirm(actor, pending.data!.id)).error?.code).toBe(PERMISSION_DENIED);
+    }
     expect((await row(pending.data!.id))?.status).toBe("pending");
     // A rejected upload can't be confirmed later.
-    expect(
-      (
-        await ops.client.rpc("reject_contract_document", {
-          p_organisation_id: owner.orgId,
-          p_document_id: pending.data!.id,
-        })
-      ).error,
-    ).toBeNull();
-    expect((await confirm(ops.client, pending.data!.id)).error?.code).toBe("MLCD2");
+    expect((await reject(ops.id, pending.data!.id)).error).toBeNull();
+    expect((await confirm(ops.id, pending.data!.id)).error?.code).toBe("MLCD2");
     expect(await canRead(ops.client, pending.data!.storage_path)).toBe(false);
   });
 

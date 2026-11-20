@@ -776,7 +776,7 @@ isOneToOne: false
 { Args: { "p_organisation_id": string }; Returns: string
                            },
 "confirm_contract_document":
-{ Args: { "p_document_id": string,"p_organisation_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: undefined
+{ Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: undefined
                            },
 "create_client":
 { Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
@@ -852,7 +852,7 @@ isOneToOne: false
             }[]
                            },
 "reject_contract_document":
-{ Args: { "p_document_id": string,"p_organisation_id": string }; Returns: undefined
+{ Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
                            },
 "remove_contract_document":
 { Args: { "p_document_id": string,"p_organisation_id": string,"p_reason": string }; Returns: undefined

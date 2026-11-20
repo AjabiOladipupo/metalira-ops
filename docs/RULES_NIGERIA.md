@@ -76,6 +76,8 @@ Open points (ask before Phase 5 code depends on them):
   - Record the WHT actually deducted on each payment and flag differences from the expected amount.
   - `clients.deducts_wht` is learned from payments (a client that pays in full is flagged, not assumed small).
   - Bank matching accepts three patterns: the full amount; the amount less WHT; the amount less WHT and VAT (clients that withhold VAT).
+  - Invoice lines are split by rate-card version, so each line has one WHT rate.
+  - WHT on credit-note (negative) lines rounds half away from zero, symmetric with `roundHalfUp`, so a credit mirrors the line it reverses.
   - A WHT credit-note tracker per client.
   - A warning when the organisation has no TIN.
 

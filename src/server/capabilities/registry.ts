@@ -2,7 +2,6 @@ import "server-only";
 
 import { z } from "zod";
 
-import { lagosToday } from "@/lib/dates";
 import { MANAGER_ROLES } from "@/lib/roles";
 import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
 import {
@@ -30,7 +29,11 @@ import {
   saveDraftRateCardSpec,
   updateContractSpec,
 } from "@/server/business/contracts";
-import { listContracts, loadContractsSummary } from "@/server/business/contracts-data";
+import {
+  listContracts,
+  loadContractsSummary,
+  organisationToday,
+} from "@/server/business/contracts-data";
 import {
   confirmContractDocumentSpec,
   contractDocumentLink,
@@ -1078,8 +1081,12 @@ export const CAPABILITIES: readonly Capability[] = [
     input: null,
     changes: "none",
     action: null,
-    read: ({ supabase, organisationId }) =>
-      loadContractsSummary(supabase, organisationId, lagosToday()),
+    read: async ({ supabase, organisationId }) =>
+      loadContractsSummary(
+        supabase,
+        organisationId,
+        await organisationToday(supabase, organisationId),
+      ),
     agent: true,
   },
   {

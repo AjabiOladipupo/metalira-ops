@@ -31,10 +31,12 @@ import { CONTRACT_EDITORS } from "./contracts";
  * 2. The browser uploads the file straight to the private `contract-docs` bucket at that path
  *    (Storage takes it only for the user's own pending row).
  * 3. `confirmContractDocumentSpec` reads the object back as the user, checks its type from its
- *    magic bytes and its size, works out its sha256 and calls `confirm_contract_document`, which
- *    checks the object in Storage again and marks the row active. A file that fails is marked
- *    rejected and deleted with the secret key (the only use of it here; nothing a user sends
- *    picks the object, which is the row's own path).
+ *    magic bytes and its size, works out its sha256 and only then calls
+ *    `confirm_contract_document` with the secret key, naming the verified user as the actor; the
+ *    database re-checks the actor's role, that they uploaded it and the object in Storage, and
+ *    marks the row active. Signed-in users can't call confirm or reject themselves. A file that
+ *    fails is marked rejected and deleted with the secret key. Nothing a user sends picks the
+ *    object or the actor: the path is the row's own and the actor is the session's.
  * Removing marks the row removed with a reason; the file stops opening at once and is deleted
  * 30 days later by the sweep. Opening makes a 60-second signed URL after an RLS-checked read.
  * File contents, signed URLs and object paths are never logged.
@@ -159,15 +161,21 @@ async function deleteRejectedObject(path: string): Promise<void> {
   }
 }
 
+/**
+ * Marks the actor's pending upload rejected and deletes its file. Secret key only (the database
+ * refuses signed-in users), naming the actor `mutate()` verified; the database re-checks their
+ * role and that they uploaded it.
+ */
 async function reject(
-  supabase: Client,
   organisationId: string,
+  actor: string,
   documentId: string,
   path: string,
 ): Promise<void> {
-  const { error } = await supabase.rpc("reject_contract_document", {
+  const { error } = await createAdminSupabase().rpc("reject_contract_document", {
     p_organisation_id: organisationId,
     p_document_id: documentId,
+    p_actor: actor,
   });
   if (error) fromDocumentDbError(error);
   await deleteRejectedObject(path);
@@ -202,26 +210,29 @@ export const confirmContractDocumentSpec: MutationSpec<
 
     const download = await supabase.storage.from(CONTRACT_DOCS_BUCKET).download(row.storage_path);
     if (download.error || !download.data) {
-      await reject(supabase, organisationId, row.id, row.storage_path);
+      await reject(organisationId, userId, row.id, row.storage_path);
       throw new MutationError("invalid", "The upload didn't arrive. Choose the file again.");
     }
     const bytes = new Uint8Array(await download.data.arrayBuffer());
     const check = checkUploadedBytes(bytes, row.file_ext as DocumentExt);
     if (!check.ok) {
-      await reject(supabase, organisationId, row.id, row.storage_path);
+      await reject(organisationId, userId, row.id, row.storage_path);
       throw new MutationError("invalid", check.message);
     }
 
+    // Only now, with the bytes checked, does the row become active: confirm is secret-key only,
+    // so a signed-in user can't skip this check. The actor is the user mutate() verified.
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const { error: confirmError } = await supabase.rpc("confirm_contract_document", {
+    const { error: confirmError } = await createAdminSupabase().rpc("confirm_contract_document", {
       p_organisation_id: organisationId,
       p_document_id: row.id,
+      p_actor: userId,
       p_size_bytes: bytes.length,
       p_sha256: sha256,
     });
     if (confirmError) {
       if (confirmError.code === "MLCD3") {
-        await reject(supabase, organisationId, row.id, row.storage_path);
+        await reject(organisationId, userId, row.id, row.storage_path);
       }
       fromDocumentDbError(confirmError);
     }
@@ -270,17 +281,36 @@ export type DocumentLink =
  * A 60-second signed URL for an active document, made with the user's own client after reading
  * the row under RLS: Storage signs it only when its select policy lets the user read the object
  * (owner, admin, finance or ops_manager of the company, active rows only). `download` asks the
- * browser to save the file under its name instead of showing it. Never log the URL.
+ * browser to save the file under its name instead of showing it. `contractId` and `clientId`
+ * (from the page's URL) must be the document's contract and that contract's client. Never log
+ * the URL.
  */
 export async function contractDocumentLink(
   supabase: Client,
   organisationId: string,
   documentId: string,
-  options: { download?: boolean; contractId?: string } = {},
+  options: { download?: boolean; contractId?: string; clientId?: string } = {},
 ): Promise<DocumentLink> {
-  if (!z.uuid().safeParse(documentId).success) return { ok: false, reason: "not_found" };
-  if (options.contractId !== undefined && !z.uuid().safeParse(options.contractId).success) {
+  const isId = (value: string | undefined) =>
+    value === undefined || z.uuid().safeParse(value).success;
+  if (
+    !z.uuid().safeParse(documentId).success ||
+    !isId(options.contractId) ||
+    !isId(options.clientId)
+  ) {
     return { ok: false, reason: "not_found" };
+  }
+  if (options.clientId !== undefined) {
+    if (options.contractId === undefined) return { ok: false, reason: "not_found" };
+    const { data: contract, error: contractError } = await supabase
+      .from("contracts")
+      .select("id")
+      .eq("organisation_id", organisationId)
+      .eq("id", options.contractId)
+      .eq("client_id", options.clientId)
+      .maybeSingle();
+    if (contractError) throw new Error(`Could not read the contract (${contractError.code})`);
+    if (!contract) return { ok: false, reason: "not_found" };
   }
   let query = supabase
     .from("contract_documents")

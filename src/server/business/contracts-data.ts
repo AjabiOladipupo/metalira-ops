@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { LAGOS_TIME_ZONE, todayIn } from "@/lib/dates";
 import type { Currency } from "@/lib/money";
 import {
   rateCardInForce,
@@ -283,4 +284,14 @@ export async function loadRateCardVersions(
     },
     versions: sortVersions((data.rate_cards ?? []).map(toRateCardVersion)),
   };
+}
+
+/** The company's calendar day in its own time zone, as `private.org_today` gives it. */
+export async function organisationToday(supabase: Client, organisationId: string): Promise<string> {
+  const { data } = await supabase
+    .from("organisations")
+    .select("timezone")
+    .eq("id", organisationId)
+    .maybeSingle();
+  return todayIn(data?.timezone ?? LAGOS_TIME_ZONE);
 }

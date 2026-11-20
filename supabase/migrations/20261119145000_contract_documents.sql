@@ -11,18 +11,24 @@
 --       fixes its storage path from the row's own ids;
 --    b. the browser uploads straight to the bucket (no request-size limit in between); Storage
 --       takes an object only at the path of a pending row the same user created;
---    c. the server reads the object back as that user, checks its type from its magic bytes,
---       works out its sha256 and calls `confirm_contract_document`, which also checks the object
---       is in Storage with the size and type stated, and marks the row `active`. A file that
---       fails the check is marked `rejected` (`reject_contract_document`) and deleted by the
---       server with the secret key. A pending row an hour old is rejected by the sweep.
+--    c. the server reads the object back as that user, checks its type from its magic bytes and
+--       works out its sha256; only then does it call `confirm_contract_document` with the secret
+--       key, naming the signed-in user as the actor. The function re-checks that the actor is an
+--       owner, admin or ops_manager and the row's uploader, and that the object is in Storage
+--       with the size and type stated, and marks the row `active`. Signed-in users can't call it,
+--       so the magic-byte check can't be skipped. A file that fails is marked `rejected`
+--       (`reject_contract_document`, also secret key only) and deleted by the server. A pending
+--       row an hour old is rejected by the sweep.
+--    Uploads are capped: 10 rows an hour and 20 files not yet confirmed or deleted per person,
+--    and 300 rows a day per company (MLCD5).
 -- 4. Reads. The row: owner, admin, finance and ops_manager (contract readers). The file: the
 --    same roles, and only while its row is `active` (the uploader also reads their own pending
 --    upload, for step c). Files open by 60-second signed URLs made on the server after an
 --    RLS-checked read of the row. hr, line managers, workers and other companies see nothing.
 -- 5. Writes. No update or delete grants on the table, and no update or delete policies on the
---    bucket: the row moves only through the functions below (private security definers that
---    check the caller's role themselves, behind public invoker wrappers), and the guard trigger
+--    bucket: the row moves only through the functions below (private security definers behind
+--    public invoker wrappers: remove for signed-in editors, who are checked by role; confirm and
+--    reject for the secret key only, which names the actor), and the guard trigger
 --    refuses any other change for every role, the secret key included, except the sweep
 --    recording that a file has gone.
 --
@@ -155,9 +161,55 @@ create index contract_documents_sweep_idx
 comment on table public.contract_documents is
   'Files kept against a contract (signed contract, SLA, amendments, purchase orders, insurance). Never deleted: removed rows keep who, when and why; the file is deleted 30 days after removal.';
 comment on column public.contract_documents.sha256 is
-  'SHA-256 of the file, worked out by the app server from the bytes it read back. confirm_contract_document checks the object''s size, type and owner in Storage, but takes this value from its caller (an owner, admin or ops_manager): not proof of what was uploaded.';
+  'SHA-256 of the file, worked out by the app server from the bytes it read back. confirm_contract_document checks the object''s size, type and owner in Storage, and only the server (secret key) can confirm, after its magic-byte check.';
 comment on column public.contract_documents.storage_path is
   'Object name in the private contract-docs bucket: {organisation_id}/{contract_id}/{id}.{file_ext}. Opened only by 60-second signed URLs.';
+
+-- Refuses a new upload past the caps (MLCD5). Definer, so the counts see every row whatever
+-- the caller may read; one uploader at a time (advisory lock), so parallel inserts can't race
+-- past the per-person caps.
+create function private.contract_documents_check_caps(p_organisation_id uuid, p_uploaded_by uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended('contract_documents_upload:' || p_uploaded_by::text, 0));
+  if (
+    select count(*)
+    from public.contract_documents d
+    where d.uploaded_by = p_uploaded_by
+      and d.created_at > now() - interval '1 hour'
+  ) >= 10 then
+    raise exception 'That''s 10 uploads in the last hour. Wait a while and try again.'
+      using errcode = 'MLCD5';
+  end if;
+  if (
+    select count(*)
+    from public.contract_documents d
+    where d.uploaded_by = p_uploaded_by
+      and d.status in ('pending', 'rejected')
+      and d.file_deleted_at is null
+  ) >= 20 then
+    raise exception 'Too many uploads are unfinished or refused. Try again tomorrow.'
+      using errcode = 'MLCD5';
+  end if;
+  if (
+    select count(*)
+    from public.contract_documents d
+    where d.organisation_id = p_organisation_id
+      and d.created_at > now() - interval '1 day'
+  ) >= 300 then
+    raise exception 'Your company has uploaded 300 documents today. Try again tomorrow.'
+      using errcode = 'MLCD5';
+  end if;
+end;
+$$;
+
+revoke all on function private.contract_documents_check_caps(uuid, uuid) from public, anon;
+grant execute on function private.contract_documents_check_caps(uuid, uuid) to authenticated, service_role;
 
 -- BEFORE INSERT/UPDATE/DELETE on contract_documents.
 -- Insert: a new row is always pending, uploaded by the caller, at the path the database works
@@ -194,18 +246,9 @@ begin
     if new.uploaded_by is null then
       raise exception 'A document needs the person who uploads it.' using errcode = 'MLCD4';
     end if;
-    -- Unconfirmed uploads are swept daily; until then cap how many one person can start, so
-    -- the bucket can't be filled with files nobody confirms.
-    if (
-      select count(*)
-      from public.contract_documents d
-      where d.uploaded_by = new.uploaded_by
-        and d.status = 'pending'
-        and d.created_at > now() - interval '1 hour'
-    ) >= 10 then
-      raise exception 'Too many uploads are still unfinished. Wait an hour and try again.'
-        using errcode = 'MLCD5';
-    end if;
+    -- Unconfirmed uploads are swept daily; until then cap how many can be started, so the
+    -- bucket can't be filled with files nobody confirms.
+    perform private.contract_documents_check_caps(new.organisation_id, new.uploaded_by);
     return new;
   end if;
 
@@ -316,6 +359,7 @@ create policy contract_docs_insert on storage.objects
         and d.storage_path = name
         and d.status = 'pending'
         and d.uploaded_by = (select private.session_uid())
+        and d.created_at > now() - interval '1 hour'
     )
   );
 
@@ -346,10 +390,14 @@ create policy contract_docs_select on storage.objects
 -- 5. Writes
 -- ---------------------------------------------------------------------------
 
--- The caller's pending row, locked, or a refusal. Role first, so an outsider learns nothing.
+-- The actor's pending row, locked, or a refusal. Secret key only: the server names the
+-- signed-in user it verified (`p_actor`), and the actor is checked here as if they had called:
+-- an owner, admin or ops_manager of the organisation, and the row's uploader. Role first, so an
+-- outsider learns nothing.
 create function private.lock_pending_contract_document(
   p_organisation_id uuid,
-  p_document_id uuid
+  p_document_id uuid,
+  p_actor uuid
 )
 returns public.contract_documents
 language plpgsql
@@ -360,14 +408,23 @@ as $$
 declare
   v_doc public.contract_documents;
 begin
-  if not private.has_role(p_organisation_id, array['owner', 'admin', 'ops_manager']) then
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server confirms uploads.' using errcode = '42501';
+  end if;
+  if p_actor is null or not exists (
+    select 1
+    from public.memberships m
+    where m.organisation_id = p_organisation_id
+      and m.user_id = p_actor
+      and m.role::text = any (array['owner', 'admin', 'ops_manager'])
+  ) then
     raise exception 'Your role can''t upload contract documents.' using errcode = '42501';
   end if;
   select d.* into v_doc
   from public.contract_documents d
   where d.id = p_document_id
     and d.organisation_id = p_organisation_id
-    and d.uploaded_by = private.session_uid()
+    and d.uploaded_by = p_actor
   for update;
   if v_doc.id is null then
     raise exception 'That upload wasn''t found.' using errcode = 'MLCD1';
@@ -375,18 +432,22 @@ begin
   if v_doc.status <> 'pending' then
     raise exception 'That upload has already been dealt with.' using errcode = 'MLCD2';
   end if;
+  -- The person acted in the manager app; the secret key only carried it.
+  perform set_config('metalira.audit_channel', 'web', true);
   return v_doc;
 end;
 $$;
 
-revoke all on function private.lock_pending_contract_document(uuid, uuid) from public, anon, authenticated;
+revoke all on function private.lock_pending_contract_document(uuid, uuid, uuid) from public, anon, authenticated;
 
--- confirm_contract_document: the server has read the upload back, checked its magic bytes and
--- worked out its sha256. The object must be in Storage at the row's path, uploaded by the
--- caller, with the size given and the row's type; then the row becomes active.
+-- confirm_contract_document: the server has read the upload back as the actor, checked its
+-- magic bytes and worked out its sha256. The object must be in Storage at the row's path,
+-- uploaded by the actor, with the size given and the row's type; then the row becomes active.
+-- The audit event names the actor (the row trigger's actor is empty under the secret key).
 create function private.confirm_contract_document(
   p_organisation_id uuid,
   p_document_id uuid,
+  p_actor uuid,
   p_size_bytes bigint,
   p_sha256 text
 )
@@ -401,7 +462,7 @@ declare
   v_size bigint;
   v_mime text;
 begin
-  v_doc := private.lock_pending_contract_document(p_organisation_id, p_document_id);
+  v_doc := private.lock_pending_contract_document(p_organisation_id, p_document_id, p_actor);
 
   if p_sha256 is null or p_sha256 !~ '^[0-9a-f]{64}$' then
     raise exception 'The file''s fingerprint is missing.' using errcode = 'MLCD3';
@@ -412,7 +473,7 @@ begin
   from storage.objects o
   where o.bucket_id = 'contract-docs'
     and o.name = v_doc.storage_path
-    and o.owner_id = private.session_uid()::text;
+    and o.owner_id = p_actor::text;
   if not found then
     raise exception 'The upload didn''t arrive. Choose the file again.' using errcode = 'MLCD3';
   end if;
@@ -429,21 +490,25 @@ begin
       uploaded_at = now()
   where d.id = v_doc.id;
 
-  perform private.log_audit_impl(
-    p_organisation_id, 'contract_document.uploaded', 'contract_documents', v_doc.id, null,
+  insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after)
+  values (
+    p_organisation_id, p_actor, 'contract_document.uploaded', 'contract_documents', v_doc.id, null,
     jsonb_build_object(
       'contract_id', v_doc.contract_id, 'kind', v_doc.kind, 'title', v_doc.title,
       'file_name', v_doc.file_name, 'mime_type', v_doc.mime_type, 'size_bytes', p_size_bytes,
       'sha256', p_sha256
-    ),
-    null
+    )
   );
 end;
 $$;
 
 -- reject_contract_document: the upload failed the server's check (or never arrived). The row is
--- kept as `rejected`; the server deletes the object with the secret key.
-create function private.reject_contract_document(p_organisation_id uuid, p_document_id uuid)
+-- kept as `rejected`; the server deletes the object with the secret key straight after.
+create function private.reject_contract_document(
+  p_organisation_id uuid,
+  p_document_id uuid,
+  p_actor uuid
+)
 returns void
 language plpgsql
 volatile
@@ -453,7 +518,7 @@ as $$
 declare
   v_doc public.contract_documents;
 begin
-  v_doc := private.lock_pending_contract_document(p_organisation_id, p_document_id);
+  v_doc := private.lock_pending_contract_document(p_organisation_id, p_document_id, p_actor);
   update public.contract_documents d set status = 'rejected' where d.id = v_doc.id;
 end;
 $$;
@@ -512,16 +577,18 @@ begin
 end;
 $$;
 
-revoke all on function private.confirm_contract_document(uuid, uuid, bigint, text) from public, anon;
-revoke all on function private.reject_contract_document(uuid, uuid) from public, anon;
+-- Confirm and reject: the secret key only (the server, after its own checks). Remove: editors.
+revoke all on function private.confirm_contract_document(uuid, uuid, uuid, bigint, text) from public, anon, authenticated;
+revoke all on function private.reject_contract_document(uuid, uuid, uuid) from public, anon, authenticated;
 revoke all on function private.remove_contract_document(uuid, uuid, text) from public, anon;
-grant execute on function private.confirm_contract_document(uuid, uuid, bigint, text) to authenticated;
-grant execute on function private.reject_contract_document(uuid, uuid) to authenticated;
+grant execute on function private.confirm_contract_document(uuid, uuid, uuid, bigint, text) to service_role;
+grant execute on function private.reject_contract_document(uuid, uuid, uuid) to service_role;
 grant execute on function private.remove_contract_document(uuid, uuid, text) to authenticated;
 
 create function public.confirm_contract_document(
   p_organisation_id uuid,
   p_document_id uuid,
+  p_actor uuid,
   p_size_bytes bigint,
   p_sha256 text
 )
@@ -531,17 +598,23 @@ volatile
 security invoker
 set search_path = ''
 as $$
-  select private.confirm_contract_document(p_organisation_id, p_document_id, p_size_bytes, p_sha256)
+  select private.confirm_contract_document(
+    p_organisation_id, p_document_id, p_actor, p_size_bytes, p_sha256
+  )
 $$;
 
-create function public.reject_contract_document(p_organisation_id uuid, p_document_id uuid)
+create function public.reject_contract_document(
+  p_organisation_id uuid,
+  p_document_id uuid,
+  p_actor uuid
+)
 returns void
 language sql
 volatile
 security invoker
 set search_path = ''
 as $$
-  select private.reject_contract_document(p_organisation_id, p_document_id)
+  select private.reject_contract_document(p_organisation_id, p_document_id, p_actor)
 $$;
 
 create function public.remove_contract_document(
@@ -558,9 +631,9 @@ as $$
   select private.remove_contract_document(p_organisation_id, p_document_id, p_reason)
 $$;
 
-revoke all on function public.confirm_contract_document(uuid, uuid, bigint, text) from public, anon;
-revoke all on function public.reject_contract_document(uuid, uuid) from public, anon;
+revoke all on function public.confirm_contract_document(uuid, uuid, uuid, bigint, text) from public, anon, authenticated;
+revoke all on function public.reject_contract_document(uuid, uuid, uuid) from public, anon, authenticated;
 revoke all on function public.remove_contract_document(uuid, uuid, text) from public, anon;
-grant execute on function public.confirm_contract_document(uuid, uuid, bigint, text) to authenticated;
-grant execute on function public.reject_contract_document(uuid, uuid) to authenticated;
+grant execute on function public.confirm_contract_document(uuid, uuid, uuid, bigint, text) to service_role;
+grant execute on function public.reject_contract_document(uuid, uuid, uuid) to service_role;
 grant execute on function public.remove_contract_document(uuid, uuid, text) to authenticated;
