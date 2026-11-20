@@ -643,6 +643,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"roster_publications": {
+                  Row: {
+                    "assigned_count": number,"id": string,"open_count": number,"organisation_id": string,"published_at": string,"published_by": string | null,"site_id": string,"snapshot": NonNullable<Json>,"version": number,"week_start": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "assigned_count"?: number,"id"?: string,"open_count"?: number,"organisation_id": string,"published_at"?: string,"published_by"?: string | null,"site_id": string,"snapshot"?: NonNullable<Json>,"version": number,"week_start": string
+                  }
+                  Update: {
+                    "assigned_count"?: number,"id"?: string,"open_count"?: number,"organisation_id"?: string,"published_at"?: string,"published_by"?: string | null,"site_id"?: string,"snapshot"?: NonNullable<Json>,"version"?: number,"week_start"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "roster_publications_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "roster_publications_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"roster_requirements": {
                   Row: {
                     "contract_id": string,"created_at": string,"created_by": string | null,"days_of_week": (number)[],"duration_minutes": number | null,"effective_from": string,"effective_to": string | null,"end_time": string,"id": string,"organisation_id": string,"post_id": string,"required_count": number,"site_id": string,"start_time": string,"updated_at": string
@@ -1159,6 +1185,11 @@ isOneToOne: false
               "has_line_manager": boolean,"name": string
             }[]
                            },
+"my_published_shifts":
+{ Args: { "p_from": string,"p_to": string }; Returns: {
+              "assignment_id": string,"ends_at": string,"organisation_id": string,"post_name": string,"shift_date": string,"site_address": string,"site_landmark": string,"site_name": string,"starts_at": string
+            }[]
+                           },
 "org_bank_account_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
@@ -1168,6 +1199,9 @@ isOneToOne: false
 { Args: { "p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
+                           },
+"publish_roster":
+{ Args: { "p_dry_run"?: boolean,"p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
                            },
 "reject_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
@@ -1210,6 +1244,9 @@ isOneToOne: false
 { Args: { "p_from": string,"p_organisation_id": string,"p_site_id": string,"p_to": string }; Returns: {
               "assigned_at": string,"assigned_by": string,"id": string,"removed_at": string,"removed_by": string,"removed_reason": string
             }[]
+                           },
+"roster_publication_status":
+{ Args: { "p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
                            },
 "rotate_checkpoint_qr":
 { Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined

@@ -210,7 +210,8 @@ test("ops_manager assigns a suggested worker into an uncovered shift", async ({ 
     `Week of ${formatDate(weekOne)}`,
   );
   await expect(page.getByText("0 of 14 shifts covered · 14 open")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Publish roster" })).toBeDisabled();
+  await expect(page.getByRole("link", { name: "Publish roster" })).toBeVisible();
+  await expect(page.getByTestId("publication-status")).toHaveText("Not published");
 
   const tray = page.getByTestId("uncovered-tray");
   await expect(tray.getByText("14 open")).toBeVisible();

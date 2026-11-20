@@ -5,15 +5,22 @@ import { redirect } from "next/navigation";
 
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { formatShortDay } from "@/lib/roster";
+import { formatNotifyTally } from "@/lib/roster-publish";
 import type { CompanyFormState } from "@/server/identity/company-form-state";
 import { MutationError, mutate } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 
-import { assignShiftSpec, copyLastWeekSpec, removeAssignmentSpec } from "./roster";
+import {
+  assignShiftSpec,
+  copyLastWeekSpec,
+  publishRosterSpec,
+  removeAssignmentSpec,
+} from "./roster";
+import { notifyPublishedRoster } from "./roster-notify";
 
 /**
  * Server Actions for the roster (slice 3.2): assign a worker to a post-day, take them off, and
- * copy last week's roster after its preview. Each goes through `mutate()` (role, then Zod, then
+ * copy last week's roster after its preview, and publish a week (slice 3.3). Each goes through `mutate()` (role, then Zod, then
  * one SQL function as the user, which checks the role again). Registered in
  * src/server/capabilities/registry.ts.
  */
@@ -101,4 +108,30 @@ export async function copyLastWeekAction(
   }
   revalidatePath("/app/roster");
   redirect(rosterPath(fields));
+}
+
+/**
+ * Publishes a site's week after the confirm step on /app/roster/publish, then tells each affected
+ * worker (in the app, and by email under the daily caps). On a republish only the workers whose
+ * shifts changed are told. Stays on the page with "Published version 2 · 3 workers told in the
+ * app, 2 by email".
+ */
+export async function publishRosterAction(
+  _prev: CompanyFormState,
+  formData: FormData,
+): Promise<CompanyFormState> {
+  const fields = formFields(formData);
+  let result;
+  try {
+    result = await mutate(publishRosterSpec, fields);
+  } catch (error) {
+    return refusal(error, fields);
+  }
+  const tally = await notifyPublishedRoster(result.organisationId, result);
+  revalidatePath("/app/roster");
+  return {
+    ok: true,
+    status: 200,
+    message: `Published version ${result.version} · ${formatNotifyTally(tally)}.`,
+  };
 }

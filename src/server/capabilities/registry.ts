@@ -151,8 +151,14 @@ import {
   ROSTER_EDITORS,
   assignShiftSpec,
   copyLastWeekSpec,
+  publishRosterSchema,
+  publishRosterSpec,
   removeAssignmentSpec,
 } from "@/server/workforce/roster";
+import {
+  loadMyPublishedShifts,
+  loadPublicationStatus,
+} from "@/server/workforce/roster-publish-data";
 import {
   loadRosterCandidates,
   loadRosterSettings,
@@ -184,7 +190,7 @@ import {
   previewChangeRequirement,
   previewClosePost,
 } from "./live-change-previews";
-import { previewCopyWeek } from "./roster-previews";
+import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -218,6 +224,8 @@ const LIVE_CHANGE =
   "Changes a live contract's staffing over several dated rows, which rosters and billing follow: kept to people for now (the owner may enable it later).";
 const COPY_WEEK =
   "Writes a whole week of assignments at once: kept to people for now, with its preview on the screen (the owner may enable it later).";
+const PUBLISH_WEEK =
+  "Publishes a whole week and tells every affected worker by inbox and email: kept to people for now, with its preview on the screen (the owner may enable it later).";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -230,6 +238,10 @@ const rosterWeekInput = z.object({
   siteId: z.uuid("Choose a site"),
   weekStart: z.iso.date("Choose a week").optional(),
 });
+/** The worker's own published shifts, at most 62 days (slice 3.3). */
+const myShiftsInput = z
+  .object({ from: z.iso.date("Choose a day"), to: z.iso.date("Choose a day") })
+  .refine((v) => v.from <= v.to, "Choose a from day on or before the to day");
 const rosterSummaryInput = z.object({ weekStart: z.iso.date("Choose a week").optional() });
 const rosterSuggestionsInput = z.object({
   postId: z.uuid("Choose a post"),
@@ -1031,6 +1043,23 @@ export const CAPABILITIES: readonly Capability[] = [
     agentNote: "Worker app only.",
   },
   {
+    name: "me.published_shifts",
+    description:
+      "A worker reads their own published shifts between two days, with the post and site names.",
+    kind: "read",
+    audience: "worker",
+    roles: [],
+    input: myShiftsInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase }, input) => {
+      const { from, to } = myShiftsInput.parse(input);
+      return loadMyPublishedShifts(supabase, from, to);
+    },
+    agent: false,
+    agentNote: "Worker app only.",
+  },
+  {
     name: "consents.summary",
     description: "Counts active workers who agreed to location and to selfies at clock-in.",
     kind: "read",
@@ -1784,6 +1813,35 @@ export const CAPABILITIES: readonly Capability[] = [
     preview: previewCopyWeek,
     agent: false,
     agentNote: COPY_WEEK,
+  },
+  {
+    name: "roster.publication_status",
+    description:
+      "Says whether a site's week is published, which version and when, and which post-days changed since.",
+    kind: "read",
+    audience: "manager",
+    roles: ROSTER_EDITORS,
+    input: publishRosterSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { siteId, weekStart } = publishRosterSchema.parse(input);
+      return loadPublicationStatus(supabase, organisationId, siteId, weekStart);
+    },
+    agent: true,
+  },
+  {
+    name: "roster.publish",
+    description:
+      "Publishes a site's week as the next version and tells each worker whose shifts are new or changed.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(publishRosterSpec),
+    changes: "many",
+    action: at("workforce/roster-actions", "publishRosterAction"),
+    preview: previewPublishWeek,
+    agent: false,
+    agentNote: PUBLISH_WEEK,
   },
 ];
 
