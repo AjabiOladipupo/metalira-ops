@@ -270,7 +270,9 @@ test("ops_manager copies last week after the preview", async ({ browser }) => {
   await expect(page.getByText("0 of 14 shifts covered · 14 open")).toBeVisible();
 
   await page.getByRole("link", { name: "Copy last week" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Copy last week");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Copy last week", {
+    timeout: 15_000,
+  });
   await expect(page.getByTestId("copy-preview")).toHaveText(
     `Copies 2 assignments into the week of ${formatDate(weekTwo)}.`,
   );

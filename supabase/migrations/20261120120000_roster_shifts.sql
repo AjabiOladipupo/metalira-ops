@@ -210,6 +210,8 @@ set search_path = ''
 as $$
 declare
   v_req record;
+  v_name text;
+  v_closed date;
 begin
   if tg_op = 'DELETE' then
     raise exception 'Shifts are never deleted.' using errcode = 'MLRS1';
@@ -219,7 +221,15 @@ begin
     select * into v_req
     from private.post_day_requirement(new.organisation_id, new.post_id, new.shift_date);
     if not found then
-      raise exception 'This post isn''t staffed on %.', to_char(new.shift_date, 'FMDy FMDD Mon YYYY')
+      select p.name, p.closed_on into v_name, v_closed
+      from public.posts p
+      where p.id = new.post_id and p.organisation_id = new.organisation_id;
+      if v_closed is not null and new.shift_date > v_closed then
+        raise exception '% closed after %.', v_name, to_char(v_closed, 'FMDD Mon YYYY')
+          using errcode = 'MLRS1';
+      end if;
+      raise exception '% isn''t staffed on %.', coalesce(v_name, 'This post'),
+        to_char(new.shift_date, 'FMDy FMDD Mon YYYY')
         using errcode = 'MLRS1';
     end if;
     new.status := 'open';
