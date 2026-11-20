@@ -32,6 +32,8 @@ export type BankLookupResult =
       test: boolean;
       result: NameMatchResult;
       expected: string;
+      /** The answer can't back a request (a test lookup on real data): shown, not sendable. */
+      blocked?: string;
     }
   | { ok: false; message: string; field?: "bankCode" | "bankAccountNumber" };
 
@@ -355,6 +357,11 @@ export function BankAccountFields({
                 <span className="text-sm text-fg-muted">Expected: {done.expected}</span>
               ) : null}
             </div>
+            {done.blocked ? (
+              <p className="m-0 text-sm" role="alert" data-testid="bank-lookup-blocked">
+                {done.blocked}
+              </p>
+            ) : null}
             {done.result === "no_match" ? (
               <p className="m-0 text-sm" role="alert">
                 This account belongs to someone else, so it can&apos;t be used. Use an account in{" "}

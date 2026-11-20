@@ -77,6 +77,12 @@ create table public.bank_account_lookups (
   -- others are labelled "Test lookup" wherever they show.
   source text
     constraint bank_account_lookups_source check (source in ('bank', 'sandbox', 'test')),
+  -- The network address the server saw (x-real-ip), for the per-address limit.
+  client_ip text
+    constraint bank_account_lookups_client_ip_length check (char_length(client_ip) <= 64),
+  -- worker_check only: md5 of the ciphertext the number was read from, so the result is kept
+  -- only if the worker's account is still that one when the bank answers.
+  worker_enc_md5 text,
   created_at timestamptz not null default now(),
   finished_at timestamptz,
   used_at timestamptz,
@@ -123,8 +129,38 @@ revoke truncate, delete, references, trigger on table public.bank_account_lookup
 grant select on table public.bank_account_lookups to authenticated;
 grant select, insert, update on table public.bank_account_lookups to service_role;
 
+-- Whether test and sandbox lookups may back real requests. Only local and CI databases say yes:
+-- supabase/seed.sql inserts the setting, and `supabase db reset` / `supabase start` run the seed
+-- there. The hosted project gets migrations only (never the seed), so there the setting is
+-- absent and test or sandbox answers can be shown but never used (Vercel previews share the
+-- production database).
+create table private.settings (
+  key text primary key,
+  value text not null
+);
+revoke all on table private.settings from public, anon, authenticated;
+
+create function private.test_bank_lookups_allowed()
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    (select s.value = 'on' from private.settings s where s.key = 'allow_test_bank_lookups'),
+    false
+  )
+$$;
+
 -- Starts a lookup for p_user_id (the server has verified the session), after checking their
--- role for the purpose and the hourly limits under a per-company lock. Secret key only.
+-- role for the purpose and the limits under one lock. Secret key only.
+--
+-- Limits (they protect people's names and Metalira's provider account):
+--   per user: 30 an hour;            per network address (x-real-ip): 60 an hour;
+--   per company: 20 an hour for the company account, 100 an hour for workers;
+--   a company that hasn't finished setup (anyone can create one): 10 a day;
+--   the platform: 2,000 an hour, of which companies in setup share at most 200.
 create function private.begin_bank_account_lookup(
   p_organisation_id uuid,
   p_user_id uuid,
@@ -132,7 +168,8 @@ create function private.begin_bank_account_lookup(
   p_worker_id uuid,
   p_bank_code text,
   p_bank_account_digest text,
-  p_bank_account_last4 text
+  p_bank_account_last4 text,
+  p_client_ip text default null
 )
 returns uuid
 language plpgsql
@@ -143,7 +180,10 @@ as $$
 declare
   v_roles text[];
   v_allowed boolean;
+  v_in_setup boolean;
+  v_worker_enc_md5 text;
   v_id uuid;
+  v_ip text := nullif(left(btrim(p_client_ip), 64), '');
 begin
   if auth.uid() is not null then
     raise exception 'Only the server can look up bank accounts.' using errcode = '42501';
@@ -176,15 +216,21 @@ begin
     raise exception 'Your role can''t check this bank account.' using errcode = '42501';
   end if;
 
-  if p_worker_id is not null and not exists (
-    select 1 from public.workers w
-    where w.id = p_worker_id and w.organisation_id = p_organisation_id
-  ) then
-    raise exception 'That employee wasn''t found.' using errcode = 'P0002';
+  if p_worker_id is not null then
+    select md5(w.bank_account_enc) into v_worker_enc_md5
+    from public.workers w
+    where w.id = p_worker_id and w.organisation_id = p_organisation_id;
+    if not found then
+      raise exception 'That employee wasn''t found.' using errcode = 'P0002';
+    end if;
   end if;
 
-  -- One lock for all lookups, so parallel lookups can't pass a limit together (a lookup is a
-  -- network call made after this returns, so the lock is held only for the counts).
+  select o.setup_completed_at is null into v_in_setup
+  from public.organisations o
+  where o.id = p_organisation_id;
+
+  -- One lock for all lookups, so parallel lookups can't pass a limit together. The network
+  -- call happens after this returns, so the lock is held only for the counts.
   perform pg_advisory_xact_lock(hashtextextended('bank_account_lookups', 0));
   if (
     select count(*) from public.bank_account_lookups l
@@ -193,57 +239,77 @@ begin
     raise exception 'You have checked 30 bank accounts in the last hour. Try again later.'
       using errcode = 'MLBL1';
   end if;
-  if (
+  if v_ip is not null and (
     select count(*) from public.bank_account_lookups l
-    where l.organisation_id = p_organisation_id and l.created_at > now() - interval '1 hour'
-  ) >= 100 then
-    raise exception 'Your company has checked 100 bank accounts in the last hour. Try again later.'
+    where l.client_ip = v_ip and l.created_at > now() - interval '1 hour'
+  ) >= 60 then
+    raise exception 'Too many bank account checks from your network in the last hour. Try again later.'
+      using errcode = 'MLBL1';
+  end if;
+  if p_purpose = 'company_bank' and (
+    select count(*) from public.bank_account_lookups l
+    where l.organisation_id = p_organisation_id and l.purpose = 'company_bank'
+      and l.created_at > now() - interval '1 hour'
+  ) >= 20 then
+    raise exception 'Your company has checked its own account 20 times in the last hour. Try again later.'
       using errcode = 'MLBL2';
   end if;
-  -- A company still in setup (anyone can create one) gets a smaller allowance, so new sign-ups
-  -- can't use Metalira's lookup to find out who owns account numbers in bulk.
-  if exists (
-    select 1 from public.organisations o
-    where o.id = p_organisation_id and o.setup_completed_at is null
-  ) and (
+  if p_purpose <> 'company_bank' and (
+    select count(*) from public.bank_account_lookups l
+    where l.organisation_id = p_organisation_id and l.purpose <> 'company_bank'
+      and l.created_at > now() - interval '1 hour'
+  ) >= 100 then
+    raise exception 'Your company has checked 100 employee bank accounts in the last hour. Try again later.'
+      using errcode = 'MLBL2';
+  end if;
+  if v_in_setup and (
     select count(*) from public.bank_account_lookups l
     where l.organisation_id = p_organisation_id and l.created_at > now() - interval '24 hours'
-  ) >= 40 then
-    raise exception 'Your company can check 40 bank accounts a day until setup is finished.'
+  ) >= 10 then
+    raise exception 'Your company can check 10 bank accounts a day until setup is finished.'
       using errcode = 'MLBL2';
   end if;
-  -- And a ceiling for the whole platform, which also protects Metalira's provider account.
   if (
     select count(*) from public.bank_account_lookups l
     where l.created_at > now() - interval '1 hour'
-  ) >= 2000 then
+  ) >= 2000 or (
+    v_in_setup and (
+      select count(*)
+      from public.bank_account_lookups l
+      join public.organisations o on o.id = l.organisation_id
+      where o.setup_completed_at is null and l.created_at > now() - interval '1 hour'
+    ) >= 200
+  ) then
     raise exception 'Bank account checks are busy right now. Try again in a few minutes.'
       using errcode = 'MLBL9';
   end if;
 
   insert into public.bank_account_lookups (
     organisation_id, requested_by, purpose, worker_id, bank_code, bank_account_digest,
-    bank_account_last4
+    bank_account_last4, client_ip, worker_enc_md5
   )
   values (
     p_organisation_id, p_user_id, p_purpose, p_worker_id, p_bank_code, p_bank_account_digest,
-    p_bank_account_last4
+    p_bank_account_last4, v_ip,
+    case when p_purpose = 'worker_check' then v_worker_enc_md5 end
   )
   returning id into v_id;
   return v_id;
 end;
 $$;
 
--- Records what the bank said. A resolved `worker_check` (the server looked up the number on
--- file) is also written to the worker, unless their bank details changed meanwhile. Secret key
--- only; a lookup finishes once.
+-- Records what the bank said, and returns whether the answer may back a request: a live
+-- bank's answer always; a test or sandbox answer only where the database allows test lookups.
+-- A usable `worker_check` (the server looked up the number on file) is also written to the
+-- worker, unless their account changed meanwhile (bound to the ciphertext it was read from).
+-- Secret key only; a lookup finishes once.
 create function private.finish_bank_account_lookup(
   p_id uuid,
   p_status public.bank_lookup_status,
   p_account_name text default null,
   p_source text default null
 )
-returns void
+returns boolean
 language plpgsql
 volatile
 security definer
@@ -251,6 +317,7 @@ set search_path = ''
 as $$
 declare
   l public.bank_account_lookups;
+  v_usable boolean;
 begin
   if auth.uid() is not null then
     raise exception 'Only the server can record a bank lookup.' using errcode = '42501';
@@ -270,7 +337,10 @@ begin
     raise exception 'That lookup wasn''t found or has already finished.' using errcode = 'P0002';
   end if;
 
-  if l.purpose = 'worker_check' and l.status = 'resolved' then
+  v_usable := l.status = 'resolved'
+    and (l.source = 'bank' or private.test_bank_lookups_allowed());
+
+  if v_usable and l.purpose = 'worker_check' then
     update public.workers w
     set bank_checked_name = l.account_name,
         bank_checked_at = l.finished_at,
@@ -279,8 +349,9 @@ begin
         bank_checked_source = l.source
     where w.id = l.worker_id
       and w.organisation_id = l.organisation_id
-      and w.bank_account_last4 = l.bank_account_last4;
+      and md5(w.bank_account_enc) = l.worker_enc_md5;
   end if;
+  return v_usable;
 end;
 $$;
 
@@ -292,7 +363,8 @@ create function public.begin_bank_account_lookup(
   p_worker_id uuid,
   p_bank_code text,
   p_bank_account_digest text,
-  p_bank_account_last4 text
+  p_bank_account_last4 text,
+  p_client_ip text default null
 )
 returns uuid
 language sql
@@ -302,7 +374,7 @@ set search_path = ''
 as $$
   select private.begin_bank_account_lookup(
     p_organisation_id, p_user_id, p_purpose, p_worker_id, p_bank_code, p_bank_account_digest,
-    p_bank_account_last4
+    p_bank_account_last4, p_client_ip
   )
 $$;
 
@@ -312,7 +384,7 @@ create function public.finish_bank_account_lookup(
   p_account_name text default null,
   p_source text default null
 )
-returns void
+returns boolean
 language sql
 volatile
 security invoker
@@ -341,6 +413,9 @@ alter table public.organisation_bank_accounts
     ),
   add column name_check_source text
     constraint organisation_bank_accounts_name_check_source check (name_check_source in ('bank', 'sandbox', 'test')),
+  -- The names the check compared with when the request was raised (set by the trigger from
+  -- the company's legal and trading names), so the approver sees if they changed since.
+  add column name_check_expected text,
   -- null: raised before slice 2.3b. Otherwise checked (match or near, with the lookup) or not.
   add constraint organisation_bank_accounts_name_check_columns check (
     name_check is null
@@ -367,6 +442,8 @@ alter table public.bank_detail_changes
     ),
   add column name_check_source text
     constraint bank_detail_changes_name_check_source check (name_check_source in ('bank', 'sandbox', 'test')),
+  -- The employee's name when the request was raised (set by the trigger).
+  add column name_check_expected text,
   add constraint bank_detail_changes_name_check_columns check (
     name_check is null
     or (name_check in ('match', 'near')
@@ -465,6 +542,11 @@ begin
       using errcode = 'MLBL6';
   end if;
 
+  if l.source <> 'bank' and not private.test_bank_lookups_allowed() then
+    raise exception 'Test lookups can''t be used for real bank details. Check the account with a live bank lookup.'
+      using errcode = 'MLBLT';
+  end if;
+
   update public.bank_account_lookups b set used_at = now() where b.id = l.id;
   return l;
 end;
@@ -506,22 +588,48 @@ begin
   if new.name_check = 'match' then
     new.name_check_reason := null;
   end if;
+  select nullif(concat_ws(' / ', o.legal_name, o.trading_name), '')
+  into new.name_check_expected
+  from public.organisations o
+  where o.id = new.organisation_id;
   return new;
 end;
 $$;
 
--- BEFORE INSERT on bank_detail_changes, after bank_detail_changes_before_insert. A lookup is
--- optional (the people import raises requests without one: `not_checked`).
+-- The employee's name as the check compares it (definer: a worker may not read every column).
+create function private.worker_check_name(p_organisation_id uuid, p_worker_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select w.first_name || ' ' || w.last_name
+  from public.workers w
+  where w.id = p_worker_id and w.organisation_id = p_organisation_id
+$$;
+
+-- BEFORE INSERT on bank_detail_changes, after bank_detail_changes_before_insert. Invoker on
+-- purpose: `current_user` is then the role that ran the insert. A signed-in user writing
+-- through the Data API (`authenticated`, directly or through an invoker function such as
+-- create_worker) must name a lookup (MLBL7). Only the people import, through the definer
+-- function private.import_bank_change, and the secret key raise requests without one
+-- (`not_checked`), and approving those needs the approver to say how they confirmed it.
 create function private.bank_detail_changes_lookup()
 returns trigger
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
   l public.bank_account_lookups;
 begin
+  new.name_check_expected := private.worker_check_name(new.organisation_id, new.worker_id);
   if new.bank_lookup_id is null then
+    if auth.uid() is not null and current_user = 'authenticated' then
+      raise exception 'Check the account name with the bank before sending the request.'
+        using errcode = 'MLBL7';
+    end if;
     new.name_check := 'not_checked';
     new.bank_account_digest := null;
     new.name_check_reason := null;
@@ -545,22 +653,40 @@ begin
 end;
 $$;
 
--- BEFORE UPDATE on both tables: the check is part of the request, fixed after insert.
+-- BEFORE UPDATE on both tables: the check is part of the request, fixed after insert. And on
+-- approval: a request checked with a test or sandbox lookup can't be approved where test
+-- lookups aren't allowed (the hosted project), and an unchecked worker request (the import, or
+-- raised before slice 2.3b) needs the approver to say how they confirmed the account.
 create function private.bank_request_check_fixed()
 returns trigger
 language plpgsql
+security definer
 set search_path = ''
 as $$
 begin
   if (
     new.bank_code, new.bank_lookup_id, new.bank_account_digest, new.name_check,
-    new.name_check_reason, new.name_check_source
+    new.name_check_reason, new.name_check_source, new.name_check_expected
   ) is distinct from (
     old.bank_code, old.bank_lookup_id, old.bank_account_digest, old.name_check,
-    old.name_check_reason, old.name_check_source
+    old.name_check_reason, old.name_check_source, old.name_check_expected
   ) then
     raise exception 'A bank request can''t be edited. Reject it and raise a new one.'
       using errcode = 'MLBL8';
+  end if;
+
+  if old.status = 'pending' and new.status = 'approved' then
+    if new.name_check in ('match', 'near') and new.name_check_source <> 'bank'
+      and not private.test_bank_lookups_allowed() then
+      raise exception 'Test lookups can''t be used for real bank details. Reject this request and raise it again with a live bank lookup.'
+        using errcode = 'MLBLT';
+    end if;
+    if tg_table_name = 'bank_detail_changes'
+      and coalesce(new.name_check, 'not_checked') = 'not_checked'
+      and char_length(coalesce(btrim(new.decision_note), '')) < 10 then
+      raise exception 'This account wasn''t checked with the bank. Say how you confirmed it (at least 10 characters), for example from the employee''s bank letter.'
+        using errcode = 'MLBLC';
+    end if;
   end if;
   return new;
 end;
@@ -723,7 +849,408 @@ revoke all on function public.create_worker(jsonb, jsonb) from public, anon;
 grant execute on function public.create_worker(jsonb, jsonb) to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
--- 7. Housekeeping and grants
+-- 7. The people import raises unchecked bank-detail requests
+-- ---------------------------------------------------------------------------
+
+-- A new employee's bank details from an import, as a pending `not_checked` request (the
+-- import never looks names up per row; "Check bank details" does later, and approving needs
+-- the approver to say how they confirmed it). Definer, so the request is inserted by the
+-- function's owner rather than `authenticated`; the bank_detail_changes triggers still take
+-- the requester and the role check from the signed-in caller. Only for a worker created in
+-- this transaction by the caller's own commit of a checked batch.
+create function private.import_bank_change(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_worker_id uuid,
+  p_bank_name text,
+  p_account_name text,
+  p_bank_account_enc bytea,
+  p_bank_account_last4 text,
+  p_bank_code text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  if not private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
+    raise exception 'Your role can''t import employees.' using errcode = '42501';
+  end if;
+  if not exists (
+    select 1 from public.import_batches b
+    where b.id = p_batch_id and b.organisation_id = p_organisation_id
+      and b.status not in ('uploaded', 'cancelled')
+  ) or not exists (
+    select 1 from public.workers w
+    where w.id = p_worker_id and w.organisation_id = p_organisation_id
+      and w.created_at = now()
+  ) then
+    raise exception 'Bank details from an import go only to employees it is creating.'
+      using errcode = '42501';
+  end if;
+  insert into public.bank_detail_changes (
+    organisation_id, worker_id, bank_name, account_name, bank_account_enc, bank_account_last4,
+    reason, bank_code
+  )
+  values (
+    p_organisation_id, p_worker_id, p_bank_name, p_account_name, p_bank_account_enc,
+    p_bank_account_last4, 'Bank details for a new employee', p_bank_code
+  );
+end;
+$$;
+
+-- As in 20261117180000, except that bank details of a new employee (outside the owner's first
+-- import, decision 20) are raised through private.import_bank_change.
+create or replace function public.commit_import_batch(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_rows jsonb
+)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+set statement_timeout = '300s'
+as $$
+declare
+  v_status public.import_batch_status;
+  v_sent integer;
+  v_found integer;
+  v_done integer;
+  v_held integer;
+  v_item jsonb;
+  v_worker jsonb;
+  v_worker_id uuid;
+  v_departments jsonb;
+  v_clients jsonb;
+  v_sites jsonb;
+  v_projects jsonb;
+  v_department uuid;
+  v_client uuid;
+  v_site uuid;
+  v_project uuid;
+  v_created integer := 0;
+  v_new_departments integer := 0;
+  v_new_clients integer := 0;
+  v_new_sites integer := 0;
+  v_new_projects integer := 0;
+  v_single_approver boolean := false;
+  v_bank public.workers;
+  v_bank_saved integer := 0;
+begin
+  if not private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
+    raise exception 'Your role can''t import employees.' using errcode = '42501';
+  end if;
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' then
+    raise exception 'Nothing to import.' using errcode = '22023';
+  end if;
+
+  -- One commit per batch at a time.
+  select b.status into v_status
+  from public.import_batches b
+  where b.id = p_batch_id and b.organisation_id = p_organisation_id
+  for update;
+  if v_status is null then
+    raise exception 'That import wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_status = 'cancelled' then
+    raise exception 'This import was cancelled. Upload the file again.' using errcode = 'MLIM2';
+  end if;
+  if v_status = 'uploaded' then
+    raise exception 'Check the file before importing it.' using errcode = 'MLIM2';
+  end if;
+
+  -- The rows named (kept still by the batch lock above).
+  select count(*)::integer into v_sent from jsonb_array_elements(p_rows);
+  select count(*)::integer,
+         count(*) filter (where r.status = 'imported')::integer,
+         count(*) filter (where r.status = 'held')::integer
+  into v_found, v_done, v_held
+  from public.import_rows r
+  where r.batch_id = p_batch_id
+    and r.organisation_id = p_organisation_id
+    and r.id in (select (e.item ->> 'row_id')::uuid from jsonb_array_elements(p_rows) as e (item));
+
+  if v_found <> v_sent then
+    raise exception 'A row of this import wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_sent = 0 then
+    return jsonb_build_object('created', 0, 'already_imported', 0, 'departments', 0,
+      'clients', 0, 'sites', 0, 'projects', 0);
+  end if;
+  if v_done = v_sent then
+    return jsonb_build_object('created', 0, 'already_imported', v_done, 'departments', 0,
+      'clients', 0, 'sites', 0, 'projects', 0);
+  end if;
+  if v_done > 0 then
+    raise exception 'Some of these rows were imported a moment ago. Check the file again.'
+      using errcode = 'MLIM1';
+  end if;
+  if v_held > 0 then
+    raise exception 'Rows that need fixing can''t be imported yet. Check the file again.'
+      using errcode = 'MLIM1';
+  end if;
+
+  -- Decision 20: the owner's import before setup is finished saves bank details directly.
+  v_single_approver := private.import_single_approver(p_organisation_id, p_batch_id);
+
+  -- New names, once each. The server sends a name only when it found no match.
+  insert into public.departments (organisation_id, name)
+  select distinct on (lower(n.name)) p_organisation_id, n.name
+  from (
+    select btrim(e.item -> 'department' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where (e.item -> 'department') ? 'name'
+  ) as n
+  where n.name <> ''
+  on conflict (organisation_id, lower(name)) do nothing;
+  get diagnostics v_new_departments = row_count;
+
+  insert into public.clients (organisation_id, name)
+  select distinct on (lower(n.name)) p_organisation_id, n.name
+  from (
+    select btrim(e.item -> 'client' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object' and (e.item -> 'client') ? 'name'
+  ) as n
+  where n.name <> ''
+  on conflict (organisation_id, lower(name)) do nothing;
+  get diagnostics v_new_clients = row_count;
+
+  -- Lookups by id and by lower-case name, for this organisation only.
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_departments
+  from public.departments d
+  cross join lateral (values ('id:' || d.id::text, d.id), ('name:' || lower(d.name), d.id)) as m (k, v)
+  where d.organisation_id = p_organisation_id;
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_clients
+  from public.clients c
+  cross join lateral (values ('id:' || c.id::text, c.id), ('name:' || lower(c.name), c.id)) as m (k, v)
+  where c.organisation_id = p_organisation_id;
+
+  -- Sites and projects belong to a client: new ones once each per client.
+  insert into public.sites (organisation_id, client_id, name)
+  select distinct on (n.client_id, lower(n.name)) p_organisation_id, n.client_id, n.name
+  from (
+    select (v_clients ->> case
+              when (e.item -> 'client') ? 'id' then 'id:' || (e.item -> 'client' ->> 'id')
+              else 'name:' || lower(btrim(e.item -> 'client' ->> 'name'))
+            end)::uuid as client_id,
+           btrim(e.item -> 'site' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object'
+      and jsonb_typeof(e.item -> 'site') = 'object'
+      and (e.item -> 'site') ? 'name'
+  ) as n
+  where n.client_id is not null and n.name <> ''
+  on conflict (organisation_id, client_id, lower(name)) do nothing;
+  get diagnostics v_new_sites = row_count;
+
+  insert into public.projects (organisation_id, client_id, name)
+  select distinct on (n.client_id, lower(n.name)) p_organisation_id, n.client_id, n.name
+  from (
+    select (v_clients ->> case
+              when (e.item -> 'client') ? 'id' then 'id:' || (e.item -> 'client' ->> 'id')
+              else 'name:' || lower(btrim(e.item -> 'client' ->> 'name'))
+            end)::uuid as client_id,
+           btrim(e.item -> 'project' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object'
+      and jsonb_typeof(e.item -> 'project') = 'object'
+      and (e.item -> 'project') ? 'name'
+  ) as n
+  where n.client_id is not null and n.name <> ''
+  on conflict (organisation_id, client_id, lower(name)) do nothing;
+  get diagnostics v_new_projects = row_count;
+
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_sites
+  from public.sites s
+  cross join lateral (
+    values ('id:' || s.client_id::text || ':' || s.id::text, s.id),
+           ('name:' || s.client_id::text || ':' || lower(s.name), s.id)
+  ) as m (k, v)
+  where s.organisation_id = p_organisation_id;
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_projects
+  from public.projects p
+  cross join lateral (
+    values ('id:' || p.client_id::text || ':' || p.id::text, p.id),
+           ('name:' || p.client_id::text || ':' || lower(p.name), p.id)
+  ) as m (k, v)
+  where p.organisation_id = p_organisation_id;
+
+  for v_item in
+    select e.item from jsonb_array_elements(p_rows) with ordinality as e (item, n) order by e.n
+  loop
+    v_department := (v_departments ->> case
+      when (v_item -> 'department') ? 'id' then 'id:' || (v_item -> 'department' ->> 'id')
+      else 'name:' || lower(btrim(v_item -> 'department' ->> 'name'))
+    end)::uuid;
+    if v_department is null then
+      raise exception 'An employee in this import has no department.' using errcode = '22023';
+    end if;
+
+    v_client := null;
+    v_site := null;
+    v_project := null;
+    if jsonb_typeof(v_item -> 'client') = 'object' then
+      v_client := (v_clients ->> case
+        when (v_item -> 'client') ? 'id' then 'id:' || (v_item -> 'client' ->> 'id')
+        else 'name:' || lower(btrim(v_item -> 'client' ->> 'name'))
+      end)::uuid;
+      if v_client is null then
+        raise exception 'A client in this import wasn''t found.' using errcode = 'P0002';
+      end if;
+      if jsonb_typeof(v_item -> 'site') = 'object' then
+        v_site := (v_sites ->> case
+          when (v_item -> 'site') ? 'id' then 'id:' || v_client::text || ':' || (v_item -> 'site' ->> 'id')
+          else 'name:' || v_client::text || ':' || lower(btrim(v_item -> 'site' ->> 'name'))
+        end)::uuid;
+        if v_site is null then
+          raise exception 'A site in this import wasn''t found.' using errcode = 'P0002';
+        end if;
+      end if;
+      if jsonb_typeof(v_item -> 'project') = 'object' then
+        v_project := (v_projects ->> case
+          when (v_item -> 'project') ? 'id' then 'id:' || v_client::text || ':' || (v_item -> 'project' ->> 'id')
+          else 'name:' || v_client::text || ':' || lower(btrim(v_item -> 'project' ->> 'name'))
+        end)::uuid;
+        if v_project is null then
+          raise exception 'A project in this import wasn''t found.' using errcode = 'P0002';
+        end if;
+      end if;
+    end if;
+
+    -- The worker, always in this organisation, with the department and line manager resolved
+    -- here. create_worker runs as the caller: RLS, grants and the workers triggers apply
+    -- (line-manager checks, needs_pay_details, audit).
+    v_worker := coalesce(v_item -> 'worker', '{}'::jsonb)
+      || jsonb_build_object(
+        'organisation_id', p_organisation_id,
+        'department_id', v_department,
+        'line_manager_worker_id', v_item -> 'line_manager' ->> 'worker_id',
+        'line_manager_membership_id', v_item -> 'line_manager' ->> 'membership_id'
+      );
+    v_bank := jsonb_populate_record(null::public.workers, v_worker);
+    if v_single_approver
+      and num_nulls(v_bank.bank_name, v_bank.account_name, v_bank.bank_account_enc, v_bank.bank_account_last4) = 0 then
+      v_worker_id := public.create_worker(
+        v_worker - 'bank_name' - 'account_name' - 'bank_account_enc' - 'bank_account_last4',
+        null
+      );
+      perform private.import_bank_details_single_approver(
+        p_organisation_id, p_batch_id, v_worker_id, v_bank.bank_name, v_bank.account_name,
+        v_bank.bank_account_enc, v_bank.bank_account_last4
+      );
+      v_bank_saved := v_bank_saved + 1;
+    else
+      -- Slice 2.3b: create_worker no longer takes unchecked bank details from a signed-in
+      -- caller, so they go in as a `not_checked` request through the definer function.
+      v_worker_id := public.create_worker(
+        v_worker - 'bank_name' - 'account_name' - 'bank_account_enc' - 'bank_account_last4'
+          - 'bank_code' - 'bank_lookup_id' - 'bank_account_digest' - 'name_check'
+          - 'name_check_reason',
+        null
+      );
+      if num_nulls(v_bank.bank_name, v_bank.account_name, v_bank.bank_account_enc,
+          v_bank.bank_account_last4) = 0 then
+        perform private.import_bank_change(
+          p_organisation_id, p_batch_id, v_worker_id, v_bank.bank_name, v_bank.account_name,
+          v_bank.bank_account_enc, v_bank.bank_account_last4, v_bank.bank_code
+        );
+      end if;
+    end if;
+
+    -- The first pay version from the start date. The worker is new, so there is nothing to
+    -- close; private.pay_rates_guard still checks the start date.
+    if jsonb_typeof(v_item -> 'pay_rate') = 'object' then
+      insert into public.pay_rates (
+        organisation_id, worker_id, pay_type, basic_kobo, housing_kobo, transport_kobo,
+        other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, effective_from
+      )
+      values (
+        p_organisation_id,
+        v_worker_id,
+        (v_item -> 'pay_rate' ->> 'pay_type')::public.pay_type,
+        (v_item -> 'pay_rate' ->> 'basic_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'housing_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'transport_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'other_allowances_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'daily_rate_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'hourly_rate_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'effective_from')::date
+      );
+    end if;
+
+    if v_client is not null then
+      insert into public.worker_assignments (
+        organisation_id, worker_id, client_id, site_id, project_id, effective_from
+      )
+      values (
+        p_organisation_id, v_worker_id, v_client, v_site, v_project,
+        (v_worker ->> 'start_date')::date
+      );
+    end if;
+
+    v_created := v_created + 1;
+  end loop;
+
+  perform private.mark_import_rows_imported(p_organisation_id, p_batch_id, p_rows);
+
+  update public.import_batches b
+  set status = 'committed',
+      committed_at = coalesce(b.committed_at, now()),
+      committed_by = coalesce(b.committed_by, (select auth.uid())),
+      rows_ready = counts.ready,
+      rows_held = counts.held,
+      rows_imported = counts.imported
+  from (
+    select
+      count(*) filter (where r.status in ('ready', 'fixed'))::integer as ready,
+      count(*) filter (where r.status = 'held')::integer as held,
+      count(*) filter (where r.status = 'imported')::integer as imported
+    from public.import_rows r
+    where r.batch_id = p_batch_id
+  ) as counts
+  where b.id = p_batch_id and b.organisation_id = p_organisation_id;
+
+  perform public.log_audit(
+    p_organisation_id,
+    'people.import_committed',
+    'import_batches',
+    p_batch_id,
+    null,
+    jsonb_build_object(
+      'created', v_created,
+      'departments', v_new_departments,
+      'clients', v_new_clients,
+      'sites', v_new_sites,
+      'projects', v_new_projects,
+      'bank_details_saved', v_bank_saved
+    ),
+    null
+  );
+
+  return jsonb_build_object(
+    'created', v_created,
+    'already_imported', 0,
+    'departments', v_new_departments,
+    'clients', v_new_clients,
+    'sites', v_new_sites,
+    'projects', v_new_projects,
+    'bank_details_saved', v_bank_saved
+  );
+end;
+$$;
+
+revoke all on function private.import_bank_change(uuid, uuid, uuid, text, text, bytea, text, text) from public, anon;
+grant execute on function private.import_bank_change(uuid, uuid, uuid, text, text, bytea, text, text) to authenticated;
+revoke all on function public.commit_import_batch(uuid, uuid, jsonb) from public, anon;
+grant execute on function public.commit_import_batch(uuid, uuid, jsonb) to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 8. Housekeeping and grants
 -- ---------------------------------------------------------------------------
 
 -- Lookups are kept 30 days (the hourly limits need one hour; the rest is the record of who
@@ -750,17 +1277,23 @@ select cron.schedule(
   $$select private.purge_bank_account_lookups()$$
 );
 
-revoke all on function private.take_bank_account_lookup(uuid, uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) from public, anon, authenticated;
+revoke all on function private.take_bank_account_lookup(uuid, uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) from public, anon;
+-- The worker request trigger runs as the inserting role (see bank_detail_changes_lookup).
+grant execute on function private.take_bank_account_lookup(uuid, uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) to authenticated, service_role;
 revoke all on function private.organisation_bank_accounts_lookup() from public, anon, authenticated;
 revoke all on function private.bank_detail_changes_lookup() from public, anon, authenticated;
 revoke all on function private.bank_request_check_fixed() from public, anon, authenticated;
 revoke all on function private.purge_bank_account_lookups() from public, anon, authenticated;
+revoke all on function private.test_bank_lookups_allowed() from public, anon;
+grant execute on function private.test_bank_lookups_allowed() to authenticated, service_role;
+revoke all on function private.worker_check_name(uuid, uuid) from public, anon;
+grant execute on function private.worker_check_name(uuid, uuid) to authenticated, service_role;
 
-revoke all on function private.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) from public, anon, authenticated;
-grant execute on function private.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) to service_role;
+revoke all on function private.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text, text) from public, anon, authenticated;
+grant execute on function private.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text, text) to service_role;
 revoke all on function private.finish_bank_account_lookup(uuid, public.bank_lookup_status, text, text) from public, anon, authenticated;
 grant execute on function private.finish_bank_account_lookup(uuid, public.bank_lookup_status, text, text) to service_role;
-revoke all on function public.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) from public, anon, authenticated;
-grant execute on function public.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text) to service_role;
+revoke all on function public.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.begin_bank_account_lookup(uuid, uuid, public.bank_lookup_purpose, uuid, text, text, text, text) to service_role;
 revoke all on function public.finish_bank_account_lookup(uuid, public.bank_lookup_status, text, text) from public, anon, authenticated;
 grant execute on function public.finish_bank_account_lookup(uuid, public.bank_lookup_status, text, text) to service_role;

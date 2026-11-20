@@ -17,6 +17,8 @@ import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "@/server/peop
 
 import {
   LOOKUP_MESSAGES,
+  NO_COMPANY_NAME,
+  hasCompanyName,
   loadCompanyNames,
   runBankLookup,
   type BankLookupView,
@@ -96,6 +98,8 @@ export async function lookupCompanyBankAccountAction(input: unknown): Promise<Ba
   const organisationId = session.active.organisationId;
   try {
     const supabase = await createServerSupabase();
+    const expected = await loadCompanyNames(supabase, organisationId);
+    if (!hasCompanyName(expected)) return { ok: false, message: NO_COMPANY_NAME };
     return await runBankLookup({
       organisationId,
       userId: session.user.id,
@@ -103,7 +107,7 @@ export async function lookupCompanyBankAccountAction(input: unknown): Promise<Ba
       workerId: null,
       bankCode: parsed.data.bankCode,
       accountNumber: parsed.data.bankAccountNumber,
-      expected: await loadCompanyNames(supabase, organisationId),
+      expected,
     });
   } catch (error) {
     console.error("billing.bank_lookup_failed:", error instanceof Error ? error.name : "unknown");

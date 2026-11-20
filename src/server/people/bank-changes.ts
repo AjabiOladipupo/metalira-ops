@@ -103,7 +103,11 @@ function fromDbError(error: PostgrestError, field = "bankAccountNumber"): never 
     case "MLBL4":
     case "MLBL5":
     case "MLBL6":
+    case "MLBL7":
+    case "MLBLT":
       throw new MutationError("invalid", error.message, { [field]: error.message });
+    case "MLBLC":
+      throw new MutationError("invalid", error.message, { note: error.message });
     case "23505":
       if (text.includes("bank_detail_changes_one_open_key")) {
         const message =
@@ -218,7 +222,7 @@ async function checkRequestedAccount(
   supabase: Client,
   organisationId: string,
   changeId: string,
-): Promise<void> {
+): Promise<boolean> {
   const { data: change, error } = await supabase
     .from("bank_detail_changes")
     .select(
@@ -272,7 +276,14 @@ async function checkRequestedAccount(
       "These are the bank details already on file, so there is nothing to approve. Reject it instead.",
     );
   }
+  // True when the bank never checked the account name.
+  return change.name_check !== "match" && change.name_check !== "near";
 }
+
+/** Shortest note an approver gives for an account the bank never checked. */
+export const UNCHECKED_NOTE_MIN = 10;
+export const UNCHECKED_NOTE =
+  "This account wasn't checked with the bank. Say how you confirmed it (at least 10 characters), for example from the employee's bank letter.";
 
 export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, DecidedBankChange> =
   {
@@ -281,7 +292,12 @@ export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, D
     run: async ({ supabase, organisationId, data }) => {
       const { from, to } = DECISION[data.decision];
       if (data.decision === "approve") {
-        await checkRequestedAccount(supabase, organisationId, data.changeId);
+        const unchecked = await checkRequestedAccount(supabase, organisationId, data.changeId);
+        // An account the bank never checked (the import, or raised before slice 2.3b): the
+        // approver says how they confirmed it. The database refuses it too (MLBLC).
+        if (unchecked && (data.note ?? "").trim().length < UNCHECKED_NOTE_MIN) {
+          throw new MutationError("invalid", UNCHECKED_NOTE, { note: UNCHECKED_NOTE });
+        }
       }
       // The database fills in who decided and when, sets the hold, and refuses the requester.
       const { data: row, error } = await supabase
@@ -406,7 +422,7 @@ export interface BankChangeView {
 }
 
 const COLUMNS =
-  "id, worker_id, status, bank_name, account_name, bank_account_last4, reason, name_check, name_check_reason, name_check_source, requested_by, raised_by_worker, approved_by, rejected_by, cancelled_by, decision_note, previous_bank_name, previous_bank_account_last4, created_at, decided_at, applies_after, applied_at, cancelled_at, workers!bank_detail_changes_worker_fkey ( first_name, last_name, staff_id, bank_name, bank_account_last4 )";
+  "id, worker_id, status, bank_name, account_name, bank_account_last4, reason, name_check, name_check_reason, name_check_source, name_check_expected, requested_by, raised_by_worker, approved_by, rejected_by, cancelled_by, decision_note, previous_bank_name, previous_bank_account_last4, created_at, decided_at, applies_after, applied_at, cancelled_at, workers!bank_detail_changes_worker_fkey ( first_name, last_name, staff_id, bank_name, bank_account_last4 )";
 
 const FORMER_USER = "A former user";
 

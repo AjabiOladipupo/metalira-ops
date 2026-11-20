@@ -400,6 +400,7 @@ function Profile({
               <CheckBankDetails
                 workerId={worker.id}
                 defaultBankCode={worker.bankCode ?? bankFromName(worker.bankName)?.code ?? ""}
+                bankFixed={worker.bankCode !== null}
               />
             ) : null}
             {bankChanges.map((change) => (

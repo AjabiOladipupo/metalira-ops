@@ -40,6 +40,8 @@ export interface NameCheckDetailsProps {
   expected: string | null;
   reason: string | null;
   test: boolean;
+  /** What it was compared with when raised, when the names have changed since. */
+  expectedThen?: string | null;
 }
 
 /**
@@ -60,7 +62,13 @@ export function NameCheckDetails({ check }: { check: NameCheckDetailsProps }) {
       {check.status === "not_checked" ? (
         <p className="m-0 text-sm text-fg-muted">
           The account name wasn&apos;t checked with the bank. Confirm it from a bank letter or
-          statement before approving.
+          statement, and say how in the note, before approving.
+        </p>
+      ) : null}
+      {check.expectedThen ? (
+        <p className="m-0 text-sm font-medium" data-testid="name-check-changed">
+          The name has changed since this request was raised: it was compared with{" "}
+          {check.expectedThen}.
         </p>
       ) : null}
       {check.reason ? (

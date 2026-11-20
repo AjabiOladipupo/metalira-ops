@@ -28,7 +28,8 @@ import {
 export function BankChangeRequestForm({ workerId }: { workerId: string }) {
   const [state, action] = useActionState(requestBankChangeAction, null);
   const [lookup, setLookup] = useState<BankLookupState>({ status: "idle" });
-  const sendable = lookup.status === "done" && lookup.result.result !== "no_match";
+  const sendable =
+    lookup.status === "done" && lookup.result.result !== "no_match" && !lookup.result.blocked;
   const errors = state && !state.ok ? state.fieldErrors : undefined;
   const typed = state && !state.ok ? state.values : undefined;
 
@@ -91,9 +92,12 @@ export function BankChangeRequestForm({ workerId }: { workerId: string }) {
 export function CheckBankDetails({
   workerId,
   defaultBankCode,
+  bankFixed = false,
 }: {
   workerId: string;
   defaultBankCode: string;
+  /** The bank's code is on file: the check uses it, and the picker isn't shown. */
+  bankFixed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [bankCode, setBankCode] = useState(defaultBankCode);
@@ -138,7 +142,7 @@ export function CheckBankDetails({
         Asks the bank for the name on the account on file and compares it with the employee&apos;s
         name. Nothing changes on the record except the check.
       </p>
-      <div className="max-w-sm">
+      <div className={bankFixed ? "hidden" : "max-w-sm"}>
         <BankPicker
           label="Bank"
           name="checkBankCode"
@@ -217,11 +221,14 @@ export function BankChangeDecision({
   changeId,
   decisions,
   label,
+  unchecked = false,
 }: {
   changeId: string;
   decisions: readonly DecisionKind[];
   /** Names the request for screen readers, for example "Musa Ibrahim's bank change". */
   label: string;
+  /** The bank never checked the account name: approving needs a note saying how it was confirmed. */
+  unchecked?: boolean;
 }) {
   const [state, action, pending] = useActionState(decideBankChangeAction, null);
 
@@ -237,9 +244,14 @@ export function BankChangeDecision({
     <form action={action} aria-label={label} className="flex flex-col gap-3">
       <input type="hidden" name="changeId" value={changeId} />
       <Field
-        label="Note"
+        label={unchecked ? "How you confirmed this account" : "Note"}
         name="note"
-        hint="Optional. Kept with the decision."
+        hint={
+          unchecked
+            ? "Needed to approve an account the bank didn't check, for example “Bank letter dated 3 Nov seen”. Kept with the decision."
+            : "Optional. Kept with the decision."
+        }
+        error={state && !state.ok ? state.fieldErrors?.note : undefined}
         maxLength={500}
         className="max-w-md"
       />

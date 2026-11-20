@@ -196,6 +196,7 @@ export function BankChangeCard({
           changeId={change.id}
           decisions={["approve", "reject"]}
           label={`Decide ${change.workerName}'s bank change`}
+          unchecked={change.nameCheck.status === "not_checked"}
         />
       ) : null}
       {ownRequest ? (

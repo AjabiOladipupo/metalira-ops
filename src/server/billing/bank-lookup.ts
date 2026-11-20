@@ -151,18 +151,47 @@ export function matchExpected(accountName: string, expected: ExpectedNames): Nam
     : matchPersonName(accountName, expected);
 }
 
-/** The company's legal, trading and display names, for the company account. */
+/**
+ * The company's legal and trading names, for the company account. Not the display name: anyone
+ * can type that at sign-up, and the account must be the registered business's.
+ */
 export async function loadCompanyNames(
   supabase: Client,
   organisationId: string,
-): Promise<ExpectedNames> {
+): Promise<ExpectedNames & { kind: "company" }> {
   const { data, error } = await supabase
     .from("organisations")
-    .select("name, legal_name, trading_name")
+    .select("legal_name, trading_name")
     .eq("id", organisationId)
     .maybeSingle();
   if (error) throw new Error(`Could not read the company name: ${error.code}`);
-  return { kind: "company", names: [data?.legal_name, data?.trading_name, data?.name] };
+  return { kind: "company", names: [data?.legal_name, data?.trading_name] };
+}
+
+export const NO_COMPANY_NAME =
+  "Add your company's legal or trading name in Settings > Company first, so the bank's name can be compared with it.";
+
+/** True when a company has a legal or trading name to compare with. */
+export function hasCompanyName(expected: ExpectedNames): boolean {
+  return expected.kind !== "company" || expected.names.some((n) => (n ?? "").trim() !== "");
+}
+
+/** How the expected names are recorded on a request (the database sets the same at insert). */
+export function expectedLabel(expected: ExpectedNames): string {
+  return expected.kind === "company"
+    ? expected.names.map((n) => (n ?? "").trim()).filter(Boolean).join(" / ")
+    : `${expected.firstName} ${expected.lastName}`;
+}
+
+/** The network address the platform saw (x-real-ip only), or null outside a request. */
+async function requestIp(): Promise<string | null> {
+  try {
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    return h?.get("x-real-ip")?.trim().slice(0, 64) || null;
+  } catch {
+    return null;
+  }
 }
 
 /** A worker's first and last name, read under the caller's RLS. */
@@ -193,7 +222,9 @@ export const LOOKUP_MESSAGES = {
   not_configured:
     "Account name checks aren't switched on yet, so bank details can't be added. Contact Metalira support.",
   failed: "The account couldn't be checked. Try again in a minute.",
-} as const satisfies Record<ResolveBankAccountError | "failed", string>;
+  /** A test or sandbox answer where the database doesn't allow them (the hosted project). */
+  test_only: "Test lookups can't be used for real bank details.",
+} as const satisfies Record<ResolveBankAccountError | "failed" | "test_only", string>;
 
 export type BankLookupView =
   | {
@@ -207,6 +238,11 @@ export type BankLookupView =
       test: boolean;
       result: NameMatch["result"];
       expected: string;
+      /**
+       * Set when the answer can't back a request (a test or sandbox answer on the hosted
+       * database): the name is shown, `lookupId` is empty and the form can't be sent.
+       */
+      blocked?: string;
     }
   | { ok: false; message: string; field?: "bankCode" | "bankAccountNumber" };
 
@@ -214,6 +250,8 @@ export interface RunBankLookupInput {
   organisationId: string;
   /** The verified session's user. */
   userId: string;
+  /** The network address the platform saw (x-real-ip), for the per-address limit. */
+  clientIp?: string | null;
   purpose: BankLookupPurpose;
   workerId: string | null;
   bankCode: string;
@@ -248,9 +286,10 @@ export async function runBankLookup(input: RunBankLookupInput): Promise<BankLook
     p_bank_code: bank.code,
     p_bank_account_digest: bankAccountDigest(input.organisationId, bank.code, input.accountNumber),
     p_bank_account_last4: input.accountNumber.slice(-4),
+    p_client_ip: input.clientIp ?? (await requestIp()) ?? undefined,
   });
   if (beginError || !lookupId) {
-    if (beginError?.code === "MLBL1" || beginError?.code === "MLBL2") {
+    if (beginError?.code === "MLBL1" || beginError?.code === "MLBL2" || beginError?.code === "MLBL9") {
       return { ok: false, message: beginError.message };
     }
     if (beginError?.code === "42501") {
@@ -274,7 +313,7 @@ export async function runBankLookup(input: RunBankLookupInput): Promise<BankLook
         : input.expected,
   });
 
-  const { error: finishError } = await admin.rpc("finish_bank_account_lookup", {
+  const { data: usable, error: finishError } = await admin.rpc("finish_bank_account_lookup", {
     p_id: lookupId,
     p_status: answer.ok ? "resolved" : answer.error === "not_found" ? "not_found" : "failed",
     p_account_name: answer.ok ? answer.accountName : undefined,
@@ -297,7 +336,8 @@ export async function runBankLookup(input: RunBankLookupInput): Promise<BankLook
   const check = matchExpected(answer.accountName, input.expected);
   return {
     ok: true,
-    lookupId,
+    lookupId: usable ? lookupId : "",
+    ...(usable ? {} : { blocked: LOOKUP_MESSAGES.test_only }),
     bankCode: bank.code,
     bankName: bank.name,
     accountName: answer.accountName,
@@ -466,8 +506,13 @@ export interface NameCheckView {
   expected: string | null;
   /** The requester's reason for a close match. */
   reason: string | null;
-  /** The name came from the test resolver. */
+  /** The name came from the test resolver or the provider's sandbox. */
   test: boolean;
+  /**
+   * The names it was compared with when raised, when they have changed since (a renamed
+   * employee or company): the approver should know.
+   */
+  expectedThen: string | null;
 }
 
 export function nameCheckView(
@@ -476,17 +521,20 @@ export function nameCheckView(
     name_check: Database["public"]["Enums"]["bank_name_check"] | null;
     name_check_reason: string | null;
     name_check_source: string | null;
+    name_check_expected?: string | null;
   },
   expected: ExpectedNames | null,
 ): NameCheckView {
   if ((row.name_check !== "match" && row.name_check !== "near") || !expected) {
-    return { status: "not_checked", expected: null, reason: null, test: false };
+    return { status: "not_checked", expected: null, reason: null, test: false, expectedThen: null };
   }
   const check = matchExpected(row.account_name, expected);
+  const then = row.name_check_expected?.trim() || null;
   return {
     status: check.result,
     expected: check.expected,
     reason: row.name_check_reason,
     test: row.name_check_source !== "bank",
+    expectedThen: then && then !== expectedLabel(expected) ? then : null,
   };
 }

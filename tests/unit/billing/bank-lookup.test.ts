@@ -112,7 +112,7 @@ describe("runBankLookup", () => {
   };
 
   it("records the lookup with a digest only, and returns the name and the match", async () => {
-    rpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValueOnce({ error: null });
+    rpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValueOnce({ data: true, error: null });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await runBankLookup(input);
     expect(result).toEqual({
@@ -142,6 +142,19 @@ describe("runBankLookup", () => {
     expect(log).not.toHaveBeenCalled();
   });
 
+  it("shows a test answer the database won't accept, but gives no lookup to send", async () => {
+    rpc
+      .mockResolvedValueOnce({ data: LOOKUP, error: null })
+      .mockResolvedValueOnce({ data: false, error: null });
+    const result = await runBankLookup(input);
+    expect(result).toMatchObject({
+      ok: true,
+      lookupId: "",
+      accountName: "ADEYEMI JOHN",
+      blocked: LOOKUP_MESSAGES.test_only,
+    });
+  });
+
   it("passes on the hourly limits", async () => {
     const message = "You have checked 30 bank accounts in the last hour. Try again later.";
     rpc.mockResolvedValueOnce({ data: null, error: { code: "MLBL1", message } });
@@ -150,7 +163,7 @@ describe("runBankLookup", () => {
   });
 
   it("asks to retry when the bank doesn't answer, and logs the kind only", async () => {
-    rpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValueOnce({ error: null });
+    rpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValueOnce({ data: true, error: null });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await runBankLookup({ ...input, accountNumber: "0000000000" });
     expect(result).toEqual({ ok: false, message: LOOKUP_MESSAGES.timeout });
@@ -159,7 +172,7 @@ describe("runBankLookup", () => {
   });
 
   it("says when the bank has no such account", async () => {
-    rpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValueOnce({ error: null });
+    rpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValueOnce({ data: true, error: null });
     await expect(runBankLookup({ ...input, accountNumber: "0123456789" })).resolves.toEqual({
       ok: false,
       message: LOOKUP_MESSAGES.not_found,

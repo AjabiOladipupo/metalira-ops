@@ -70,7 +70,11 @@ function BankForm() {
       <SubmitButton
         size="lg"
         pendingLabel={copy.pending}
-        disabled={lookup.status !== "done" || lookup.result.result === "no_match"}
+        disabled={
+          lookup.status !== "done" ||
+          lookup.result.result === "no_match" ||
+          Boolean(lookup.result.blocked)
+        }
       >
         {copy.bankSubmit}
       </SubmitButton>

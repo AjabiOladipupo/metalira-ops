@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { bankByCode, bankFromName } from "@/lib/banks";
 import type { ManagerRole } from "@/lib/roles";
 import { createServerSupabase } from "@/lib/supabase/server";
 import {
@@ -122,7 +123,7 @@ export async function checkWorkerBankDetails(input: unknown): Promise<BankLookup
     const supabase = await createServerSupabase();
     const { data: worker, error } = await supabase
       .from("workers")
-      .select("first_name, last_name, bank_account_enc")
+      .select("first_name, last_name, bank_name, bank_code, bank_account_enc")
       .eq("organisation_id", who.organisationId)
       .eq("id", workerId)
       .maybeSingle();
@@ -130,6 +131,18 @@ export async function checkWorkerBankDetails(input: unknown): Promise<BankLookup
     if (!worker) return fail("That employee wasn't found.");
     if (!worker.bank_account_enc)
       return fail("This employee has no bank account on file to check.");
+    // The bank is the one on file: its code when saved (slice 2.3b on), otherwise the chosen
+    // bank must be the one the saved name means, when it means one.
+    const onFile = worker.bank_code ?? bankFromName(worker.bank_name)?.code ?? null;
+    if (onFile && onFile !== bankCode && !worker.bank_code) {
+      const name = bankByCode(onFile)?.name ?? worker.bank_name;
+      return {
+        ok: false,
+        message: `The bank on file is ${name}. Check with that bank, or raise a bank change if it's wrong.`,
+        field: "bankCode",
+      };
+    }
+    const checkCode = worker.bank_code ?? bankCode;
     let number: string;
     try {
       number = decryptPii(
@@ -147,7 +160,7 @@ export async function checkWorkerBankDetails(input: unknown): Promise<BankLookup
       userId: who.userId,
       purpose: "worker_check",
       workerId,
-      bankCode,
+      bankCode: checkCode,
       accountNumber: number,
       expected: { kind: "person", firstName: worker.first_name, lastName: worker.last_name },
     });

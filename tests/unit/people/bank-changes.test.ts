@@ -367,9 +367,18 @@ describe("decideBankChange", () => {
         const result = await runMutation(context(fake.client, "owner"), decideBankChangeSpec, {
           changeId: CHANGE,
           decision: "approve",
+          // Not checked with the bank (raised before slice 2.3b): the approver says how.
+          note: "Bank letter dated 3 Nov seen",
         });
         expect(result.status).toBe("approved");
       }
+    });
+
+    it("needs a note saying how an account the bank never checked was confirmed", async () => {
+      const fake = fakeSupabase([pendingRequest({ name_check: "not_checked" })]);
+      const error = await approve(fake);
+      expect(error.fieldErrors.note).toMatch(/wasn't checked with the bank/);
+      expect(fake.calls.map((c) => c.op)).toEqual(["select"]);
     });
 
     it("says so when the request is no longer pending", async () => {

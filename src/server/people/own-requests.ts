@@ -124,7 +124,10 @@ function fromDbError(error: PostgrestError, field: string): never {
     case "MLBL4":
     case "MLBL5":
     case "MLBL6":
+    case "MLBL7":
       throw new MutationError("invalid", "", { bankAccountNumber: copy.checkAgain });
+    case "MLBLT":
+      throw new MutationError("invalid", "", { bankAccountNumber: copy.testLookup });
     case "MLBK5":
     case "MLCR1":
       throw new MutationError("invalid", copy.left);

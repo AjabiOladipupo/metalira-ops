@@ -21,6 +21,7 @@ import {
   type TenantUser,
   type TestUser,
 } from "./helpers/supabase";
+import { makeLookup } from "./helpers/bank-lookup";
 
 type Role = Database["public"]["Enums"]["membership_role"];
 
@@ -72,7 +73,20 @@ async function addWorker(org = owner.orgId, extra: Record<string, unknown> = {})
   return id;
 }
 
-function request(workerId: string, by: Client = people.hr.client, last4 = "7712") {
+/**
+ * Raises a change as `by`, checked with a lookup the server made for them (slice 2.3b). A caller
+ * the lookup refuses raises without one, so the request itself is what the database refuses.
+ */
+async function request(workerId: string, by: Client = people.hr.client, last4 = "7712") {
+  const { data: who } = await by.auth.getUser();
+  const lookup = await makeLookup(admin, {
+    orgId: owner.orgId,
+    userId: who.user!.id,
+    purpose: "worker_bank",
+    workerId,
+    last4,
+    accountName: "MUSA IBRAHIM",
+  }).catch(() => null);
   return by
     .from("bank_detail_changes")
     .insert({
@@ -83,6 +97,14 @@ function request(workerId: string, by: Client = people.hr.client, last4 = "7712"
       bank_account_enc: enc(),
       bank_account_last4: last4,
       reason: "Moved banks",
+      ...(lookup
+        ? {
+            bank_code: lookup.bankCode,
+            bank_lookup_id: lookup.id,
+            bank_account_digest: lookup.digest,
+            name_check: "match" as const,
+          }
+        : {}),
     })
     .select("*")
     .single();
@@ -561,9 +583,18 @@ describe("the 72-hour hold", () => {
 });
 
 describe("new workers", () => {
-  function newWorker(by: Client, org: string, fields: Record<string, Json> = {}) {
+  async function newWorker(by: Client, org: string, fields: Record<string, Json> = {}) {
     staffCounter += 1;
     const id = randomUUID();
+    // Bank details come with the caller's own lookup (slice 2.3b).
+    const { data: who } = await by.auth.getUser();
+    const lookup = await makeLookup(admin, {
+      orgId: org,
+      userId: who.user!.id,
+      purpose: "worker_bank",
+      last4: "4410",
+      accountName: "NGOZI EZE",
+    });
     return by
       .rpc("create_worker", {
         p_worker: {
@@ -578,11 +609,24 @@ describe("new workers", () => {
           account_name: "Ngozi Eze",
           bank_account_enc: enc(),
           bank_account_last4: "4410",
+          bank_code: lookup.bankCode,
+          bank_lookup_id: lookup.id,
+          bank_account_digest: lookup.digest,
+          name_check: "match",
           ...fields,
         },
       })
       .then((result) => ({ ...result, id }));
   }
+
+  it("refuses unchecked bank details from a signed-in caller (slice 2.3b)", async () => {
+    const { error } = await newWorker(people.hr.client, owner.orgId, {
+      bank_lookup_id: null,
+      bank_account_digest: null,
+      name_check: null,
+    });
+    expect(error?.code).toBe("MLBL7");
+  });
 
   async function openRequests(workerId: string) {
     const { rows } = await db.query<{ status: string; requested_by: string; reason: string }>(

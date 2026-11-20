@@ -74,6 +74,8 @@ const lookup = (
   extra: { workerId?: string | null; last4?: string; accountName?: string; orgId?: string } = {},
 ) =>
   makeLookup(admin, {
+    // Through begin/finish, as the server does: role checks and limits apply.
+    viaServer: true,
     orgId: extra.orgId ?? owner.orgId,
     userId: user.id,
     purpose,
@@ -233,10 +235,59 @@ describe("who writes and reads lookups", () => {
   });
 
   it("stops a user at 30 lookups an hour", async () => {
-    const busy = await createTestUser("bl-busy", "Busy Finance");
-    await addMember(busy, "finance");
-    for (let i = 0; i < 30; i += 1) await lookup(busy, "company_bank");
-    await expect(lookup(busy, "company_bank")).rejects.toMatchObject({ code: "MLBL1" });
+    const busy = await createTestUser("bl-busy", "Busy Hr");
+    await addMember(busy, "hr");
+    for (let i = 0; i < 30; i += 1) await lookup(busy, "worker_bank", { workerId });
+    await expect(lookup(busy, "worker_bank", { workerId })).rejects.toMatchObject({
+      code: "MLBL1",
+    });
+  });
+
+  it("gives a company in setup 10 lookups a day, and its own account 20 an hour", async () => {
+    const fresh = await createTenantUser("bl-fresh", "Fresh Signup Ltd");
+    for (let i = 0; i < 10; i += 1) {
+      await lookup(fresh, "company_bank", { orgId: fresh.orgId, last4: "4410" });
+    }
+    await expect(
+      lookup(fresh, "company_bank", { orgId: fresh.orgId, last4: "4410" }),
+    ).rejects.toMatchObject({ code: "MLBL2" });
+  });
+
+  it("limits one network address to 60 lookups an hour", async () => {
+    const ip = `203.0.113.${Math.floor(Math.random() * 200) + 1}`;
+    const users: TestUser[] = [];
+    for (let u = 0; u < 3; u += 1) {
+      const user = await createTestUser(`bl-ip-${u}`, `Ip User ${u}`);
+      await addMember(user, "hr");
+      users.push(user);
+    }
+    let made = 0;
+    for (const user of users) {
+      for (let i = 0; i < 20; i += 1) {
+        await makeLookup(admin, {
+          viaServer: true,
+          orgId: owner.orgId,
+          userId: user.id,
+          purpose: "worker_bank",
+          workerId,
+          last4: "7712",
+          clientIp: ip,
+        });
+        made += 1;
+      }
+    }
+    expect(made).toBe(60);
+    await expect(
+      makeLookup(admin, {
+        viaServer: true,
+        orgId: owner.orgId,
+        userId: people.admin.id,
+        purpose: "worker_bank",
+        workerId,
+        last4: "7712",
+        clientIp: ip,
+      }),
+    ).rejects.toMatchObject({ code: "MLBL1" });
   });
 });
 
@@ -331,21 +382,49 @@ describe("a request takes its account name from the lookup", () => {
       .eq("id", ok.data!.id);
   });
 
-  it("marks a worker request without a lookup not_checked, whatever it claims", async () => {
-    const { data, error } = await changeWith(people.hr.client, workerId, null, {
-      name_check: "match",
-      name_check_reason: "trust me, it is fine",
-    });
-    expect(error).toBeNull();
-    expect(data).toMatchObject({
-      name_check: "not_checked",
-      name_check_reason: null,
-      account_name: "Typed By Hand",
-    });
-    await people.hr.client
+  it("refuses an unchecked worker request from a signed-in user, whatever it claims", async () => {
+    for (const client of [people.hr.client, owner.client, people.worker.client]) {
+      const target = client === people.worker.client ? ownWorkerId : workerId;
+      const { error } = await changeWith(client, target, null, {
+        name_check: "match",
+        name_check_reason: "trust me, it is fine",
+      });
+      expect(error?.code).toBe("MLBL7");
+    }
+  });
+
+  it("lets only the import and the secret key raise unchecked requests, approved with a note", async () => {
+    const id = await addWorker();
+    const { data, error } = await admin
       .from("bank_detail_changes")
-      .update({ status: "cancelled" })
+      .insert({
+        organisation_id: owner.orgId,
+        worker_id: id,
+        requested_by: people.hr.id,
+        bank_name: "GTBank (Guaranty Trust Bank)",
+        account_name: "Typed By Hand",
+        bank_account_enc: enc(),
+        bank_account_last4: "7712",
+        name_check: "match",
+      })
+      .select("*")
+      .single();
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ name_check: "not_checked", account_name: "Typed By Hand" });
+
+    // Approving an account the bank never checked needs the approver to say how.
+    const bare = await owner.client
+      .from("bank_detail_changes")
+      .update({ status: "approved" })
       .eq("id", data!.id);
+    expect(bare.error?.code).toBe("MLBLC");
+    const noted = await owner.client
+      .from("bank_detail_changes")
+      .update({ status: "approved", decision_note: "Bank letter dated 3 Nov seen" })
+      .eq("id", data!.id)
+      .select("status");
+    expect(noted.error).toBeNull();
+    expect(noted.data![0]!.status).toBe("approved");
   });
 
   it("needs a lookup for the company account, and takes the bank's name", async () => {
@@ -359,6 +438,68 @@ describe("a request takes its account name from the lookup", () => {
     const { data, error } = await companyWith(people.finance.client, l);
     expect(error).toBeNull();
     expect(data![0]).toMatchObject({ status: "pending", account_name: "LOOKUP TEST LIMITED" });
+  });
+});
+
+describe("test lookups on a database that doesn't allow them (the hosted project)", () => {
+  it("shows them but never lets them back or approve a request", async () => {
+    const id = await addWorker();
+    // Raised while test lookups are allowed (local and CI), so there is one to approve.
+    const before = await lookup(people.hr, "worker_bank", { workerId: id });
+    const raised = await changeWith(people.hr.client, id, before);
+    expect(raised.error).toBeNull();
+
+    await db.query("delete from private.settings where key = 'allow_test_bank_lookups'");
+    try {
+      const test = await lookup(people.hr, "worker_bank", { workerId: id });
+      expect(test.usable).toBe(false);
+      const sandbox = await makeLookup(admin, {
+        viaServer: true,
+        orgId: owner.orgId,
+        userId: people.admin.id,
+        purpose: "worker_bank",
+        workerId,
+        last4: "7712",
+        source: "sandbox",
+      });
+      expect(sandbox.usable).toBe(false);
+      expect((await changeWith(people.admin.client, workerId, sandbox)).error?.code).toBe("MLBLT");
+
+      const approve = await owner.client
+        .from("bank_detail_changes")
+        .update({ status: "approved" })
+        .eq("id", raised.data!.id);
+      expect(approve.error?.code).toBe("MLBLT");
+
+      // A live bank's answer is still usable.
+      const live = await lookup(people.admin, "worker_bank", { workerId, accountName: "ADEYEMI JOHN" });
+      const liveBank = await makeLookup(admin, {
+        viaServer: true,
+        orgId: owner.orgId,
+        userId: people.admin.id,
+        purpose: "worker_bank",
+        workerId,
+        last4: "7712",
+        source: "bank",
+        accountName: "ADEYEMI JOHN",
+      });
+      expect(live.usable).toBe(false);
+      expect(liveBank.usable).toBe(true);
+      const ok = await changeWith(people.admin.client, workerId, liveBank);
+      expect(ok.error).toBeNull();
+      await people.admin.client
+        .from("bank_detail_changes")
+        .update({ status: "cancelled" })
+        .eq("id", ok.data!.id);
+    } finally {
+      await db.query(
+        "insert into private.settings (key, value) values ('allow_test_bank_lookups', 'on') on conflict (key) do update set value = 'on'",
+      );
+    }
+    await people.hr.client
+      .from("bank_detail_changes")
+      .update({ status: "cancelled" })
+      .eq("id", raised.data!.id);
   });
 });
 
@@ -403,6 +544,7 @@ describe("applying a change and checking details on file", () => {
 
   it("records a check of the details on file on the worker, never by a signed-in user", async () => {
     const l = await makeLookup(admin, {
+      viaServer: true,
       orgId: owner.orgId,
       userId: people.hr.id,
       purpose: "worker_check",

@@ -74,6 +74,10 @@ export function CompanyBankRequestForm({
       );
       return;
     }
+    if (lookup.result.blocked) {
+      setProblem(lookup.result.blocked);
+      return;
+    }
     if (lookup.result.result === "no_match") {
       setProblem(
         "The bank's account name doesn't match your company, so this account can't be used.",

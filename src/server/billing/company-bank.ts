@@ -78,12 +78,14 @@ function fromDbError(error: PostgrestError, field = "bankAccountNumber"): never 
     case "MLOB3":
     case "MLOB4":
     case "MLOB5":
+    case "MLBLC":
       throw new MutationError("invalid", error.message);
     case "MLBL3":
     case "MLBL4":
     case "MLBL5":
     case "MLBL6":
     case "MLBL7":
+    case "MLBLT":
       throw new MutationError("invalid", error.message, { bankAccountNumber: error.message });
     case "23505":
       if (text.includes("organisation_bank_accounts_one_open_key")) {
@@ -379,7 +381,7 @@ export interface CompanyBankDetail {
 }
 
 const COLUMNS =
-  "id, status, bank_name, account_name, bank_account_last4, reason, name_check, name_check_reason, name_check_source, single_approver, requested_by, approved_by, rejected_by, cancelled_by, decision_note, created_at, decided_at, applies_after, activated_at, retired_at, cancelled_at";
+  "id, status, bank_name, account_name, bank_account_last4, reason, name_check, name_check_reason, name_check_source, name_check_expected, single_approver, requested_by, approved_by, rejected_by, cancelled_by, decision_note, created_at, decided_at, applies_after, activated_at, retired_at, cancelled_at";
 
 const FORMER_USER = "A former user";
 

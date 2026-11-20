@@ -219,6 +219,7 @@ export const workerMessages = {
     bankRequired: "Choose your bank from the list.",
     checkFirst: "Wait for the bank to show the name on the account.",
     checkAgain: "Check the account again: the bank check has expired or the details changed.",
+    testLookup: "Test lookups can't be used for real bank details.",
     reason: "Reason (optional)",
     reasonHint: "For example: I moved to a new bank.",
     tooLong: (max: number) => `Keep it to ${max} characters or fewer.`,

@@ -128,6 +128,8 @@ function fromDbError(error: PostgrestError, fields: { effectiveFrom?: string } =
     case "MLBL4":
     case "MLBL5":
     case "MLBL6":
+    case "MLBL7":
+    case "MLBLT":
       return invalid("bankAccountNumber", error.message);
     case "23503":
       if (text.includes("department"))

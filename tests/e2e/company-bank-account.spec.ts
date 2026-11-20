@@ -50,6 +50,18 @@ async function fillAccount(page: Page, search: string, bankName: string, number:
   return { form, result };
 }
 
+/**
+ * The account is compared with the company's legal and trading names (slice 2.3b), which
+ * setup's Business step records; these tests skip that step.
+ */
+async function setLegalName(orgId: string, legalName: string) {
+  const { error } = await adminClient()
+    .from("organisations")
+    .update({ legal_name: legalName })
+    .eq("id", orgId);
+  expect(error).toBeNull();
+}
+
 /** Moves an approved account's 72-hour hold into the past, as if three days had gone by. */
 async function endHold(orgId: string) {
   const db = await pgClient();
@@ -87,6 +99,7 @@ test("the owner asks, finance approves, and the account shows masked after the h
   test.setTimeout(180_000);
   const suffix = uniqueSuffix();
   const owner = await createOwner("cb-owner", `Coastline Guards ${suffix}`);
+  await setLegalName(owner.orgId, `Coastline Guards ${suffix}`);
   const finance = await createAccount("cb-finance", "Femi Adeyemi");
   await addMembership(owner.orgId, finance.userId, "finance");
 
@@ -168,6 +181,7 @@ test("an owner adds the first account alone during setup", async ({ browser }) =
   const owner = await createOwner("cb-first", `Greenfield Cleaning ${suffix}`, {
     setupDone: false,
   });
+  await setLegalName(owner.orgId, `Greenfield Cleaning ${suffix}`);
   const page = await signedInPage(browser, owner, /\/app\/setup\//);
 
   await page.goto("/app/setup/invoices");
@@ -205,6 +219,7 @@ test("a close match needs a reason the approver sees; no match is refused", asyn
   test.setTimeout(150_000);
   const suffix = uniqueSuffix();
   const owner = await createOwner("cb-near", `Harbour Security ${suffix}`);
+  await setLegalName(owner.orgId, `Harbour Security ${suffix}`);
   const finance = await createAccount("cb-near-fin", "Femi Adeyemi");
   await addMembership(owner.orgId, finance.userId, "finance");
   const page = await signedInPage(browser, owner);
@@ -246,7 +261,7 @@ test("a close match needs a reason the approver sees; no match is refused", asyn
   await financePage.goto("/app/settings/bank-account");
   const card = financePage.getByTestId("company-bank-account").filter({ hasText: "New account" });
   await expect(card.getByTestId("name-check-status")).toHaveText("Close match");
-  await expect(card).toContainText(`HARBOUR SECURIT`);
+  await expect(card).toContainText(`HARBOU SECURITY ${suffix.toUpperCase()}`);
   await expect(card).toContainText(`Expected: Harbour Security ${suffix}`);
   await expect(card.getByTestId("name-check-reason")).toContainText(
     "The bank shortened our name; letter on file",
