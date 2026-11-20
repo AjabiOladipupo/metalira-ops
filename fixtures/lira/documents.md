@@ -1,0 +1,13 @@
+# Lira test questions: contract documents
+
+Each request is what a manager might type, with the outcome Lira must reach (docs/LIRA.md). "Card" means a confirmation card showing the capability's preview; nothing changes until the person confirms. Capabilities are named as in `src/server/capabilities/registry.ts`. Uploads take a file from the person's device and opening a file hands out a link, so `contract_documents.start_upload`, `contract_documents.confirm_upload` and `contract_documents.open` are `agent: false`: Lira links to the contract's Documents tab instead. Lira never reads, quotes or summarises a file's contents.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | owner | Which live contracts don't have a signed contract on file? | Instant answer from `contract_documents.summary` (`activeWithoutSignedContract` and up to 20 references, for example "2 active contracts: CTR-0002, CTR-0005"), each linking to its Documents tab. Counts and references only, no titles or file names. No change. |
+| 2 | ops_manager | Upload the signed Coastline contract. | No card and no upload: Lira can't take files. It links to the Coastline contract's Documents tab with "Signed contract" chosen and says what is accepted: "PDF, PNG or JPEG, 10 MB or less". |
+| 3 | finance | Send me the Greenfield SLA. | Lists the Greenfield contract's SLA from `contract_documents.list` (title, file name, size, who uploaded it and when) with a link to the Documents tab, where finance opens it. Lira never creates or pastes a signed link and never attaches the file to an email. |
+| 4 | ops_manager | Remove the insurance certificate on the Marina VI Tower contract, it expired. | Card for `contract_documents.remove`: "Removes 1 document: Insurance certificate 2025 (Insurance). It can't be opened afterwards." with the reason "Expired". Confirming marks it removed with the reason and the person as actor; the file stops opening at once and is deleted after 30 days. If the contract has two insurance documents, Lira asks which one first. |
+| 5 | hr | Show me the documents on the Coastline contract. | Refused: contract documents are read by owner, admin, finance and ops_manager only. Lira says who can. |
+| 6 | finance | Delete the old purchase order on CTR-0003. | Refused: finance reads documents but can't remove them; owners, admins and ops managers can, and a removed document stays on record with its reason. |
+| 7 | ops_manager | Put back the contract I removed yesterday. | Explains that a removed document can't be restored: upload the file again from the Documents tab (link). The removed entry stays in the history. |
