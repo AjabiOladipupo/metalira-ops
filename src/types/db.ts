@@ -123,6 +123,44 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"contract_changes": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"created_by": string | null,"detail": NonNullable<Json>,"effective_on": string,"id": string,"kind": string,"organisation_id": string,"post_id": string | null,"reason": string | null,"site_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"detail"?: NonNullable<Json>,"effective_on": string,"id"?: string,"kind": string,"organisation_id": string,"post_id"?: string | null,"reason"?: string | null,"site_id"?: string | null
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"detail"?: NonNullable<Json>,"effective_on"?: string,"id"?: string,"kind"?: string,"organisation_id"?: string,"post_id"?: string | null,"reason"?: string | null,"site_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "contract_changes_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "contract_changes_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "contract_changes_post_fkey"
+      columns: ["organisation_id","post_id"]
+isOneToOne: false
+      referencedRelation: "posts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "contract_changes_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"contract_documents": {
                   Row: {
                     "contract_id": string,"created_at": string,"file_deleted_at": string | null,"file_ext": string,"file_name": string,"id": string,"kind": string,"mime_type": string,"organisation_id": string,"removed_at": string | null,"removed_by": string | null,"removed_reason": string | null,"sha256": string | null,"size_bytes": number | null,"status": string,"storage_path": string,"title": string,"updated_at": string,"uploaded_at": string | null,"uploaded_by": string
@@ -860,8 +898,14 @@ isOneToOne: false
 "activate_contract":
 { Args: { "p_contract_id": string,"p_go_live_date"?: string,"p_organisation_id": string,"p_send_welcome"?: boolean }; Returns: Json
                            },
+"add_contract_site":
+{ Args: { "p_contract_id": string,"p_note"?: string,"p_organisation_id": string,"p_site_id": string }; Returns: Json
+                           },
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
+                           },
+"add_post":
+{ Args: { "p_add_site"?: boolean,"p_band": string,"p_contract_id": string,"p_count": number,"p_days": (number)[],"p_end": string,"p_from": string,"p_note"?: string,"p_organisation_id": string,"p_post_name": string,"p_role": string,"p_site_id": string,"p_start": string,"p_unit": string }; Returns: Json
                            },
 "add_rate_card_version":
 { Args: { "p_contract_id": string,"p_effective_from": string,"p_lines": Json,"p_note"?: string,"p_organisation_id": string }; Returns: string
@@ -889,6 +933,9 @@ isOneToOne: false
               "member_email": string,"member_name": string,"member_user_id": string,"new_role": Database["public"]['Enums']["membership_role"],"old_role": Database["public"]['Enums']["membership_role"]
             }[]
                            },
+"change_post_requirement":
+{ Args: { "p_count": number,"p_days": (number)[],"p_end": string,"p_from": string,"p_note"?: string,"p_organisation_id": string,"p_post_id": string,"p_start": string }; Returns: Json
+                           },
 "choose_company_plan":
 { Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
                            },
@@ -896,6 +943,9 @@ isOneToOne: false
 { Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
               "billing_address": string,"billing_terms_days": number,"client_id": string,"deducts_wht": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string,"withholds_vat": boolean
             }[]
+                           },
+"close_post":
+{ Args: { "p_last_day": string,"p_organisation_id": string,"p_post_id": string,"p_reason": string }; Returns: Json
                            },
 "commit_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string,"p_rows": Json }; Returns: Json

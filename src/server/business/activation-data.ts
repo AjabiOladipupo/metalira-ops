@@ -155,7 +155,7 @@ export interface PostRow {
   requirements: PostRequirement[];
 }
 
-interface RequirementDbRow {
+export interface RequirementDbRow {
   id: string;
   effective_from: string;
   effective_to: string | null;
@@ -165,7 +165,7 @@ interface RequirementDbRow {
   required_count: number;
 }
 
-function toRequirement(row: RequirementDbRow): PostRequirement {
+export function toRequirement(row: RequirementDbRow): PostRequirement {
   const startTime = toHourMinute(row.start_time);
   const endTime = toHourMinute(row.end_time);
   const daysOfWeek = [...row.days_of_week].sort((a, b) => a - b);

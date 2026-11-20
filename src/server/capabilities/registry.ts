@@ -59,6 +59,13 @@ import { contractIdSchema } from "@/server/business/headcount-schemas";
 import { activateContractSpec, endContractSpec } from "@/server/business/activation";
 import { loadPosts, loadRequiredShiftsSummary } from "@/server/business/activation-data";
 import {
+  addPostSpec,
+  changeRequirementSpec,
+  closePostSpec,
+  postIdSchema,
+} from "@/server/business/live-changes";
+import { loadPostDetail } from "@/server/business/live-changes-data";
+import {
   advanceSetupSpec,
   completeSetupSpec,
   saveBusinessSpec,
@@ -148,6 +155,11 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
+import {
+  previewAddPost,
+  previewChangeRequirement,
+  previewClosePost,
+} from "./live-change-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -177,6 +189,8 @@ const FILES = "Takes a file from the person's device: uploads are made on the sc
 const OPEN_FILE = "Hands out a link to a stored file: the agent never opens or passes on files.";
 const GO_LIVE =
   "Makes a contract live or ends it, which starts or stops rosters and billing: kept to people for now (the owner may enable it later).";
+const LIVE_CHANGE =
+  "Changes a live contract's staffing over several dated rows, which rosters and billing follow: kept to people for now (the owner may enable it later).";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -1461,6 +1475,65 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadRequiredShiftsSummary(supabase, organisationId),
+    agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Changes to a live contract (business/live-changes-actions.ts, slice 2.8)
+  // -------------------------------------------------------------------------
+  {
+    name: "posts.change_requirement",
+    description:
+      "Changes how many people a live post needs, or its days and hours, from a date: closes the version in force the day before and adds the new one.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(changeRequirementSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "changeRequirementAction"),
+    preview: previewChangeRequirement,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.add",
+    description:
+      "Adds a post to a live contract from a date with its days, hours and people, adding the client's site to the contract when asked.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addPostSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "addPostAction"),
+    preview: previewAddPost,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.close",
+    description:
+      "Closes a live post after its last day staffed, with a reason; changes scheduled after that day are removed.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(closePostSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "closePostAction"),
+    preview: previewClosePost,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.history",
+    description:
+      "Shows one post's every requirement version (from, to, days, hours, people) and the changes made to it, with reasons.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: postIdSchema,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }, input) => {
+      const { postId } = postIdSchema.parse(input);
+      return loadPostDetail(supabase, organisationId, postId);
+    },
     agent: true,
   },
 ];
