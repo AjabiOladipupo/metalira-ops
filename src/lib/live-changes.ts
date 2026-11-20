@@ -89,7 +89,10 @@ function contractRefusal(contract: LiveContract, today: string): Refusal | null 
 
 /** A date a change applies from (`private.check_live_change_date`). */
 function dateRefusal(contract: LiveContract, today: string, from: string): Refusal | null {
-  if (from < today) return refuse("MLPC2", "A change to a live contract starts today or later.");
+  // A day already in progress never changes: tomorrow at the earliest.
+  if (from <= today) {
+    return refuse("MLPC2", "A change to a live contract starts tomorrow or later.");
+  }
   if (contract.goLiveDate !== null && from < contract.goLiveDate) {
     return refuse(
       "MLPC2",
@@ -259,9 +262,6 @@ export function planRequirementChange(args: {
       `Nothing changes: the post already needs that from ${formatDate(from)}.`,
     );
   }
-  if (current.effectiveFrom === from && from <= today) {
-    return refuse("MLPC2", "This post's requirement started today. Change it from tomorrow.");
-  }
   const replaced = current.effectiveFrom === from;
   const before = weekOf(current);
   const after = weekOf(next);
@@ -335,8 +335,8 @@ export function planAddPost(args: {
   /** Ask to add a site that isn't on the contract yet. */
   addSite: boolean;
   clientArchived?: boolean;
-  /** The names of the open posts at the chosen site. */
-  openPostNames: readonly string[];
+  /** The posts at the chosen site that aren't closed (or close today or later). */
+  sitePosts: readonly { name: string; closedOn: string | null }[];
   /** The contract's rate card versions, any order (a RateCardVersion fits). */
   rates: readonly RateKeyVersion[];
 }): AddPostPlan {
@@ -356,17 +356,13 @@ export function planAddPost(args: {
     return refuse("MLPC8", "Keep the post name to 80 characters of plain text.");
   }
   if (!site) return refuse("MLPC5", "That site wasn't found.");
-  if (!site.onContract) {
-    if (!args.addSite) {
-      return refuse("MLPC5", `${site.name} isn't on this contract. Add it with the post.`);
-    }
-    if (args.clientArchived) return refuse("MLPC5", "The client is archived. Restore it first.");
-    if (site.archived) return refuse("MLPC5", `${site.name} is archived. Restore it first.`);
-    if (!site.hasGeofence) {
-      return refuse("MLPC5", `No geofence at ${site.name}. Set one on the site first.`);
-    }
-  } else if (site.archived) {
-    return refuse("MLPC5", `${site.name} is archived. Restore it first.`);
+  if (!site.onContract && !args.addSite) {
+    return refuse("MLPC5", `${site.name} isn't on this contract. Add it with the post.`);
+  }
+  if (args.clientArchived) return refuse("MLPC5", "The client is archived. Restore it first.");
+  if (site.archived) return refuse("MLPC5", `${site.name} is archived. Restore it first.`);
+  if (!site.hasGeofence) {
+    return refuse("MLPC5", `No geofence at ${site.name}. Set one on the site first.`);
   }
   const line = {
     postName: input.postName.trim() || null,
@@ -375,8 +371,17 @@ export function planAddPost(args: {
   };
   const name = postLabel(line);
   const nameKey = normaliseKeyPart(name);
-  if (args.openPostNames.some((n) => normaliseKeyPart(n) === nameKey)) {
-    return refuse("MLPC8", `There's already an open post called ${name} at ${site.name}.`);
+  // Any post at the site still staffed on or after the new one's first day.
+  if (
+    args.sitePosts.some(
+      (p) =>
+        (p.closedOn === null || p.closedOn >= input.from) && normaliseKeyPart(p.name) === nameKey,
+    )
+  ) {
+    return refuse(
+      "MLPC8",
+      `There's already a post called ${name} at ${site.name} on or after that day.`,
+    );
   }
   if (!rateCardInForce(args.rates, input.from)) {
     return refuse("MLPC4", `No rate card is in force on ${formatDate(input.from)}.`);
@@ -445,11 +450,10 @@ export function planClosePost(args: {
   const { contract, post, today, lastDay } = args;
   const blocked = contractRefusal(contract, today);
   if (blocked) return blocked;
-  if (post.status === "closed") {
-    return refuse(
-      "MLPC6",
-      `This post already closes after ${formatDate(post.closedOn ?? lastDay)}.`,
-    );
+  // A post already closing (Close post, or an ending contract) can close sooner, never later.
+  if (post.closedOn !== null && (post.closedOn < today || lastDay >= post.closedOn)) {
+    const sooner = post.closedOn >= today ? " Choose an earlier day to close it sooner." : "";
+    return refuse("MLPC6", `This post already closes after ${formatDate(post.closedOn)}.${sooner}`);
   }
   if (lastDay < today) return refuse("MLPC2", "The last day can't be in the past.");
   if (lastDay < addDays(post.openedOn, -1)) {
@@ -466,7 +470,9 @@ export function planClosePost(args: {
   }
   const reason = args.reason.trim();
   if (reason.length === 0) return refuse("MLPC7", "Say why.");
-  if (reason.length > 500) return refuse("MLPC7", "Keep it to 500 characters of plain text.");
+  if (reason.length > 500 || /:\/\/|www\./i.test(reason)) {
+    return refuse("MLPC7", "Keep it to 500 characters of plain text, without web addresses.");
+  }
   const cancels = args.versions.filter((v) => v.effectiveFrom > lastDay).map((v) => v.id);
   const closes = args.versions
     .filter(
@@ -484,6 +490,61 @@ export function planClosePost(args: {
     summary: neverStaffed
       ? `Closes ${post.name} before it opens on ${formatDate(post.openedOn)}: it is never staffed.`
       : `Closes ${post.name} after ${formatDate(lastDay)} (its last day staffed).${cancels.length ? ` ${plural(cancels.length, "scheduled change is", "scheduled changes are")} removed.` : ""}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cancel a scheduled change
+// ---------------------------------------------------------------------------
+
+export type CancelChangePlan =
+  | {
+      ok: true;
+      cancels: PostVersion;
+      /** The version before it, running on to where the cancelled one ran. */
+      restores: { version: PostVersion; effectiveToAfter: string | null };
+      /** "Cancels the change from 7 Dec 2026: Gate A · Night stays at 1 person (…)." */
+      summary: string;
+    }
+  | Refusal;
+
+/** Taking back a change that hasn't started, or the reason `cancel_post_requirement_change` refuses. */
+export function planCancelRequirementChange(args: {
+  contract: LiveContract;
+  post: LivePost;
+  versions: readonly PostVersion[];
+  today: string;
+  requirementId: string;
+}): CancelChangePlan {
+  const { contract, post, today } = args;
+  const blocked = contractRefusal(contract, today);
+  if (blocked) return blocked;
+  const target = args.versions.find((v) => v.id === args.requirementId);
+  if (!target) return refuse("MLPC2", "That requirement wasn't found.");
+  if (target.effectiveFrom <= today) {
+    return refuse(
+      "MLPC2",
+      "This change has started and can't be cancelled. Change the post again from a later day.",
+    );
+  }
+  const later = args.versions
+    .filter((v) => v.effectiveFrom > target.effectiveFrom)
+    .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1))[0];
+  if (later) {
+    return refuse(
+      "MLPC3",
+      `A later change is scheduled from ${formatDate(later.effectiveFrom)}. Cancel that one first.`,
+    );
+  }
+  const previous = args.versions.find((v) => v.effectiveTo === addDays(target.effectiveFrom, -1));
+  if (!previous) {
+    return refuse("MLPC3", "This is the post's first requirement. Close the post instead.");
+  }
+  return {
+    ok: true,
+    cancels: target,
+    restores: { version: previous, effectiveToAfter: target.effectiveTo },
+    summary: `Cancels the change from ${formatDate(target.effectiveFrom)}: ${post.name} stays at ${describeValues(previous)}${target.effectiveTo ? ` to ${formatDate(target.effectiveTo)}` : ""}.`,
   };
 }
 

@@ -8,7 +8,7 @@ import type { CompanyFormState } from "@/server/identity/company-form-state";
 import { MutationError } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 
-import { addPost, changeRequirement, closePost } from "./live-changes";
+import { addPost, cancelRequirementChange, changeRequirement, closePost } from "./live-changes";
 
 /**
  * Server Actions for changes to a live contract (slice 2.8): "Change headcount from", "Add post"
@@ -118,4 +118,22 @@ export async function closePostAction(
   const base = contractBase(fields);
   if (base) redirect(`${base}/posts/${result.postId}`);
   return { ok: true, status: 200, message: "Saved" };
+}
+
+/** "Cancel this change": takes back a requirement change that hasn't started. */
+export async function cancelRequirementChangeAction(
+  _prev: CompanyFormState,
+  formData: FormData,
+): Promise<CompanyFormState> {
+  const fields = formFields(formData);
+  let result;
+  try {
+    result = await cancelRequirementChange(fields);
+  } catch (error) {
+    return refusal(error, fields);
+  }
+  refresh(fields);
+  const base = contractBase(fields);
+  if (base) redirect(`${base}/posts/${result.postId}`);
+  return { ok: true, status: 200, message: "Cancelled" };
 }

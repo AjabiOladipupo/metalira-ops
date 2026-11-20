@@ -19,7 +19,8 @@ async function ClosePage({
     editing: true,
   });
   const { post, versions, contract } = detail;
-  if (post.status !== "open") redirect(postPath);
+  // Open, or closing on a later day than today (it can close sooner, never later).
+  if (post.closedOn !== null && post.closedOn <= ctx.today) redirect(postPath);
   return (
     <>
       <PageHeader

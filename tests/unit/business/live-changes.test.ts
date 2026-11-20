@@ -5,6 +5,7 @@ import {
   formatWeek,
   parseRequirementInput,
   planAddPost,
+  planCancelRequirementChange,
   planClosePost,
   planRequirementChange,
   weekOf,
@@ -101,12 +102,15 @@ describe("planRequirementChange", () => {
   it("refuses with the database's reasons", () => {
     const base = { contract, post: night, versions: [v1], today, next: two };
     expect(planRequirementChange({ ...base, from: "2026-11-19" })).toMatchObject({ code: "MLPC2" });
+    // A day already in progress never changes: tomorrow at the earliest.
+    expect(planRequirementChange({ ...base, from: today })).toMatchObject({
+      code: "MLPC2",
+      reason: "A change to a live contract starts tomorrow or later.",
+    });
+    expect(planRequirementChange({ ...base, from: "2026-11-21" })).toMatchObject({ ok: true });
     expect(planRequirementChange({ ...base, from: monday, next: v1 })).toMatchObject({
       code: "MLPC9",
     });
-    expect(
-      planRequirementChange({ ...base, versions: [{ ...v1, effectiveFrom: today }], from: today }),
-    ).toMatchObject({ code: "MLPC2", reason: expect.stringContaining("Change it from tomorrow") });
     expect(
       planRequirementChange({
         ...base,
@@ -183,7 +187,7 @@ describe("planAddPost", () => {
     endTime: "06:00",
     requiredCount: 1,
   };
-  const base = { contract, today, input, site: apapa, addSite: false, openPostNames: [], rates };
+  const base = { contract, today, input, site: apapa, addSite: false, sitePosts: [], rates };
 
   it("names the post and gives its week", () => {
     const plan = planAddPost(base);
@@ -229,9 +233,22 @@ describe("planAddPost", () => {
   });
 
   it("refuses a duplicate open name and sites that can't take the post", () => {
-    expect(planAddPost({ ...base, openPostNames: ["gate  c · night"] })).toMatchObject({
-      code: "MLPC8",
+    expect(
+      planAddPost({ ...base, sitePosts: [{ name: "gate  c · night", closedOn: null }] }),
+    ).toMatchObject({ code: "MLPC8" });
+    // A post of that name closing on or after the new one's first day still clashes...
+    expect(
+      planAddPost({ ...base, sitePosts: [{ name: "Gate C · Night", closedOn: monday }] }),
+    ).toMatchObject({ code: "MLPC8" });
+    // ...one whose last day is before it doesn't.
+    expect(
+      planAddPost({ ...base, sitePosts: [{ name: "Gate C · Night", closedOn: "2026-11-22" }] }),
+    ).toMatchObject({ ok: true });
+    // A site already on the contract still needs a geofence and a client in use.
+    expect(planAddPost({ ...base, site: { ...apapa, hasGeofence: false } })).toMatchObject({
+      code: "MLPC5",
     });
+    expect(planAddPost({ ...base, clientArchived: true })).toMatchObject({ code: "MLPC5" });
     const lekki = { ...apapa, id: "site-l", name: "Lekki Gate", onContract: false };
     expect(planAddPost({ ...base, site: lekki })).toMatchObject({ code: "MLPC5" });
     expect(planAddPost({ ...base, site: lekki, addSite: true })).toMatchObject({
@@ -310,9 +327,91 @@ describe("planClosePost", () => {
         post: { ...night, status: "closed", closedOn: monday },
       }),
     ).toMatchObject({ code: "MLPC6" });
+    expect(planClosePost({ ...base, versions: [v1], reason: "See www.example.com" })).toMatchObject(
+      { code: "MLPC7" },
+    );
     expect(
       planClosePost({ ...base, versions: [v1], contract: { ...contract, endDate: monday } }),
     ).toMatchObject({ code: "MLPC2" });
+  });
+});
+
+describe("planClosePost on a post already closing", () => {
+  it("brings an ending contract's post forward, never later", () => {
+    const ending = { ...contract, endDate: "2026-12-31", endReason: "Notice" };
+    const closing = { ...night, status: "closed" as const, closedOn: "2026-12-31" };
+    const versions = [{ ...v1, effectiveTo: "2026-12-31" }];
+    expect(
+      planClosePost({
+        contract: ending,
+        post: closing,
+        versions,
+        today,
+        lastDay: monday,
+        reason: "Client withdrew the night gate",
+      }),
+    ).toMatchObject({ ok: true, closes: ["req-1"] });
+    expect(
+      planClosePost({
+        contract: ending,
+        post: closing,
+        versions,
+        today,
+        lastDay: "2026-12-31",
+        reason: "Later",
+      }),
+    ).toMatchObject({ code: "MLPC6", reason: expect.stringContaining("close it sooner") });
+  });
+});
+
+describe("planCancelRequirementChange", () => {
+  const scheduled: PostVersion = { ...two, id: "req-2", effectiveFrom: monday };
+  const versions = [{ ...v1, effectiveTo: "2026-11-22" }, scheduled];
+  const base = { contract, post: night, today, versions };
+
+  it("removes the change and runs the version before it on", () => {
+    const plan = planCancelRequirementChange({ ...base, requirementId: "req-2" });
+    expect(plan).toMatchObject({
+      ok: true,
+      cancels: { id: "req-2" },
+      restores: { version: { id: "req-1" }, effectiveToAfter: null },
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    expect(plan.summary).toBe(
+      "Cancels the change from 23 Nov 2026: Gate A · Night stays at Every day 18:00–06:00 (next day) × 1.",
+    );
+  });
+
+  it("refuses a change that has started, one with a later change, and the first version", () => {
+    expect(
+      planCancelRequirementChange({
+        ...base,
+        versions: [
+          { ...v1, effectiveTo: "2026-11-19" },
+          { ...scheduled, effectiveFrom: "2026-11-20" },
+        ],
+        requirementId: "req-2",
+      }),
+    ).toMatchObject({ code: "MLPC2" });
+    expect(
+      planCancelRequirementChange({
+        ...base,
+        versions: [
+          ...versions.slice(0, 1),
+          { ...scheduled, effectiveTo: "2026-11-29" },
+          { ...v1, id: "req-3", effectiveFrom: "2026-11-30" },
+        ],
+        requirementId: "req-2",
+      }),
+    ).toMatchObject({ code: "MLPC3" });
+    expect(
+      planCancelRequirementChange({
+        ...base,
+        post: { ...night, openedOn: monday },
+        versions: [scheduled],
+        requirementId: "req-2",
+      }),
+    ).toMatchObject({ code: "MLPC3", reason: expect.stringContaining("first requirement") });
   });
 });
 

@@ -5,12 +5,14 @@ import {
   describeValues,
   formatWeek,
   planAddPost,
+  planCancelRequirementChange,
   planClosePost,
   planRequirementChange,
 } from "@/lib/live-changes";
 import { organisationToday } from "@/server/business/contracts-data";
 import type {
   addPostSchema,
+  cancelRequirementChangeSchema,
   changeRequirementSchema,
   closePostSchema,
 } from "@/server/business/live-changes";
@@ -93,7 +95,7 @@ export const previewAddPost: PreviewFn<typeof addPostSchema> = async ({
     site: context.sites.find((s) => s.id === data.siteId) ?? null,
     addSite: data.addSite,
     clientArchived: context.contract.clientArchived,
-    openPostNames: context.openPostNames[data.siteId] ?? [],
+    sitePosts: context.sitePosts[data.siteId] ?? [],
     rates: context.rates,
   });
   if (!plan.ok) return { summary: plan.reason, changes: [] };
@@ -143,6 +145,41 @@ export const previewClosePost: PreviewFn<typeof closePostSchema> = async ({
           after: "Removed",
         })),
       { label: "A week of this post", before: formatWeek(plan.week.before), after: "None" },
+    ],
+  };
+};
+
+export const previewCancelRequirementChange: PreviewFn<
+  typeof cancelRequirementChangeSchema
+> = async ({ supabase, organisationId, data }) => {
+  const [detail, today] = await Promise.all([
+    loadPostDetail(supabase, organisationId, data.postId),
+    organisationToday(supabase, organisationId),
+  ]);
+  if (!detail) return NOT_FOUND;
+  const plan = planCancelRequirementChange({
+    contract: detail.contract,
+    post: detail.post,
+    versions: detail.versions,
+    today,
+    requirementId: data.requirementId,
+  });
+  if (!plan.ok) return { summary: plan.reason, changes: [] };
+  return {
+    summary: plan.summary,
+    changes: [
+      {
+        label: `Change from ${formatDate(plan.cancels.effectiveFrom)}`,
+        before: describeValues(plan.cancels),
+        after: "Cancelled",
+      },
+      {
+        label: `Requirement from ${formatDate(plan.restores.version.effectiveFrom)}`,
+        before: `Ends ${plan.restores.version.effectiveTo ? formatDate(plan.restores.version.effectiveTo) : "open"}`,
+        after: plan.restores.effectiveToAfter
+          ? `Runs to ${formatDate(plan.restores.effectiveToAfter)}`
+          : "Runs on",
+      },
     ],
   };
 };

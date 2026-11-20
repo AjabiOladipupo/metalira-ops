@@ -5,11 +5,12 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { addDays, formatDate, formatDateTime } from "@/lib/dates";
 import { versionState } from "@/lib/rate-cards";
 
 import { RouteGate } from "../../../../../../_shell/slots";
 import { Section } from "../../../../../../people/_components/display";
+import { CancelChangeButton } from "../../../../../_components/live-change-forms";
 import { isChangeable, loadPostPage } from "../post-data";
 
 export const metadata: Metadata = { title: "Post history" };
@@ -34,7 +35,17 @@ async function PostPage({
   const today = ctx.today;
   const canChange = ctx.canEditContracts && isChangeable(detail, today);
   const changeable = canChange && (post.closedOn === null || post.closedOn >= today);
-  const closable = canChange && post.status === "open";
+  // Open, or closing later than today (it can close sooner).
+  const closable = canChange && (post.closedOn === null || post.closedOn > today);
+  // The latest version, not started, with a version before it, can be cancelled.
+  const latest = versions[versions.length - 1];
+  const cancellable =
+    canChange &&
+    latest !== undefined &&
+    latest.effectiveFrom > today &&
+    versions.some((v) => v.effectiveTo === addDays(latest.effectiveFrom, -1))
+      ? latest.id
+      : null;
   const newestFirst = [...versions].reverse();
   return (
     <>
@@ -94,6 +105,15 @@ async function PostPage({
                       {v.requiredCount} {v.requiredCount === 1 ? "person" : "people"}
                     </span>
                   </p>
+                  {cancellable === v.id ? (
+                    <CancelChangeButton
+                      clientId={clientId}
+                      contractId={contractId}
+                      postId={post.id}
+                      requirementId={v.id}
+                      label={`the change from ${formatDate(v.effectiveFrom)}`}
+                    />
+                  ) : null}
                 </li>
               );
             })}

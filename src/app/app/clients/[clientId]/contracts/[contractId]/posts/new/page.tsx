@@ -58,7 +58,7 @@ async function AddPostPage({
         contract={contract}
         today={ctx.today}
         sites={context.sites}
-        openPostNames={context.openPostNames}
+        sitePosts={context.sitePosts}
         rates={rates}
         initialFrom={initialFrom}
         back={back}

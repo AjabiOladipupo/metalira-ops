@@ -337,9 +337,16 @@ describe("change_post_requirement", () => {
     const night = await postId(id, "Gate A · Night");
     expect((await change(night, addDays(today, -1), 2)).error?.code).toBe("MLPC2");
     expect((await change(night, monday, 1)).error?.code).toBe("MLPC9");
+    // A day already in progress never changes: tomorrow at the earliest.
     const startedToday = await change(night, today, 2);
     expect(startedToday.error?.code).toBe("MLPC2");
-    expect(startedToday.error?.message).toContain("Change it from tomorrow");
+    expect(startedToday.error?.message).toContain("starts tomorrow or later");
+    expect((await addPost(id, { from: today })).error?.code).toBe("MLPC2");
+    // Notes and reasons never carry web addresses.
+    expect(
+      (await change(night, addDays(monday, 21), 2, ops.client, { note: "See https://x.example" }))
+        .error?.code,
+    ).toBe("MLPC7");
     expect((await change(night, addDays(monday, 7), 2)).error).toBeNull();
     const between = await change(night, monday, 3);
     expect(between.error?.code).toBe("MLPC3");
@@ -569,6 +576,149 @@ describe("close_post", () => {
     expect(
       (await closePost(await postId(id, "Gate A · Day"), today, "x".repeat(501))).error?.code,
     ).toBe("MLPC7");
+  });
+});
+
+describe("review fixes: closing earlier, overlapping names, sites, reasons", () => {
+  it("an earlier end_contract brings forward a post already closed later by close_post", async () => {
+    const id = await liveContract();
+    const night = await postId(id, "Gate A · Night");
+    expect((await closePost(night, addDays(monday, 10))).error).toBeNull();
+    const end = addDays(monday, 3);
+    const ended = await ops.client.rpc("end_contract", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_end_date: end,
+      p_reason: "Client gave notice.",
+    });
+    expect(ended.error).toBeNull();
+    const { data: post } = await admin
+      .from("posts")
+      .select("status, closed_on, closed_reason")
+      .eq("id", night)
+      .single();
+    expect(post).toEqual({ status: "closed", closed_on: end, closed_reason: "Post closed" });
+    expect(await versions(night)).toEqual([
+      { effective_from: today, effective_to: end, required_count: 1 },
+    ]);
+    expect((await requiredOn(addDays(end, 1), id))["Gate A · Night"]).toBeUndefined();
+  });
+
+  it("close_post brings a post of an ending contract forward, never later", async () => {
+    const id = await liveContract();
+    const night = await postId(id, "Gate A · Night");
+    const end = addDays(monday, 10);
+    expect(
+      (
+        await ops.client.rpc("end_contract", {
+          p_organisation_id: owner.orgId,
+          p_contract_id: id,
+          p_end_date: end,
+          p_reason: "Client gave notice.",
+        })
+      ).error,
+    ).toBeNull();
+    expect((await closePost(night, monday)).error).toBeNull();
+    const { data: post } = await admin
+      .from("posts")
+      .select("closed_on, closed_reason")
+      .eq("id", night)
+      .single();
+    expect(post).toEqual({ closed_on: monday, closed_reason: "Post closed" });
+    expect(await versions(night)).toEqual([
+      { effective_from: today, effective_to: monday, required_count: 1 },
+    ]);
+    // Never later again, and the database owner can't move it either outside the functions.
+    expect((await closePost(night, addDays(monday, 2))).error?.code).toBe("MLPC6");
+    await expect(
+      db.query("update public.posts set closed_on = closed_on - 1 where id = $1", [night]),
+    ).rejects.toMatchObject({ code: "MLPO1" });
+  });
+
+  it("refuses a post name still staffed on or after the new post's first day", async () => {
+    const id = await liveContract();
+    const night = await postId(id, "Gate A · Night");
+    expect((await closePost(night, addDays(monday, 5))).error).toBeNull();
+    const clash = await addPost(id, { name: "Gate A", from: monday });
+    expect(clash.error?.code).toBe("MLPC8");
+    expect((await addPost(id, { name: "Gate A", from: addDays(monday, 6) })).error).toBeNull();
+  });
+
+  it("refuses a post at a contract site that has lost its geofence", async () => {
+    const id = await liveContract();
+    const yaba = await newSite("Yaba Annex");
+    expect(
+      (
+        await ops.client.rpc("add_contract_site", {
+          p_organisation_id: owner.orgId,
+          p_contract_id: id,
+          p_site_id: yaba,
+        })
+      ).error,
+    ).toBeNull();
+    await db.query("update public.sites set centre = null, boundary = null where id = $1", [yaba]);
+    const refused = await addPost(id, { site: yaba });
+    expect(refused.error?.code).toBe("MLPC5");
+    expect(refused.error?.message).toContain("No geofence at Yaba Annex");
+  });
+
+  it("refuses web addresses in a closing reason", async () => {
+    const id = await liveContract();
+    const day = await postId(id, "Gate A · Day");
+    expect((await closePost(day, monday, "Details at www.example.com")).error?.code).toBe("MLPC7");
+  });
+});
+
+describe("cancel_post_requirement_change", () => {
+  function cancel(requirement: string, by: Client = ops.client) {
+    return by.rpc("cancel_post_requirement_change", {
+      p_organisation_id: owner.orgId,
+      p_requirement_id: requirement,
+      p_note: "Client changed their mind.",
+    });
+  }
+
+  it("takes back a scheduled change and runs the version before it on", async () => {
+    const id = await liveContract();
+    const night = await postId(id, "Gate A · Night");
+    const changed = await change(night, monday, 2);
+    expect(changed.error).toBeNull();
+    const scheduled = (changed.data as { requirement_id: string }).requirement_id;
+    expect((await cancel(scheduled, hr.client)).error?.code).toBe("42501");
+    expect((await cancel(scheduled, other.client)).error?.code).toBe("42501");
+    const { data, error } = await cancel(scheduled);
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ cancelled_id: scheduled, effective_from: monday });
+    expect(await versions(night)).toEqual([
+      { effective_from: today, effective_to: null, required_count: 1 },
+    ]);
+    expect((await requiredOn(monday, id))["Gate A · Night"]).toBe(1);
+    const { data: log } = await admin
+      .from("contract_changes")
+      .select("kind, effective_on")
+      .eq("post_id", night)
+      .order("created_at");
+    expect(log?.map((l) => l.kind)).toEqual(["requirement_changed", "requirement_cancelled"]);
+    expect((await cancel(scheduled)).error?.code).toBe("P0002");
+  });
+
+  it("refuses a change with a later one after it, and a post's first requirement", async () => {
+    const id = await liveContract();
+    const night = await postId(id, "Gate A · Night");
+    const first = await change(night, monday, 2);
+    expect((await change(night, addDays(monday, 7), 3)).error).toBeNull();
+    const refused = await cancel((first.data as { requirement_id: string }).requirement_id);
+    expect(refused.error?.code).toBe("MLPC3");
+
+    const added = await addPost(id, { from: addDays(monday, 7) });
+    const { data: req } = await admin
+      .from("roster_requirements")
+      .select("id")
+      .eq("post_id", (added.data as { post_id: string }).post_id)
+      .single();
+    const firstReq = await cancel(req!.id);
+    expect(firstReq.error?.code).toBe("MLPC3");
+    expect(firstReq.error?.message).toContain("Close the post instead");
   });
 });
 

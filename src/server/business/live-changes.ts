@@ -20,6 +20,9 @@ import { CONTRACT_EDITORS } from "./contracts";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Reasons and notes never carry web addresses (the database refuses them too). */
+const NO_URL = /:\/\/|www\./i;
+
 const date = (message: string) => z.string().trim().regex(ISO_DATE, message);
 
 const note = z
@@ -28,7 +31,8 @@ const note = z
   .optional()
   .transform((v) => (v ?? "").replace(/\r\n?/g, " ").trim())
   .refine((v) => v.length <= 500, "500 characters or fewer")
-  .refine((v) => /^[^\p{Cc}<>]*$/u.test(v), "Plain text only");
+  .refine((v) => /^[^\p{Cc}<>]*$/u.test(v), "Plain text only")
+  .refine((v) => !NO_URL.test(v), "Leave out web addresses");
 
 const days = z.array(z.string().max(2)).max(14).optional().default([]);
 const text = (max: number) => z.string().max(max).optional().default("");
@@ -101,7 +105,8 @@ export const closePostSchema = z.object({
     .trim()
     .min(1, "Say why the post is closing")
     .max(500, "500 characters or fewer")
-    .regex(/^[^\p{Cc}<>]*$/u, "Plain text only"),
+    .regex(/^[^\p{Cc}<>]*$/u, "Plain text only")
+    .refine((v) => !NO_URL.test(v), "Leave out web addresses"),
 });
 
 export const addContractSiteSchema = z.object({
@@ -111,6 +116,12 @@ export const addContractSiteSchema = z.object({
 });
 
 export const postIdSchema = z.object({ postId: z.uuid("Choose a post") });
+
+export const cancelRequirementChangeSchema = z.object({
+  postId: z.uuid("Choose a post"),
+  requirementId: z.uuid("Choose a change"),
+  note,
+});
 
 /** Which form field each refusal belongs under. */
 const FIELD: Record<string, string> = {
@@ -275,4 +286,31 @@ export const addContractSiteSpec: MutationSpec<typeof addContractSiteSchema, { s
 
 export function addContractSite(input: unknown) {
   return mutate(addContractSiteSpec, input);
+}
+
+export interface CancelChangeResult {
+  postId: string;
+  cancelledId: string;
+}
+
+export const cancelRequirementChangeSpec: MutationSpec<
+  typeof cancelRequirementChangeSchema,
+  CancelChangeResult
+> = {
+  schema: cancelRequirementChangeSchema,
+  roles: CONTRACT_EDITORS,
+  run: async ({ supabase, organisationId, data }) => {
+    const { data: result, error } = await supabase.rpc("cancel_post_requirement_change", {
+      p_organisation_id: organisationId,
+      p_requirement_id: data.requirementId,
+      ...(data.note ? { p_note: data.note } : {}),
+    });
+    if (error) fromLiveChangeDbError(error, { MLPC2: "requirementId", MLPC3: "requirementId" });
+    const r = record(result);
+    return { postId: String(r.post_id ?? data.postId), cancelledId: data.requirementId };
+  },
+};
+
+export function cancelRequirementChange(input: unknown) {
+  return mutate(cancelRequirementChangeSpec, input);
 }

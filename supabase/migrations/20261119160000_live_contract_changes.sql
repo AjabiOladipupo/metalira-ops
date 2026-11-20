@@ -18,6 +18,15 @@
 --    the rest close on it.
 -- 5. `add_contract_site(org, contract, site, note)`: a site of the client with a geofence joins a
 --    live contract (the 2.4 guard now lets only this function through).
+-- 6. `cancel_post_requirement_change(org, requirement, note)`: takes back a change that hasn't
+--    started (the post's latest version) and runs the version before it on to where the cancelled
+--    one ran.
+-- 7. Replaces 2.7's posts and roster_requirements guards, end_contract and end_due_contracts so a
+--    post already closed by close_post can only move EARLIER (an earlier contract end, or closing
+--    a post on an ending contract sooner), and a cancelled change can reopen the version before.
+--
+-- Every change applies from TOMORROW at the earliest (a day already in progress is never
+-- changed); a post's last day (close_post) may be today, so the close takes effect tomorrow.
 --
 -- Every function is a security definer checking owner, admin or ops_manager through
 -- private.has_role (private.session_uid: untrusted sessions are refused), locks the contract row
@@ -44,15 +53,20 @@ create table public.contract_changes (
   site_id uuid,
   kind text not null
     constraint contract_changes_kind_value check (
-      kind in ('requirement_changed', 'post_added', 'post_closed', 'site_added')
+      kind in (
+        'requirement_changed', 'requirement_cancelled', 'post_added', 'post_closed', 'site_added'
+      )
     ),
-  -- The first day the change applies; for a closed post, its last day staffed.
+  -- Depends on kind: the first day a requirement change, a cancelled change or a new post applies;
+  -- a closed post's LAST day staffed; the day a site was added. A log for people, never a source
+  -- for pricing: Phase 6 prices from posts, roster_requirements and Work Units only.
   effective_on date not null,
   reason text
     constraint contract_changes_reason_text check (
       reason = btrim(reason)
       and char_length(reason) between 1 and 500
       and reason !~ '[\x01-\x1f\x7f-\x9f<>]'
+      and reason !~* '(://|www\.)'
     ),
   -- What changed, for the history (counts, days, hours; never money).
   detail jsonb not null default '{}'::jsonb,
@@ -222,8 +236,8 @@ begin
   if p_from is null then
     raise exception 'Choose the date % starts.', p_what using errcode = 'MLPC2';
   end if;
-  if p_from < private.org_today(p_contract.organisation_id) then
-    raise exception 'A change to a live contract starts today or later.' using errcode = 'MLPC2';
+  if p_from <= private.org_today(p_contract.organisation_id) then
+    raise exception 'A change to a live contract starts tomorrow or later.' using errcode = 'MLPC2';
   end if;
   if p_from < p_contract.go_live_date then
     raise exception 'The contract goes live on %. Choose that day or later.',
@@ -291,8 +305,10 @@ begin
     end if;
     return null;
   end if;
-  if char_length(v_reason) > 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]' then
-    raise exception 'Keep it to 500 characters of plain text.' using errcode = 'MLPC7';
+  if char_length(v_reason) > 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]'
+    or v_reason ~* '(://|www\.)' then
+    raise exception 'Keep it to 500 characters of plain text, without web addresses.'
+      using errcode = 'MLPC7';
   end if;
   return v_reason;
 end;
@@ -496,11 +512,7 @@ begin
   end if;
 
   if v_current.effective_from = p_from then
-    if p_from <= v_today then
-      raise exception 'This post''s requirement started today. Change it from tomorrow.'
-        using errcode = 'MLPC2';
-    end if;
-    -- Not started yet: replaced (the audit trigger keeps the before).
+    -- Not started yet (p_from is tomorrow or later): replaced (the audit trigger keeps the before).
     delete from public.roster_requirements r where r.id = v_current.id;
     v_replaced := v_current.id;
   else
@@ -660,7 +672,7 @@ begin
     || ' (' || p_unit || ')';
 
   -- The site: on the contract already, or one of the client's sites added with the post.
-  select s.id, s.name, s.status into v_site
+  select s.id, s.name, s.status, s.geofence is not null as fenced into v_site
   from public.sites s
   where s.id = p_site_id and s.organisation_id = p_organisation_id;
   if v_site.id is null then
@@ -676,16 +688,30 @@ begin
     end if;
     perform private.add_contract_site_locked(v_contract, p_site_id, v_note);
     v_site_added := true;
-  elsif v_site.status = 'archived' then
-    raise exception '% is archived. Restore it first.', v_site.name using errcode = 'MLPC5';
+  else
+    if exists (
+      select 1 from public.clients c where c.id = v_contract.client_id and c.status = 'archived'
+    ) then
+      raise exception 'The client is archived. Restore it first.' using errcode = 'MLPC5';
+    end if;
+    if v_site.status = 'archived' then
+      raise exception '% is archived. Restore it first.', v_site.name using errcode = 'MLPC5';
+    end if;
+    if not v_site.fenced then
+      raise exception 'No geofence at %. Set one on the site first.', v_site.name
+        using errcode = 'MLPC5';
+    end if;
   end if;
 
   if exists (
+    -- Any post at the site still staffed on or after the new one's first day (open, or closing
+    -- later), compared as rate keys are (2.7's MLCT6 rule).
     select 1 from public.posts p
-    where p.contract_id = p_contract_id and p.site_id = p_site_id and p.status = 'open'
+    where p.contract_id = p_contract_id and p.site_id = p_site_id
+      and (p.closed_on is null or p.closed_on >= p_from)
       and private.rate_key_part(p.name) = private.rate_key_part(v_name)
   ) then
-    raise exception 'There''s already an open post called % at %.', v_name, v_site.name
+    raise exception 'There''s already a post called % at % on or after that day.', v_name, v_site.name
       using errcode = 'MLPC8';
   end if;
 
@@ -859,8 +885,12 @@ begin
   select * into v_post from public.posts p where p.id = p_post_id for update;
   v_today := private.org_today(p_organisation_id);
 
-  if v_post.status = 'closed' then
-    raise exception 'This post already closes after %.', to_char(v_post.closed_on, 'FMDD Mon YYYY')
+  -- A post already closing (close_post, or an ending contract) can close sooner, never later.
+  if v_post.status = 'closed' and (
+    v_post.closed_on < v_today or p_last_day is null or p_last_day >= v_post.closed_on
+  ) then
+    raise exception 'This post already closes after %.%', to_char(v_post.closed_on, 'FMDD Mon YYYY'),
+      case when v_post.closed_on >= v_today then ' Choose an earlier day to close it sooner.' else '' end
       using errcode = 'MLPC6';
   end if;
   if p_last_day is null then
@@ -879,6 +909,7 @@ begin
   end if;
   v_reason := private.check_change_reason(p_reason, true);
 
+  perform set_config('metalira.post_closing', p_post_id::text, true);
   delete from public.roster_requirements r
   where r.post_id = p_post_id and r.effective_from > p_last_day;
   get diagnostics v_cancelled = row_count;
@@ -890,6 +921,7 @@ begin
   update public.posts p
   set status = 'closed', closed_on = p_last_day, closed_reason = 'Post closed'
   where p.id = p_post_id;
+  perform set_config('metalira.post_closing', '', true);
 
   insert into public.contract_changes (
     organisation_id, contract_id, post_id, site_id, kind, effective_on, reason, detail
@@ -898,12 +930,13 @@ begin
     p_organisation_id, v_post.contract_id, p_post_id, v_post.site_id, 'post_closed', p_last_day,
     v_reason,
     jsonb_build_object(
-      'name', v_post.name, 'requirements_closed', v_closed, 'requirements_cancelled', v_cancelled
+      'name', v_post.name, 'requirements_closed', v_closed, 'requirements_cancelled', v_cancelled,
+      'closed_on_before', v_post.closed_on
     )
   );
   perform private.log_audit_impl(
     p_organisation_id, 'post.closed', 'posts', p_post_id,
-    jsonb_build_object('status', 'open', 'closed_on', null),
+    jsonb_build_object('status', v_post.status, 'closed_on', v_post.closed_on),
     jsonb_build_object(
       'status', 'closed', 'closed_on', p_last_day, 'requirements_closed', v_closed,
       'requirements_cancelled', v_cancelled
@@ -938,3 +971,451 @@ $$;
 
 revoke all on function public.close_post(uuid, uuid, date, text) from public, anon;
 grant execute on function public.close_post(uuid, uuid, date, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 8. cancel_post_requirement_change
+-- ---------------------------------------------------------------------------
+
+-- Takes back a requirement change that hasn't started: the post's latest version, starting
+-- tomorrow or later, with a version before it ending the day before. The cancelled version is
+-- removed (the audit trigger keeps it) and the version before runs on to where it ran.
+create function private.cancel_post_requirement_change(
+  p_organisation_id uuid,
+  p_requirement_id uuid,
+  p_note text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_contract_id uuid;
+  v_req public.roster_requirements%rowtype;
+  v_previous public.roster_requirements%rowtype;
+  v_later date;
+  v_note text;
+begin
+  perform private.require_live_change_role(p_organisation_id);
+  select r.contract_id into v_contract_id
+  from public.roster_requirements r
+  where r.id = p_requirement_id and r.organisation_id = p_organisation_id;
+  if v_contract_id is null then
+    raise exception 'That requirement wasn''t found.' using errcode = 'P0002';
+  end if;
+  perform private.lock_live_contract(p_organisation_id, v_contract_id);
+  select * into v_req from public.roster_requirements r where r.id = p_requirement_id;
+  perform 1 from public.posts p where p.id = v_req.post_id for update;
+  v_note := private.check_change_reason(p_note, false);
+
+  if v_req.effective_from <= private.org_today(p_organisation_id) then
+    raise exception 'This change has started and can''t be cancelled. Change the post again from a later day.'
+      using errcode = 'MLPC2';
+  end if;
+  select min(r.effective_from) into v_later
+  from public.roster_requirements r
+  where r.post_id = v_req.post_id and r.effective_from > v_req.effective_from;
+  if v_later is not null then
+    raise exception 'A later change is scheduled from %. Cancel that one first.',
+      to_char(v_later, 'FMDD Mon YYYY') using errcode = 'MLPC3';
+  end if;
+  select * into v_previous
+  from public.roster_requirements r
+  where r.post_id = v_req.post_id and r.effective_to = v_req.effective_from - 1;
+  if v_previous.id is null then
+    raise exception 'This is the post''s first requirement. Close the post instead.'
+      using errcode = 'MLPC3';
+  end if;
+
+  delete from public.roster_requirements r where r.id = v_req.id;
+  perform set_config('metalira.requirement_reopening', v_req.post_id::text, true);
+  update public.roster_requirements r
+  set effective_to = v_req.effective_to
+  where r.id = v_previous.id;
+  perform set_config('metalira.requirement_reopening', '', true);
+
+  insert into public.contract_changes (
+    organisation_id, contract_id, post_id, site_id, kind, effective_on, reason, detail
+  )
+  values (
+    p_organisation_id, v_req.contract_id, v_req.post_id, v_req.site_id, 'requirement_cancelled',
+    v_req.effective_from, v_note,
+    jsonb_build_object(
+      'before', jsonb_build_object(
+        'days', v_req.days_of_week, 'start', v_req.start_time, 'end', v_req.end_time,
+        'count', v_req.required_count
+      ),
+      'after', jsonb_build_object(
+        'days', v_previous.days_of_week, 'start', v_previous.start_time,
+        'end', v_previous.end_time, 'count', v_previous.required_count
+      )
+    )
+  );
+  perform private.log_audit_impl(
+    p_organisation_id, 'post.requirement_change_cancelled', 'posts', v_req.post_id,
+    jsonb_build_object(
+      'requirement_id', v_req.id, 'effective_from', v_req.effective_from,
+      'effective_to', v_req.effective_to, 'days', v_req.days_of_week, 'start', v_req.start_time,
+      'end', v_req.end_time, 'count', v_req.required_count,
+      'previous_effective_to', v_previous.effective_to
+    ),
+    jsonb_build_object('requirement_id', v_previous.id, 'effective_to', v_req.effective_to),
+    v_note
+  );
+
+  return jsonb_build_object(
+    'post_id', v_req.post_id, 'cancelled_id', v_req.id, 'restored_id', v_previous.id,
+    'effective_from', v_req.effective_from, 'effective_to', v_req.effective_to
+  );
+end;
+$$;
+
+revoke all on function private.cancel_post_requirement_change(uuid, uuid, text) from public, anon;
+grant execute on function private.cancel_post_requirement_change(uuid, uuid, text) to authenticated;
+
+create function public.cancel_post_requirement_change(
+  p_organisation_id uuid,
+  p_requirement_id uuid,
+  p_note text default null
+)
+returns jsonb
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.cancel_post_requirement_change(p_organisation_id, p_requirement_id, p_note)
+$$;
+
+revoke all on function public.cancel_post_requirement_change(uuid, uuid, text) from public, anon;
+grant execute on function public.cancel_post_requirement_change(uuid, uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 9. 2.7's guards and ending, replaced: a closed post only moves EARLIER
+-- ---------------------------------------------------------------------------
+
+-- As 2.7, plus: a closed post's last day may move EARLIER (never later, never reopening), and
+-- only inside end_contract or end_due_contracts (flag `metalira.contract_ending`: the contract,
+-- or '*' for the daily job) or close_post (flag `metalira.post_closing`: the post, and the new
+-- last day is today or later). Nothing a signed-in user can call sets these flags: set_config is
+-- not exposed through the Data API.
+create or replace function private.posts_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_start date;
+  v_end date;
+  v_ending text := coalesce(current_setting('metalira.contract_ending', true), '');
+  v_closing text := coalesce(current_setting('metalira.post_closing', true), '');
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'Posts are never deleted. Close the post instead.' using errcode = 'MLPO1';
+  end if;
+
+  if tg_op = 'INSERT' then
+    select c.status, c.start_date, c.end_date into v_status, v_start, v_end
+    from public.contracts c
+    where c.id = new.contract_id and c.organisation_id = new.organisation_id;
+    if v_status is distinct from 'active' then
+      raise exception 'Posts are added to a live contract only.' using errcode = 'MLPO1';
+    end if;
+    if new.opened_on < v_start or (v_end is not null and new.opened_on > v_end) then
+      raise exception 'A post opens inside the contract''s dates.' using errcode = 'MLPO1';
+    end if;
+    if new.status <> 'open' then
+      raise exception 'A new post is open.' using errcode = 'MLPO1';
+    end if;
+    return new;
+  end if;
+
+  if (
+    new.id, new.organisation_id, new.contract_id, new.site_id, new.headcount_requirement_id, new.name,
+    new.role, new.band, new.unit, new.opened_on, new.created_at, new.created_by
+  ) is distinct from (
+    old.id, old.organisation_id, old.contract_id, old.site_id, old.headcount_requirement_id, old.name,
+    old.role, old.band, old.unit, old.opened_on, old.created_at, old.created_by
+  ) then
+    raise exception 'A post never changes. Close it and add a new one.' using errcode = 'MLPO1';
+  end if;
+  if old.status = 'closed' and (
+    new.status, new.closed_on, new.closed_reason
+  ) is distinct from (
+    old.status, old.closed_on, old.closed_reason
+  ) then
+    if new.status = 'closed' and new.closed_on < old.closed_on and (
+      v_ending in (new.contract_id::text, '*')
+      or (v_closing = new.id::text and new.closed_on >= private.org_today(new.organisation_id))
+    ) then
+      return new;
+    end if;
+    raise exception 'This post is closed and posts don''t reopen.' using errcode = 'MLPO1';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.posts_guard() from public, anon, authenticated;
+
+-- As 2.7, plus: inside cancel_post_requirement_change (flag `metalira.requirement_reopening`,
+-- the post) the version before a cancelled change may run on later again (to the cancelled
+-- version's end, or open), still inside the post's dates.
+create or replace function private.roster_requirements_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_today date := private.org_today(coalesce(new.organisation_id, old.organisation_id));
+  v_opened date;
+  v_closed date;
+begin
+  if tg_op = 'DELETE' then
+    if old.effective_from <= v_today then
+      raise exception 'This requirement has started and can''t be removed. Close it instead.'
+        using errcode = 'MLPO1';
+    end if;
+    return old;
+  end if;
+
+  select p.opened_on, p.closed_on into v_opened, v_closed
+  from public.posts p
+  where p.id = new.post_id and p.organisation_id = new.organisation_id;
+
+  if tg_op = 'INSERT' then
+    if new.effective_from < v_opened
+      or (v_closed is not null and coalesce(new.effective_to, 'infinity') > v_closed) then
+      raise exception 'A requirement sits inside its post''s open dates.' using errcode = 'MLPO1';
+    end if;
+    if new.days_of_week is not null and array_position(new.days_of_week, null) is null then
+      new.days_of_week := array(select distinct d from unnest(new.days_of_week) d order by d);
+    end if;
+    return new;
+  end if;
+
+  if (
+    new.id, new.organisation_id, new.post_id, new.contract_id, new.site_id, new.effective_from,
+    new.days_of_week, new.start_time, new.end_time, new.required_count, new.created_at,
+    new.created_by
+  ) is distinct from (
+    old.id, old.organisation_id, old.post_id, old.contract_id, old.site_id, old.effective_from,
+    old.days_of_week, old.start_time, old.end_time, old.required_count, old.created_at,
+    old.created_by
+  ) then
+    raise exception 'A requirement is never edited. Add a new version from a date instead.'
+      using errcode = 'MLPO1';
+  end if;
+  if new.effective_to is distinct from old.effective_to then
+    if old.effective_to is not null and old.effective_to < v_today then
+      raise exception 'This requirement has ended and can''t change.' using errcode = 'MLPO1';
+    end if;
+    if coalesce(current_setting('metalira.requirement_reopening', true), '') = new.post_id::text
+      and (new.effective_to is null or new.effective_to > old.effective_to) then
+      if v_closed is not null and coalesce(new.effective_to, 'infinity') > v_closed then
+        raise exception 'A requirement sits inside its post''s open dates.' using errcode = 'MLPO1';
+      end if;
+      return new;
+    end if;
+    if new.effective_to is null or new.effective_to < v_today - 1 then
+      raise exception 'A requirement closes from yesterday at the earliest.' using errcode = 'MLPO1';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.roster_requirements_guard() from public, anon, authenticated;
+
+create or replace function private.end_contract(
+  p_organisation_id uuid,
+  p_contract_id uuid,
+  p_end_date date,
+  p_reason text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_contract public.contracts%rowtype;
+  v_today date;
+  v_reason text := btrim(coalesce(p_reason, ''));
+  v_card record;
+  v_cards_cancelled integer := 0;
+  v_cards_closed integer;
+  v_reqs_cancelled integer;
+  v_reqs_closed integer;
+  v_posts integer;
+  v_moved integer;
+begin
+  if auth.uid() is null or p_organisation_id is null
+    or not private.has_role(p_organisation_id, array['owner', 'admin', 'ops_manager']) then
+    raise exception 'Your role can''t end contracts.' using errcode = '42501';
+  end if;
+
+  select * into v_contract
+  from public.contracts c
+  where c.id = p_contract_id and c.organisation_id = p_organisation_id
+  for update;
+  if not found then
+    raise exception 'That contract wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_contract.status <> 'active' then
+    raise exception 'Only a live contract can be ended.' using errcode = 'MLCE1';
+  end if;
+  if p_end_date is null then
+    raise exception 'Choose the last day of service.' using errcode = 'MLCE2';
+  end if;
+  if v_contract.end_reason is not null then
+    if v_contract.end_date = p_end_date then
+      return jsonb_build_object(
+        'contract_id', p_contract_id, 'end_date', p_end_date, 'changed', false,
+        'posts_closed', 0, 'requirements_closed', 0, 'requirements_cancelled', 0,
+        'rate_cards_closed', 0, 'rate_cards_cancelled', 0
+      );
+    end if;
+    raise exception 'This contract is already ending on %.', to_char(v_contract.end_date, 'FMDD Mon YYYY')
+      using errcode = 'MLCE4';
+  end if;
+
+  v_today := private.org_today(p_organisation_id);
+  if p_end_date < v_today then
+    raise exception 'The last day of service can''t be in the past.' using errcode = 'MLCE2';
+  end if;
+  if p_end_date < v_contract.go_live_date then
+    raise exception 'The last day of service can''t be before the go-live date.' using errcode = 'MLCE2';
+  end if;
+  if v_contract.end_date is not null and p_end_date > v_contract.end_date then
+    raise exception 'The contract already ends on %. It can end earlier, not later.',
+      to_char(v_contract.end_date, 'FMDD Mon YYYY') using errcode = 'MLCE2';
+  end if;
+  if char_length(v_reason) not between 1 and 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]' then
+    raise exception 'Say why the contract is ending (500 characters or fewer, plain text).'
+      using errcode = 'MLCE3';
+  end if;
+
+  perform set_config('metalira.contract_ending', p_contract_id::text, true);
+
+  -- Rate cards: cancel the versions that would start after the end date, latest first (each
+  -- delete reopens the one before it), then close what is left on the end date.
+  for v_card in
+    select r.id from public.rate_cards r
+    where r.contract_id = p_contract_id and r.effective_from > p_end_date
+    order by r.effective_from desc
+  loop
+    delete from public.rate_card_lines l where l.rate_card_id = v_card.id;
+    delete from public.rate_cards r where r.id = v_card.id;
+    v_cards_cancelled := v_cards_cancelled + 1;
+  end loop;
+  update public.rate_cards r
+  set effective_to = p_end_date
+  where r.contract_id = p_contract_id
+    and (r.effective_to is null or r.effective_to > p_end_date);
+  get diagnostics v_cards_closed = row_count;
+
+  -- Roster requirements: the same.
+  delete from public.roster_requirements r
+  where r.contract_id = p_contract_id and r.effective_from > p_end_date;
+  get diagnostics v_reqs_cancelled = row_count;
+  update public.roster_requirements r
+  set effective_to = p_end_date
+  where r.contract_id = p_contract_id
+    and (r.effective_to is null or r.effective_to > p_end_date);
+  get diagnostics v_reqs_closed = row_count;
+
+  -- Posts: closed on the end date (a post that would only have opened later was never staffed).
+  -- The reason itself stays on the contract (readers of contracts only): posts are read by hr
+  -- and line managers too.
+  update public.posts p
+  set status = 'closed',
+    closed_on = greatest(p_end_date, p.opened_on - 1),
+    closed_reason = 'Contract ended'
+  where p.contract_id = p_contract_id and p.status = 'open';
+  get diagnostics v_posts = row_count;
+
+  -- Slice 2.8: posts already closed (close_post) on a day after the end date close on it too, so
+  -- no post stays staffed past the contract's end. Moving a closed post's last day EARLIER is
+  -- allowed only under this function's flag (posts_guard).
+  update public.posts p
+  set closed_on = greatest(p_end_date, p.opened_on - 1)
+  where p.contract_id = p_contract_id and p.status = 'closed' and p.closed_on > p_end_date;
+  get diagnostics v_moved = row_count;
+  v_posts := v_posts + v_moved;
+
+  update public.contracts c
+  set end_date = p_end_date, end_reason = v_reason
+  where c.id = p_contract_id;
+
+  perform set_config('metalira.contract_ending', '', true);
+
+  perform private.log_audit_impl(
+    p_organisation_id, 'contract.ended', 'contracts', p_contract_id,
+    jsonb_build_object('end_date', v_contract.end_date),
+    jsonb_build_object(
+      'end_date', p_end_date, 'posts_closed', v_posts, 'requirements_closed', v_reqs_closed,
+      'requirements_cancelled', v_reqs_cancelled, 'rate_cards_closed', v_cards_closed,
+      'rate_cards_cancelled', v_cards_cancelled
+    ),
+    v_reason
+  );
+
+  return jsonb_build_object(
+    'contract_id', p_contract_id, 'end_date', p_end_date, 'changed', true,
+    'posts_closed', v_posts, 'requirements_closed', v_reqs_closed,
+    'requirements_cancelled', v_reqs_cancelled, 'rate_cards_closed', v_cards_closed,
+    'rate_cards_cancelled', v_cards_cancelled
+  );
+end;
+$$;
+
+
+-- As 2.7, plus posts already closed on a day after the end date close on it (the same rule as
+-- end_contract; flag '*' for the posts guard).
+create or replace function private.end_due_contracts(p_organisation_id uuid default null)
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_count integer;
+begin
+  perform set_config('metalira.contract_ending', '*', true);
+  with due as (
+    update public.contracts c
+    set status = 'ended', ended_at = now()
+    where c.status = 'active'
+      and c.end_date is not null
+      and c.end_date < private.org_today(c.organisation_id)
+      and (p_organisation_id is null or c.organisation_id = p_organisation_id)
+    returning c.id, c.end_date
+  ), closed as (
+    update public.posts p
+    set status = 'closed',
+      closed_on = greatest(due.end_date, p.opened_on - 1),
+      closed_reason = 'Contract ended'
+    from due
+    where p.contract_id = due.id and p.status = 'open'
+    returning p.id
+  ), moved as (
+    update public.posts p
+    set closed_on = greatest(due.end_date, p.opened_on - 1)
+    from due
+    where p.contract_id = due.id and p.status = 'closed' and p.closed_on > due.end_date
+    returning p.id
+  )
+  select count(*) into v_count from due;
+  perform set_config('metalira.contract_ending', '', true);
+  return v_count;
+end;
+$$;
+
+revoke all on function private.end_due_contracts(uuid) from public, anon, authenticated;

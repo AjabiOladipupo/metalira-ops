@@ -925,6 +925,9 @@ isOneToOne: false
 "cancel_pay_rate":
 { Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
                            },
+"cancel_post_requirement_change":
+{ Args: { "p_note"?: string,"p_organisation_id": string,"p_requirement_id": string }; Returns: Json
+                           },
 "cancel_rate_card_version":
 { Args: { "p_organisation_id": string,"p_rate_card_id": string }; Returns: undefined
                            },

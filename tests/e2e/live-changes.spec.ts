@@ -209,6 +209,19 @@ test("ops_manager raises Gate A · Night from 1 to 2 guards from next Monday", a
     .eq("action", "post.requirement_changed")
     .eq("entity_id", post!.id);
   expect(audit).toEqual([{ actor_id: ops.userId, channel: "web" }]);
+
+  // Taking the change back before it starts: the first version runs on again.
+  await page.getByRole("button", { name: `Cancel the change from ${formatDate(monday)}` }).click();
+  await page.getByRole("button", { name: "Yes, cancel it" }).click();
+  await expect(page.getByTestId("post-versions").getByRole("listitem")).toHaveCount(1, {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId(`post-version-${today}`)).toContainText(
+    `From ${formatDate(today)}`,
+  );
+  await expect(page.getByTestId("post-changes")).toContainText(
+    `Change from ${formatDate(monday)} cancelled`,
+  );
 });
 
 test("ops_manager adds a post at a client site not yet on the contract", async ({ browser }) => {
@@ -280,5 +293,6 @@ test("ops_manager closes Gate A · Day after next Monday", async ({ browser }) =
     `${formatDate(today)} to ${formatDate(monday)}`,
   );
   await expect(page.getByTestId("post-changes")).toContainText("Client closed the day gate");
-  await expect(page.getByRole("link", { name: "Close post" })).toHaveCount(0);
+  // Closing after a later day, it can still be closed sooner (never later).
+  await expect(page.getByRole("link", { name: "Close post" })).toBeVisible();
 });

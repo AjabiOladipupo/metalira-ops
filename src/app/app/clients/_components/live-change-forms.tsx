@@ -5,7 +5,7 @@ import { useActionState, useMemo, useState } from "react";
 
 import { Field, FormAlert, SelectField, SubmitButton } from "@/components/form";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/dates";
+import { addDays, formatDate } from "@/lib/dates";
 import { HEADCOUNT_UNITS, HEADCOUNT_UNIT_LABELS, WEEKDAYS, WEEKDAY_SHORT } from "@/lib/headcount";
 import {
   describeValues,
@@ -23,6 +23,7 @@ import {
 } from "@/lib/live-changes";
 import {
   addPostAction,
+  cancelRequirementChangeAction,
   changeRequirementAction,
   closePostAction,
 } from "@/server/business/live-changes-actions";
@@ -239,11 +240,11 @@ export function ChangeRequirementForm({
         label="From"
         name="from"
         type="date"
-        min={today}
+        min={addDays(today, 1)}
         max={post.closedOn ?? contract.endDate ?? undefined}
         value={from}
         onChange={(e) => setFrom(e.currentTarget.value)}
-        hint="The first day the new numbers apply. Days before it keep the current ones."
+        hint="Tomorrow at the earliest. Days before it keep the current numbers."
         error={errors?.from}
         required
       />
@@ -282,7 +283,7 @@ export function AddPostForm({
   contract,
   today,
   sites,
-  openPostNames,
+  sitePosts,
   rates,
   initialFrom,
   back,
@@ -291,7 +292,7 @@ export function AddPostForm({
   contract: LiveContract & { id: string; clientArchived: boolean };
   today: string;
   sites: PostSite[];
-  openPostNames: Record<string, string[]>;
+  sitePosts: Record<string, { name: string; closedOn: string | null }[]>;
   rates: RateKeyVersion[];
   initialFrom: string;
   back: string;
@@ -336,10 +337,10 @@ export function AddPostForm({
       site,
       addSite: !site.onContract,
       clientArchived: contract.clientArchived,
-      openPostNames: openPostNames[site.id] ?? [],
+      sitePosts: sitePosts[site.id] ?? [],
       rates,
     });
-  }, [from, site, role, band, unit, postName, input, contract, today, openPostNames, rates]);
+  }, [from, site, role, band, unit, postName, input, contract, today, sitePosts, rates]);
 
   const lines = plan?.ok
     ? [
@@ -421,7 +422,7 @@ export function AddPostForm({
             label="From"
             name="from"
             type="date"
-            min={today}
+            min={addDays(today, 1)}
             max={contract.endDate ?? undefined}
             value={from}
             onChange={(e) => setFrom(e.currentTarget.value)}
@@ -516,6 +517,7 @@ export function ClosePostForm({
         name="lastDay"
         type="date"
         min={today}
+        max={post.closedOn ? addDays(post.closedOn, -1) : undefined}
         value={lastDay}
         onChange={(e) => setLastDay(e.currentTarget.value)}
         hint="The post is staffed up to and including this day."
@@ -552,6 +554,68 @@ export function ClosePostForm({
       />
       <FormAlert message={state && !state.ok ? state.formError : undefined} />
       <Actions submit="Close post" pending="Closing…" back={back} />
+    </form>
+  );
+}
+
+/** "Cancel this change": takes back a scheduled change after a second click to confirm. */
+export function CancelChangeButton({
+  clientId,
+  contractId,
+  postId,
+  requirementId,
+  label,
+}: {
+  clientId: string;
+  contractId: string;
+  postId: string;
+  requirementId: string;
+  /** "the change from 7 Dec 2026". */
+  label: string;
+}) {
+  const [state, action, pending] = useActionState<CompanyFormState, FormData>(
+    cancelRequirementChangeAction,
+    null,
+  );
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    return (
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="px-0 text-sm"
+        aria-label={`Cancel ${label}`}
+        onClick={() => setConfirming(true)}
+      >
+        Cancel this change
+      </Button>
+    );
+  }
+  return (
+    <form action={action} className="inline-flex flex-wrap items-center gap-3">
+      <input type="hidden" name="clientId" value={clientId} />
+      <input type="hidden" name="contractId" value={contractId} />
+      <input type="hidden" name="postId" value={postId} />
+      <input type="hidden" name="requirementId" value={requirementId} />
+      <span className="text-sm">Cancel {label}? The version before it runs on.</span>
+      <Button type="submit" variant="link" size="sm" disabled={pending} className="px-0 text-sm">
+        {pending ? "Cancelling…" : "Yes, cancel it"}
+      </Button>
+      <Button
+        type="button"
+        variant="link"
+        size="sm"
+        className="px-0 text-sm"
+        onClick={() => setConfirming(false)}
+      >
+        Keep
+      </Button>
+      {state && !state.ok ? (
+        <span role="alert" className="text-xs font-medium">
+          {state.formError}
+        </span>
+      ) : null}
     </form>
   );
 }

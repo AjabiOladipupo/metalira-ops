@@ -8,7 +8,7 @@ import type { RateCardVersion } from "@/lib/rate-cards";
 import type { Database } from "@/types/db";
 
 import { toRequirement, type PostRequirement } from "./activation-data";
-import { loadRateCardVersions } from "./contracts-data";
+import { loadRateCardVersions, organisationToday } from "./contracts-data";
 
 /**
  * Reads for changes to a live contract (slice 2.8), with the signed-in user's own client and
@@ -30,7 +30,8 @@ export interface LiveContractRow extends LiveContract {
   reference: string;
 }
 
-export type ChangeKind = "requirement_changed" | "post_added" | "post_closed" | "site_added";
+export type ChangeKind =
+  "requirement_changed" | "requirement_cancelled" | "post_added" | "post_closed" | "site_added";
 
 export interface ChangeEntry {
   id: string;
@@ -62,6 +63,7 @@ export interface PostDetail {
 
 const CHANGE_LABEL: Record<ChangeKind, string> = {
   requirement_changed: "Headcount changed",
+  requirement_cancelled: "Change cancelled",
   post_added: "Post added",
   post_closed: "Post closed",
   site_added: "Site added",
@@ -89,6 +91,9 @@ function toChange(row: {
   const kind = row.kind as ChangeKind;
   let label = `${CHANGE_LABEL[kind]} from ${formatDate(row.effective_on)}`;
   if (kind === "post_closed") label = `Post closed after ${formatDate(row.effective_on)}`;
+  if (kind === "requirement_cancelled") {
+    label = `Change from ${formatDate(row.effective_on)} cancelled`;
+  }
   if (kind === "requirement_changed") {
     const before = count(row.detail, "before");
     const after = count(row.detail, "after");
@@ -203,21 +208,25 @@ export async function loadPostDetail(
 export interface AddPostContext {
   contract: LiveContractRow;
   sites: PostSite[];
-  /** Open post names per site id. */
-  openPostNames: Record<string, string[]>;
+  /** Posts still staffed today or later (open, or closing later), per site id. */
+  sitePosts: Record<string, { name: string; closedOn: string | null }[]>;
   rates: RateCardVersion[];
 }
 
 /**
  * What "Add post" needs: the contract's sites first, then the client's other sites in use (which
- * can be added with the post), the open post names per site, and the rate card versions.
+ * can be added with the post), the posts per site still staffed today or later (for the name
+ * rule), and the rate card versions.
  */
 export async function loadAddPostContext(
   supabase: Client,
   organisationId: string,
   contractId: string,
 ): Promise<AddPostContext | null> {
-  const contract = await loadLiveContract(supabase, organisationId, contractId);
+  const [contract, today] = await Promise.all([
+    loadLiveContract(supabase, organisationId, contractId),
+    organisationToday(supabase, organisationId),
+  ]);
   if (!contract) return null;
   const [linked, clientSites, posts, rates] = await Promise.all([
     supabase
@@ -233,10 +242,10 @@ export async function loadAddPostContext(
       .limit(500),
     supabase
       .from("posts")
-      .select("site_id, name")
+      .select("site_id, name, closed_on")
       .eq("organisation_id", organisationId)
       .eq("contract_id", contractId)
-      .eq("status", "open")
+      .or(`closed_on.is.null,closed_on.gte.${today}`)
       .limit(1000),
     loadRateCardVersions(supabase, organisationId, contractId),
   ]);
@@ -256,9 +265,11 @@ export async function loadAddPostContext(
     // Archived sites only when already on the contract (so its posts still name them).
     .filter((s) => s.onContract || !s.archived)
     .sort((a, b) => Number(b.onContract) - Number(a.onContract) || a.name.localeCompare(b.name));
-  const openPostNames: Record<string, string[]> = {};
-  for (const p of posts.data ?? []) (openPostNames[p.site_id] ??= []).push(p.name);
-  return { contract, sites, openPostNames, rates: rates.versions };
+  const sitePosts: AddPostContext["sitePosts"] = {};
+  for (const p of posts.data ?? []) {
+    (sitePosts[p.site_id] ??= []).push({ name: p.name, closedOn: p.closed_on });
+  }
+  return { contract, sites, sitePosts, rates: rates.versions };
 }
 
 /** The live contract's change log, newest first (contract readers only; RLS hides it otherwise). */

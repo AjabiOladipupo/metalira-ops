@@ -60,6 +60,7 @@ import { activateContractSpec, endContractSpec } from "@/server/business/activat
 import { loadPosts, loadRequiredShiftsSummary } from "@/server/business/activation-data";
 import {
   addPostSpec,
+  cancelRequirementChangeSpec,
   changeRequirementSpec,
   closePostSpec,
   postIdSchema,
@@ -155,7 +156,12 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
-import { previewAddPost, previewChangeRequirement, previewClosePost } from "./live-change-previews";
+import {
+  previewAddPost,
+  previewCancelRequirementChange,
+  previewChangeRequirement,
+  previewClosePost,
+} from "./live-change-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -1491,6 +1497,19 @@ export const CAPABILITIES: readonly Capability[] = [
     agentNote: LIVE_CHANGE,
   },
   {
+    name: "posts.cancel_requirement_change",
+    description:
+      "Cancels a scheduled headcount change on a live post before it starts; the version before it runs on.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(cancelRequirementChangeSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "cancelRequirementChangeAction"),
+    preview: previewCancelRequirementChange,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
     name: "posts.add",
     description:
       "Adds a post to a live contract from a date, with its days, hours and people (and its site when asked).",
@@ -1519,16 +1538,18 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "posts.history",
     description:
-      "Shows every requirement version of one post and the changes made to it, with reasons.",
+      "Shows every requirement version of one post and the changes made to it (reasons left out).",
     kind: "read",
     audience: "manager",
     roles: CONTRACT_READERS,
     input: postIdSchema,
     changes: "none",
     action: null,
-    read: ({ supabase, organisationId }, input) => {
+    read: async ({ supabase, organisationId }, input) => {
       const { postId } = postIdSchema.parse(input);
-      return loadPostDetail(supabase, organisationId, postId);
+      const detail = await loadPostDetail(supabase, organisationId, postId);
+      // Closing reasons and notes stay with people: the agent gets what changed and when.
+      return detail && { ...detail, changes: detail.changes.map((c) => ({ ...c, reason: null })) };
     },
     agent: true,
   },
