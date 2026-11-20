@@ -5,6 +5,24 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  async headers() {
+    return [
+      {
+        // The worker app's service worker (slice 3.4, built by scripts/build-sw.mjs). Never
+        // cached by the browser or the CDN, so a new version is found on the next visit; its own
+        // CSP limits it to this origin. Registered with scope /m (src/app/m/_components/offline).
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'self'; script-src 'self'; worker-src 'self'",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+    ];
+  },
   experimental: {
     serverActions: {
       // Company logos may be up to 1 MB (slice 1.1); multipart adds a little on top. The logo
