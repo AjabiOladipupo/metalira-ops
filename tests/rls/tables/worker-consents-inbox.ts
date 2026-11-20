@@ -41,7 +41,7 @@ export const tables: TableSpec[] = [
       const db = await pgClient();
       try {
         await db.query(
-          "insert into public.worker_consents (organisation_id, worker_id, kind, notice_version) values ($1, $2, 'location', '2026-11-20.1')",
+          "insert into public.worker_consents (organisation_id, worker_id, kind, notice_version) values ($1, $2, 'location', '1.0')",
           [side.orgId, workerId],
         );
       } finally {
@@ -53,7 +53,7 @@ export const tables: TableSpec[] = [
       organisation_id: victim.orgId,
       worker_id: randomUUID(),
       kind: "selfie",
-      notice_version: "2026-11-20.1",
+      notice_version: "1.0",
     }),
     patch: { withdrawn_at: new Date().toISOString() },
   },

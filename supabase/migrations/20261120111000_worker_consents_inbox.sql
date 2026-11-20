@@ -8,11 +8,16 @@
 --    withdrawal are logged by the audit trigger with channel `worker_app`.
 --    Chosen over "withdrawing adds a row" so the current state is one indexed row, and the
 --    history still reads as accepted -> withdrawn -> accepted again.
--- 2. private.worker_has_consent(org, worker, kind): true while the worker has an open consent of
---    that kind. Slice 3.5's punch function calls it. A worker who declines or withdraws is
---    clocked in by their supervisor (owner decision, 20 Nov 2026).
--- 3. `inbox_items`: messages to one worker (kind, title, plain-text body with no web addresses,
---    an optional internal /m link). Only the server (secret key) or SQL functions add them. The
+-- 2. Notice versions are "major.minor" and only known versions are accepted
+--    (private.consent_notice_known, kept in step with src/lib/messages/consent.ts). A wording fix
+--    bumps the minor and keeps every consent; a change of meaning bumps the major
+--    (private.consent_notice_major) and workers are asked again (owner's default, pending their
+--    answer, 20 Nov 2026).
+--    private.worker_has_consent(org, worker, kind): true while the worker has an open consent of
+--    that kind under the current major version. Slice 3.5's punch function calls it. A worker who
+--    declines or withdraws is clocked in by their supervisor (owner decision, 20 Nov 2026).
+-- 3. `inbox_items`: messages to one worker (kind, title, plain-text body with no web addresses
+--    and no personal numbers, an optional internal /m link). Only the server (secret key) or SQL functions add them. The
 --    worker reads their own and can only set `read_at` (a column grant; the guard sets it to
 --    now() and never clears it). Owner, admin and HR may read a worker's items, read-only, to
 --    answer "did they get the notice?": every item is something the company itself sent. Other
@@ -35,10 +40,10 @@ create table public.worker_consents (
   worker_id uuid not null,
   kind text not null
     constraint worker_consents_kind_value check (kind in ('location', 'selfie')),
-  -- The version of the notice text the worker saw (src/lib/messages/consent.ts), "2026-11-20.1".
+  -- The version of the notice the worker saw, "major.minor" (src/lib/messages/consent.ts).
   notice_version text not null
     constraint worker_consents_notice_version_format check (
-      notice_version ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]{1,3}$'
+      notice_version ~ '^[0-9]{1,3}\.[0-9]{1,3}$'
     ),
   accepted_at timestamptz not null default now(),
   withdrawn_at timestamptz,
@@ -104,6 +109,44 @@ grant select on table public.worker_consents to authenticated;
 -- accept_worker_consent and withdraw_worker_consent (security review, slice 3.1).
 revoke insert, update, delete, truncate on table public.worker_consents from service_role;
 
+-- The notice versions a worker may agree to. Add a row here in the same pull request as new
+-- wording in src/lib/messages/consent.ts (tests/rls/worker-consents-inbox.test.ts checks both).
+create function private.consent_notice_known(p_kind text, p_version text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select (p_kind, p_version) in (values
+    ('location', '1.0'),
+    ('selfie', '1.0')
+  )
+$$;
+
+-- The current major version of each notice: consents under an older major no longer count.
+create function private.consent_notice_major(p_kind text)
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$
+  select case p_kind when 'location' then 1 when 'selfie' then 1 end
+$$;
+
+-- The major part of "major.minor".
+create function private.consent_version_major(p_version text)
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$
+  select case when p_version ~ '^[0-9]{1,3}\.[0-9]{1,3}$' then split_part(p_version, '.', 1)::integer end
+$$;
+
+revoke all on function private.consent_notice_known(text, text) from public, anon, authenticated;
+revoke all on function private.consent_notice_major(text) from public, anon, authenticated;
+revoke all on function private.consent_version_major(text) from public, anon, authenticated;
+
 -- The caller's own worker record in `p_organisation_id` (a worker login), or an error.
 create function private.my_worker_in(p_organisation_id uuid)
 returns uuid
@@ -135,8 +178,9 @@ $$;
 
 revoke all on function private.my_worker_in(uuid) from public, anon, authenticated;
 
--- The worker agrees to the `p_kind` notice they were shown. Idempotent: an open consent is kept
--- as it is (the version they first agreed to) and returned.
+-- The worker agrees to the `p_kind` notice they were shown, a known version only. Idempotent: an
+-- open consent under the current major version is kept as it is and returned. An open consent
+-- under an older major is closed (withdrawn_at) and a new row added.
 create function private.accept_worker_consent(
   p_organisation_id uuid,
   p_kind text,
@@ -152,8 +196,8 @@ declare
   v_worker uuid;
   v_id uuid;
 begin
-  if p_kind is null or p_kind not in ('location', 'selfie')
-    or p_notice_version is null or p_notice_version !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]{1,3}$' then
+  if p_kind is null or p_notice_version is null
+    or not private.consent_notice_known(p_kind, p_notice_version) then
     raise exception 'Unknown consent or notice.' using errcode = 'MLCN3';
   end if;
   v_worker := private.my_worker_in(p_organisation_id);
@@ -163,10 +207,15 @@ begin
 
   select c.id into v_id
   from public.worker_consents c
-  where c.worker_id = v_worker and c.kind = p_kind and c.withdrawn_at is null;
+  where c.worker_id = v_worker and c.kind = p_kind and c.withdrawn_at is null
+    and private.consent_version_major(c.notice_version) = private.consent_notice_major(p_kind);
   if v_id is not null then
     return v_id;
   end if;
+  -- An open consent to an older meaning of the notice is closed before the new one starts.
+  update public.worker_consents c
+  set withdrawn_at = greatest(now(), c.accepted_at)
+  where c.worker_id = v_worker and c.kind = p_kind and c.withdrawn_at is null;
 
   insert into public.worker_consents (organisation_id, worker_id, kind, notice_version, created_by)
   values (p_organisation_id, v_worker, p_kind, p_notice_version, auth.uid())
@@ -246,7 +295,8 @@ grant execute on function public.accept_worker_consent(uuid, text, text) to auth
 grant execute on function public.withdraw_worker_consent(uuid, text) to authenticated;
 
 -- For slice 3.5's punch function (runs as the caller, inside a definer function): does the
--- worker have an open consent of this kind? Not callable from the Data API.
+-- worker have an open consent of this kind under the current major notice version? Not
+-- callable from the Data API.
 create function private.worker_has_consent(p_organisation_id uuid, p_worker_id uuid, p_kind text)
 returns boolean
 language sql
@@ -261,6 +311,7 @@ as $$
       and c.worker_id = p_worker_id
       and c.kind = p_kind
       and c.withdrawn_at is null
+      and private.consent_version_major(c.notice_version) = private.consent_notice_major(p_kind)
   )
 $$;
 
@@ -283,6 +334,7 @@ create table public.inbox_items (
       and char_length(title) between 1 and 120
       and title !~ '[\x01-\x1f\x7f-\x9f<>]'
       and title !~* '(://|www\.)'
+      and title !~ '[0-9]([ -]*[0-9]){9,}'
     ),
   -- Plain text: line breaks allowed, no other control characters, no web addresses.
   body text not null
@@ -291,6 +343,9 @@ create table public.inbox_items (
       and char_length(body) between 1 and 1000
       and body !~ '[\x01-\x09\x0b-\x1f\x7f-\x9f<>]'
       and body !~* '(://|www\.)'
+      -- No personal numbers (rule 9): 10 or more digits with only spaces or hyphens between them
+      -- (src/lib/inbox.ts hasPersonalNumberRun, the same rule). Dates and times stay allowed.
+      and body !~ '[0-9]([ -]*[0-9]){9,}'
     ),
   -- An internal worker-app path ("/m/shifts"), never a full address (src/lib/inbox.ts).
   link_path text
@@ -341,6 +396,9 @@ begin
   end if;
   if old.emailed_at is not null and new.emailed_at is distinct from old.emailed_at then
     raise exception 'An inbox item is emailed once.' using errcode = 'MLIB1';
+  end if;
+  if old.emailed_at is null and new.emailed_at is not null then
+    new.emailed_at := now();
   end if;
   return new;
 end;

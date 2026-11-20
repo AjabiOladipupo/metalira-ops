@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { hasPersonalNumber } from "@/lib/worker-requests";
-
 /**
  * Worker inbox rules shared by the server and its tests (slice 3.1). The database checks the same
  * things again (inbox_items constraints in migration 20261120111000).
@@ -18,6 +16,17 @@ export function isWorkerAppPath(path: string): boolean {
 const NO_WEB_ADDRESS = (value: string) => !/:\/\/|www\./i.test(value);
 
 /**
+ * A personal number in inbox text (rule 9): 10 or more digits in a run where only spaces or
+ * hyphens separate them ("0123456789", "0123 456 7890", "0123-456-7890"). Slashes, colons, dots
+ * and letters break a run, so "21/11/2026 08:00" is allowed. The database's inbox_items checks
+ * use the same rule: `!~ '[0-9]([ -]*[0-9]){9,}'`. Inbox text is written by our own server code;
+ * text workers type uses the stricter rule in src/lib/worker-requests.ts.
+ */
+export function hasPersonalNumberRun(text: string): boolean {
+  return /[0-9](?:[ -]*[0-9]){9,}/.test(text);
+}
+
+/**
  * What notifyWorker takes. Plain text only, no web addresses: links are internal paths. Never
  * personal numbers (NIN, BVN, account numbers, RSA PIN; rule 9): a run of 10 or more digits is
  * refused, because each item is also copied to the audit log and owner, admin and HR can read it.
@@ -30,7 +39,8 @@ export const inboxMessageSchema = z.object({
     .min(1)
     .max(120)
     .regex(/^[^\p{Cc}<>]*$/u, "Plain text only")
-    .refine(NO_WEB_ADDRESS, "No web addresses"),
+    .refine(NO_WEB_ADDRESS, "No web addresses")
+    .refine((value) => !hasPersonalNumberRun(value), "No personal numbers"),
   body: z
     .string()
     .trim()
@@ -39,7 +49,7 @@ export const inboxMessageSchema = z.object({
     // Line breaks are fine; other control characters and angle brackets are not.
     .refine((value) => !/[\p{Cc}<>]/u.test(value.replace(/\n/g, "")), "Plain text only")
     .refine(NO_WEB_ADDRESS, "No web addresses")
-    .refine((value) => !hasPersonalNumber(value), "No personal numbers"),
+    .refine((value) => !hasPersonalNumberRun(value), "No personal numbers"),
   link: z
     .string()
     .refine(isWorkerAppPath, "Links must be a worker-app path such as /m/shifts")

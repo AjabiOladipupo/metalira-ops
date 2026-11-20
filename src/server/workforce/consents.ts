@@ -3,7 +3,12 @@ import "server-only";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { CONSENT_KINDS, CONSENT_NOTICES, type ConsentKind } from "@/lib/messages/consent";
+import {
+  CONSENT_KINDS,
+  CONSENT_NOTICES,
+  isCurrentConsentVersion,
+  type ConsentKind,
+} from "@/lib/messages/consent";
 import { workerMessages } from "@/lib/messages/worker";
 import { MutationError } from "@/server/identity/mutate";
 import type { OwnContext } from "@/server/people/own-requests";
@@ -54,12 +59,16 @@ export async function loadMyConsents(ctx: Pick<OwnContext, "supabase" | "workerI
   if (error) throw new Error(`Could not load consents (${error.code})`);
   return CONSENT_KINDS.map((kind): MyConsent => {
     const latest = (data ?? []).find((row) => row.kind === kind);
-    const open = latest && latest.withdrawn_at === null ? latest : null;
+    // An open consent to an older meaning of the notice doesn't count: the worker is asked again.
+    const open =
+      latest && latest.withdrawn_at === null && isCurrentConsentVersion(kind, latest.notice_version)
+        ? latest
+        : null;
     return {
       kind,
       acceptedAt: open?.accepted_at ?? null,
       noticeVersion: open?.notice_version ?? null,
-      withdrawnAt: latest?.withdrawn_at ?? null,
+      withdrawnAt: open ? null : (latest?.withdrawn_at ?? null),
     };
   });
 }

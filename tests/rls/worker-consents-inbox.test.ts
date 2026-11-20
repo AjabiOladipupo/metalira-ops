@@ -13,6 +13,7 @@
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { CONSENT_KINDS, CONSENT_NOTICES, consentVersionMajor } from "@/lib/messages/consent";
 import type { Database } from "@/types/db";
 
 import {
@@ -20,6 +21,7 @@ import {
   anonClient,
   createTenantUser,
   createTestUser,
+  markPasswordTrusted,
   pgClient,
   type Client,
   type TenantUser,
@@ -30,7 +32,7 @@ type Role = Database["public"]["Enums"]["membership_role"];
 
 const PERMISSION_DENIED = "42501";
 const PIN_HASH = `s1$k1$${"A".repeat(22)}$${"B".repeat(43)}`;
-const VERSION = "2026-11-20.1";
+const VERSION = "1.0";
 
 let admin: Client;
 let db: pg.Client;
@@ -172,6 +174,8 @@ describe("worker_consents", () => {
     for (const [kind, version] of [
       ["fingerprint", VERSION],
       ["location", "v1"],
+      ["location", "9.9"],
+      ["selfie", "2026-11-20.1"],
     ]) {
       const { error } = await meClient.rpc("accept_worker_consent", {
         p_organisation_id: owner.orgId,
@@ -181,6 +185,42 @@ describe("worker_consents", () => {
       expect(error?.code).toBe("MLCN3");
     }
   });
+
+  it("knows exactly the notice versions in src/lib/messages/consent.ts, and their majors", async () => {
+    for (const kind of CONSENT_KINDS) {
+      const version = CONSENT_NOTICES[kind].version;
+      const { rows } = await db.query<{ known: boolean; major: number }>(
+        "select private.consent_notice_known($1, $2) as known, private.consent_notice_major($1) as major",
+        [kind, version],
+      );
+      expect(rows[0], kind).toEqual({ known: true, major: consentVersionMajor(version) });
+    }
+  });
+
+  it("a consent to an older major version stops counting, and agreeing again replaces it", async () => {
+    const worker = await addWorker();
+    const client = await workerSession(worker);
+    await db.query(
+      "insert into public.worker_consents (organisation_id, worker_id, kind, notice_version) values ($1, $2, 'selfie', '0.3')",
+      [owner.orgId, worker],
+    );
+    expect(await hasConsent(worker, "selfie")).toBe(false);
+    const again = await client.rpc("accept_worker_consent", {
+      p_organisation_id: owner.orgId,
+      p_kind: "selfie",
+      p_notice_version: VERSION,
+    });
+    expect(again.error).toBeNull();
+    expect(await hasConsent(worker, "selfie")).toBe(true);
+    const { rows } = await db.query<{ notice_version: string; open: boolean }>(
+      "select notice_version, withdrawn_at is null as open from public.worker_consents where worker_id = $1 order by accepted_at, open",
+      [worker],
+    );
+    expect(rows).toEqual([
+      { notice_version: "0.3", open: false },
+      { notice_version: VERSION, open: true },
+    ]);
+  }, 60_000);
 
   it("withdrawing closes the open consent; agreeing again adds a new row", async () => {
     const withdrawn = await meClient.rpc("withdraw_worker_consent", {
@@ -434,6 +474,55 @@ describe("inbox_items", () => {
     }
   });
 
+  it("refuses personal numbers in the title or body, but not dates and times", async () => {
+    for (const row of [
+      { title: "Account 0123456789", body: "Fine" },
+      { title: "Hi", body: "Your NIN 0123 456 7890 is on file" },
+      { title: "Hi", body: "Call 0123-456-7890" },
+    ]) {
+      const { error } = await admin
+        .from("inbox_items")
+        .insert({ organisation_id: owner.orgId, worker_id: colleague, kind: "general", ...row });
+      expect(error?.code, JSON.stringify(row)).toBe("23514");
+    }
+    const { error } = await admin.from("inbox_items").insert({
+      organisation_id: owner.orgId,
+      worker_id: colleague,
+      kind: "general",
+      title: "Shift moved to 21/11/2026 08:00",
+      body: "Your shift on 21/11/2026 now starts at 08:00.",
+    });
+    expect(error).toBeNull();
+    // The SQL path is held by the same checks.
+    await expect(
+      db.query("select private.add_inbox_item($1, $2, 'general', 'Hi', 'Account 0123 456 7890')", [
+        owner.orgId,
+        colleague,
+      ]),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("stamps emailed_at with the database's time", async () => {
+    const item = await admin
+      .from("inbox_items")
+      .insert({
+        organisation_id: owner.orgId,
+        worker_id: colleague,
+        kind: "general",
+        title: "Hi",
+        body: "Hello",
+      })
+      .select("id")
+      .single();
+    const stamped = await admin
+      .from("inbox_items")
+      .update({ emailed_at: "2020-01-01T00:00:00Z" })
+      .eq("id", item.data!.id)
+      .select("emailed_at")
+      .single();
+    expect(new Date(stamped.data!.emailed_at!).getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
   it("is never edited or deleted with the secret key", async () => {
     const edit = await admin.from("inbox_items").update({ body: "Changed" }).eq("id", mine);
     expect(edit.error?.code).toBe("MLIB1");
@@ -449,10 +538,12 @@ describe("inbox_items", () => {
     });
     expect(forbidden.error?.code).toBe(PERMISSION_DENIED);
 
-    const { rows: before } = await db.query<{ n: string }>(
-      "select count(*) as n from public.inbox_items where emailed_at > now() - interval '24 hours'",
+    const { rows: before } = await db.query<{ n: string; org: string }>(
+      "select count(*) as n, count(*) filter (where organisation_id = $1) as org from public.inbox_items where emailed_at > now() - interval '24 hours'",
+      [owner.orgId],
     );
     const sentSoFar = Number(before[0]!.n);
+    const orgSoFar = Number(before[0]!.org);
     const items = await admin
       .from("inbox_items")
       .insert(
@@ -469,11 +560,11 @@ describe("inbox_items", () => {
     const claim = (id: string, orgCap: number, globalCap: number) =>
       admin.rpc("claim_inbox_email", { p_item_id: id, p_org_cap: orgCap, p_global_cap: globalCap });
 
-    expect((await claim(ids[0]!, 1, sentSoFar + 10)).data).toBe(true);
-    expect((await claim(ids[0]!, 10, sentSoFar + 10)).data).toBe(false); // already emailed
-    expect((await claim(ids[1]!, 1, sentSoFar + 10)).data).toBe(false); // company cap reached
-    expect((await claim(ids[1]!, 10, sentSoFar + 1)).data).toBe(false); // overall cap reached
-    expect((await claim(ids[1]!, 10, sentSoFar + 10)).data).toBe(true);
+    expect((await claim(ids[0]!, orgSoFar + 1, sentSoFar + 10)).data).toBe(true);
+    expect((await claim(ids[0]!, orgSoFar + 10, sentSoFar + 10)).data).toBe(false); // already emailed
+    expect((await claim(ids[1]!, orgSoFar + 1, sentSoFar + 10)).data).toBe(false); // company cap
+    expect((await claim(ids[1]!, orgSoFar + 10, sentSoFar + 1)).data).toBe(false); // overall cap
+    expect((await claim(ids[1]!, orgSoFar + 10, sentSoFar + 10)).data).toBe(true);
     const stamped = await admin.from("inbox_items").select("emailed_at").in("id", ids);
     expect(stamped.data!.filter((r) => r.emailed_at !== null)).toHaveLength(2);
   });
@@ -540,4 +631,116 @@ describe("attendance settings", () => {
       .single();
     expect(data!.late_grace_minutes).toBe(15);
   });
+});
+
+describe("an untrusted password session reads no consents, inbox items or reportees", () => {
+  /** A password account confirmed before its password was chosen (no password_set_at). */
+  async function untrusted(label: string) {
+    const email = `rls-${label}-${crypto.randomUUID()}@example.test`;
+    const password = `${crypto.randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    expect(created.error).toBeNull();
+    const client = anonClient();
+    expect((await client.auth.signInWithPassword({ email, password })).error).toBeNull();
+    return { id: created.data.user!.id, email, client };
+  }
+
+  async function reads(client: Client, workerId: string) {
+    const count = async (table: "worker_consents" | "inbox_items" | "worker_assignments") =>
+      ((await client.from(table).select("id").eq("worker_id", workerId)).data ?? []).length;
+    return {
+      workers: ((await client.from("workers").select("id").eq("id", workerId)).data ?? []).length,
+      assignments: await count("worker_assignments"),
+      consents: await count("worker_consents"),
+      inbox: await count("inbox_items"),
+    };
+  }
+
+  it("for HR, a line manager and a worker, until the password is trusted", async () => {
+    const reportee = await addWorker();
+    const client = await admin
+      .from("clients")
+      .insert({ organisation_id: owner.orgId, name: "Untrusted Client" })
+      .select("id")
+      .single();
+    const site = await admin
+      .from("sites")
+      .insert({ organisation_id: owner.orgId, client_id: client.data!.id, name: "Untrusted Gate" })
+      .select("id")
+      .single();
+    const assigned = await admin.from("worker_assignments").insert({
+      organisation_id: owner.orgId,
+      worker_id: reportee,
+      site_id: site.data!.id,
+      effective_from: "2025-01-06",
+    });
+    expect(assigned.error).toBeNull();
+    await db.query(
+      "insert into public.worker_consents (organisation_id, worker_id, kind, notice_version) values ($1, $2, 'location', $3)",
+      [owner.orgId, reportee, VERSION],
+    );
+    await db.query("select private.add_inbox_item($1, $2, 'general', 'Hi', 'Hello')", [
+      owner.orgId,
+      reportee,
+    ]);
+
+    const hr = await untrusted("ci-untrusted-hr");
+    await addMember(hr, "hr");
+    const lm = await untrusted("ci-untrusted-lm");
+    await addMember(lm, "line_manager");
+    const { data: lmMembership } = await admin
+      .from("memberships")
+      .select("id")
+      .eq("organisation_id", owner.orgId)
+      .eq("user_id", lm.id)
+      .single();
+    await db.query("update public.workers set line_manager_membership_id = $1 where id = $2", [
+      lmMembership!.id,
+      reportee,
+    ]);
+    // A worker membership on a password account, linked to the reportee's own record.
+    const own = await untrusted("ci-untrusted-worker");
+    const linked = await admin.from("memberships").insert({
+      organisation_id: owner.orgId,
+      user_id: own.id,
+      role: "worker",
+      worker_id: reportee,
+    });
+    expect(linked.error).toBeNull();
+
+    const nothing = { workers: 0, assignments: 0, consents: 0, inbox: 0 };
+    expect(await reads(hr.client, reportee)).toEqual(nothing);
+    expect(await reads(lm.client, reportee)).toEqual(nothing);
+    expect(await reads(own.client, reportee)).toEqual(nothing);
+    const refused = await own.client.rpc("accept_worker_consent", {
+      p_organisation_id: owner.orgId,
+      p_kind: "selfie",
+      p_notice_version: VERSION,
+    });
+    expect(refused.error?.code).toBe("MLCN1");
+
+    // Positive controls: the same tokens read once each password is trusted.
+    await markPasswordTrusted(hr.id);
+    await markPasswordTrusted(lm.id);
+    await markPasswordTrusted(own.id);
+    expect(await reads(hr.client, reportee)).toEqual({
+      workers: 1,
+      assignments: 1,
+      consents: 1,
+      inbox: 1,
+    });
+    // A line manager sees their reportee and its assignments, never consents or the inbox.
+    expect(await reads(lm.client, reportee)).toEqual({
+      workers: 1,
+      assignments: 1,
+      consents: 0,
+      inbox: 0,
+    });
+    expect(await reads(own.client, reportee)).toEqual({
+      workers: 1,
+      assignments: 1,
+      consents: 1,
+      inbox: 1,
+    });
+  }, 120_000);
 });

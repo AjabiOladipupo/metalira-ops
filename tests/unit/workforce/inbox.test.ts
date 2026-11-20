@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { attendanceSettingsSchema } from "@/lib/attendance";
-import { INBOX_EMAIL_CAPS, emailFits, inboxMessageSchema, isWorkerAppPath } from "@/lib/inbox";
-import { CONSENT_NOTICES } from "@/lib/messages/consent";
+import {
+  INBOX_EMAIL_CAPS,
+  emailFits,
+  hasPersonalNumberRun,
+  inboxMessageSchema,
+  isWorkerAppPath,
+} from "@/lib/inbox";
+import {
+  CONSENT_NOTICES,
+  consentVersionMajor,
+  isCurrentConsentVersion,
+} from "@/lib/messages/consent";
 
 describe("isWorkerAppPath", () => {
   it.each(["/m", "/m/inbox", "/m/shifts", "/m/me/consent", "/m/a_b-c/9"])("accepts %s", (path) =>
@@ -50,8 +60,37 @@ describe("inboxMessageSchema", () => {
     { body: "x".repeat(1001) },
     { body: "Your new account is 0123456789." },
     { body: "NIN 1234 5678 901 on file" },
+    { title: "Account 0123-456-7890" },
   ])("refuses %j", (patch) => {
     expect(inboxMessageSchema.safeParse({ ...ok, ...patch }).success).toBe(false);
+  });
+});
+
+describe("hasPersonalNumberRun (the same rule as the inbox_items checks)", () => {
+  it.each([
+    "0123456789",
+    "0123 456 7890",
+    "0123-456-7890",
+    "Call 0803 - 123 - 4567",
+    "12345678901234",
+  ])("flags %j", (text) => expect(hasPersonalNumberRun(text)).toBe(true));
+
+  it.each([
+    "21/11/2026 08:00",
+    "Shift 21/11/2026 08:00 to 21/11/2026 20:00",
+    "2026-11-21",
+    "Gate 3, block 14, room 207",
+    "123456789",
+    "0123.456.7890",
+  ])("allows %j", (text) => expect(hasPersonalNumberRun(text)).toBe(false));
+
+  it("lets a dated message through the schema", () => {
+    const parsed = inboxMessageSchema.safeParse({
+      kind: "shift_changed",
+      title: "Shift moved to 21/11/2026 08:00",
+      body: "Your shift on 21/11/2026 now starts at 08:00.",
+    });
+    expect(parsed.success).toBe(true);
   });
 });
 
@@ -93,10 +132,20 @@ describe("attendance settings", () => {
 });
 
 describe("consent notices", () => {
-  it("version every notice as YYYY-MM-DD.n, as the database expects", () => {
+  it("version every notice as major.minor, as the database expects", () => {
     for (const notice of Object.values(CONSENT_NOTICES)) {
-      expect(notice.version).toMatch(/^\d{4}-\d{2}-\d{2}\.\d{1,3}$/);
+      expect(notice.version).toMatch(/^\d{1,3}\.\d{1,3}$/);
       expect(notice.body.length).toBeGreaterThan(0);
     }
+  });
+
+  it("keeps a consent through a wording fix (minor) but not a change of meaning (major)", () => {
+    expect(consentVersionMajor("1.0")).toBe(1);
+    expect(consentVersionMajor("12.3")).toBe(12);
+    expect(consentVersionMajor("2026-11-20.1")).toBeNull();
+    const major = consentVersionMajor(CONSENT_NOTICES.location.version)!;
+    expect(isCurrentConsentVersion("location", `${major}.9`)).toBe(true);
+    expect(isCurrentConsentVersion("location", `${major + 1}.0`)).toBe(false);
+    expect(isCurrentConsentVersion("location", `${major - 1}.0`)).toBe(false);
   });
 });

@@ -90,9 +90,7 @@ test("a worker agrees to location, withdraws it from Me, and reads an inbox mess
     .from("worker_consents")
     .select("kind, notice_version, withdrawn_at")
     .eq("worker_id", s.workerId);
-  expect(open.data).toEqual([
-    { kind: "location", notice_version: "2026-11-20.1", withdrawn_at: null },
-  ]);
+  expect(open.data).toEqual([{ kind: "location", notice_version: "1.0", withdrawn_at: null }]);
 
   // Back on Me later, the worker withdraws.
   await w.goto("/m/me");
