@@ -242,6 +242,26 @@ describe("planActivation", () => {
     expect(none.summary).toBe("Creates 0 posts and 0 roster requirements from 1 Dec 2026.");
   });
 
+  it("refuses two rows at a site that would open posts of the same name", () => {
+    const plan = planActivation(
+      input({
+        headcount: [
+          ...coastline,
+          row({ id: "h5", postName: "Gate A · Night", band: "standard" }),
+          row({ id: "h6", siteId: GATE_B, postName: "Gate A · Night", band: "standard" }),
+        ],
+        versions: [{ ...card, lines: [...card.lines, rate({ band: "standard" })] }],
+      }),
+    );
+    expect(plan.issues).toEqual([
+      {
+        code: "MLCT6",
+        message:
+          "Two headcount rows would open posts with the same name (Apapa Warehouse 3: Gate A · Night). Rename one.",
+      },
+    ]);
+  });
+
   it("refuses an ended contract and says a live one is live", () => {
     const ended = planActivation(
       input({

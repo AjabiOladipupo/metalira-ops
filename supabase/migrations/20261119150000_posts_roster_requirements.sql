@@ -19,6 +19,10 @@
 --    passed (the 2.4 guards refuse rate card writes after that).
 -- 6. Owner decision (19 Nov 2026): new worker assignments to an archived site or an archived
 --    client are refused (existing ones are left alone).
+-- 7. Rate keys everywhere compare with private.rate_key_part (2.5): add_rate_card_version's
+--    MLRC5 check and the rate_card_lines unique key are aligned with it here.
+-- 8. The welcome email has a per-company daily cap and goes to a contact at most once a day
+--    (private.contract_welcome_allowed).
 --
 -- Nothing here stores money. Posts carry the rate key (role, band, unit) copied from the
 -- headcount row, so they match the rate card exactly as the headcount did (decision 5).
@@ -754,6 +758,29 @@ begin
     end if;
   end if;
 
+  -- MLCT6: two headcount rows at one site that would open posts of the same name (compared as
+  -- rate keys are: "Gate A · Night" from a Night band, or a post named that on the standard band).
+  select string_agg(d.label, ', ' order by d.label) into v_list
+  from (
+    select min(s.name) || ': ' || min(n.post_name) as label
+    from (
+      select h.site_id,
+        coalesce(h.post_name, h.role)
+          || case when private.rate_key_part(h.band) = 'standard' then '' else ' · ' || h.band end
+          as post_name
+      from public.headcount_requirements h
+      where h.contract_id = p_contract_id and h.organisation_id = p_organisation_id
+    ) n
+    join public.sites s on s.id = n.site_id
+    group by n.site_id, private.rate_key_part(n.post_name)
+    having count(*) > 1
+  ) d;
+  if v_list is not null then
+    v_failures := v_failures || jsonb_build_object('code', 'MLCT6',
+      'message', 'Two headcount rows would open posts with the same name (' || v_list
+        || '). Rename one.');
+  end if;
+
   -- MLCT6: a manned-post contract says who it staffs.
   if v_contract.type = 'manned_post' and not exists (
     select 1 from public.headcount_requirements h where h.contract_id = p_contract_id
@@ -1099,3 +1126,187 @@ revoke all on function private.worker_assignments_target_active() from public, a
 create trigger worker_assignments_target_active
   before insert or update on public.worker_assignments
   for each row execute function private.worker_assignments_target_active();
+
+-- ---------------------------------------------------------------------------
+-- 11. Rate keys compared with private.rate_key_part (aligns slice 2.4 with 2.5)
+-- ---------------------------------------------------------------------------
+
+-- One line per rate key in a version, compared as the headcount and src/lib/rate-cards.ts
+-- compare them (case, Unicode letters and any whitespace run, NBSP included). Same name, so the
+-- app's refusal mapping (rate_card_lines_key) is unchanged.
+drop index public.rate_card_lines_key;
+create unique index rate_card_lines_key on public.rate_card_lines (
+  rate_card_id, private.rate_key_part(role), private.rate_key_part(band), unit
+);
+
+-- add_rate_card_version as in 20261119130000, with the MLRC5 check comparing keys through
+-- private.rate_key_part instead of lower(btrim()). Nothing else changes.
+create or replace function private.add_rate_card_version(
+  p_organisation_id uuid,
+  p_contract_id uuid,
+  p_effective_from date,
+  p_lines jsonb,
+  p_note text default null
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+  v_card uuid;
+  v_previous uuid;
+  v_previous_to date;
+  v_missing text;
+begin
+  v_status := private.lock_contract_for_rates(
+    p_organisation_id, p_contract_id, array['owner', 'admin', 'ops_manager']
+  );
+  if v_status = 'ended' then
+    raise exception 'This contract has ended and its rates can''t change.' using errcode = 'MLRC6';
+  end if;
+  if p_effective_from is null then
+    raise exception 'Choose the date the new rates start.' using errcode = '22023';
+  end if;
+  if p_lines is null or jsonb_typeof(p_lines) <> 'array' then
+    raise exception 'Add at least one rate line.' using errcode = 'MLRC8';
+  end if;
+
+  select r.id, r.effective_to into v_previous, v_previous_to
+  from public.rate_cards r
+  where r.contract_id = p_contract_id
+  order by r.effective_from desc
+  limit 1;
+  if v_previous is null then
+    raise exception 'This contract has no rate card yet. Add the first one.' using errcode = 'MLRC7';
+  end if;
+  if exists (
+    select 1 from public.rate_cards r
+    where r.contract_id = p_contract_id and r.effective_from >= p_effective_from
+  ) then
+    raise exception 'A rate card from this date or later already exists. Cancel it first.'
+      using errcode = 'MLRC3';
+  end if;
+  if v_status <> 'draft' and p_effective_from < private.org_today(p_organisation_id) then
+    raise exception 'A rate change starts today or later.' using errcode = 'MLRC2';
+  end if;
+
+  select string_agg(k.role || ' · ' || k.band || ' (' || k.unit || ')', ', ')
+  into v_missing
+  from private.rate_card_open_post_keys(p_organisation_id, p_contract_id) k
+  where not exists (
+    select 1 from jsonb_array_elements(p_lines) l
+    where private.rate_key_part(l.value ->> 'role') = private.rate_key_part(k.role)
+      and private.rate_key_part(coalesce(nullif(btrim(l.value ->> 'band'), ''), 'standard'))
+        = private.rate_key_part(k.band)
+      and l.value ->> 'unit' = k.unit
+  );
+  if v_missing is not null then
+    raise exception 'The new rates leave out %, which open posts need.', v_missing
+      using errcode = 'MLRC5';
+  end if;
+
+  update public.rate_cards r
+  set effective_to = p_effective_from - 1
+  where r.id = v_previous;
+
+  insert into public.rate_cards (organisation_id, contract_id, effective_from, effective_to, note)
+  values (
+    p_organisation_id, p_contract_id, p_effective_from, v_previous_to, nullif(btrim(p_note), '')
+  )
+  returning id into v_card;
+  perform private.rate_card_insert_lines(p_organisation_id, v_card, p_lines);
+
+  perform private.log_audit_impl(
+    p_organisation_id, 'rate_card.version_added', 'rate_cards', v_card,
+    jsonb_build_object(
+      'closes', v_previous, 'effective_to_before', v_previous_to,
+      'effective_to_after', p_effective_from - 1
+    ),
+    private.rate_card_snapshot(v_card), null
+  );
+  return v_card;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 12. Welcome email allowance
+-- ---------------------------------------------------------------------------
+
+-- Which of p_contact_ids (active contacts of the contract's client) may get a welcome email now:
+-- none once the company has sent 20 welcome emails in the last 24 hours, never a contact who got
+-- one in the last 24 hours, and no more than what is left of the 20. Counted from the
+-- `contract.welcome_sent` audit events (their `after` carries the count and the contact ids,
+-- never addresses). Owner, admin and ops_manager, who are the ones who activate.
+create function private.contract_welcome_allowed(
+  p_organisation_id uuid,
+  p_contract_id uuid,
+  p_contact_ids uuid[]
+)
+returns setof uuid
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_sent integer;
+  v_left integer;
+begin
+  if p_organisation_id is null
+    or not private.has_role(p_organisation_id, array['owner', 'admin', 'ops_manager']) then
+    return;
+  end if;
+  select coalesce(sum(
+    case when (a.after ->> 'recipients') ~ '^[0-9]{1,4}$' then (a.after ->> 'recipients')::integer else 0 end
+  ), 0)
+  into v_sent
+  from public.audit_log a
+  where a.organisation_id = p_organisation_id
+    and a.action = 'contract.welcome_sent'
+    and a.at > now() - interval '24 hours';
+  v_left := greatest(20 - v_sent, 0);
+  if v_left = 0 then
+    return;
+  end if;
+  return query
+  select k.id
+  from public.client_contacts k
+  join public.contracts c on c.client_id = k.client_id and c.organisation_id = k.organisation_id
+  where c.id = p_contract_id
+    and k.organisation_id = p_organisation_id
+    and k.status = 'active'
+    and k.id = any (coalesce(p_contact_ids, '{}'))
+    and not exists (
+      select 1 from public.audit_log a
+      where a.organisation_id = p_organisation_id
+        and a.action = 'contract.welcome_sent'
+        and a.at > now() - interval '24 hours'
+        and (a.after -> 'contact_ids') ? k.id::text
+    )
+  order by array_position(p_contact_ids, k.id)
+  limit v_left;
+end;
+$$;
+
+revoke all on function private.contract_welcome_allowed(uuid, uuid, uuid[]) from public, anon;
+grant execute on function private.contract_welcome_allowed(uuid, uuid, uuid[]) to authenticated;
+
+create function public.contract_welcome_allowed(
+  p_organisation_id uuid,
+  p_contract_id uuid,
+  p_contact_ids uuid[]
+)
+returns setof uuid
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.contract_welcome_allowed(p_organisation_id, p_contract_id, p_contact_ids)
+$$;
+
+revoke all on function public.contract_welcome_allowed(uuid, uuid, uuid[]) from public, anon;
+grant execute on function public.contract_welcome_allowed(uuid, uuid, uuid[]) to authenticated;
