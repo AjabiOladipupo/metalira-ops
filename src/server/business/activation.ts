@@ -247,7 +247,23 @@ export async function loadWelcomePayload(
     .eq("client_id", contract.data.client_id)
     .eq("status", "active");
   if (contacts.error) return null;
-  const recipients = welcomeRecipients(contacts.data ?? []);
+  const wanted = welcomeRecipients(contacts.data ?? []);
+  if (wanted.length === 0) return null;
+  // The company's daily cap and once a day per contact (private.contract_welcome_allowed).
+  const allowed = await supabase.rpc("contract_welcome_allowed", {
+    p_organisation_id: organisationId,
+    p_contract_id: contractId,
+    p_contact_ids: wanted.map((r) => r.contactId),
+  });
+  if (allowed.error) return null;
+  const allowedIds = new Set((allowed.data ?? []) as string[]);
+  const recipients = wanted.filter((r) => allowedIds.has(r.contactId));
+  if (recipients.length < wanted.length) {
+    // Counts only: never the addresses.
+    console.warn(
+      `contract.welcome_held: ${wanted.length - recipients.length} of ${wanted.length} over the daily limit or already welcomed today`,
+    );
+  }
   if (recipients.length === 0) return null;
   return {
     organisationId,
@@ -275,6 +291,7 @@ export async function sendContractWelcome(
   payload: WelcomePayload,
 ): Promise<void> {
   let sent = 0;
+  const sentTo: string[] = [];
   for (const recipient of payload.recipients) {
     try {
       await sendContractWelcomeEmail({
@@ -290,6 +307,7 @@ export async function sendContractWelcome(
         invoiceEmail: payload.invoiceEmail,
       });
       sent += 1;
+      sentTo.push(recipient.contactId);
     } catch (error) {
       console.error(
         "contract.welcome_failed:",
@@ -303,7 +321,8 @@ export async function sendContractWelcome(
       action: "contract.welcome_sent",
       entity: "contracts",
       entityId: payload.contractId,
-      after: { recipients: sent },
+      // Contact ids, never addresses: they feed the daily cap and once-a-day rule.
+      after: { recipients: sent, contact_ids: sentTo },
     });
   } catch (error) {
     console.error(

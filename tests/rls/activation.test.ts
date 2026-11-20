@@ -446,6 +446,101 @@ describe("activate_contract", () => {
   });
 });
 
+describe("rate keys compared as private.rate_key_part compares them", () => {
+  const NBSP = "\u00a0";
+
+  async function liveWith(role: string, band: string, lines: { role: string; band: string }[]) {
+    const id = await draftContract({
+      card: false,
+      rows: [
+        { site_id: apapa, post_name: "Gate K", role, band, start_time: "06:00", end_time: "18:00" },
+      ],
+    });
+    const card = await ops.client.rpc("save_draft_rate_card", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: monday,
+      p_lines: lines.map((l) => ({ ...l, unit: "shift", rate_kobo: "1250000" })) as Json,
+    });
+    return { id, card };
+  }
+
+  function change(id: string, role: string, band: string) {
+    return ops.client.rpc("add_rate_card_version", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: addDays(monday, 14),
+      p_lines: [{ role, band, unit: "shift", rate_kobo: "1300000" }] as Json,
+    });
+  }
+
+  it("matches case on A-Z and any whitespace run, at activation and in a rate change", async () => {
+    const { id, card } = await liveWith("Agent de sécurité", "Nuit", [
+      { role: `AGENT  DE${NBSP}SéCURITé`, band: "NUIT" },
+    ]);
+    expect(card.error).toBeNull();
+    expect((await activate(id)).error).toBeNull();
+    expect((await change(id, `agent de sécurité${NBSP}`, ` nuit`)).error).toBeNull();
+  });
+
+  it("treats accented capitals as different letters, in both directions", async () => {
+    // Headcount in small letters, rate line in accented capitals: no match at activation.
+    const upper = await liveWith("sécurité", "Day", [{ role: "SÉCURITÉ", band: "Day" }]);
+    expect(upper.card.error).toBeNull();
+    expect(codesOf((await activate(upper.id)).error)).toEqual(["MLCT5"]);
+
+    // Live with the matching key; a change to accented capitals leaves the post out.
+    const lower = await liveWith("SÉCURITÉ", "Day", [{ role: "SÉCURITÉ", band: "Day" }]);
+    expect((await activate(lower.id)).error).toBeNull();
+    const refused = await change(lower.id, "sécurité", "Day");
+    expect(refused.error?.code).toBe("MLRC5");
+    expect((await change(lower.id, "SÉCURITÉ", "DAY")).error).toBeNull();
+  });
+
+  it("keeps one line per key in a version, whitespace and A-Z case aside", async () => {
+    const dup = await liveWith("Guard", "Day", [
+      { role: "Guard  Day", band: "Day" },
+      { role: `guard${NBSP}day`, band: "DAY" },
+    ]);
+    expect(dup.card.error?.code).toBe("23505");
+    expect(dup.card.error?.message).toContain("rate_card_lines_key");
+    // Accented capitals are their own key, so both lines may stand.
+    const both = await liveWith("Guard", "Day", [
+      { role: "Guard", band: "Day" },
+      { role: "SÉCURITÉ", band: "Day" },
+      { role: "sécurité", band: "Day" },
+    ]);
+    expect(both.card.error).toBeNull();
+  });
+
+  it("refuses two headcount rows that would open posts of the same name", async () => {
+    const id = await draftContract({
+      rows: [
+        {
+          site_id: apapa,
+          post_name: "Gate A",
+          band: "Night",
+          start_time: "18:00",
+          end_time: "06:00",
+        },
+        {
+          site_id: apapa,
+          post_name: "gate a · night",
+          band: "standard",
+          start_time: "06:00",
+          end_time: "18:00",
+        },
+      ],
+    });
+    const { error } = await activate(id);
+    expect(codesOf(error)).toContain("MLCT6");
+    expect(error?.message).toContain(
+      "Two headcount rows would open posts with the same name (Apapa Warehouse 3: ",
+    );
+    expect(await count("posts", id)).toBe(0);
+  });
+});
+
 describe("posts and roster requirements", () => {
   let contractId: string;
   let postId: string;

@@ -24,6 +24,7 @@ import {
 import {
   formatRateKey,
   missingRateKeys,
+  normaliseKeyPart,
   rateCardInForce,
   type RateCardVersion,
 } from "./rate-cards";
@@ -187,6 +188,27 @@ export function planActivation(input: ActivationInput): ActivationPlan {
         );
       }
     }
+  }
+
+  // Two rows at one site that would open posts of the same name (as the database compares them).
+  const siteNames = new Map(input.sites.map((s) => [s.id, s.name]));
+  const byName = new Map<string, { site: string; names: string[] }>();
+  for (const line of input.headcount) {
+    const name = postLabel(line);
+    const key = `${line.siteId}|${normaliseKeyPart(name)}`;
+    const entry = byName.get(key) ?? { site: siteNames.get(line.siteId) ?? "a site", names: [] };
+    entry.names.push(name);
+    byName.set(key, entry);
+  }
+  const clashes = [...byName.values()]
+    .filter((e) => e.names.length > 1)
+    .map((e) => `${e.site}: ${[...e.names].sort()[0]}`)
+    .sort();
+  if (clashes.length > 0) {
+    add(
+      "MLCT6",
+      `Two headcount rows would open posts with the same name (${clashes.join(", ")}). Rename one.`,
+    );
   }
 
   if (headcountRequired(contract.type) && input.headcount.length === 0) {
