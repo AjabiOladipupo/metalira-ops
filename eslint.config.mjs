@@ -54,5 +54,6 @@ export default defineConfig([
     "docs/**",
     "next-env.d.ts",
     "src/types/db.ts",
+    "public/sw.js",
   ]),
 ]);

@@ -2,11 +2,13 @@ import type { Metadata, Viewport } from "next";
 
 import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from "@/components/theme/theme";
 
+import { WorkerPwa } from "./_components/offline/worker-pwa";
+
 /**
  * The worker app's web app manifest and home-screen icons (slice 1.10), so a worker can add it
  * to their phone's home screen. The manifest is a static file in public/ (the proxy never runs
  * on it, so the browser can fetch it before sign-in); its scope is /m, the worker app only.
- * The service worker and offline punch queue come in Phase 3.
+ * The service worker (scope /m) and the offline banner come from <WorkerPwa> (slice 3.4).
  */
 export const metadata: Metadata = {
   manifest: "/worker.webmanifest",
@@ -34,7 +36,10 @@ export const viewport: Viewport = {
 export default function WorkerLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-dvh justify-center bg-background text-foreground">
-      <div className="flex w-full max-w-[430px] min-w-0 flex-col">{children}</div>
+      <div className="flex w-full max-w-[430px] min-w-0 flex-col">
+        <WorkerPwa />
+        {children}
+      </div>
     </div>
   );
 }

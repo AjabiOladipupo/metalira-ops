@@ -19,6 +19,11 @@ export const WORKER_SIGN_IN_PATH = "/m/sign-in";
 /** Invite links: /m/invite/<token>. */
 export const WORKER_INVITE_PATH = "/m/invite";
 /**
+ * The worker app's offline screen (slice 3.4): static, no personal data, precached by the
+ * service worker, which may fetch it before anyone has signed in.
+ */
+export const WORKER_OFFLINE_PATH = "/m/offline";
+/**
  * user_metadata key for the path the sign-up confirmation email links back to. The template
  * (supabase/templates/confirmation.html) reads it as `{{ .Data.next_path }}`; the confirm route
  * still passes it through safeNextPath, so a value set through the Auth API directly can only
@@ -60,9 +65,13 @@ function isWorkerApp(pathname: string): boolean {
   return pathname === WORKER_HOME_PATH || pathname.startsWith(`${WORKER_HOME_PATH}/`);
 }
 
-/** Worker pages anyone may open: sign-in and invite links. */
+/** Worker pages anyone may open: sign-in, invite links and the offline screen. */
 function isWorkerPublic(pathname: string): boolean {
-  return pathname === WORKER_SIGN_IN_PATH || pathname.startsWith(`${WORKER_INVITE_PATH}/`);
+  return (
+    pathname === WORKER_SIGN_IN_PATH ||
+    pathname === WORKER_OFFLINE_PATH ||
+    pathname.startsWith(`${WORKER_INVITE_PATH}/`)
+  );
 }
 
 /**
@@ -126,7 +135,8 @@ export type ProxyDecision = { type: "next" } | { type: "redirect"; location: str
  *
  * - Manager app (/app) and team invites (/join): signed out goes to /sign-in (the invite page
  *   itself is public); a worker session goes to the worker app.
- * - Worker app (/m): signed out goes to /m/sign-in, except sign-in and invite links; a worker
+ * - Worker app (/m): signed out goes to /m/sign-in, except sign-in, invite links and the
+ *   offline screen; a worker
  *   who is already signed in skips /m/sign-in.
  */
 export function proxyDecision(

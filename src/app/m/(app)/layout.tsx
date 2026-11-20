@@ -3,6 +3,23 @@ import { Suspense } from "react";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 
 import { BottomNav } from "../_components/bottom-nav";
+import { QueueOwnerSync } from "../_components/offline/queue-owner";
+
+/**
+ * Opens the signed-in worker's offline queue (slice 3.4) with the ids from the verified
+ * session. Renders nothing; signed out or unlinked logins get no queue (the pages redirect).
+ */
+async function QueueOwner() {
+  const lookup = await lookupWorkerPageSession();
+  if (lookup.type !== "worker") return null;
+  return (
+    <QueueOwnerSync
+      organisationId={lookup.session.organisationId}
+      workerId={lookup.session.workerId}
+      userId={lookup.session.userId}
+    />
+  );
+}
 
 /** The bottom nav without Clock when the worker's company has Shifts off (slice 3.0). */
 async function WorkerBottomNav() {
@@ -18,6 +35,9 @@ async function WorkerBottomNav() {
 export default function WorkerAppLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
+      <Suspense fallback={null}>
+        <QueueOwner />
+      </Suspense>
       <div className="flex flex-1 flex-col pb-[calc(4rem+env(safe-area-inset-bottom))]">
         {children}
       </div>

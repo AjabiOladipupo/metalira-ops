@@ -7,7 +7,6 @@ import { Suspense } from "react";
 import { Illustration } from "@/components/illustration";
 import { LogoMark } from "@/components/logo";
 import { ThemeButton } from "@/components/theme/theme-button";
-import { Button } from "@/components/ui/button";
 import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { initials } from "@/lib/people";
@@ -15,6 +14,8 @@ import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 
 import { InboxLink } from "../_components/inbox-link";
+import { InstallCard } from "../_components/offline/install-card";
+import { WorkerSignOutForm } from "../_components/offline/sign-out-form";
 
 export const metadata: Metadata = { title: "Home" };
 
@@ -44,11 +45,12 @@ async function Header() {
           </h1>
           <p className="m-0 text-[15px] text-fg-muted">{copy.unlinked}</p>
         </div>
-        <form action={signOutWorker}>
-          <Button type="submit" variant="outline" className="h-11 rounded-lg">
-            {copy.signOut}
-          </Button>
-        </form>
+        <WorkerSignOutForm
+          action={signOutWorker}
+          label={copy.signOut}
+          variant="outline"
+          buttonClassName="h-11 rounded-lg"
+        />
       </div>
     );
   }
@@ -156,6 +158,8 @@ export default function WorkerHomePage() {
       <Suspense fallback={<HomeBodySkeleton />}>
         <HomeBody />
       </Suspense>
+
+      <InstallCard />
 
       <p className="m-0 mt-auto pt-4 text-center text-[13px] text-fg-muted">{copy.location}</p>
     </main>

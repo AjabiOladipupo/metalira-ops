@@ -17,6 +17,7 @@ import { requireWorkerPageSession } from "@/server/identity/worker-session";
 import type { BankChangeStatus } from "@/server/people/bank-changes";
 import { loadMyProfile, type MyBankChange, type MyChangeRequest } from "@/server/people/my-profile";
 
+import { WorkerSignOutForm } from "../../_components/offline/sign-out-form";
 import { WorkerTopBar } from "../../_components/worker-top-bar";
 import { MeTabs } from "./me-tabs";
 
@@ -245,11 +246,12 @@ async function ProfilePanel() {
         <Link href="/m/me/change">{copy.requestChange}</Link>
       </Button>
       <p className="m-0 text-[13px] text-fg-muted">{copy.bankNote}</p>
-      <form action={signOutWorker} className="pt-2">
-        <Button type="submit" variant="ghost" className="h-11 w-full rounded-lg">
-          {copy.signOut}
-        </Button>
-      </form>
+      <WorkerSignOutForm
+        action={signOutWorker}
+        label={copy.signOut}
+        className="pt-2"
+        buttonClassName="h-11 w-full rounded-lg"
+      />
     </>
   );
 }
