@@ -10,6 +10,7 @@ export const workerMessages = {
   back: {
     home: "home",
     me: "Me",
+    inbox: "Inbox",
     workersPage: "Metalira Ops for workers",
   },
   signIn: {
@@ -178,6 +179,41 @@ export const workerMessages = {
     },
     hrNote: (note: string) => `HR: ${note}`,
     sentOn: (date: string) => `Sent ${date}`,
+  },
+  /** Location and selfie consent (slice 3.1). The notices themselves are in ./consent.ts. */
+  consent: {
+    title: "Location and selfie",
+    meLink: "Location and selfie",
+    meLinkHint: "What the app collects when you clock in, and your choices.",
+    intro:
+      "Clocking in on your phone uses your location and a selfie. You choose whether to agree to each. You can change your mind here at any time.",
+    declineNote:
+      "If you don't agree, your supervisor clocks you in and out instead. Nothing else changes.",
+    agree: "I agree",
+    agreePending: "Saving…",
+    withdraw: "Withdraw",
+    withdrawPending: "Withdrawing…",
+    agreedOn: (date: string) => `You agreed on ${date}`,
+    notAgreed: "You have not agreed",
+    withdrawnOn: (date: string) => `You withdrew on ${date}`,
+    agreed: "Saved. You agreed.",
+    withdrawnDone: "Withdrawn. Your supervisor clocks you in from now on.",
+    left: "You have left this company, so you can't agree to this.",
+    failed: "That was not saved. Try again in a minute.",
+  },
+  /** The worker inbox (slice 3.1). */
+  inbox: {
+    title: "Inbox",
+    open: "Inbox",
+    openUnread: (count: number) => `Inbox, ${count} unread`,
+    empty: "No messages yet. When your company sends you something, it shows here.",
+    unread: "New",
+    markRead: "Mark as read",
+    markAllRead: "Mark all as read",
+    marking: "Saving…",
+    marked: "Marked as read.",
+    openLink: "Open",
+    failed: "That didn't work. Try again in a minute.",
   },
   change: {
     title: "Request a change",

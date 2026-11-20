@@ -86,6 +86,7 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 | clock-in | Worker app home, today's shift card with no shift | 1 | 96 |
 | worker-profile | Worker app Me, no requests yet | 1 | 96 |
 | no-clients | Empty Clients | 2 | 160 |
+| inbox-empty | Worker app inbox, no messages yet (worker holding up an empty envelope) | 3 | 96 |
 | roster-empty | Empty roster week | 3 | 160 |
 | all-covered | No uncovered shifts | 3 | 160 |
 | offline | Worker app offline state (person, phone, crossed-out cloud) | 3 | 160 |
@@ -105,4 +106,4 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 | role-freelancer | Landing, for freelancers and sole proprietors: a freelancer holding up an invoice, a naira sign in a speech bubble (the accent) | Landing (3.0) | 160 |
 | lira-chat | Landing, "Meet Lira" (coming soon): manager on a phone, her message and a reply card with a confirm button (the accent). Far below the hero, so never on screen with it | Landing | 160 |
 
-Still to draw when their phase needs them: an error page scene, search with no results, and an empty inbox. Add the slot here first.
+Still to draw when their phase needs them: an error page scene and search with no results. Add the slot here first.

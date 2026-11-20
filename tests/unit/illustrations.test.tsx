@@ -25,6 +25,7 @@ describe("illustrations", () => {
         "no-approvals",
         "clock-in",
         "worker-profile",
+        "inbox-empty",
         "no-clients",
         "roster-empty",
         "all-covered",

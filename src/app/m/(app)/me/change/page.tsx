@@ -28,7 +28,7 @@ export default function ChangePage() {
   return (
     <main className="flex flex-1 flex-col">
       <div className="px-4 pt-3 pb-1">
-        <WorkerTopBar back={{ href: "/m/me", label: workerMessages.back.me }}>
+        <WorkerTopBar back={{ href: "/m/me", label: workerMessages.back.me }} inbox>
           <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
         </WorkerTopBar>
       </div>

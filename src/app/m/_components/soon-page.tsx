@@ -39,7 +39,7 @@ export function SoonPage({ which }: { which: SoonKey }) {
       </Suspense>
       {/* Same top row as Me and Request a change (Wk* boards: 12px above the back arrow). */}
       <div className="px-4 pt-3 pb-1">
-        <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }}>
+        <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }} inbox>
           <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
         </WorkerTopBar>
       </div>

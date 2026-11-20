@@ -1,4 +1,15 @@
-import { Accent, Bubble, CardStack, Icon, IdCard, LaptopBack, PAPER, Person, Phone } from "./ink";
+import {
+  Accent,
+  Bubble,
+  CardStack,
+  Envelope,
+  Icon,
+  IdCard,
+  LaptopBack,
+  PAPER,
+  Person,
+  Phone,
+} from "./ink";
 import type { Scene } from "./types";
 
 /** Scenes used by Phase 1 screens. */
@@ -156,6 +167,36 @@ export const APP_SCENES = {
             </g>
           }
         />
+      </>
+    ),
+  },
+  "inbox-empty": {
+    viewBox: [140, 120],
+    size: "worker",
+    label: "A worker holding up an empty envelope, with a tick in a speech bubble",
+    draw: (lw) => (
+      <>
+        <Person
+          x={92}
+          y={168}
+          s={1}
+          lw={lw}
+          hair="puff"
+          top="apron"
+          build="regular"
+          turn={-1}
+          left="reach"
+          right="hip"
+          face="smile"
+          held={
+            <g transform="translate(-50 -94)">
+              <Envelope w={32} h={22} />
+            </g>
+          }
+        />
+        <Bubble cx={30} cy={30} r={15} toward={[56, 52]} lw={lw}>
+          <Icon.check />
+        </Bubble>
       </>
     ),
   },
