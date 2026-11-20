@@ -104,7 +104,7 @@ export function pricingFor(
   const date = pricingDate(today, contract.startDate, contract.endDate);
   return {
     date,
-    version: rateCardInForce(contract.versions, date),
+    version: rateCardInForce(contract.versions, date, contract.endDate),
     label: ratesLabel(date, today),
   };
 }

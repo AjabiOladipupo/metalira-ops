@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 
+import { NameCheckDetails } from "@/components/name-check";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
@@ -161,6 +162,9 @@ function AccountCard({
           </dd>
         </div>
       </dl>
+      {account.status === "pending" || account.nameCheck.status !== "not_checked" ? (
+        <NameCheckDetails check={account.nameCheck} />
+      ) : null}
       {account.reason ? (
         <p className="m-0 text-sm break-words">
           <span className="text-fg-muted">Reason: </span>

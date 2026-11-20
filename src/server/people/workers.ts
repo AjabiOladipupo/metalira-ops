@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 import type { ManagerRole } from "@/lib/roles";
+import { takeCheckedName } from "@/server/billing/bank-lookup";
 import { encryptPiiForDb, sealPii, type PiiContext } from "@/server/crypto/pii";
 import { MutationError, mutate, type MutationSpec } from "@/server/identity/mutate";
 import type { Database, Json } from "@/types/db";
@@ -123,6 +124,13 @@ function fromDbError(error: PostgrestError, fields: { effectiveFrom?: string } =
       break;
     case "MLSI3":
       return invalid("staffId", error.message);
+    case "MLBL3":
+    case "MLBL4":
+    case "MLBL5":
+    case "MLBL6":
+    case "MLBL7":
+    case "MLBLT":
+      return invalid("bankAccountNumber", error.message);
     case "23503":
       if (text.includes("department"))
         return invalid("departmentId", "That department wasn't found.");
@@ -160,9 +168,25 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
     const id = randomUUID();
     const ctx = (column: string) => piiContext(organisationId, id, column);
 
-    const bank = data.bankAccountNumber
-      ? sealPii(data.bankAccountNumber, ctx("bank_account_enc"))
-      : null;
+    // Bank details carry the bank's account name, from the caller's own lookup (slice 2.3b),
+    // compared with the names being saved.
+    const checked =
+      data.bankCode && data.bankAccountNumber && data.bankLookupId
+        ? await takeCheckedName(supabase, {
+            organisationId,
+            lookupId: data.bankLookupId,
+            purpose: "worker_bank",
+            workerId: null,
+            bankCode: data.bankCode,
+            accountNumber: data.bankAccountNumber,
+            expected: { kind: "person", firstName: data.firstName, lastName: data.lastName },
+            reason: data.nameCheckReason,
+          })
+        : null;
+    const bank =
+      checked && data.bankAccountNumber
+        ? sealPii(data.bankAccountNumber, ctx("bank_account_enc"))
+        : null;
     const rsa = data.rsaPin ? sealPii(data.rsaPin, ctx("rsa_pin_enc")) : null;
     const supervisorClockIn =
       data.supervisorClockIn ||
@@ -181,10 +205,16 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
       line_manager_membership_id: data.lineManagerMembershipId,
       employment_type: data.employmentType,
       start_date: data.startDate,
-      bank_name: data.bankName,
-      account_name: data.accountName,
+      bank_name: checked?.bankName ?? null,
+      account_name: checked?.accountName ?? null,
       bank_account_enc: bank?.enc ?? null,
       bank_account_last4: bank?.last4 ?? null,
+      // Read by create_worker for the bank-detail request it raises (never written to workers).
+      bank_code: checked?.bankCode ?? null,
+      bank_lookup_id: checked ? data.bankLookupId : null,
+      bank_account_digest: checked?.digest ?? null,
+      name_check: checked?.nameCheck ?? null,
+      name_check_reason: checked?.reason ?? null,
       nin_enc: data.nin ? encryptPiiForDb(data.nin, ctx("nin_enc")) : null,
       tin: data.tin,
       tax_state: data.taxState,

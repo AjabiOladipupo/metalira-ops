@@ -27,7 +27,13 @@ import {
   type HeadcountInput,
   type HeadcountLine,
 } from "@/lib/headcount";
-import type { RateCardVersion, RateLine } from "@/lib/rate-cards";
+import {
+  findRateLine,
+  normaliseKeyPart,
+  rateKeyId,
+  type RateCardVersion,
+  type RateLine,
+} from "@/lib/rate-cards";
 
 const APAPA = "00000000-0000-4000-8000-0000000000a1";
 const GATE_B = "00000000-0000-4000-8000-0000000000b2";
@@ -70,6 +76,9 @@ const row = (over: Partial<HeadcountLine>): HeadcountLine => ({
   notes: null,
   ...over,
 });
+
+/** A rolling manned-post contract that started before every range below. */
+const OPEN = { type: "manned_post", startDate: "2026-11-01", endDate: null };
 
 /** The board's four posts at two sites (docs/PHASE_2.md test plan). */
 const FOUR = [
@@ -267,9 +276,8 @@ describe("expandRange and rangeTotals", () => {
     const totals = rangeTotals(
       [weekdayNights, days],
       [COASTLINE],
-      "2026-12-04",
-      "2026-12-06",
-      "manned_post",
+      { from: "2026-12-04", to: "2026-12-06" },
+      OPEN,
     );
     expect(totals).toEqual({
       shifts: 4,
@@ -292,9 +300,8 @@ describe("expandRange and rangeTotals", () => {
     const totals = rangeTotals(
       [row({})],
       [december, january],
-      "2026-12-28",
-      "2027-01-03",
-      "manned_post",
+      { from: "2026-12-28", to: "2027-01-03" },
+      OPEN,
     );
     expect(totals.billableKobo).toBe(4n * 1_250_000n + 3n * 1_300_000n);
     expect(totals.billableKobo).toBe(8_900_000n);
@@ -304,9 +311,8 @@ describe("expandRange and rangeTotals", () => {
     const totals = rangeTotals(
       [row({ requiredCount: 2 })],
       [COASTLINE],
-      "2026-11-29",
-      "2026-12-01",
-      "manned_post",
+      { from: "2026-11-29", to: "2026-12-01" },
+      OPEN,
     );
     expect(totals.unpricedOccurrences).toBe(4);
     expect(totals.billableKobo).toBe(2n * 1_250_000n);
@@ -319,7 +325,7 @@ describe("expandRange and rangeTotals", () => {
     };
     const quarter = row({ band: "", unit: "hour", startTime: "06:00", endTime: "06:15" });
     expect(
-      rangeTotals([quarter], [hourly], "2026-12-01", "2026-12-02", "manned_post").billableKobo,
+      rangeTotals([quarter], [hourly], { from: "2026-12-01", to: "2026-12-02" }, OPEN).billableKobo,
     ).toBe(501n);
   });
 });
@@ -457,5 +463,80 @@ describe("previewHeadcountChange", () => {
       label: "Gate A · Day at Apapa Warehouse 3",
       after: "Removed",
     });
+  });
+});
+
+describe("money review (slice 2.5)", () => {
+  it("clamps a range to the contract's dates: a contract ending mid-week", () => {
+    // Monday 7 Dec to Sunday 13 Dec 2026; the contract ends on Wednesday 9 Dec.
+    const ending = { ...OPEN, endDate: "2026-12-09" };
+    const totals = rangeTotals(
+      [row({})],
+      [COASTLINE],
+      { from: "2026-12-07", to: "2026-12-13" },
+      ending,
+    );
+    expect(totals).toEqual({
+      shifts: 3,
+      visits: 0,
+      billableKobo: 3n * 1_250_000n,
+      unpricedOccurrences: 0,
+    });
+    // A contract starting on Friday 11 Dec counts Friday to Sunday only.
+    const starting = { ...OPEN, startDate: "2026-12-11" };
+    expect(
+      rangeTotals(
+        [row({})],
+        [{ ...COASTLINE, effectiveFrom: "2026-12-11" }],
+        { from: "2026-12-07", to: "2026-12-13" },
+        starting,
+      ),
+    ).toEqual({ shifts: 3, visits: 0, billableKobo: 3n * 1_250_000n, unpricedOccurrences: 0 });
+  });
+
+  it("matches a whole-weeks range to the sum of its weeks, except hourly rounding", () => {
+    const one = weeklyHeadcount(FOUR, COASTLINE, "manned_post").weeklyKobo!;
+    const two = rangeTotals(FOUR, [COASTLINE], { from: "2026-12-07", to: "2026-12-20" }, OPEN);
+    expect(two.billableKobo).toBe(2n * one);
+    // Hourly rows round once per row and rate version over the range: 15 minutes at 1,001 kobo
+    // an hour on Mondays is 250.25 kobo a week (250), but 500.5 over two weeks (501).
+    const hourly: RateCardVersion = {
+      ...COASTLINE,
+      lines: [rate({ band: "standard", unit: "hour", rateKobo: 1001n })],
+    };
+    const quarter = row({
+      band: "",
+      unit: "hour",
+      startTime: "06:00",
+      endTime: "06:15",
+      daysOfWeek: [1],
+    });
+    expect(weeklyHeadcount([quarter], hourly, "manned_post").weeklyKobo).toBe(250n);
+    expect(
+      rangeTotals([quarter], [hourly], { from: "2026-12-07", to: "2026-12-20" }, OPEN).billableKobo,
+    ).toBe(501n);
+  });
+
+  it("normalises rate keys one way: Unicode spaces, trimming and ASCII-only case", () => {
+    expect(normaliseKeyPart("  Agent\u00a0de   sécurité\u200b ")).toBe("agent de sécurité");
+    expect(normaliseKeyPart("AGENT DE SéCURITé")).toBe("agent de sécurité");
+    // Non-ASCII capitals are not folded, in JavaScript or in SQL (private.rate_key_part).
+    expect(normaliseKeyPart("AGENT DE SÉCURITÉ")).toBe("agent de sÉcuritÉ");
+    expect(rateKeyId({ role: "Guard", band: "\u00a0", unit: "shift" })).toBe(
+      "guard|standard|shift",
+    );
+    const version = { lines: [rate({ role: "Agent de sécurité", band: "Nuit" })] };
+    expect(
+      findRateLine(version, { role: "agent\u00a0de sécurité", band: " NUIT ", unit: "shift" }),
+    ).not.toBeNull();
+    expect(
+      findRateLine(version, { role: "AGENT DE SÉCURITÉ", band: "Nuit", unit: "shift" }),
+    ).toBeNull();
+    const week = weeklyHeadcount(
+      [row({ role: "Agent de sécurité", band: "nuit" })],
+      version,
+      "manned_post",
+    );
+    expect(week.unpriced).toBe(0);
   });
 });

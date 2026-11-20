@@ -23,6 +23,7 @@ import {
   type TenantUser,
   type TestUser,
 } from "./helpers/supabase";
+import { makeLookup } from "./helpers/bank-lookup";
 
 type Role = Database["public"]["Enums"]["membership_role"];
 
@@ -352,10 +353,33 @@ describe("worker change requests", () => {
   });
 });
 
+/**
+ * The check columns of a bank change raised the way the app raises it (slice 2.3b): with an
+ * account name lookup the server made for that user, bound to the worker's own record.
+ */
+async function lookupFields(client: Client, worker: string) {
+  const { data: who } = await client.auth.getUser();
+  const lookup = await makeLookup(admin, {
+    orgId: owner.orgId,
+    userId: who.user!.id,
+    purpose: "worker_bank",
+    workerId: worker,
+    last4: "7712",
+    accountName: "MUSA IBRAHIM",
+  });
+  return {
+    bank_code: lookup.bankCode,
+    bank_lookup_id: lookup.id,
+    bank_account_digest: lookup.digest,
+    name_check: "match" as const,
+  };
+}
+
 describe("a bank change from the worker's phone", () => {
   it("is raised by the worker for themselves and reaches HR's approvals, never decided by them", async () => {
     const worker = await addWorker();
     const client = await workerSession(worker);
+    const checked = await lookupFields(client, worker);
     const raised = await client
       .from("bank_detail_changes")
       .insert({
@@ -365,6 +389,7 @@ describe("a bank change from the worker's phone", () => {
         account_name: "Musa Ibrahim",
         bank_account_enc: `\\x${randomBytes(40).toString("hex")}`,
         bank_account_last4: "7712",
+        ...checked,
       })
       .select("id, raised_by_worker, status")
       .single();
@@ -395,7 +420,8 @@ describe("a bank change from the worker's phone", () => {
 });
 
 describe("bank changes raised from the worker's phone", () => {
-  function raise(client: Client, worker: string) {
+  async function raise(client: Client, worker: string) {
+    const checked = await lookupFields(client, worker);
     return client
       .from("bank_detail_changes")
       .insert({
@@ -405,6 +431,7 @@ describe("bank changes raised from the worker's phone", () => {
         account_name: "Musa Ibrahim",
         bank_account_enc: `\\x${randomBytes(40).toString("hex")}`,
         bank_account_last4: "7712",
+        ...checked,
       })
       .select("id")
       .single();

@@ -28,6 +28,9 @@ export function workerFormInput(
     delete input.bankName;
     delete input.accountName;
     delete input.bankAccountNumber;
+    delete input.bankCode;
+    delete input.bankLookupId;
+    delete input.nameCheckReason;
   }
   return input;
 }

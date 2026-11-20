@@ -12,6 +12,7 @@ import {
   uniqueSuffix,
   type TestAccount,
 } from "./helpers/auth";
+import { enterBankAccount } from "./helpers/bank";
 
 test.skip(!supabaseReady, NEEDS_SUPABASE);
 // Bank details, NIN and RSA PIN are encrypted by the app, so the server under test needs a key.
@@ -95,9 +96,13 @@ test("HR adds an employee and changes pay; other roles see masked, read-only vie
   await form.getByLabel("Pay type", { exact: true }).selectOption("monthly");
   await form.getByLabel("Basic monthly", { exact: true }).fill("150,000");
   await form.getByLabel("Housing monthly", { exact: true }).fill("50000");
-  await form.getByLabel("Bank name", { exact: true }).fill("GTBank");
-  await form.getByLabel("Account name", { exact: true }).fill(name);
-  await form.getByLabel("Account number", { exact: true }).fill(NUBAN);
+  // Slice 2.3b: pick the bank; the bank gives the account name for the number.
+  const looked = await enterBankAccount(form, {
+    search: "gtb",
+    bankName: "GTBank (Guaranty Trust Bank)",
+    number: NUBAN,
+  });
+  await expect(looked.getByTestId("name-check-status")).toHaveText("Name matches");
   await form.getByLabel("NIN", { exact: true }).fill(NIN);
   await expectNoHorizontalScroll(page);
   await form.getByRole("button", { name: "Add employee" }).click();

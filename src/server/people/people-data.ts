@@ -516,6 +516,10 @@ export interface WorkerProfile {
   accountName: string | null;
   /** Last four digits only; the number itself is revealed on request. */
   bankAccountLast4: string | null;
+  /** The bank's code, for details saved from slice 2.3b on (null before, and from imports). */
+  bankCode: string | null;
+  /** The last account name check of the details on file (slice 2.3b), or null: not checked. */
+  bankCheck: { accountName: string; at: string; test: boolean } | null;
   ninOnFile: boolean;
   tin: string | null;
   taxState: string | null;
@@ -536,7 +540,7 @@ export interface WorkerProfile {
 }
 
 const PROFILE_COLUMNS =
-  "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in" as const;
+  "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, bank_code, bank_checked_name, bank_checked_at, bank_checked_source, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in" as const;
 
 /**
  * What a line manager may load about a reportee (slice 1.11): no bank, tax, pension, next of kin
@@ -564,6 +568,10 @@ type ProfileRow = {
   bank_name: string | null;
   account_name: string | null;
   bank_account_last4: string | null;
+  bank_code: string | null;
+  bank_checked_name: string | null;
+  bank_checked_at: string | null;
+  bank_checked_source: string | null;
   nin_enc: unknown;
   tin: string | null;
   tax_state: string | null;
@@ -607,6 +615,10 @@ async function loadProfileRow(
     bank_name: null,
     account_name: null,
     bank_account_last4: null,
+    bank_code: null,
+    bank_checked_name: null,
+    bank_checked_at: null,
+    bank_checked_source: null,
     nin_enc: null,
     tin: null,
     tax_state: null,
@@ -688,6 +700,15 @@ export async function loadWorkerProfile(
     bankName: w.bank_name,
     accountName: w.account_name,
     bankAccountLast4: w.bank_account_last4,
+    bankCode: w.bank_code,
+    bankCheck:
+      w.bank_checked_name && w.bank_checked_at
+        ? {
+            accountName: w.bank_checked_name,
+            at: w.bank_checked_at,
+            test: w.bank_checked_source !== "bank",
+          }
+        : null,
     ninOnFile: w.nin_enc !== null,
     tin: w.tin,
     taxState: w.tax_state,

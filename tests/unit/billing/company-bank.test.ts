@@ -24,9 +24,12 @@ import {
   requestCompanyBankSpec,
 } from "@/server/billing/company-bank";
 import { decideCompanyBankSchema, requestCompanyBankSchema } from "@/server/billing/schemas";
+import { bankAccountDigest } from "@/server/billing/bank-lookup";
 import { decryptPii, sealPii } from "@/server/crypto/pii";
 import { MutationError, runMutation, type MutationContext } from "@/server/identity/mutate";
 import type { Database } from "@/types/db";
+
+import { LOOKUP_ID, lookupRow } from "../helpers/bank-lookup";
 
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
 
@@ -166,40 +169,54 @@ describe("previewCompanyBankRequest", () => {
 });
 
 describe("schemas", () => {
-  it("takes a 10-digit NUBAN, with spaces", () => {
+  it("takes a bank code from the list and a 10-digit NUBAN, with spaces; never an account name", () => {
     const parsed = requestCompanyBankSchema.parse({
-      bankName: " GTBank ",
-      accountName: "ADEBAYO LTD",
+      bankCode: " 058 ",
+      bankLookupId: LOOKUP_ID,
       bankAccountNumber: "0123 454 410",
+      accountName: "Typed by hand",
       reason: "",
+      nameCheckReason: "",
     });
     expect(parsed).toEqual({
-      bankName: "GTBank",
-      accountName: "ADEBAYO LTD",
+      bankCode: "058",
+      bankLookupId: LOOKUP_ID,
       bankAccountNumber: NUBAN,
       reason: null,
+      nameCheckReason: null,
     });
   });
 
-  it("refuses web addresses and angle brackets in names", () => {
-    for (const bankName of ["www.gtbank-verify.com", "<b>GTBank</b>", "https://x"]) {
+  it("refuses a bank code that isn't in the list, and a request without a lookup", () => {
+    for (const bankCode of ["999", "GTBank", ""]) {
       expect(
         requestCompanyBankSchema.safeParse({
-          bankName,
-          accountName: "A",
+          bankCode,
+          bankLookupId: LOOKUP_ID,
           bankAccountNumber: NUBAN,
         }).success,
       ).toBe(false);
     }
+    expect(
+      requestCompanyBankSchema.safeParse({ bankCode: "058", bankAccountNumber: NUBAN }).success,
+    ).toBe(false);
   });
 
   it("keeps account numbers out of free text", () => {
     expect(
       requestCompanyBankSchema.safeParse({
-        bankName: "GTBank",
-        accountName: "A",
+        bankCode: "058",
+        bankLookupId: LOOKUP_ID,
         bankAccountNumber: NUBAN,
         reason: "Moving from 0123456789 to GTBank",
+      }).success,
+    ).toBe(false);
+    expect(
+      requestCompanyBankSchema.safeParse({
+        bankCode: "058",
+        bankLookupId: LOOKUP_ID,
+        bankAccountNumber: NUBAN,
+        nameCheckReason: "Old account 0123456789 closed",
       }).success,
     ).toBe(false);
     expect(
@@ -223,16 +240,42 @@ describe("schemas", () => {
 
 type Result = { data: unknown; error: unknown };
 
-/** A client double: `from()` chains answer `rows`; `rpc()` answers `rpcResult` and records. */
-function fakeSupabase(rows: Result, rpcResult: Result = { data: [], error: null }) {
+const COMPANY = {
+  name: "Adebayo",
+  legal_name: "Adebayo Facility Services Ltd",
+  trading_name: null,
+};
+
+/**
+ * A client double: `organisation_bank_accounts` reads answer `rows`, `organisations` the
+ * company's names, `bank_account_lookups` the lookup; `rpc()` answers `rpcResult` and records.
+ */
+function fakeSupabase(
+  rows: Result,
+  rpcResult: Result = { data: [], error: null },
+  lookup: Record<string, unknown> | null = lookupRow({
+    organisationId: ORG,
+    accountNumber: NUBAN,
+    accountName: "ADEBAYO FACILITY SERVICES LIMITED",
+    purpose: "company_bank",
+  }),
+) {
   const rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
-  const builder = {
-    select: () => builder,
-    eq: () => builder,
-    in: () => Promise.resolve(rows),
+  const from = (table: string) => {
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      in: () => Promise.resolve(rows),
+      maybeSingle: async () => ({
+        data:
+          table === "organisations" ? COMPANY : table === "bank_account_lookups" ? lookup : null,
+        error: null,
+      }),
+    };
+    return builder;
   };
   const client = {
-    from: () => builder,
+    from,
     rpc: async (name: string, args: Record<string, unknown>) => {
       rpcCalls.push({ name, args });
       return rpcResult;
@@ -264,13 +307,21 @@ describe("requestCompanyBankSpec", () => {
       { data: [{ id: "x", status: "pending", single_approver: false }], error: null },
     );
     const result = await runMutation(context(client, "admin"), requestCompanyBankSpec, {
-      bankName: "GTBank",
-      accountName: "ADEBAYO LTD",
+      bankCode: "058",
+      bankLookupId: LOOKUP_ID,
       bankAccountNumber: NUBAN,
     });
     const call = rpcCalls[0]!;
     expect(call.name).toBe("request_org_bank_account");
     expect(call.args.p_bank_account_last4).toBe("4410");
+    // Slice 2.3b: the bank from the list, the account name from the bank's lookup.
+    expect(call.args).toMatchObject({
+      p_bank_name: "GTBank (Guaranty Trust Bank)",
+      p_account_name: "ADEBAYO FACILITY SERVICES LIMITED",
+      p_bank_code: "058",
+      p_bank_lookup_id: LOOKUP_ID,
+      p_name_check: "match",
+    });
     expect(JSON.stringify(call.args)).not.toContain(NUBAN);
     const id = call.args.p_id as string;
     expect(decryptPii(call.args.p_bank_account_enc as string, companyBankContext(ORG, id))).toBe(
@@ -284,14 +335,86 @@ describe("requestCompanyBankSpec", () => {
       const { client, rpcCalls } = fakeSupabase({ data: [], error: null });
       const error = await refusal(
         runMutation(context(client, role), requestCompanyBankSpec, {
-          bankName: "GTBank",
-          accountName: "A",
+          bankCode: "058",
+          bankLookupId: LOOKUP_ID,
           bankAccountNumber: NUBAN,
         }),
       );
       expect(error.code).toBe("forbidden");
       expect(rpcCalls).toHaveLength(0);
     }
+  });
+});
+
+describe("requestCompanyBankSpec: the bank's account name", () => {
+  const input = { bankCode: "058", bankLookupId: LOOKUP_ID, bankAccountNumber: NUBAN };
+  const lookup = (accountName: string, extra: Record<string, unknown> = {}) => ({
+    ...lookupRow({
+      organisationId: ORG,
+      accountNumber: NUBAN,
+      accountName,
+      purpose: "company_bank",
+    }),
+    ...extra,
+  });
+
+  it("refuses an account in someone else's name", async () => {
+    const { client, rpcCalls } = fakeSupabase(
+      { data: [], error: null },
+      undefined,
+      lookup("OKONKWO TRADING LTD"),
+    );
+    const error = await refusal(runMutation(context(client), requestCompanyBankSpec, input));
+    expect(error.fieldErrors.bankAccountNumber).toContain("OKONKWO TRADING LTD");
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("needs a reason for a close match, and sends it", async () => {
+    const near = fakeSupabase(
+      { data: [], error: null },
+      undefined,
+      lookup("ADEBAYO FACILITTY SERVICES LTD"),
+    );
+    const error = await refusal(runMutation(context(near.client), requestCompanyBankSpec, input));
+    expect(error.fieldErrors.nameCheckReason).toBeDefined();
+
+    const ok = fakeSupabase(
+      { data: [], error: null },
+      { data: [{ id: "x", status: "pending", single_approver: false }], error: null },
+      lookup("ADEBAYO FACILITTY SERVICES LTD"),
+    );
+    await runMutation(context(ok.client), requestCompanyBankSpec, {
+      ...input,
+      nameCheckReason: "Bank misspelt our name; letter on file",
+    });
+    expect(ok.rpcCalls[0]?.args).toMatchObject({
+      p_name_check: "near",
+      p_name_check_reason: "Bank misspelt our name; letter on file",
+    });
+  });
+
+  it.each([
+    ["for another number", { bank_account_digest: "0".repeat(64) }],
+    ["for another bank", { bank_code: "057" }],
+    ["already used", { used_at: "2026-11-19T08:00:00Z" }],
+    ["older than 30 minutes", { created_at: new Date(Date.now() - 31 * 60_000).toISOString() }],
+    ["for a worker", { purpose: "worker_bank" }],
+    ["not resolved", { status: "not_found" }],
+  ])("refuses a lookup %s", async (_label, extra) => {
+    const { client, rpcCalls } = fakeSupabase(
+      { data: [], error: null },
+      undefined,
+      lookup("ADEBAYO FACILITY SERVICES LIMITED", extra),
+    );
+    const error = await refusal(runMutation(context(client), requestCompanyBankSpec, input));
+    expect(error.fieldErrors.bankAccountNumber).toContain("Check the account again");
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("refuses when the lookup isn't the caller's (RLS hides it)", async () => {
+    const { client } = fakeSupabase({ data: [], error: null }, undefined, null);
+    const error = await refusal(runMutation(context(client), requestCompanyBankSpec, input));
+    expect(error.fieldErrors.bankAccountNumber).toContain("Check the account again");
   });
 });
 
@@ -304,8 +427,67 @@ describe("decideCompanyBankSpec: approval checks the number", () => {
       account_name: "ADEBAYO LTD",
       bank_account_enc: sealPii(number, companyBankContext(ORG, ACCOUNT)).enc,
       bank_account_last4: last4,
+      bank_code: null,
+      bank_lookup_id: null,
+      bank_account_digest: null,
+      name_check: null,
+      name_check_reason: null,
     };
   }
+
+  /** A request raised with the bank's name check (slice 2.3b). */
+  function checked(accountName: string, nameCheck: "match" | "near", reason: string | null) {
+    return {
+      ...pending("4410"),
+      account_name: accountName,
+      bank_code: "058",
+      bank_lookup_id: LOOKUP_ID,
+      bank_account_digest: bankAccountDigest(ORG, "058", NUBAN),
+      name_check: nameCheck,
+      name_check_reason: reason,
+    };
+  }
+
+  const approve = { accountId: ACCOUNT, decision: "approve" };
+
+  it("refuses a checked request whose number isn't the one the bank checked", async () => {
+    const row = {
+      ...checked("ADEBAYO FACILITY SERVICES LTD", "match", null),
+      bank_account_digest: bankAccountDigest(ORG, "058", "0000000001"),
+    };
+    const { client, rpcCalls } = fakeSupabase({ data: [row], error: null });
+    const error = await refusal(runMutation(context(client), decideCompanyBankSpec, approve));
+    expect(error.message).toContain("isn't the one the bank checked");
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("recomputes the name check: refuses no match, and a close match without a reason", async () => {
+    for (const row of [
+      checked("OKONKWO TRADING LTD", "match", null),
+      checked("ADEBAYO FACILITTY SERVICES LTD", "match", null),
+    ]) {
+      const { client, rpcCalls } = fakeSupabase({ data: [row], error: null });
+      await refusal(runMutation(context(client), decideCompanyBankSpec, approve));
+      expect(rpcCalls).toHaveLength(0);
+    }
+  });
+
+  it("approves a checked close match that gives a reason", async () => {
+    const row = checked(
+      "ADEBAYO FACILITTY SERVICES LTD",
+      "near",
+      "Bank misspelt our name; letter on file",
+    );
+    const { client, rpcCalls } = fakeSupabase(
+      { data: [row], error: null },
+      {
+        data: [{ id: ACCOUNT, status: "approved", applies_after: NOW, bank_account_last4: "4410" }],
+        error: null,
+      },
+    );
+    await runMutation(context(client, "owner"), decideCompanyBankSpec, approve);
+    expect(rpcCalls[0]?.name).toBe("decide_org_bank_account");
+  });
 
   it("refuses an approval whose last four digits don't match the number", async () => {
     const { client, rpcCalls } = fakeSupabase({ data: [pending("9999")], error: null });

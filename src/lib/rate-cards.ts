@@ -107,10 +107,30 @@ export interface RateKey {
 // Keys and look-ups
 // ---------------------------------------------------------------------------
 
-/** The rate key as one comparable string: case and outer spaces don't matter. */
+/**
+ * Whitespace a rate key ignores: ASCII spaces and controls, no-break and other Unicode spaces,
+ * zero-width space and BOM. The SQL twin `private.rate_key_part` (migration
+ * 20261119140000_headcount) uses the same list, so the screens and activation always agree.
+ */
+const KEY_SPACE = /[\t\n\v\f\r \u00a0\u1680\u2000-\u200b\u2028\u2029\u202f\u205f\u3000\ufeff]+/gu;
+
+/**
+ * One part of a rate key (role or band) as it is compared: runs of whitespace (Unicode spaces
+ * included) become one space, the ends are trimmed and only A–Z are lower-cased. ASCII-only
+ * case folding is deterministic in JavaScript and in Postgres whatever the collation:
+ * "Agent de sécurité" matches "AGENT DE SéCURITé" but not "AGENT DE SÉCURITÉ".
+ */
+export function normaliseKeyPart(text: string): string {
+  return text
+    .replace(KEY_SPACE, " ")
+    .trim()
+    .replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+/** The rate key as one comparable string (`normaliseKeyPart` on role and band). */
 export function rateKeyId(key: RateKey): string {
-  const band = key.band.trim() === "" ? STANDARD_BAND : key.band;
-  return `${key.role.trim().toLowerCase()}|${band.trim().toLowerCase()}|${key.unit}`;
+  const band = normaliseKeyPart(key.band) || STANDARD_BAND;
+  return `${normaliseKeyPart(key.role)}|${band}|${key.unit}`;
 }
 
 /** "Guard · Night (shift)", or "Guard (shift)" for the standard band. */

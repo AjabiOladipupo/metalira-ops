@@ -17,6 +17,8 @@ import {
 } from "@/server/people/bank-changes";
 import type { Database } from "@/types/db";
 
+import { LOOKUP_ID, lookupRow } from "../helpers/bank-lookup";
+
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
 
 const ORG = "a0000000-0000-4000-8000-000000000001";
@@ -104,25 +106,40 @@ describe("roles", () => {
 describe("requestBankChange", () => {
   const input = {
     workerId: WORKER,
-    bankName: " GTBank ",
-    accountName: "Musa Ibrahim",
+    bankCode: "058",
+    bankLookupId: LOOKUP_ID,
     bankAccountNumber: "0123 457 712",
     reason: "Moved banks",
   };
+  const names: Result = { data: { first_name: "Musa", last_name: "Ibrahim" }, error: null };
+  const lookup = (accountName = "IBRAHIM MUSA", extra: Record<string, unknown> = {}): Result => ({
+    data: {
+      ...lookupRow({ organisationId: ORG, accountNumber: NUBAN, accountName, workerId: WORKER }),
+      ...extra,
+    },
+    error: null,
+  });
+  /** The employee's names, the caller's lookup, then the insert. */
+  const raise = (insert: Result, found: Result = lookup()) => fakeSupabase([names, found, insert]);
 
   it("encrypts the number for the worker's own column and sends no plaintext", async () => {
-    const fake = fakeSupabase({ data: { id: CHANGE }, error: null });
+    const fake = raise({ data: { id: CHANGE }, error: null });
     const result = await runMutation(context(fake.client), requestBankChangeSpec, input);
 
     expect(result).toEqual({ id: CHANGE, workerId: WORKER });
-    const [call] = fake.calls;
+    const call = fake.calls[2];
     expect(call).toMatchObject({ table: "bank_detail_changes", op: "insert" });
     const row = call!.payload as Record<string, string>;
     expect(row).toMatchObject({
       organisation_id: ORG,
       worker_id: WORKER,
-      bank_name: "GTBank",
-      account_name: "Musa Ibrahim",
+      bank_name: "GTBank (Guaranty Trust Bank)",
+      // The bank's name from the lookup (the database takes it from the lookup again).
+      account_name: "IBRAHIM MUSA",
+      bank_code: "058",
+      bank_lookup_id: LOOKUP_ID,
+      name_check: "match",
+      name_check_reason: null,
       bank_account_last4: "7712",
       reason: "Moved banks",
     });
@@ -130,9 +147,14 @@ describe("requestBankChange", () => {
     expect(Object.keys(row).sort()).toEqual(
       [
         "account_name",
+        "bank_account_digest",
         "bank_account_enc",
         "bank_account_last4",
+        "bank_code",
+        "bank_lookup_id",
         "bank_name",
+        "name_check",
+        "name_check_reason",
         "organisation_id",
         "reason",
         "worker_id",
@@ -153,23 +175,57 @@ describe("requestBankChange", () => {
     }
   });
 
-  it("checks the account number and the other fields", async () => {
+  it("checks the account number, the bank and the lookup", async () => {
     const fake = fakeSupabase({ data: null, error: null });
     const error = await refusal(
       runMutation(context(fake.client), requestBankChangeSpec, {
         ...input,
         bankAccountNumber: "012345771",
-        accountName: "",
+        bankCode: "999",
+        bankLookupId: "",
       }),
     );
     expect(error.fieldErrors).toMatchObject({
       bankAccountNumber: "Bank account numbers are 10 digits",
-      accountName: "Enter the account name",
+      bankCode: "Choose a bank from the list",
+      bankLookupId: "Check the account name with the bank first",
     });
   });
 
+  it("refuses an account in someone else's name before any write", async () => {
+    const fake = raise({ data: { id: CHANGE }, error: null }, lookup("ADEYEMI MARY"));
+    const error = await refusal(runMutation(context(fake.client), requestBankChangeSpec, input));
+    expect(error.fieldErrors.bankAccountNumber).toContain("ADEYEMI MARY");
+    expect(fake.calls.some((c) => c.op === "insert")).toBe(false);
+  });
+
+  it("needs a reason for a close match", async () => {
+    const fake = raise({ data: { id: CHANGE }, error: null }, lookup("IBRAHIM M"));
+    const error = await refusal(runMutation(context(fake.client), requestBankChangeSpec, input));
+    expect(error.fieldErrors.nameCheckReason).toBeDefined();
+
+    const ok = raise({ data: { id: CHANGE }, error: null }, lookup("IBRAHIM M"));
+    await runMutation(context(ok.client), requestBankChangeSpec, {
+      ...input,
+      nameCheckReason: "Bank shows first initial only; statement seen",
+    });
+    expect(ok.calls[2]?.payload).toMatchObject({
+      name_check: "near",
+      name_check_reason: "Bank shows first initial only; statement seen",
+    });
+  });
+
+  it("refuses a lookup made for another employee", async () => {
+    const fake = raise(
+      { data: { id: CHANGE }, error: null },
+      lookup("IBRAHIM MUSA", { worker_id: "b0000000-0000-4000-8000-000000000009" }),
+    );
+    const error = await refusal(runMutation(context(fake.client), requestBankChangeSpec, input));
+    expect(error.fieldErrors.bankAccountNumber).toContain("Check the account again");
+  });
+
   it("explains a second open request against the account number field", async () => {
-    const fake = fakeSupabase({
+    const fake = raise({
       data: null,
       error: {
         code: "23505",
@@ -184,7 +240,7 @@ describe("requestBankChange", () => {
 
   it("passes on the database's refusal for an employee who has left", async () => {
     const message = "This employee has left, so their bank details can't change.";
-    const fake = fakeSupabase({ data: null, error: { code: "MLBK5", message } });
+    const fake = raise({ data: null, error: { code: "MLBK5", message } });
     const error = await refusal(runMutation(context(fake.client), requestBankChangeSpec, input));
     expect(error).toMatchObject({ code: "invalid", message });
   });
@@ -311,9 +367,18 @@ describe("decideBankChange", () => {
         const result = await runMutation(context(fake.client, "owner"), decideBankChangeSpec, {
           changeId: CHANGE,
           decision: "approve",
+          // Not checked with the bank (raised before slice 2.3b): the approver says how.
+          note: "Bank letter dated 3 Nov seen",
         });
         expect(result.status).toBe("approved");
       }
+    });
+
+    it("needs a note saying how an account the bank never checked was confirmed", async () => {
+      const fake = fakeSupabase([pendingRequest({ name_check: "not_checked" })]);
+      const error = await approve(fake);
+      expect(error.fieldErrors.note).toMatch(/wasn't checked with the bank/);
+      expect(fake.calls.map((c) => c.op)).toEqual(["select"]);
     });
 
     it("says so when the request is no longer pending", async () => {

@@ -36,8 +36,8 @@ import { DetailList, Section } from "../../../../people/_components/display";
 import { inheritedTermsLabel } from "../../../_components/contract-options";
 import { clientsPageContext } from "../../../_components/context";
 import { ContractStatusChip } from "../../../_components/contract-status";
-import { HeadcountTab } from "../../../_components/headcount-tab";
 import { DocumentUploadForm, RemoveDocumentForm } from "../../../_components/document-forms";
+import { HeadcountTab } from "../../../_components/headcount-tab";
 import { CancelVersionButton } from "../../../_components/rate-forms";
 
 export const metadata: Metadata = { title: "Contract" };

@@ -66,8 +66,9 @@ enabled = true
 schema_paths = []
 
 [db.seed]
-# No seed data yet. If enabled, seeds the database after migrations during a db reset.
-enabled = false
+# Seeds local and CI databases after migrations (db reset, start): supabase/seed.sql turns on
+# test bank lookups (slice 2.3b). The hosted project never runs it.
+enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
 sql_paths = ["./seed.sql"]

@@ -98,7 +98,7 @@ create table public.posts (
 
 create unique index posts_headcount_key on public.posts (headcount_requirement_id)
   where headcount_requirement_id is not null;
-create unique index posts_open_name_key on public.posts (contract_id, site_id, lower(name))
+create unique index posts_open_name_key on public.posts (contract_id, site_id, private.rate_key_part(name))
   where status = 'open';
 create index posts_contract_idx on public.posts (organisation_id, contract_id);
 create index posts_site_idx on public.posts (organisation_id, site_id);
@@ -343,7 +343,10 @@ language sql
 stable
 set search_path = ''
 as $$
-  select distinct p.role, p.band, p.unit
+  -- One row per key as private.rate_key_part compares them (the same rule as the headcount and
+  -- src/lib/rate-cards.ts normaliseKeyPart), keeping the text as written for the message.
+  select distinct on (private.rate_key_part(p.role), private.rate_key_part(p.band), p.unit)
+    p.role, p.band, p.unit
   from public.posts p
   join public.contracts c on c.id = p.contract_id and c.organisation_id = p.organisation_id
   where p.organisation_id = p_organisation_id
@@ -708,18 +711,21 @@ begin
     -- go-live date to the end (a change scheduled while the contract was a draft too: nothing
     -- re-checks it once the posts exist). Keys are written as the app writes them
     -- (formatRateKey: "Guard · Night (shift)", "Guard (shift)" for the standard band).
+    -- (Skipped when the go-live date is outside the contract's dates: MLCT7 says so already.)
     for v_version in
       select greatest(r.effective_from, v_go_live) as on_date
       from public.rate_cards r
       where r.contract_id = p_contract_id
         and (r.effective_to is null or r.effective_to >= v_go_live)
         and (v_contract.end_date is null or r.effective_from <= v_contract.end_date)
+        and v_go_live >= v_contract.start_date
+        and (v_contract.end_date is null or v_go_live <= v_contract.end_date)
       order by r.effective_from
     loop
       select string_agg(k.label, ', ' order by k.first_seen)
       into v_list
       from (
-        select u.role || case when lower(u.band) = 'standard' then '' else ' · ' || u.band end
+        select u.role || case when private.rate_key_part(u.band) = 'standard' then '' else ' · ' || u.band end
             || ' (' || u.unit || ')' as label,
           min(u.ord) as first_seen
         from private.headcount_unpriced_rows(p_organisation_id, p_contract_id, v_version.on_date)
@@ -783,7 +789,7 @@ begin
   )
   select h.organisation_id, h.contract_id, h.site_id, h.id,
     coalesce(h.post_name, h.role)
-      || case when lower(h.band) = 'standard' then '' else ' · ' || h.band end,
+      || case when private.rate_key_part(h.band) = 'standard' then '' else ' · ' || h.band end,
     h.role, h.band, h.unit, v_go_live
   from public.headcount_requirements h
   where h.contract_id = p_contract_id and h.organisation_id = p_organisation_id

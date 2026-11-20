@@ -109,10 +109,41 @@ create table public.headcount_requirements (
     references public.contract_sites (organisation_id, contract_id, site_id)
 );
 
+-- One part of a rate key (role or band) as it is compared, the twin of normaliseKeyPart in
+-- src/lib/rate-cards.ts: runs of whitespace (ASCII, no-break and other Unicode spaces,
+-- zero-width space, BOM) become one space, the ends are trimmed and only A-Z are lower-cased.
+-- ASCII-only folding gives the same answer in JavaScript and here whatever the collation, so the
+-- Headcount tab and activation never disagree about a match.
+create function private.rate_key_part(p_text text)
+returns text
+language sql
+immutable
+parallel safe
+set search_path = ''
+as $$
+  select translate(
+    btrim(regexp_replace(
+      coalesce(p_text, ''),
+      '[\t\n\v\f\r    -​    　﻿]+',
+      ' ',
+      'g'
+    )),
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    'abcdefghijklmnopqrstuvwxyz'
+  )
+$$;
+
+revoke all on function private.rate_key_part(text) from public, anon;
+-- The unique index evaluates it as whoever writes the row: signed-in users and the secret key.
+grant execute on function private.rate_key_part(text) to authenticated, service_role;
+
 -- One post of a name and band per site: "Gate A · Day" once at Apapa. Without a post name the
--- role names the post.
+-- role names the post. Compared as rate keys are.
 create unique index headcount_requirements_post_key on public.headcount_requirements (
-  contract_id, site_id, lower(coalesce(post_name, role)), lower(band)
+  contract_id,
+  site_id,
+  private.rate_key_part(coalesce(post_name, role)),
+  private.rate_key_part(band)
 );
 create index headcount_requirements_contract_idx
   on public.headcount_requirements (organisation_id, contract_id);
@@ -249,7 +280,9 @@ grant update (
 
 -- The contract's headcount rows whose rate key (role, band, unit) has no line on the rate card
 -- in force on p_on. Empty for fixed_monthly and per_job contracts (not priced per row) and for
--- rows that match. Case is ignored, as in src/lib/rate-cards.ts. Called by definer functions only.
+-- rows that match. Keys are compared with private.rate_key_part, as src/lib/rate-cards.ts does.
+-- Outside the contract's dates no rate card applies, so every row is unpriced (as
+-- rateCardInForce with the contract's end date). Called by definer functions only.
 create function private.headcount_unpriced_rows(
   p_organisation_id uuid,
   p_contract_id uuid,
@@ -271,10 +304,12 @@ as $$
       from public.rate_cards r
       join public.rate_card_lines l on l.rate_card_id = r.id
       where r.contract_id = h.contract_id
+        and p_on >= c.start_date
+        and (c.end_date is null or p_on <= c.end_date)
         and r.effective_from <= p_on
         and (r.effective_to is null or r.effective_to >= p_on)
-        and lower(l.role) = lower(h.role)
-        and lower(l.band) = lower(h.band)
+        and private.rate_key_part(l.role) = private.rate_key_part(h.role)
+        and private.rate_key_part(l.band) = private.rate_key_part(h.band)
         and l.unit = h.unit
     )
   order by h.created_at, h.id

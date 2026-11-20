@@ -2,7 +2,6 @@ import "server-only";
 
 import { notFound, redirect } from "next/navigation";
 
-import { lagosToday } from "@/lib/dates";
 import type { HeadcountLine } from "@/lib/headcount";
 import { toRateLineInput } from "@/lib/rate-cards";
 import { loadContract, type ContractDetail } from "@/server/business/contracts-data";
@@ -35,7 +34,7 @@ export async function loadHeadcountEditor(
   if (!ctx.canEditContracts || contract.status !== "draft" || contract.sites.length === 0) {
     redirect(back);
   }
-  return { contract, lines, back, today: lagosToday() };
+  return { contract, lines, back, today: ctx.today };
 }
 
 /** The form's props from the editor data: rates as typed text, so no bigint reaches the browser. */

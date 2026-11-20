@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { NameCheckDetails } from "@/components/name-check";
 import { Status } from "@/components/status";
 import { formatDateTime } from "@/lib/dates";
 import { maskAccount } from "@/lib/mask";
@@ -184,6 +185,10 @@ export function BankChangeCard({
         ) : null}
       </dl>
 
+      {change.status === "pending" || change.nameCheck.status !== "not_checked" ? (
+        <NameCheckDetails check={change.nameCheck} />
+      ) : null}
+
       <Outcome change={change} />
 
       {decide ? (
@@ -191,6 +196,7 @@ export function BankChangeCard({
           changeId={change.id}
           decisions={["approve", "reject"]}
           label={`Decide ${change.workerName}'s bank change`}
+          unchecked={change.nameCheck.status === "not_checked"}
         />
       ) : null}
       {ownRequest ? (

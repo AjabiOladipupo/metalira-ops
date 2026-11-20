@@ -141,28 +141,46 @@ describe("createWorkerSchema", () => {
     ).toEqual({ payEffectiveFrom: "Pay can't start before the start date" });
   });
 
-  it("takes bank details all together, NUBAN 10 digits", () => {
-    expect(issues(createWorkerSchema.safeParse({ ...base, bankName: "GTBank" }))).toEqual({
-      accountName: "Enter the bank name, account name and account number together",
-      bankAccountNumber: "Enter the bank name, account name and account number together",
+  it("takes the bank and number together, with the bank's lookup; NUBAN 10 digits", () => {
+    const LOOKUP = "d0000000-0000-4000-8000-0000000000aa";
+    expect(issues(createWorkerSchema.safeParse({ ...base, bankCode: "058" }))).toEqual({
+      bankAccountNumber: "Choose the bank and enter the account number together",
     });
+    expect(
+      issues(
+        createWorkerSchema.safeParse({ ...base, bankCode: "058", bankAccountNumber: "0123457712" }),
+      ),
+    ).toEqual({ bankAccountNumber: "Wait for the bank to give the account name" });
     expect(
       issues(
         createWorkerSchema.safeParse({
           ...base,
-          bankName: "GTBank",
-          accountName: "Musa Ibrahim",
+          bankCode: "058",
+          bankLookupId: LOOKUP,
           bankAccountNumber: "012345678",
         }),
       ),
     ).toEqual({ bankAccountNumber: "Bank account numbers are 10 digits" });
+    expect(
+      issues(
+        createWorkerSchema.safeParse({
+          ...base,
+          bankCode: "12345",
+          bankLookupId: LOOKUP,
+          bankAccountNumber: "0123457712",
+        }),
+      ),
+    ).toEqual({ bankCode: "Choose a bank from the list" });
     const ok = createWorkerSchema.parse({
       ...base,
-      bankName: "GTBank",
-      accountName: "Musa Ibrahim",
+      bankCode: "058",
+      bankLookupId: LOOKUP,
       bankAccountNumber: "0123 457 712",
+      // An account name typed into the form is ignored: the bank's name comes from the lookup.
+      accountName: "Typed by hand",
     });
     expect(ok.bankAccountNumber).toBe("0123457712");
+    expect(ok).not.toHaveProperty("accountName");
   });
 
   it("checks NIN format, RSA PIN shape and plain-text names", () => {

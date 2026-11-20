@@ -4,6 +4,14 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 import type { ManagerRole } from "@/lib/roles";
 import { PiiDecryptError, decryptPii, last4, sealPii, type PiiContext } from "@/server/crypto/pii";
+import {
+  loadWorkerNames,
+  nameCheckView,
+  refuseCheckedRequest,
+  takeCheckedName,
+  type CheckedName,
+  type NameCheckView,
+} from "@/server/billing/bank-lookup";
 import { MutationError, mutate, type MutationSpec } from "@/server/identity/mutate";
 import { getSession } from "@/server/identity/session";
 import type { Database } from "@/types/db";
@@ -15,6 +23,20 @@ import {
   type BankChangeDecision,
 } from "./schemas";
 import { PEOPLE_EDITORS } from "./workers";
+
+/** The request columns that carry the bank and its account name check (slice 2.3b). */
+export function checkedColumns(checked: CheckedName, lookupId: string) {
+  return {
+    bank_name: checked.bankName,
+    // Replaced by the lookup's name in the database whatever is sent; sent for the type.
+    account_name: checked.accountName,
+    bank_code: checked.bankCode,
+    bank_lookup_id: lookupId,
+    bank_account_digest: checked.digest,
+    name_check: checked.nameCheck,
+    name_check_reason: checked.reason,
+  };
+}
 
 /**
  * Bank-detail changes (slice 1.7, CLAUDE.md rule 10, owner decision 9). A request changes
@@ -77,6 +99,15 @@ function fromDbError(error: PostgrestError, field = "bankAccountNumber"): never 
     case "MLBK4":
     case "MLBK5":
       throw new MutationError("invalid", error.message);
+    case "MLBL3":
+    case "MLBL4":
+    case "MLBL5":
+    case "MLBL6":
+    case "MLBL7":
+    case "MLBLT":
+      throw new MutationError("invalid", error.message, { [field]: error.message });
+    case "MLBLC":
+      throw new MutationError("invalid", error.message, { note: error.message });
     case "23505":
       if (text.includes("bank_detail_changes_one_open_key")) {
         const message =
@@ -104,6 +135,19 @@ export const requestBankChangeSpec: MutationSpec<typeof requestBankChangeSchema,
     schema: requestBankChangeSchema,
     roles: BANK_CHANGE_REQUESTERS,
     run: async ({ supabase, organisationId, data }) => {
+      const expected = await loadWorkerNames(supabase, organisationId, data.workerId);
+      if (!expected) throw new MutationError("invalid", "That employee wasn't found.");
+      // The account name is the bank's, from the caller's own lookup (slice 2.3b).
+      const checked = await takeCheckedName(supabase, {
+        organisationId,
+        lookupId: data.bankLookupId,
+        purpose: "worker_bank",
+        workerId: data.workerId,
+        bankCode: data.bankCode,
+        accountNumber: data.bankAccountNumber,
+        expected,
+        reason: data.nameCheckReason,
+      });
       const sealed = sealPii(
         data.bankAccountNumber,
         bankAccountContext(organisationId, data.workerId),
@@ -115,8 +159,7 @@ export const requestBankChangeSpec: MutationSpec<typeof requestBankChangeSchema,
         .insert({
           organisation_id: organisationId,
           worker_id: data.workerId,
-          bank_name: data.bankName,
-          account_name: data.accountName,
+          ...checkedColumns(checked, data.bankLookupId),
           bank_account_enc: sealed.enc,
           bank_account_last4: sealed.last4,
           reason: data.reason,
@@ -179,11 +222,11 @@ async function checkRequestedAccount(
   supabase: Client,
   organisationId: string,
   changeId: string,
-): Promise<void> {
+): Promise<boolean> {
   const { data: change, error } = await supabase
     .from("bank_detail_changes")
     .select(
-      "worker_id, status, bank_name, account_name, bank_account_enc, bank_account_last4, workers!bank_detail_changes_worker_fkey ( bank_name, account_name, bank_account_enc )",
+      "worker_id, status, raised_by_worker, bank_name, account_name, bank_account_enc, bank_account_last4, bank_code, bank_lookup_id, bank_account_digest, name_check, name_check_reason, name_check_source, workers!bank_detail_changes_worker_fkey ( first_name, last_name, bank_name, account_name, bank_account_enc )",
     )
     .eq("id", changeId)
     .eq("organisation_id", organisationId)
@@ -212,6 +255,16 @@ async function checkRequestedAccount(
   }
 
   const worker = change.workers;
+  // The bank's name check (slice 2.3b): the number is the one checked, and the name still
+  // compares with the employee's name as it is now.
+  if (worker) {
+    const refusal = refuseCheckedRequest(organisationId, change, number, {
+      kind: "person",
+      firstName: worker.first_name,
+      lastName: worker.last_name,
+    });
+    if (refusal) throw new MutationError("invalid", refusal);
+  }
   if (
     worker &&
     sameText(worker.bank_name, change.bank_name) &&
@@ -223,7 +276,14 @@ async function checkRequestedAccount(
       "These are the bank details already on file, so there is nothing to approve. Reject it instead.",
     );
   }
+  // True when the bank never checked the account name.
+  return change.name_check !== "match" && change.name_check !== "near";
 }
+
+/** Shortest note an approver gives for an account the bank never checked. */
+export const UNCHECKED_NOTE_MIN = 10;
+export const UNCHECKED_NOTE =
+  "This account wasn't checked with the bank. Say how you confirmed it (at least 10 characters), for example from the employee's bank letter.";
 
 export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, DecidedBankChange> =
   {
@@ -232,7 +292,12 @@ export const decideBankChangeSpec: MutationSpec<typeof decideBankChangeSchema, D
     run: async ({ supabase, organisationId, data }) => {
       const { from, to } = DECISION[data.decision];
       if (data.decision === "approve") {
-        await checkRequestedAccount(supabase, organisationId, data.changeId);
+        const unchecked = await checkRequestedAccount(supabase, organisationId, data.changeId);
+        // An account the bank never checked (the import, or raised before slice 2.3b): the
+        // approver says how they confirmed it. The database refuses it too (MLBLC).
+        if (unchecked && (data.note ?? "").trim().length < UNCHECKED_NOTE_MIN) {
+          throw new MutationError("invalid", UNCHECKED_NOTE, { note: UNCHECKED_NOTE });
+        }
       }
       // The database fills in who decided and when, sets the hold, and refuses the requester.
       const { data: row, error } = await supabase
@@ -339,6 +404,8 @@ export interface BankChangeView {
   accountName: string;
   last4: string;
   reason: string | null;
+  /** The bank's account name check, recomputed against the employee's name now (slice 2.3b). */
+  nameCheck: NameCheckView;
   /** What the change replaces: the snapshot once approved, the worker's details before. */
   previousBankName: string | null;
   previousLast4: string | null;
@@ -355,7 +422,7 @@ export interface BankChangeView {
 }
 
 const COLUMNS =
-  "id, worker_id, status, bank_name, account_name, bank_account_last4, reason, requested_by, raised_by_worker, approved_by, rejected_by, cancelled_by, decision_note, previous_bank_name, previous_bank_account_last4, created_at, decided_at, applies_after, applied_at, cancelled_at, workers!bank_detail_changes_worker_fkey ( first_name, last_name, staff_id, bank_name, bank_account_last4 )";
+  "id, worker_id, status, bank_name, account_name, bank_account_last4, reason, name_check, name_check_reason, name_check_source, name_check_expected, requested_by, raised_by_worker, approved_by, rejected_by, cancelled_by, decision_note, previous_bank_name, previous_bank_account_last4, created_at, decided_at, applies_after, applied_at, cancelled_at, workers!bank_detail_changes_worker_fkey ( first_name, last_name, staff_id, bank_name, bank_account_last4 )";
 
 const FORMER_USER = "A former user";
 
@@ -420,6 +487,12 @@ export async function loadBankChanges(
       accountName: r.account_name,
       last4: r.bank_account_last4,
       reason: r.reason,
+      nameCheck: nameCheckView(
+        r,
+        worker
+          ? { kind: "person", firstName: worker.first_name, lastName: worker.last_name }
+          : null,
+      ),
       previousBankName: r.status === "pending" ? (worker?.bank_name ?? null) : r.previous_bank_name,
       previousLast4: r.status === "pending" ? (worker?.bank_account_last4 ?? null) : snapshot,
       requestedBy: r.requested_by,

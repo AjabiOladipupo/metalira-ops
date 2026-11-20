@@ -3,8 +3,11 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useActionState, useRef, useState, useTransition } from "react";
 
+import { BankAccountFields, type BankLookupState } from "@/components/bank-account-fields";
+import { NameCheckStatus, TestLookupBadge } from "@/components/name-check";
 import { Field, FormAlert, SubmitButton } from "@/components/form";
 import { Button } from "@/components/ui/button";
+import { NEAR_REASON_MIN } from "@/lib/bank-name-match";
 import {
   previewCompanyBankRequest,
   type CompanyBankPreview,
@@ -13,12 +16,11 @@ import {
 import type { Role } from "@/lib/roles";
 import {
   decideCompanyBankAction,
+  lookupCompanyBankAccountAction,
   revealCompanyBankAccount,
   requestCompanyBankAction,
   withdrawCompanyBankAction,
 } from "@/server/billing/company-bank-actions";
-
-const GRID = "grid grid-cols-[repeat(auto-fit,minmax(min(100%,200px),1fr))] gap-4";
 
 /**
  * Add or change the account clients pay into. Two steps: the details, then a confirm step that
@@ -38,6 +40,7 @@ export function CompanyBankRequestForm({
   const formRef = useRef<HTMLFormElement>(null);
   const [preview, setPreview] = useState<Extract<CompanyBankPreview, { ok: true }> | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [lookup, setLookup] = useState<BankLookupState>({ status: "idle" });
   // After a refusal, go back to the details so the error shows beside its field.
   const [seen, setSeen] = useState(state);
   if (state !== seen) {
@@ -63,10 +66,35 @@ export function CompanyBankRequestForm({
       const value = data.get(key);
       return typeof value === "string" ? value : "";
     };
+    if (lookup.status !== "done") {
+      setProblem(
+        lookup.status === "checking"
+          ? "Wait for the bank to answer."
+          : "Choose the bank and enter the account number, so the bank can give the account name.",
+      );
+      return;
+    }
+    if (lookup.result.blocked) {
+      setProblem(lookup.result.blocked);
+      return;
+    }
+    if (lookup.result.result === "no_match") {
+      setProblem(
+        "The bank's account name doesn't match your company, so this account can't be used.",
+      );
+      return;
+    }
+    if (
+      lookup.result.result === "near" &&
+      text("nameCheckReason").trim().length < NEAR_REASON_MIN
+    ) {
+      setProblem(`Say why this is the right account (at least ${NEAR_REASON_MIN} characters).`);
+      return;
+    }
     const result = previewCompanyBankRequest(
       {
-        bankName: text("bankName"),
-        accountName: text("accountName"),
+        bankName: lookup.result.bankName,
+        accountName: lookup.result.accountName,
         accountNumber: text("bankAccountNumber"),
       },
       role,
@@ -100,30 +128,14 @@ export function CompanyBankRequestForm({
         </p>
       </div>
       <div className={preview ? "hidden" : "flex flex-col gap-4"}>
-        <div className={GRID}>
-          <Field
-            label="Bank name"
-            name="bankName"
-            defaultValue={typed?.bankName ?? ""}
-            error={errors?.bankName}
-          />
-          <Field
-            label="Account name"
-            name="accountName"
-            hint="As the bank shows it."
-            defaultValue={typed?.accountName ?? ""}
-            error={errors?.accountName}
-          />
-          <Field
-            label="Account number"
-            name="bankAccountNumber"
-            inputMode="numeric"
-            autoComplete="off"
-            placeholder="10 digits"
-            maxLength={14}
-            error={errors?.bankAccountNumber}
-          />
-        </div>
+        <BankAccountFields
+          lookup={lookupCompanyBankAccountAction}
+          defaultBankCode={typed?.bankCode ?? ""}
+          defaultReason={typed?.nameCheckReason ?? ""}
+          errors={errors}
+          onStateChange={setLookup}
+          whose="your company's"
+        />
         <Field
           label="Reason"
           name="reason"
@@ -147,6 +159,15 @@ export function CompanyBankRequestForm({
               <dt className="type-label text-fg-muted">New account</dt>
               <dd className="m-0 text-[15px] break-words">{preview.newAccount}</dd>
             </div>
+            {lookup.status === "done" ? (
+              <div className="flex flex-col gap-1">
+                <dt className="type-label text-fg-muted">Account name check</dt>
+                <dd className="m-0 flex flex-wrap items-center gap-2">
+                  <NameCheckStatus status={lookup.result.result} />
+                  {lookup.result.test ? <TestLookupBadge /> : null}
+                </dd>
+              </div>
+            ) : null}
             {preview.replaces ? (
               <div className="flex flex-col gap-1">
                 <dt className="type-label text-fg-muted">Replaces</dt>

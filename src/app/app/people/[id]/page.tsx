@@ -6,10 +6,13 @@ import { after } from "next/server";
 
 import { BackLink } from "@/components/back-link";
 import { DataTable, type Column } from "@/components/data-table";
+import { NameCheckStatus, TestLookupBadge } from "@/components/name-check";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { WorkerAvatar } from "@/components/worker-avatar";
-import { addDays, firstOfNextMonth, formatDate } from "@/lib/dates";
+import { matchPersonName } from "@/lib/bank-name-match";
+import { bankFromName } from "@/lib/banks";
+import { addDays, firstOfNextMonth, formatDate, formatDateTime } from "@/lib/dates";
 import { maskAccount, maskRsaPin, ninStatus } from "@/lib/mask";
 import { formatNaira, koboToMajorString, type Kobo } from "@/lib/money";
 import {
@@ -49,7 +52,7 @@ import {
 
 import { RouteGate } from "../../_shell/slots";
 import { BankChangeCard } from "../_components/bank-change-card";
-import { BankChangeRequestForm } from "../_components/bank-change-forms";
+import { BankChangeRequestForm, CheckBankDetails } from "../_components/bank-change-forms";
 import { CancelPayButton } from "../_components/cancel-pay-button";
 import { ChangeRequestCard } from "../_components/change-request-card";
 import { DetailList, NotSet, Section } from "../_components/display";
@@ -383,8 +386,23 @@ function Profile({
                     />
                   ) : null,
                 },
+                ...(worker.bankAccountLast4
+                  ? [
+                      {
+                        label: "Account name check",
+                        value: <BankCheckSummary worker={worker} />,
+                      },
+                    ]
+                  : []),
               ]}
             />
+            {canEdit && active && worker.bankAccountLast4 ? (
+              <CheckBankDetails
+                workerId={worker.id}
+                defaultBankCode={worker.bankCode ?? bankFromName(worker.bankName)?.code ?? ""}
+                bankFixed={worker.bankCode !== null}
+              />
+            ) : null}
             {bankChanges.map((change) => (
               <BankChangeCard key={change.id} change={change} viewer={viewer} showWorker={false} />
             ))}
@@ -520,6 +538,32 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
         ownWorkerIds: viewer.ownWorkerIds,
       }}
     />
+  );
+}
+
+/** The last bank check of the details on file, compared with the employee's name now. */
+function BankCheckSummary({ worker }: { worker: WorkerProfile }) {
+  if (!worker.bankCheck) {
+    return (
+      <span className="flex flex-col gap-1">
+        <NameCheckStatus status="not_checked" />
+        <span className="text-xs text-fg-muted">
+          Saved without a check with the bank (for example, imported).
+        </span>
+      </span>
+    );
+  }
+  const check = matchPersonName(worker.bankCheck.accountName, worker);
+  return (
+    <span className="flex flex-col gap-1" data-testid="worker-bank-check">
+      <span className="flex flex-wrap items-center gap-2">
+        <NameCheckStatus status={check.result} />
+        {worker.bankCheck.test ? <TestLookupBadge /> : null}
+      </span>
+      <span className="text-xs text-fg-muted">
+        The bank gave {worker.bankCheck.accountName} on {formatDateTime(worker.bankCheck.at)}.
+      </span>
+    </span>
   );
 }
 

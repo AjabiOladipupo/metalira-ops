@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-import { plainText } from "@/server/identity/names";
 import { nubanSchema } from "@/server/people/schemas";
+
+import { bankCheckFields, bankCodeSchema } from "./bank-check-schema";
 
 /**
  * Input for the company bank account actions (slice 2.3). Flat objects, so a form's field names
@@ -10,17 +11,6 @@ import { nubanSchema } from "@/server/people/schemas";
 
 const blankToNull = (value: unknown) =>
   typeof value === "string" && value.trim() === "" ? null : value;
-
-function name(label: string) {
-  return plainText(
-    z
-      .string()
-      .trim()
-      .min(1, `Enter the ${label.toLowerCase()}`)
-      .max(200, `${label} must be 200 characters or fewer`),
-    label,
-  );
-}
 
 const note = (label: string) =>
   z.preprocess(
@@ -35,11 +25,19 @@ const note = (label: string) =>
       .nullish(),
   );
 
+/**
+ * The account name is not an input: the server takes it from the bank lookup (slice 2.3b).
+ */
 export const requestCompanyBankSchema = z.object({
-  bankName: name("Bank name"),
-  accountName: name("Account name"),
+  ...bankCheckFields,
   bankAccountNumber: nubanSchema,
   reason: note("Reason").transform((value) => value ?? null),
+});
+
+/** "Check" in the form: looks the account name up before anything is sent. */
+export const lookupBankAccountSchema = z.object({
+  bankCode: bankCodeSchema,
+  bankAccountNumber: nubanSchema,
 });
 export type RequestCompanyBankInput = z.input<typeof requestCompanyBankSchema>;
 

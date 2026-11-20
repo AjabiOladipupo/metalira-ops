@@ -21,6 +21,7 @@ import {
   type TenantUser,
   type TestUser,
 } from "./helpers/supabase";
+import { makeLookup } from "./helpers/bank-lookup";
 
 type Role = Database["public"]["Enums"]["membership_role"];
 
@@ -69,6 +70,24 @@ async function createWorker(
 ): Promise<{ id: string | null; error: PostgrestError | null }> {
   staffCounter += 1;
   const id = randomUUID();
+  // Bank details come with the caller's own account name lookup (slice 2.3b).
+  let checked: Record<string, Json> = {};
+  if (typeof fields.bank_account_last4 === "string" && !("bank_lookup_id" in fields)) {
+    const { data: who } = await by.auth.getUser();
+    const lookup = await makeLookup(admin, {
+      orgId: owner.orgId,
+      userId: who.user!.id,
+      purpose: "worker_bank",
+      last4: fields.bank_account_last4,
+      accountName: "ADA WORKER",
+    });
+    checked = {
+      bank_code: lookup.bankCode,
+      bank_lookup_id: lookup.id,
+      bank_account_digest: lookup.digest,
+      name_check: "match",
+    };
+  }
   const { error } = await by.rpc("create_worker", {
     p_worker: {
       id,
@@ -79,6 +98,7 @@ async function createWorker(
       employment_type: "permanent",
       start_date: "2025-01-06",
       ...fields,
+      ...checked,
     },
     p_pay_rate: payRate ?? undefined,
   });

@@ -3,12 +3,13 @@ import "server-only";
 import { z } from "zod";
 
 import { MANAGER_ROLES } from "@/lib/roles";
-import { COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
+import { COMPANY_BANK_REQUESTERS, COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
 import {
   decideCompanyBankSpec,
   requestCompanyBankSpec,
   withdrawCompanyBankSpec,
 } from "@/server/billing/company-bank";
+import { lookupBankAccountSchema } from "@/server/billing/schemas";
 import { listClients, loadClientsSummary } from "@/server/business/clients-data";
 import {
   CLIENT_READERS,
@@ -35,6 +36,16 @@ import {
   organisationToday,
 } from "@/server/business/contracts-data";
 import {
+  confirmContractDocumentSpec,
+  contractDocumentLink,
+  removeContractDocumentSpec,
+  startContractDocumentSpec,
+} from "@/server/business/contract-documents";
+import {
+  listContractDocuments,
+  loadContractDocumentsSummary,
+} from "@/server/business/contract-documents-data";
+import {
   addHeadcountSpec,
   removeHeadcountSpec,
   updateHeadcountSpec,
@@ -47,16 +58,6 @@ import {
 import { contractIdSchema } from "@/server/business/headcount-schemas";
 import { activateContractSpec, endContractSpec } from "@/server/business/activation";
 import { loadPosts, loadRequiredShiftsSummary } from "@/server/business/activation-data";
-import {
-  confirmContractDocumentSpec,
-  contractDocumentLink,
-  removeContractDocumentSpec,
-  startContractDocumentSpec,
-} from "@/server/business/contract-documents";
-import {
-  listContractDocuments,
-  loadContractDocumentsSummary,
-} from "@/server/business/contract-documents-data";
 import {
   advanceSetupSpec,
   completeSetupSpec,
@@ -87,6 +88,7 @@ import {
   requestBankChangeSpec,
   withdrawBankChangeSpec,
 } from "@/server/people/bank-changes";
+import { lookupWorkerBankSchema } from "@/server/people/bank-lookups";
 import { resolveChangeRequestSpec } from "@/server/people/change-requests";
 import { createDepartmentSpec, updateDepartmentSpec } from "@/server/people/departments";
 import {
@@ -97,7 +99,12 @@ import {
   startImportSpec,
 } from "@/server/people/imports/batches";
 import { saveMappingSpec } from "@/server/people/mapping";
-import { ownBankChangeSchema, ownChangeRequestSchema } from "@/server/people/own-requests";
+import { checkWorkerBankSchema } from "@/server/people/schemas";
+import {
+  ownBankChangeSchema,
+  ownBankLookupSchema,
+  ownChangeRequestSchema,
+} from "@/server/people/own-requests";
 import { unlockSignInSpec } from "@/server/people/sign-in-status";
 import {
   decideStaffIdCorrectionSpec,
@@ -109,6 +116,7 @@ import {
   cancelPayRateSpec,
   createWorkerSpec,
   endEmploymentSpec,
+  PEOPLE_EDITORS,
   updateWorkerSpec,
 } from "@/server/people/workers";
 import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
@@ -126,17 +134,17 @@ import {
 
 import {
   previewAddContact,
-  previewAddHeadcount,
   previewAddRateCardVersion,
   previewCreateClient,
   previewCreateContract,
   previewMoveCheckpoint,
   previewQuickAddClient,
-  previewRemoveHeadcount,
   previewRemoveContractDocument,
   previewSaveDraftRateCard,
   previewSetClientTax,
   previewUpdateContract,
+  previewAddHeadcount,
+  previewRemoveHeadcount,
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
@@ -162,20 +170,22 @@ const AUTH = "Sign-in and account flows are never run by the agent.";
 const NO_PREVIEW = "Changes several rows or money and has no preview yet.";
 const SECOND_APPROVER = "Decides a two-person request: the agent is never the second approver.";
 const REVEAL = "Shows personal data in full: the agent sees masked values only.";
+const LOOKUP =
+  "Exposes an account holder's name from the bank network (personal data), and each lookup is rate-limited and may cost money: people only.";
 const RATES = "Changes what clients are billed (kind money): kept to people.";
+const FILES = "Takes a file from the person's device: uploads are made on the screen.";
+const OPEN_FILE = "Hands out a link to a stored file: the agent never opens or passes on files.";
 const GO_LIVE =
   "Makes a contract live or ends it, which starts or stops rosters and billing: kept to people for now (the owner may enable it later).";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
-/** Posts, roster requirements and required shifts are read by every manager role (slice 2.7). */
-const POST_READERS = ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"] as const;
-const FILES = "Takes a file from the person's device: uploads are made on the screen.";
-const OPEN_FILE = "Hands out a link to a stored file: the agent never opens or passes on files.";
-
 /** A contract's id, for the document reads. */
 const contractIdInput = z.object({ contractId: z.uuid("Choose a contract") });
 const documentIdInput = z.object({ documentId: z.uuid("Choose a document") });
+
+/** Posts, roster requirements and required shifts are read by every manager role (slice 2.7). */
+const POST_READERS = ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"] as const;
 
 export const CAPABILITIES: readonly Capability[] = [
   // -------------------------------------------------------------------------
@@ -667,6 +677,32 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: REVEAL,
   },
+  {
+    name: "bank_changes.lookup_account",
+    description:
+      "Asks the bank network for the account name of a bank and number, for an employee being added or changed.",
+    kind: "read",
+    audience: "manager",
+    roles: [...PEOPLE_EDITORS],
+    input: lookupWorkerBankSchema,
+    changes: "none",
+    action: at("people/bank-change-actions", "lookupWorkerBankAccountAction"),
+    agent: false,
+    agentNote: LOOKUP,
+  },
+  {
+    name: "people.check_bank_details",
+    description:
+      "Checks an employee's bank details on file with the bank network and keeps the result on the employee.",
+    kind: "write",
+    audience: "manager",
+    roles: [...PEOPLE_EDITORS],
+    input: checkWorkerBankSchema,
+    changes: "one",
+    action: at("people/bank-change-actions", "checkWorkerBankDetailsAction"),
+    agent: false,
+    agentNote: LOOKUP,
+  },
 
   // -------------------------------------------------------------------------
   // Company bank account (billing/company-bank-actions.ts, slice 2.3)
@@ -716,6 +752,19 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("billing/company-bank-actions", "revealCompanyBankAccount"),
     agent: false,
     agentNote: REVEAL,
+  },
+  {
+    name: "company_bank.lookup_account",
+    description:
+      "Asks the bank network for the account name of a bank and number, and compares it with the company's names.",
+    kind: "read",
+    audience: "manager",
+    roles: [...COMPANY_BANK_REQUESTERS],
+    input: lookupBankAccountSchema,
+    changes: "none",
+    action: at("billing/company-bank-actions", "lookupCompanyBankAccountAction"),
+    agent: false,
+    agentNote: LOOKUP,
   },
 
   // -------------------------------------------------------------------------
@@ -797,6 +846,18 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/own-request-actions", "requestOwnBankChangeAction"),
     agent: false,
     agentNote: PERSONAL,
+  },
+  {
+    name: "me.lookup_bank_account",
+    description: "Asks the bank network for the account name of a worker's own new account.",
+    kind: "read",
+    audience: "worker",
+    roles: [],
+    input: ownBankLookupSchema,
+    changes: "none",
+    action: at("people/own-request-actions", "lookupOwnBankAccountAction"),
+    agent: false,
+    agentNote: LOOKUP,
   },
   {
     name: "me.request_change",
@@ -1181,6 +1242,83 @@ export const CAPABILITIES: readonly Capability[] = [
     agentNote: RATES,
   },
   // -------------------------------------------------------------------------
+  // Contract documents (business/contract-document-actions.ts, slice 2.6)
+  // -------------------------------------------------------------------------
+  {
+    name: "contract_documents.summary",
+    description:
+      "Counts documents on file by kind, and active contracts with no signed contract on file.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadContractDocumentsSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "contract_documents.list",
+    description: "Lists a contract's documents: kind, title, file name, size and who uploaded it.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: contractIdInput,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }, input) =>
+      listContractDocuments(supabase, organisationId, (input as { contractId: string }).contractId),
+    agent: true,
+  },
+  {
+    name: "contract_documents.open",
+    description: "Makes a 60-second link that opens or downloads one document on file.",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: documentIdInput,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }, input) =>
+      contractDocumentLink(supabase, organisationId, (input as { documentId: string }).documentId),
+    agent: false,
+    agentNote: OPEN_FILE,
+  },
+  {
+    name: "contract_documents.start_upload",
+    description: "Starts a document upload on a contract and returns where the file goes.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(startContractDocumentSpec),
+    changes: "one",
+    action: at("business/contract-document-actions", "startContractDocumentUpload"),
+    agent: false,
+    agentNote: FILES,
+  },
+  {
+    name: "contract_documents.confirm_upload",
+    description: "Checks an uploaded document's type from its bytes and puts it on file.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(confirmContractDocumentSpec),
+    changes: "one",
+    action: at("business/contract-document-actions", "confirmContractDocumentUpload"),
+    agent: false,
+    agentNote: FILES,
+  },
+  {
+    name: "contract_documents.remove",
+    description: "Marks a contract document removed with a reason; its file stops opening.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(removeContractDocumentSpec),
+    changes: "one",
+    action: at("business/contract-document-actions", "removeContractDocumentAction"),
+    preview: previewRemoveContractDocument,
+    agent: true,
+  },
+
+  // -------------------------------------------------------------------------
   // Headcount (business/headcount-actions.ts, slice 2.5)
   // -------------------------------------------------------------------------
   {
@@ -1261,6 +1399,7 @@ export const CAPABILITIES: readonly Capability[] = [
     preview: previewRemoveHeadcount,
     agent: true,
   },
+
   // -------------------------------------------------------------------------
   // Activation, posts and required shifts (business/activation-actions.ts, slice 2.7)
   // -------------------------------------------------------------------------
@@ -1322,82 +1461,6 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadRequiredShiftsSummary(supabase, organisationId),
-    agent: true,
-  },
-  // -------------------------------------------------------------------------
-  // Contract documents (business/contract-document-actions.ts, slice 2.6)
-  // -------------------------------------------------------------------------
-  {
-    name: "contract_documents.summary",
-    description:
-      "Counts documents on file by kind, and active contracts with no signed contract on file.",
-    kind: "read",
-    audience: "manager",
-    roles: CONTRACT_READERS,
-    input: null,
-    changes: "none",
-    action: null,
-    read: ({ supabase, organisationId }) => loadContractDocumentsSummary(supabase, organisationId),
-    agent: true,
-  },
-  {
-    name: "contract_documents.list",
-    description: "Lists a contract's documents: kind, title, file name, size and who uploaded it.",
-    kind: "read",
-    audience: "manager",
-    roles: CONTRACT_READERS,
-    input: contractIdInput,
-    changes: "none",
-    action: null,
-    read: ({ supabase, organisationId }, input) =>
-      listContractDocuments(supabase, organisationId, (input as { contractId: string }).contractId),
-    agent: true,
-  },
-  {
-    name: "contract_documents.open",
-    description: "Makes a 60-second link that opens or downloads one document on file.",
-    kind: "read",
-    audience: "manager",
-    roles: CONTRACT_READERS,
-    input: documentIdInput,
-    changes: "none",
-    action: null,
-    read: ({ supabase, organisationId }, input) =>
-      contractDocumentLink(supabase, organisationId, (input as { documentId: string }).documentId),
-    agent: false,
-    agentNote: OPEN_FILE,
-  },
-  {
-    name: "contract_documents.start_upload",
-    description: "Starts a document upload on a contract and returns where the file goes.",
-    kind: "write",
-    audience: "manager",
-    ...fromSpec(startContractDocumentSpec),
-    changes: "one",
-    action: at("business/contract-document-actions", "startContractDocumentUpload"),
-    agent: false,
-    agentNote: FILES,
-  },
-  {
-    name: "contract_documents.confirm_upload",
-    description: "Checks an uploaded document's type from its bytes and puts it on file.",
-    kind: "write",
-    audience: "manager",
-    ...fromSpec(confirmContractDocumentSpec),
-    changes: "one",
-    action: at("business/contract-document-actions", "confirmContractDocumentUpload"),
-    agent: false,
-    agentNote: FILES,
-  },
-  {
-    name: "contract_documents.remove",
-    description: "Marks a contract document removed with a reason; its file stops opening.",
-    kind: "write",
-    audience: "manager",
-    ...fromSpec(removeContractDocumentSpec),
-    changes: "one",
-    action: at("business/contract-document-actions", "removeContractDocumentAction"),
-    preview: previewRemoveContractDocument,
     agent: true,
   },
 ];

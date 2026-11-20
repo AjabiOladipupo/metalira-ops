@@ -196,13 +196,13 @@ describe("first import during unfinished setup", () => {
     expect(await exceptionAudits(workerId)).toEqual([]);
   });
 
-  it("a direct create_worker call by the owner keeps the hold", async () => {
+  it("a direct create_worker call by the owner can't bring unchecked bank details", async () => {
+    // Slice 2.3b: outside the import, bank details need the bank's account name check.
     const worker = workerDoc();
     const { error } = await owner.client.rpc("create_worker", {
       p_worker: { ...worker, organisation_id: owner.orgId },
     });
-    expect(error).toBeNull();
-    expect(await bankState(worker.id as string)).toEqual(held);
+    expect(error?.code).toBe("MLBL7");
   });
 
   it("after setup is finished, the owner's import keeps the hold too", async () => {
