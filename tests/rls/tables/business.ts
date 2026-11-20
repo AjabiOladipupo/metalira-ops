@@ -10,7 +10,8 @@ type BusinessTable =
   | "contract_sites"
   | "rate_cards"
   | "rate_card_lines"
-  | "site_checkpoints";
+  | "site_checkpoints"
+  | "headcount_requirements";
 
 async function firstId(admin: Client, table: BusinessTable, orgId: string) {
   const { data, error } = await admin
@@ -201,5 +202,47 @@ export const tables: TableSpec[] = [
       rate_kobo: 1,
     }),
     patch: { rate_kobo: 1 },
+  },
+  // Slice 2.5: one headcount row on each organisation's draft contract, at its contract site.
+  {
+    table: "headcount_requirements",
+    ...byOrg,
+    seed: async ({ admin, side }) => {
+      const link = await admin
+        .from("contract_sites")
+        .select("contract_id, site_id")
+        .eq("organisation_id", side.orgId)
+        .order("created_at")
+        .limit(1)
+        .single();
+      if (link.error) throw new Error(link.error.message);
+      const { error } = await admin.from("headcount_requirements").insert({
+        organisation_id: side.orgId,
+        contract_id: link.data.contract_id,
+        site_id: link.data.site_id,
+        post_name: "Gate B",
+        role: "Guard",
+        band: "Day",
+        unit: "shift",
+        days_of_week: [1, 2, 3, 4, 5, 6, 7],
+        start_time: "06:00",
+        end_time: "18:00",
+        required_count: 1,
+      });
+      if (error) throw new Error(error.message);
+    },
+    rowOf: ({ admin, side }) => firstId(admin, "headcount_requirements", side.orgId),
+    attackInsert: ({ victim }) => ({
+      organisation_id: victim.orgId,
+      contract_id: randomUUID(),
+      site_id: randomUUID(),
+      role: "Guard",
+      unit: "shift",
+      days_of_week: [1],
+      start_time: "06:00",
+      end_time: "18:00",
+      required_count: 1,
+    }),
+    patch: { required_count: 2 },
   },
 ];

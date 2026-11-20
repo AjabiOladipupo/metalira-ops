@@ -207,6 +207,38 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"headcount_requirements": {
+                  Row: {
+                    "band": string,"contract_id": string,"created_at": string,"created_by": string | null,"days_of_week": (number)[],"duration_minutes": number | null,"end_time": string,"id": string,"kind": string | null,"notes": string | null,"organisation_id": string,"post_name": string | null,"required_count": number,"role": string,"site_id": string,"start_time": string,"unit": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "band"?: string,"contract_id": string,"created_at"?: string,"created_by"?: string | null,"days_of_week": (number)[],"duration_minutes"?: never,"end_time": string,"id"?: string,"kind"?: never,"notes"?: string | null,"organisation_id": string,"post_name"?: string | null,"required_count": number,"role": string,"site_id": string,"start_time": string,"unit": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "band"?: string,"contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"days_of_week"?: (number)[],"duration_minutes"?: never,"end_time"?: string,"id"?: string,"kind"?: never,"notes"?: string | null,"organisation_id"?: string,"post_name"?: string | null,"required_count"?: number,"role"?: string,"site_id"?: string,"start_time"?: string,"unit"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "headcount_requirements_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "headcount_requirements_contract_site_fkey"
+      columns: ["organisation_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "contract_sites"
+      referencedColumns: ["organisation_id","contract_id","site_id"]
+    },{
+      foreignKeyName: "headcount_requirements_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"import_batches": {
                   Row: {
                     "cancelled_at": string | null,"columns": (string)[],"committed_at": string | null,"committed_by": string | null,"created_at": string,"created_by": string | null,"file_format": string,"file_name": string,"file_notes": NonNullable<Json>,"file_path": string,"file_problems": NonNullable<Json>,"file_removed_at": string | null,"id": string,"organisation_id": string,"rows_held": number,"rows_imported": number,"rows_ready": number,"rows_total": number,"status": Database["public"]['Enums']["import_batch_status"],"summary": Json | null,"updated_at": string,"validated_at": string | null

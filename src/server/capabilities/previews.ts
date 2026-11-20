@@ -9,6 +9,14 @@ import {
   type updateContractSchema,
 } from "@/server/business/contract-schemas";
 import { loadRateCardVersions, organisationToday } from "@/server/business/contracts-data";
+import { loadHeadcountContext, pricingFor } from "@/server/business/headcount-data";
+import type {
+  addHeadcountSchema,
+  removeHeadcountSchema,
+  updateHeadcountSchema,
+} from "@/server/business/headcount-schemas";
+import type { MutationContext } from "@/server/identity/mutate";
+import { previewHeadcountChange, type HeadcountLine } from "@/lib/headcount";
 import {
   CONTACT_ROLE_LABELS,
   DEDUCTS_WHT_LABELS,
@@ -225,6 +233,66 @@ export const previewSaveDraftRateCard: PreviewFn<typeof saveRateCardSchema> = as
     })),
   };
 };
+
+// ---------------------------------------------------------------------------
+// Headcount (slice 2.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The rows that change and the weekly total before and after, at the rates the Headcount tab
+ * uses (`previewHeadcountChange`, the same text the row editor shows).
+ */
+async function previewHeadcount(
+  ctx: { supabase: MutationContext["supabase"]; organisationId: string; contractId: string },
+  change: (lines: HeadcountLine[]) => HeadcountLine[] | string,
+): Promise<CapabilityPreview> {
+  const { contract, lines, siteNames } = await loadHeadcountContext(
+    ctx.supabase,
+    ctx.organisationId,
+    ctx.contractId,
+  );
+  if (!contract) return { summary: "That contract wasn't found.", changes: [] };
+  if (contract.status !== "draft") {
+    return {
+      summary: "This contract is no longer a draft, so its headcount can't change.",
+      changes: [],
+    };
+  }
+  const after = change(lines);
+  if (typeof after === "string") return { summary: after, changes: [] };
+  const pricing = pricingFor(contract, await organisationToday(ctx.supabase, ctx.organisationId));
+  return previewHeadcountChange({
+    before: lines,
+    after,
+    version: pricing.version,
+    contractType: contract.type,
+    siteName: (id) => siteNames.get(id) ?? "a site that isn't on the contract",
+    ratesLabel: pricing.label,
+  });
+}
+
+const NEW_ROW = "new-headcount-row";
+const NO_ROW = "That headcount row wasn't found.";
+
+export const previewAddHeadcount: PreviewFn<typeof addHeadcountSchema> = (ctx) =>
+  previewHeadcount({ ...ctx, contractId: ctx.data.contractId }, (lines) => [
+    ...lines,
+    { ...ctx.data, id: NEW_ROW },
+  ]);
+
+export const previewUpdateHeadcount: PreviewFn<typeof updateHeadcountSchema> = (ctx) =>
+  previewHeadcount({ ...ctx, contractId: ctx.data.contractId }, (lines) =>
+    lines.some((l) => l.id === ctx.data.headcountId)
+      ? lines.map((l) => (l.id === ctx.data.headcountId ? { ...ctx.data, id: l.id } : l))
+      : NO_ROW,
+  );
+
+export const previewRemoveHeadcount: PreviewFn<typeof removeHeadcountSchema> = (ctx) =>
+  previewHeadcount({ ...ctx, contractId: ctx.data.contractId }, (lines) =>
+    lines.some((l) => l.id === ctx.data.headcountId)
+      ? lines.filter((l) => l.id !== ctx.data.headcountId)
+      : NO_ROW,
+  );
 
 /** A client's tax settings, before and after. */
 export const previewSetClientTax: PreviewFn<typeof clientTaxSchema> = async ({

@@ -63,6 +63,10 @@ export function fromContractDbError(error: PostgrestError): never {
     const message = "Each role and band takes one rate.";
     throw new MutationError("invalid", message, { lines: message });
   }
+  // Slice 2.5: a site with headcount stays on the contract until its rows are removed.
+  if (error.code === "MLHC2") {
+    throw new MutationError("invalid", error.message, { siteIds: error.message });
+  }
   if (error.code === "P0002" || error.code === "23503") {
     throw new MutationError("invalid", "That contract wasn't found. Reload the page.");
   }
