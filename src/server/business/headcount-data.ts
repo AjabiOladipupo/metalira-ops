@@ -12,6 +12,7 @@ import {
   type HeadcountUnit,
   type WeeklyHeadcount,
 } from "@/lib/headcount";
+import { LAGOS_TIME_ZONE, todayIn } from "@/lib/dates";
 import { rateCardInForce, type RateCardVersion } from "@/lib/rate-cards";
 import type { Database } from "@/types/db";
 
@@ -71,6 +72,16 @@ function byCreated(a: HeadcountDbRow, b: HeadcountDbRow): number {
       : 1;
 }
 
+/** The company's calendar day in its own time zone (as `private.org_today`). */
+export async function organisationToday(supabase: Client, organisationId: string): Promise<string> {
+  const { data } = await supabase
+    .from("organisations")
+    .select("timezone")
+    .eq("id", organisationId)
+    .maybeSingle();
+  return todayIn(data?.timezone ?? LAGOS_TIME_ZONE);
+}
+
 /** One contract's headcount, in the order it was added. */
 export async function loadHeadcount(
   supabase: Client,
@@ -104,7 +115,7 @@ export function pricingFor(
   const date = pricingDate(today, contract.startDate, contract.endDate);
   return {
     date,
-    version: rateCardInForce(contract.versions, date),
+    version: rateCardInForce(contract.versions, date, contract.endDate),
     label: ratesLabel(date, today),
   };
 }

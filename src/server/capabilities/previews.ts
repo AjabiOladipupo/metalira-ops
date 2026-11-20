@@ -9,7 +9,11 @@ import {
   type updateContractSchema,
 } from "@/server/business/contract-schemas";
 import { loadRateCardVersions } from "@/server/business/contracts-data";
-import { loadHeadcountContext, pricingFor } from "@/server/business/headcount-data";
+import {
+  loadHeadcountContext,
+  organisationToday,
+  pricingFor,
+} from "@/server/business/headcount-data";
 import type {
   addHeadcountSchema,
   removeHeadcountSchema,
@@ -257,7 +261,7 @@ async function previewHeadcount(
   }
   const after = change(lines);
   if (typeof after === "string") return { summary: after, changes: [] };
-  const pricing = pricingFor(contract, lagosToday());
+  const pricing = pricingFor(contract, await organisationToday(ctx.supabase, ctx.organisationId));
   return previewHeadcountChange({
     before: lines,
     after,

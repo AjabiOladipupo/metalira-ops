@@ -23,7 +23,9 @@ import {
   findRateLine,
   formatRate,
   formatRateKey,
+  normaliseKeyPart,
   rateCardInForce,
+  rateKeyId,
   type RateCardVersion,
   type RateKey,
   type RateLine,
@@ -115,7 +117,8 @@ export function crossesMidnight(startTime: string, endTime: string): boolean {
 }
 
 function isStandardBand(band: string): boolean {
-  return band.trim() === "" || band.trim().toLowerCase() === STANDARD_BAND;
+  const part = normaliseKeyPart(band);
+  return part === "" || part === STANDARD_BAND;
 }
 
 /** The post's name as 2.7 opens it: "Gate A · Day", "Guard · Night", or "Gate A". */
@@ -341,7 +344,7 @@ function totalsOf(rows: readonly PricedRow[]): HeadcountTotals {
   for (const row of rows) {
     if (!row.missingRate) continue;
     const key = headcountRateKey(row.line);
-    const id = formatRateKey(key).toLowerCase();
+    const id = rateKeyId(key);
     if (seen.has(id)) continue;
     seen.add(id);
     missingKeys.push(key);
@@ -357,7 +360,11 @@ function totalsOf(rows: readonly PricedRow[]): HeadcountTotals {
 }
 
 /**
- * One week of the plan at `version`'s rates (the version in force on the day that matters,
+ * One week of the plan at `version`'s rates. A PREVIEW of the plan, never stored: hourly rows are
+ * rounded once per row for the week, the same rule as `rangeTotals` (once per row and rate
+ * version over the range). Invoices (Phase 6) round once per invoice line from the Work Units
+ * that actually happen, so they can differ from these figures by a kobo.
+ * The week is priced at `version` (the version in force on the day that matters,
  * found by the caller with `pricingDate` and `rateCardInForce`). Rows grouped by site in the
  * order the site ids first appear. `version` null on a priced contract flags every row.
  */
@@ -371,6 +378,8 @@ export function weeklyHeadcount(
     const perWeek = shiftsPerWeek(line);
     const minutes = minutesPerWeek(line);
     const rate = priced ? findRateLine(version, headcountRateKey(line)) : null;
+    // A matched line always has the row's unit; if pricing ever returns null the row counts as
+    // unpriced rather than vanishing from the total.
     const weeklyKobo = rate
       ? priceOccurrences(rate, line.unit, perWeek, durationMinutes(line.startTime, line.endTime))
       : null;
@@ -381,7 +390,7 @@ export function weeklyHeadcount(
       minutesPerWeek: minutes,
       rate,
       weeklyKobo,
-      missingRate: priced && rate === null,
+      missingRate: priced && weeklyKobo === null,
     };
   });
   const order: string[] = [];
@@ -404,17 +413,21 @@ export interface RangeTotals {
 
 /**
  * The plan from `from` to `to` inclusive (a partial week, a month, the days around a rate
- * change), each occurrence priced at the version in force on the day it starts. Hourly rows are
- * rounded once per row and version. On a contract not priced per row only the counts are given.
+ * change), clamped to the contract's dates: days outside the contract are neither shifts nor
+ * unpriced. Each occurrence is priced at the version in force on the day it starts. A PREVIEW:
+ * hourly rows are rounded once per row and rate version over the whole range (so a two-week
+ * range can be a kobo below two one-week totals); nothing here is stored.
+ * On a contract not priced per row only the counts are given.
  */
 export function rangeTotals(
   lines: readonly HeadcountLine[],
   versions: readonly RateCardVersion[],
-  from: string,
-  to: string,
-  contractType: string,
+  range: { from: string; to: string },
+  contract: { type: string; startDate: string; endDate: string | null },
 ): RangeTotals {
-  const priced = headcountIsPriced(contractType);
+  const priced = headcountIsPriced(contract.type);
+  const from = range.from < contract.startDate ? contract.startDate : range.from;
+  const to = contract.endDate !== null && range.to > contract.endDate ? contract.endDate : range.to;
   let shifts = 0;
   let visits = 0;
   let unpricedOccurrences = 0;
@@ -425,7 +438,7 @@ export function rangeTotals(
     if (line.unit === "visit") visits += occurrence.people;
     else shifts += occurrence.people;
     if (!priced) continue;
-    const version = rateCardInForce(versions, occurrence.date);
+    const version = rateCardInForce(versions, occurrence.date, contract.endDate);
     const rate = findRateLine(version, headcountRateKey(line));
     if (!version || !rate) {
       unpricedOccurrences += occurrence.people;
@@ -445,7 +458,8 @@ export function rangeTotals(
       group.people,
       durationMinutes(line.startTime, line.endTime),
     );
-    if (amount !== null) amounts.push(amount);
+    if (amount === null) unpricedOccurrences += group.people;
+    else amounts.push(amount);
   }
   return { shifts, visits, billableKobo: sumKobo(amounts), unpricedOccurrences };
 }

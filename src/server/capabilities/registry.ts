@@ -38,6 +38,7 @@ import {
   contractWeek,
   loadHeadcountContext,
   loadHeadcountSummary,
+  organisationToday,
 } from "@/server/business/headcount-data";
 import { contractIdSchema } from "@/server/business/headcount-schemas";
 import {
@@ -1159,8 +1160,12 @@ export const CAPABILITIES: readonly Capability[] = [
     input: null,
     changes: "none",
     action: null,
-    read: ({ supabase, organisationId }) =>
-      loadHeadcountSummary(supabase, organisationId, lagosToday()),
+    read: async ({ supabase, organisationId }) =>
+      loadHeadcountSummary(
+        supabase,
+        organisationId,
+        await organisationToday(supabase, organisationId),
+      ),
     agent: true,
   },
   {
@@ -1184,7 +1189,7 @@ export const CAPABILITIES: readonly Capability[] = [
       return {
         status: contract.status,
         sites: Object.fromEntries(siteNames),
-        week: contractWeek(contract, lines, lagosToday()),
+        week: contractWeek(contract, lines, await organisationToday(supabase, organisationId)),
       };
     },
     agent: true,

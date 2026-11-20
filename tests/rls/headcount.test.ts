@@ -13,6 +13,7 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addDays, lagosToday } from "@/lib/dates";
+import { findRateLine, type RateUnit } from "@/lib/rate-cards";
 import type { Json } from "@/types/db";
 
 import {
@@ -355,6 +356,71 @@ describe("headcount rows", () => {
       start,
     ]);
     expect(none.rows).toEqual([]);
+  });
+});
+
+describe("rate keys and contract dates (money review)", () => {
+  it("matches keys the way src/lib/rate-cards.ts does, and prices nothing outside the contract", async () => {
+    const id = await newContract([apapa]);
+    const lines = [
+      { role: "Guard", band: "Day", unit: "shift", rate_kobo: "1250000" },
+      { role: "Agent de sécurité", band: "Nuit", unit: "shift", rate_kobo: "1500000" },
+    ];
+    const card = await ops.client.rpc("save_draft_rate_card", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: start,
+      p_lines: lines as Json,
+    });
+    expect(card.error).toBeNull();
+    const rows = [
+      { post_name: "A", role: "guardNBSP", band: " DAY " },
+      { post_name: "B", role: "agent de sécurité", band: "NUIT" },
+      { post_name: "C", role: "AGENT DE SÉCURITÉ", band: "Nuit" },
+      { post_name: "D", role: "Guard", band: "Supervisor" },
+    ].map((r) => ({ ...r, role: r.role.replace("NBSP", "\u00a0") }));
+    const ids: Record<string, string> = {};
+    for (const r of rows) {
+      const added = await insertAs(ops, row(id, r));
+      expect(added.error, r.post_name).toBeNull();
+      ids[r.post_name] = added.data!.id;
+    }
+    const version = {
+      lines: lines.map((l) => ({
+        role: l.role,
+        band: l.band,
+        unit: l.unit as RateUnit,
+        rateKobo: BigInt(l.rate_kobo),
+        currency: "NGN" as const,
+        otRateKobo: null,
+        otMultiplierBps: null,
+        serviceType: "services" as const,
+        whtRateBps: 200,
+      })),
+    };
+    const unpricedInTs = rows
+      .filter((r) => !findRateLine(version, { role: r.role, band: r.band, unit: "shift" }))
+      .map((r) => ids[r.post_name])
+      .sort();
+    const sql = async (on: string) =>
+      (
+        await db.query<{ headcount_requirement_id: string }>(
+          "select headcount_requirement_id from private.headcount_unpriced_rows($1, $2, $3)",
+          [owner.orgId, id, on],
+        )
+      ).rows
+        .map((r) => r.headcount_requirement_id)
+        .sort();
+    expect(unpricedInTs).toEqual([ids.C, ids.D].sort());
+    expect(await sql(start)).toEqual(unpricedInTs);
+
+    // After the contract ends no rate card applies: every row is unpriced.
+    await db.query("update public.contracts set end_date = $2 where id = $1", [
+      id,
+      addDays(start, 10),
+    ]);
+    expect(await sql(addDays(start, 10))).toEqual(unpricedInTs);
+    expect(await sql(addDays(start, 11))).toEqual(Object.values(ids).sort());
   });
 });
 
