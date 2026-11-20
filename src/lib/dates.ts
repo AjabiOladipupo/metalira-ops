@@ -28,13 +28,28 @@ export function formatDate(iso: string): string {
 
 /** Today's date in Lagos as `YYYY-MM-DD`. */
 export function lagosToday(now: Date = new Date()): string {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: LAGOS_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
+  return todayIn(LAGOS_TIME_ZONE, now);
+}
+
+/**
+ * Today's date in an IANA time zone as `YYYY-MM-DD`: the company's calendar day, as the database's
+ * `private.org_today` sees it (which falls back to Lagos only when the company has no zone). An
+ * unknown zone, which the database would refuse, falls back to Lagos here rather than throw.
+ */
+export function todayIn(timeZone: string, now: Date = new Date()): string {
+  const format = (zone: string) =>
+    // en-CA formats as YYYY-MM-DD.
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now);
+  try {
+    return format(timeZone);
+  } catch {
+    return format(LAGOS_TIME_ZONE);
+  }
 }
 
 /** The date `days` after `iso` (negative goes back). */

@@ -209,6 +209,23 @@ export const quickAddClientSchema = z.object({
   siteName: optional(text("Site name", 200)),
 });
 
+/** Whether a client is expected to deduct WHT from its payments (owner's accountant, 19 Nov 2026). */
+export const DEDUCTS_WHT = ["expected", "not_deducted"] as const;
+export type DeductsWht = (typeof DEDUCTS_WHT)[number];
+
+export const DEDUCTS_WHT_LABELS: Record<DeductsWht, string> = {
+  expected: "Deducts WHT",
+  not_deducted: "Doesn't deduct WHT",
+};
+
+/** A client's tax settings: owner, admin and finance. */
+export const clientTaxSchema = z.object({
+  clientId: id("client"),
+  deductsWht: z.enum(DEDUCTS_WHT, "Choose whether the client deducts WHT"),
+  withholdsVat: checkbox,
+  reason: optional(text("Reason", 300, false)),
+});
+
 export type CreateClientInput = z.output<typeof createClientSchema>;
 export type UpdateClientInput = z.output<typeof updateClientSchema>;
 export type AddContactInput = z.output<typeof addContactSchema>;

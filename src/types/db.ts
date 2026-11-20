@@ -79,18 +79,76 @@ isOneToOne: false
                   ]
                 },"clients": {
                   Row: {
-                    "billing_address": string | null,"billing_terms_days": number | null,"created_at": string,"created_by": string | null,"id": string,"legal_name": string | null,"name": string,"notes": string | null,"organisation_id": string,"rc_number": string | null,"state": string | null,"status": string,"tin": string | null,"updated_at": string
+                    "billing_address": string | null,"billing_terms_days": number | null,"created_at": string,"created_by": string | null,"deducts_wht": string,"id": string,"legal_name": string | null,"name": string,"notes": string | null,"organisation_id": string,"rc_number": string | null,"state": string | null,"status": string,"tin": string | null,"updated_at": string,"withholds_vat": boolean
                   }
                   ComputedFields: never
                   Insert: {
-                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"id"?: string,"legal_name"?: string | null,"name": string,"notes"?: string | null,"organisation_id": string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string
+                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"deducts_wht"?: string,"id"?: string,"legal_name"?: string | null,"name": string,"notes"?: string | null,"organisation_id": string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string,"withholds_vat"?: boolean
                   }
                   Update: {
-                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"id"?: string,"legal_name"?: string | null,"name"?: string,"notes"?: string | null,"organisation_id"?: string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string
+                    "billing_address"?: string | null,"billing_terms_days"?: number | null,"created_at"?: string,"created_by"?: string | null,"deducts_wht"?: string,"id"?: string,"legal_name"?: string | null,"name"?: string,"notes"?: string | null,"organisation_id"?: string,"rc_number"?: string | null,"state"?: string | null,"status"?: string,"tin"?: string | null,"updated_at"?: string,"withholds_vat"?: boolean
                   }
                   Relationships: [
                     {
       foreignKeyName: "clients_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"contract_sites": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"created_by": string | null,"id": string,"organisation_id": string,"site_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"organisation_id": string,"site_id": string
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"id"?: string,"organisation_id"?: string,"site_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "contract_sites_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "contract_sites_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "contract_sites_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"contracts": {
+                  Row: {
+                    "activated_at": string | null,"activated_by": string | null,"billing_frequency": string,"billing_terms_days": number | null,"client_id": string,"created_at": string,"created_by": string | null,"end_date": string | null,"end_reason": string | null,"ended_at": string | null,"go_live_date": string | null,"id": string,"name": string,"organisation_id": string,"reference": string,"sla": NonNullable<Json>,"start_date": string,"status": string,"type": string,"updated_at": string,"vat_applies": boolean
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "activated_at"?: string | null,"activated_by"?: string | null,"billing_frequency"?: string,"billing_terms_days"?: number | null,"client_id": string,"created_at"?: string,"created_by"?: string | null,"end_date"?: string | null,"end_reason"?: string | null,"ended_at"?: string | null,"go_live_date"?: string | null,"id"?: string,"name": string,"organisation_id": string,"reference": string,"sla"?: NonNullable<Json>,"start_date": string,"status"?: string,"type": string,"updated_at"?: string,"vat_applies": boolean
+                  }
+                  Update: {
+                    "activated_at"?: string | null,"activated_by"?: string | null,"billing_frequency"?: string,"billing_terms_days"?: number | null,"client_id"?: string,"created_at"?: string,"created_by"?: string | null,"end_date"?: string | null,"end_reason"?: string | null,"ended_at"?: string | null,"go_live_date"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"reference"?: string,"sla"?: NonNullable<Json>,"start_date"?: string,"status"?: string,"type"?: string,"updated_at"?: string,"vat_applies"?: boolean
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "contracts_client_fkey"
+      columns: ["organisation_id","client_id"]
+isOneToOne: false
+      referencedRelation: "clients"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "contracts_organisation_id_fkey"
       columns: ["organisation_id"]
 isOneToOne: false
       referencedRelation: "organisations"
@@ -341,6 +399,58 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "projects_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"rate_card_lines": {
+                  Row: {
+                    "band": string,"created_at": string,"created_by": string | null,"currency": string,"id": string,"organisation_id": string,"ot_multiplier_bps": number | null,"ot_rate_kobo": number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"service_type": string,"sort_order": number,"unit": string,"wht_rate_bps": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "band"?: string,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"id"?: string,"organisation_id": string,"ot_multiplier_bps"?: number | null,"ot_rate_kobo"?: number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"service_type"?: string,"sort_order"?: number,"unit": string,"wht_rate_bps": number
+                  }
+                  Update: {
+                    "band"?: string,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"id"?: string,"organisation_id"?: string,"ot_multiplier_bps"?: number | null,"ot_rate_kobo"?: number | null,"rate_card_id"?: string,"rate_kobo"?: number,"role"?: string,"service_type"?: string,"sort_order"?: number,"unit"?: string,"wht_rate_bps"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "rate_card_lines_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "rate_card_lines_rate_card_fkey"
+      columns: ["organisation_id","rate_card_id"]
+isOneToOne: false
+      referencedRelation: "rate_cards"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"rate_cards": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"created_by": string | null,"effective_from": string,"effective_to": string | null,"id": string,"note": string | null,"organisation_id": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"effective_from": string,"effective_to"?: string | null,"id"?: string,"note"?: string | null,"organisation_id": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"effective_from"?: string,"effective_to"?: string | null,"id"?: string,"note"?: string | null,"organisation_id"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "rate_cards_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "rate_cards_organisation_id_fkey"
       columns: ["organisation_id"]
 isOneToOne: false
       referencedRelation: "organisations"
@@ -602,6 +712,9 @@ isOneToOne: false
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
+"add_rate_card_version":
+{ Args: { "p_contract_id": string,"p_effective_from": string,"p_lines": Json,"p_note"?: string,"p_organisation_id": string }; Returns: string
+                           },
 "apply_due_bank_detail_changes":
 { Args: { "p_organisation_id": string }; Returns: number
                            },
@@ -614,6 +727,9 @@ isOneToOne: false
 "cancel_pay_rate":
 { Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
                            },
+"cancel_rate_card_version":
+{ Args: { "p_organisation_id": string,"p_rate_card_id": string }; Returns: undefined
+                           },
 "change_member_role":
 { Args: { "p_membership_id": string,"p_organisation_id": string,"p_role": Database["public"]['Enums']["membership_role"] }; Returns: {
               "member_email": string,"member_name": string,"member_user_id": string,"new_role": Database["public"]['Enums']["membership_role"],"old_role": Database["public"]['Enums']["membership_role"]
@@ -624,7 +740,7 @@ isOneToOne: false
                            },
 "client_billing":
 { Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
-              "billing_address": string,"billing_terms_days": number,"client_id": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string
+              "billing_address": string,"billing_terms_days": number,"client_id": string,"deducts_wht": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string,"withholds_vat": boolean
             }[]
                            },
 "commit_import_batch":
@@ -635,6 +751,9 @@ isOneToOne: false
                            },
 "create_client":
 { Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
+                           },
+"create_contract":
+{ Args: { "p_contract": Json,"p_organisation_id": string,"p_site_ids"?: (string)[] }; Returns: string
                            },
 "create_first_organisation":
 { Args: { "p_name": string }; Returns: string
@@ -729,11 +848,17 @@ isOneToOne: false
 "rotate_checkpoint_qr":
 { Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"save_draft_rate_card":
+{ Args: { "p_contract_id": string,"p_effective_from": string,"p_lines": Json,"p_note"?: string,"p_organisation_id": string }; Returns: string
+                           },
 "save_import_check":
 { Args: { "p_batch_id": string,"p_check": Json,"p_final": boolean,"p_organisation_id": string,"p_rows": Json }; Returns: undefined
                            },
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
+                           },
+"set_client_tax_settings":
+{ Args: { "p_client_id": string,"p_deducts_wht": string,"p_organisation_id": string,"p_reason"?: string,"p_withholds_vat": boolean }; Returns: undefined
                            },
 "site_checkpoint_tokens":
 { Args: { "p_organisation_id": string,"p_site_id": string }; Returns: {
@@ -752,6 +877,9 @@ isOneToOne: false
                            },
 "unlock_worker_sign_in":
 { Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: string
+                           },
+"update_draft_contract":
+{ Args: { "p_contract": Json,"p_contract_id": string,"p_organisation_id": string,"p_site_ids"?: (string)[] }; Returns: string
                            },
 "withdraw_org_bank_account":
 { Args: { "p_id": string,"p_organisation_id": string }; Returns: string
