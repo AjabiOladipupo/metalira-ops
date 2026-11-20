@@ -126,9 +126,15 @@ const LAGOS = "Africa/Lagos";
  */
 function ShiftToday({ clock, now }: { clock: ClockContext; now: number }) {
   const shift =
-    currentShift(clock.shifts, now) ?? clock.shifts.find((s) => Date.parse(s.startsAt) > now) ?? null;
+    currentShift(clock.shifts, now) ??
+    clock.shifts.find((s) => Date.parse(s.startsAt) > now) ??
+    null;
   const lastPunch = clock.lastPunch
-    ? { kind: clock.lastPunch.kind, recordedAt: clock.lastPunch.recordedAt, open: clock.lastPunch.open }
+    ? {
+        kind: clock.lastPunch.kind,
+        recordedAt: clock.lastPunch.recordedAt,
+        open: clock.lastPunch.open,
+      }
     : null;
   return (
     <>

@@ -1,4 +1,10 @@
-import type { AnyQueueItem, QueueOwner, QueueSender, SendResult, SendTiming } from "@/lib/offline/types";
+import type {
+  AnyQueueItem,
+  QueueOwner,
+  QueueSender,
+  SendResult,
+  SendTiming,
+} from "@/lib/offline/types";
 
 import { isPunchQueueKind } from "./clock";
 import { sendOutcome, type RecordPunchResult, type UploadSelfieResult } from "./codes";

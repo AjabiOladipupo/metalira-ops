@@ -371,10 +371,10 @@ export const workerMessages = {
       "You haven't agreed to share your location, so your supervisor clocks you in and out. You can agree at any time.",
     shiftsOff: "Clock-in is switched off for your company. Ask your supervisor.",
     left: "You have left this company, so you can't clock in.",
-    noQueue: "This phone can't save punches (private browsing or storage blocked). Use a normal browser window.",
+    noQueue:
+      "This phone can't save punches (private browsing or storage blocked). Use a normal browser window.",
     failed: "That punch wasn't saved. Try again.",
-    refused:
-      "Your company's system didn't accept this punch. Ask your supervisor to clock you in.",
+    refused: "Your company's system didn't accept this punch. Ask your supervisor to clock you in.",
     homeButtonIn: "Clock in",
     homeButtonOut: "Clock out",
     homeClockedInAt: (time: string) => `Clocked in at ${time}`,

@@ -294,19 +294,37 @@ describe("when a correction is allowed", () => {
     );
     expect(rows[0]!.has).toBe(false);
 
-    // A Phase 3 punches table appears without the hook being updated: corrections fail closed.
+    // Slice 3.5: a punch is a work record.
+    const punched = await addWorker();
+    await db.query(
+      `insert into public.punches (
+         organisation_id, worker_id, kind, recorded_by_user, client_event_id, device_time,
+         recorded_at, time_source, clock_drift_seconds, geofence_result, payload_hash
+       ) values ($1, $2, 'in', $3, gen_random_uuid(), now(), now(), 'elapsed', 0, 'unknown', md5('x'))`,
+      [owner.orgId, punched.id, owner.id],
+    );
+    const { rows: withPunch } = await db.query<{ has: boolean }>(
+      "select private.worker_has_work_records($1, $2) as has",
+      [owner.orgId, punched.id],
+    );
+    expect(withPunch[0]!.has).toBe(true);
+    expect((await raise(staff.hr.client, punched.id, `PUNCHED-${counter}`)).error?.code).toBe(
+      "MLSI6",
+    );
+
+    // A Phase 4 timesheets table appears without the hook being updated: corrections fail closed.
     const worker = await addWorker();
-    await db.query("create table public.punches (id uuid primary key)");
+    await db.query("create table public.timesheets (id uuid primary key)");
     try {
       const { rows: closed } = await db.query<{ has: boolean }>(
         "select private.worker_has_work_records($1, $2) as has",
         [owner.orgId, worker.id],
       );
       expect(closed[0]!.has).toBe(true);
-      const { error } = await raise(staff.hr.client, worker.id, `PUNCHED-${counter}`);
+      const { error } = await raise(staff.hr.client, worker.id, `TIMESHEET-${counter}`);
       expect(error?.code).toBe("MLSI6");
     } finally {
-      await db.query("drop table public.punches");
+      await db.query("drop table public.timesheets");
     }
   });
 

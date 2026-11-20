@@ -25,8 +25,7 @@ const SIGNED_URL_SECONDS = 60;
 export const selfieLinkSchema = z.object({ punchId: z.uuid() });
 
 export type SelfieLinkResult =
-  | { ok: true; url: string }
-  | { ok: false; reason: "forbidden" | "not_found" | "deleted" };
+  { ok: true; url: string } | { ok: false; reason: "forbidden" | "not_found" | "deleted" };
 
 export async function runPunchSelfieLink(input: unknown): Promise<SelfieLinkResult> {
   const parsed = selfieLinkSchema.safeParse(input);

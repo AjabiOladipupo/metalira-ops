@@ -23,7 +23,10 @@ async function own(): Promise<OwnResult> {
       return { ok: false, code: "signed_out" };
     }
     if (error instanceof MutationError) return { ok: false, code: "not_worker" };
-    console.error("workforce.punch_session_failed:", error instanceof Error ? error.name : "unknown");
+    console.error(
+      "workforce.punch_session_failed:",
+      error instanceof Error ? error.name : "unknown",
+    );
     return { ok: false, code: "signed_out" };
   }
 }

@@ -73,7 +73,10 @@ function Steps({ stage, withSelfie }: { stage: Stage["name"]; withSelfie: boolea
           aria-current={i === Math.min(reached, order.length - 1) ? "step" : undefined}
         >
           <span
-            className={cn("h-1 rounded-full", i < Math.max(reached, 1) ? "bg-foreground" : "bg-line")}
+            className={cn(
+              "h-1 rounded-full",
+              i < Math.max(reached, 1) ? "bg-foreground" : "bg-line",
+            )}
           />
           <span className="text-xs text-fg-muted">{label}</span>
         </li>
@@ -97,7 +100,8 @@ function locate(): Promise<{ fix: Fix } | { failure: "denied" | "timeout" }> {
             accuracy: Math.max(0, Math.round(position.coords.accuracy)),
           },
         }),
-      (error) => resolve({ failure: error.code === error.PERMISSION_DENIED ? "denied" : "timeout" }),
+      (error) =>
+        resolve({ failure: error.code === error.PERMISSION_DENIED ? "denied" : "timeout" }),
       { enableHighAccuracy: true, timeout: 20_000, maximumAge: 0 },
     );
   });
@@ -116,7 +120,9 @@ function InsideMap({ preview, site }: { preview: SitePreview; site: ClockSite })
       <span className="absolute top-1/2 left-1/2 size-3 -translate-1/2 rounded-[3px] bg-fg-muted" />
       <span
         className="absolute top-1/2 left-1/2 size-[22px] rounded-full border-[3px] border-background bg-foreground"
-        style={{ transform: `translate(calc(-50% + ${ratio * 60}px), calc(-50% - ${ratio * 40}px))` }}
+        style={{
+          transform: `translate(calc(-50% + ${ratio * 60}px), calc(-50% - ${ratio * 40}px))`,
+        }}
       />
     </div>
   );
@@ -190,17 +196,14 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
   const state = useClockState(lastPunch);
   const queue = useActiveQueue();
   const [stage, setStage] = useState<Stage>({ name: "locating" });
-  const [mode, setMode] = useState<"in" | "out" | null>(null);
+  // Fixed once the worker moves past the location step, so a punch sent mid-flow can't flip it.
+  const [lockedMode, setLockedMode] = useState<"in" | "out" | null>(null);
+  const mode = lockedMode ?? (state.ready ? (state.clockedIn ? "out" : "in") : null);
   const [reason, setReason] = useState<OutsideReason | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const run = useRef(0);
-
-  // The mode is fixed once the phone's queue is read, so a punch sent mid-flow can't flip it.
-  useEffect(() => {
-    if (mode === null && state.ready) setMode(state.clockedIn ? "out" : "in");
-  }, [mode, state.ready, state.clockedIn]);
 
   const findLocation = useCallback(async () => {
     const attempt = ++run.current;
@@ -225,14 +228,18 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
   const fix = stage.name === "located" ? stage.fix : null;
   const preferred = shiftSiteId ?? (kind === "out" ? (lastPunch?.siteId ?? null) : null);
   const site = pickSite(sites, preferred, fix ? { lat: fix.lat, lng: fix.lng } : null);
-  const preview = site && fix ? previewSite(site, { lat: fix.lat, lng: fix.lng }, fix.accuracy) : null;
+  const preview =
+    site && fix ? previewSite(site, { lat: fix.lat, lng: fix.lng }, fix.accuracy) : null;
   const away = preview?.result === "outside" || preview?.result === "near";
   const noteError = reason === "other" ? noteProblem(note) : null;
 
   // Kept from the location step for the selfie step and the save.
-  const located = useRef<{ fix: Fix | null; siteId: string | null; away: boolean; unknown: boolean }>(
-    { fix: null, siteId: null, away: false, unknown: true },
-  );
+  const located = useRef<{
+    fix: Fix | null;
+    siteId: string | null;
+    away: boolean;
+    unknown: boolean;
+  }>({ fix: null, siteId: null, away: false, unknown: true });
 
   async function save(photo: Blob | null) {
     if (!queue) {
@@ -266,7 +273,13 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
       else if (photo) doneNote = copy.noteInsideSelfie;
       else if (withSelfie) doneNote = copy.noteNoSelfie;
       else doneNote = copy.noteInside;
-      setStage({ name: "done", id: item.client_event_id, at: item.device_time, kind, note: doneNote });
+      setStage({
+        name: "done",
+        id: item.client_event_id,
+        at: item.device_time,
+        kind,
+        note: doneNote,
+      });
     } catch {
       setFailed(copy.failed);
     } finally {
@@ -275,6 +288,7 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
   }
 
   function next() {
+    setLockedMode(kind);
     located.current = {
       fix,
       siteId: site?.id ?? null,
@@ -285,7 +299,11 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
     else void save(null);
   }
 
-  const proceedLabel = withSelfie ? copy.takeSelfie : kind === "in" ? copy.clockInNow : copy.clockOutNow;
+  const proceedLabel = withSelfie
+    ? copy.takeSelfie
+    : kind === "in"
+      ? copy.clockInNow
+      : copy.clockOutNow;
 
   return (
     <>
@@ -331,10 +349,17 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
           </div>
         ) : null}
 
-        {stage.name === "located" && mode !== null && fix && (!site || !preview || preview.result === "unknown") ? (
+        {stage.name === "located" &&
+        mode !== null &&
+        fix &&
+        (!site || !preview || preview.result === "unknown") ? (
           <div className="flex flex-1 flex-col gap-4">
-            <h1 className="m-0 font-display text-[31px] leading-[1.15] font-bold">{copy.noSiteTitle}</h1>
-            <p className="m-0 text-base">{site ? copy.noGeofenceLine(site.name) : copy.noSiteLine}</p>
+            <h1 className="m-0 font-display text-[31px] leading-[1.15] font-bold">
+              {copy.noSiteTitle}
+            </h1>
+            <p className="m-0 text-base">
+              {site ? copy.noGeofenceLine(site.name) : copy.noSiteLine}
+            </p>
             <div className="mt-auto flex flex-col gap-2.5">
               <Button
                 type="button"
@@ -348,7 +373,11 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
           </div>
         ) : null}
 
-        {stage.name === "located" && mode !== null && fix && site && preview?.result === "inside" ? (
+        {stage.name === "located" &&
+        mode !== null &&
+        fix &&
+        site &&
+        preview?.result === "inside" ? (
           <div className="flex flex-1 flex-col gap-4">
             <InsideMap preview={preview} site={site} />
             <h1 className="m-0 font-display text-[31px] leading-[1.15] font-bold">
@@ -378,7 +407,9 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
             <h1 className="m-0 font-display text-[31px] leading-[1.15] font-bold">
               {copy.distance(formatDistance(preview?.distanceM ?? 0))}
             </h1>
-            <p className="m-0 text-base">{kind === "in" ? copy.outsideLine : copy.outsideLineOut}</p>
+            <p className="m-0 text-base">
+              {kind === "in" ? copy.outsideLine : copy.outsideLineOut}
+            </p>
             <div role="group" aria-label={copy.reasonGroup} className="flex flex-col gap-2">
               {OUTSIDE_REASONS.map((value) => (
                 <button
@@ -436,7 +467,11 @@ export function ClockFlow({ selfieConsent, sites, shiftSiteId, lastPunch }: Cloc
         ) : null}
 
         {stage.name === "selfie" ? (
-          <SelfieCamera busy={busy} onPhoto={(photo) => void save(photo)} onSkip={() => void save(null)} />
+          <SelfieCamera
+            busy={busy}
+            onPhoto={(photo) => void save(photo)}
+            onSkip={() => void save(null)}
+          />
         ) : null}
 
         {stage.name === "done" ? <DoneScreen stage={stage} /> : null}

@@ -29,7 +29,6 @@ export function noteProblem(note: string): string | null {
   if (text.length === 0) return null;
   if (text.length > NOTE_MAX) return `Keep it to ${NOTE_MAX} characters.`;
   // The database refuses the same characters (punch_note_ok); line breaks are not allowed.
-  // eslint-disable-next-line no-control-regex
   if (/[\u0001-\u001f\u007f-\u009f<>]/.test(text)) return "Use plain words only.";
   if (/(:\/\/|www\.)/i.test(text)) return "Leave out web addresses.";
   if (hasPersonalNumberRun(text)) return "Leave out phone and ID numbers.";

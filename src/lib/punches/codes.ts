@@ -84,8 +84,7 @@ export type RecordPunchResult =
 
 /** What the selfie upload answers. */
 export type UploadSelfieResult =
-  | { ok: true }
-  | { ok: false; code: "photo_invalid" | "photo_refused" | PunchErrorCode };
+  { ok: true } | { ok: false; code: "photo_invalid" | "photo_refused" | PunchErrorCode };
 
 /**
  * The queue's fixed code for a server code (src/lib/offline/types.ts QUEUE_ERROR_CODES). The

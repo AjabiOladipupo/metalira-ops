@@ -35,6 +35,8 @@ function refusal(error: unknown): WorkerActionState {
 function refresh(): void {
   revalidatePath("/m/me/consent");
   revalidatePath("/m/me");
+  // The clock screen shows the consent notices first (slice 3.5).
+  revalidatePath("/m/clock");
 }
 
 /** "I agree" on a notice. */

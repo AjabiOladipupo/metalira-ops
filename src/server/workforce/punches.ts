@@ -147,7 +147,9 @@ export async function runUploadSelfie(
   // The worker's own punch, read under RLS with their session.
   const { data: punch, error } = await ctx.supabase
     .from("punches")
-    .select("id, organisation_id, worker_id, kind, selfie_expected, selfie_path, selfie_deleted_at, created_at")
+    .select(
+      "id, organisation_id, worker_id, kind, selfie_expected, selfie_path, selfie_deleted_at, created_at",
+    )
     .eq("id", parsed.data.punchId)
     .eq("worker_id", ctx.workerId)
     .eq("organisation_id", ctx.organisationId)
@@ -188,7 +190,10 @@ export async function runUploadSelfie(
     const refused = attached.error.code === "MLPS1" || attached.error.code === "MLPS2";
     if (refused) {
       await admin.storage.from(PUNCH_PHOTOS_BUCKET).remove([path]);
-      return { ok: false, code: attached.error.code === "MLPS2" ? "photo_invalid" : "photo_refused" };
+      return {
+        ok: false,
+        code: attached.error.code === "MLPS2" ? "photo_invalid" : "photo_refused",
+      };
     }
     console.error("workforce.selfie_failed:", attached.error.code ?? "unknown");
     return { ok: false, code: "photo_failed" };

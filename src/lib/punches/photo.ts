@@ -28,8 +28,13 @@ export async function compressSelfie(
   for (const quality of [0.6, 0.45, 0.3]) {
     let blob = await toBlob(canvas, "image/webp", quality);
     // A browser without a WebP encoder hands back PNG: use JPEG instead.
-    if (!blob || blob.type !== "image/webp") blob = await toBlob(canvas, "image/jpeg", quality + 0.1);
-    if (blob && (blob.type === "image/webp" || blob.type === "image/jpeg") && blob.size <= MAX_SELFIE_BYTES) {
+    if (!blob || blob.type !== "image/webp")
+      blob = await toBlob(canvas, "image/jpeg", quality + 0.1);
+    if (
+      blob &&
+      (blob.type === "image/webp" || blob.type === "image/jpeg") &&
+      blob.size <= MAX_SELFIE_BYTES
+    ) {
       return blob;
     }
   }
