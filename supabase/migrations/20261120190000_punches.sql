@@ -414,29 +414,19 @@ grant select (
 -- 4. Module switch (slice 3.0's organisations.shifts_enabled)
 -- ---------------------------------------------------------------------------
 
--- Whether the company has Shifts on. Read dynamically so this migration applies before or after
--- slice 3.0's column; a company without the column has Shifts on.
+-- Whether the company has Shifts on (slice 3.0's switch). Off: punches are refused (MLPU4), a
+-- queued backlog included (3.0 review L2).
 create function private.org_shifts_enabled(p_organisation_id uuid)
 returns boolean
-language plpgsql
+language sql
 stable
 security definer
 set search_path = ''
 as $$
-declare
-  v_enabled boolean;
-begin
-  if not exists (
-    select 1 from information_schema.columns c
-    where c.table_schema = 'public' and c.table_name = 'organisations'
-      and c.column_name = 'shifts_enabled'
-  ) then
-    return true;
-  end if;
-  execute 'select o.shifts_enabled from public.organisations o where o.id = $1'
-    into v_enabled using p_organisation_id;
-  return coalesce(v_enabled, true);
-end;
+  select coalesce(
+    (select o.shifts_enabled from public.organisations o where o.id = p_organisation_id),
+    false
+  )
 $$;
 
 revoke all on function private.org_shifts_enabled(uuid) from public, anon, authenticated;

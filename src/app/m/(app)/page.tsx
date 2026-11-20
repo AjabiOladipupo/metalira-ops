@@ -10,9 +10,13 @@ import { ThemeButton } from "@/components/theme/theme-button";
 import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { initials } from "@/lib/people";
+import { timeIn } from "@/lib/roster";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
+import { currentShift, loadClockContext, type ClockContext } from "@/server/workforce/clock-data";
 
+import { ClockButton } from "../_components/clock/clock-button";
 import { InboxLink } from "../_components/inbox-link";
 import { InstallCard } from "../_components/offline/install-card";
 import { WorkerSignOutForm } from "../_components/offline/sign-out-form";
@@ -86,23 +90,14 @@ async function HomeBody() {
   const lookup = await lookupWorkerPageSession();
   const shifts = lookup.type !== "worker" || lookup.session.shiftsEnabled;
   const tiles = shifts ? TILES : TILES.filter((t) => t.href !== "/m/shifts");
+  const now = new Date();
+  const clock =
+    shifts && lookup.type === "worker"
+      ? await loadClockContext(await createServerSupabase(), lookup.session.organisationId, now)
+      : null;
   return (
     <>
-      {shifts ? (
-        <section
-          aria-labelledby="shift-today"
-          className="flex items-center gap-3 rounded-xl border border-line px-4 py-3.5"
-        >
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <h2 id="shift-today" className="m-0 type-label text-fg-muted">
-              {copy.shiftLabel}
-            </h2>
-            <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
-            <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
-          </div>
-          <Illustration name="clock-in" size="worker" decorative />
-        </section>
-      ) : null}
+      {clock ? <ShiftToday clock={clock} now={now.getTime()} /> : null}
 
       <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
         {tiles.map(({ href, label, Icon }) => (
@@ -119,6 +114,55 @@ async function HomeBody() {
           </Link>
         ))}
       </nav>
+    </>
+  );
+}
+
+const LAGOS = "Africa/Lagos";
+
+/**
+ * "Your shift today" and the big round Clock in button (WkHome board, slice 3.5): the shift a
+ * punch now would belong to, else the next one in the coming 24 hours.
+ */
+function ShiftToday({ clock, now }: { clock: ClockContext; now: number }) {
+  const shift =
+    currentShift(clock.shifts, now) ?? clock.shifts.find((s) => Date.parse(s.startsAt) > now) ?? null;
+  const lastPunch = clock.lastPunch
+    ? { kind: clock.lastPunch.kind, recordedAt: clock.lastPunch.recordedAt, open: clock.lastPunch.open }
+    : null;
+  return (
+    <>
+      <section
+        aria-labelledby="shift-today"
+        data-testid="shift-today"
+        className="flex items-center gap-3 rounded-xl border border-line px-4 py-3.5"
+      >
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <h2 id="shift-today" className="m-0 type-label text-fg-muted">
+            {copy.shiftLabel}
+          </h2>
+          {shift ? (
+            <>
+              <p className="m-0 font-display text-[25px] leading-tight font-bold">
+                {workerMessages.clock.homeShiftHours(
+                  timeIn(shift.startsAt, LAGOS),
+                  timeIn(shift.endsAt, LAGOS),
+                )}
+              </p>
+              <p className="m-0 text-base">
+                {workerMessages.clock.homeShiftWhere(shift.postName, shift.siteName)}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
+              <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
+            </>
+          )}
+        </div>
+        {shift ? null : <Illustration name="clock-in" size="worker" decorative />}
+      </section>
+      {clock.left ? null : <ClockButton lastPunch={lastPunch} />}
     </>
   );
 }

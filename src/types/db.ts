@@ -591,6 +591,50 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"punches": {
+                  Row: {
+                    "accuracy_m": number | null,"client_event_id": string,"clock_drift_seconds": number,"created_at": string,"device_time": string,"distance_m": number | null,"flags": (string)[],"geofence_result": string,"id": string,"kind": string,"location": unknown,"organisation_id": string,"outside_note": string | null,"outside_reason": string | null,"payload_hash": string,"received_at": string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at": string | null,"selfie_expected": boolean,"selfie_path": string | null,"selfie_uploaded_at": string | null,"shift_assignment_id": string | null,"shift_id": string | null,"site_id": string | null,"source": string,"time_source": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "accuracy_m"?: number | null,"client_event_id": string,"clock_drift_seconds": number,"created_at"?: string,"device_time": string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result": string,"id"?: string,"kind": string,"location"?: unknown,"organisation_id": string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash": string,"received_at"?: string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source": string,"worker_id": string
+                  }
+                  Update: {
+                    "accuracy_m"?: number | null,"client_event_id"?: string,"clock_drift_seconds"?: number,"created_at"?: string,"device_time"?: string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result"?: string,"id"?: string,"kind"?: string,"location"?: unknown,"organisation_id"?: string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash"?: string,"received_at"?: string,"recorded_at"?: string,"recorded_by_user"?: string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "punches_assignment_fkey"
+      columns: ["organisation_id","shift_assignment_id"]
+isOneToOne: false
+      referencedRelation: "shift_assignments"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "punches_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "punches_shift_fkey"
+      columns: ["organisation_id","shift_id"]
+isOneToOne: false
+      referencedRelation: "shifts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "punches_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "punches_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"rate_card_lines": {
                   Row: {
                     "band": string,"created_at": string,"created_by": string | null,"currency": string,"id": string,"organisation_id": string,"ot_multiplier_bps": number | null,"ot_rate_kobo": number | null,"rate_card_id": string,"rate_kobo": number,"role": string,"service_type": string,"sort_order": number,"unit": string,"wht_rate_bps": number
@@ -1038,6 +1082,9 @@ isOneToOne: false
 "assign_worker_to_shift":
 { Args: { "p_organisation_id": string,"p_post_id": string,"p_shift_date": string,"p_worker_id": string }; Returns: Json
                            },
+"attach_punch_selfie":
+{ Args: { "p_actor": string,"p_path": string,"p_punch_id": string }; Returns: undefined
+                           },
 "begin_bank_account_lookup":
 { Args: { "p_bank_account_digest": string,"p_bank_account_last4": string,"p_bank_code": string,"p_client_ip"?: string,"p_organisation_id": string,"p_purpose": Database["public"]['Enums']["bank_lookup_purpose"],"p_user_id": string,"p_worker_id": string }; Returns: string
                            },
@@ -1066,6 +1113,9 @@ isOneToOne: false
                            },
 "claim_inbox_email":
 { Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
+                           },
+"clear_punch_selfie":
+{ Args: { "p_punch_id": string }; Returns: boolean
                            },
 "client_billing":
 { Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
@@ -1154,6 +1204,9 @@ isOneToOne: false
 "move_site_checkpoint":
 { Args: { "p_checkpoint_id": string,"p_direction": string,"p_organisation_id": string }; Returns: number
                            },
+"my_clock_context":
+{ Args: { "p_organisation_id": string }; Returns: Json
+                           },
 "my_line_manager":
 { Args: { "p_organisation_id": string }; Returns: {
               "has_line_manager": boolean,"name": string
@@ -1168,6 +1221,22 @@ isOneToOne: false
 { Args: { "p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
+                           },
+"punch_locations":
+{ Args: { "p_organisation_id": string,"p_punch_ids": (string)[] }; Returns: {
+              "accuracy_m": number,"latitude": number,"longitude": number,"punch_id": string
+            }[]
+                           },
+"punch_photo_orphans":
+{ Args: { "p_limit"?: number }; Returns: string[]
+                           },
+"punch_selfies_due":
+{ Args: { "p_limit"?: number }; Returns: {
+              "punch_id": string,"selfie_path": string
+            }[]
+                           },
+"record_punch":
+{ Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json
                            },
 "reject_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
