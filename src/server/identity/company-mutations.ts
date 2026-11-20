@@ -80,18 +80,6 @@ export const saveBusinessSpec = {
   roles: COMPANY_ROLES,
   run: async (ctx) => {
     const { data } = ctx;
-    // What the business does (slice 3.0) goes through its own function: while setup is
-    // unfinished, a change of type also sets the module switches to the type's defaults.
-    const { error } = await ctx.supabase.rpc("set_company_business_type", {
-      p_organisation_id: ctx.organisationId,
-      p_business_type: data.businessType,
-    });
-    if (error) {
-      if (error.code === "42501") {
-        throw new MutationError("forbidden", "Your role can't make this change.");
-      }
-      throw new Error(`Could not save the business type: ${error.message}`);
-    }
     await updateOrganisation(ctx, {
       // The trading name is the name the app shows (company switcher, emails).
       ...(data.tradingName ? { name: data.tradingName } : {}),
@@ -109,6 +97,19 @@ export const saveBusinessSpec = {
         : {}),
       ...(data.payDay !== undefined ? { pay_day: data.payDay } : {}),
     });
+    // What the business does (slice 3.0) goes through its own function: while setup is
+    // unfinished, a change of type also sets the module switches to the type's defaults. It runs
+    // last, so a save refused above never changes the type or the switches.
+    const { error } = await ctx.supabase.rpc("set_company_business_type", {
+      p_organisation_id: ctx.organisationId,
+      p_business_type: data.businessType,
+    });
+    if (error) {
+      if (error.code === "42501") {
+        throw new MutationError("forbidden", "Your role can't make this change.");
+      }
+      throw new Error(`Could not save the business type: ${error.message}`);
+    }
     if (data.advance === "yes") await reachStep(ctx, 3);
   },
 } satisfies MutationSpec<typeof businessSchema, void>;

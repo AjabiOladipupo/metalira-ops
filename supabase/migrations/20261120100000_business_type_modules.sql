@@ -15,6 +15,12 @@
 --    role (owner and admin included) can skip the functions through the Data API. The
 --    organisations_update policy already limits direct updates to owner and admin.
 --
+-- Audit: each change writes two audit_log rows on purpose. The organisations_audit row trigger
+-- records the generic row change (organisations.update with the full before and after), as for
+-- every write to the table; the functions also log a named event (company.modules_changed,
+-- company.business_type_set) with just the switches, so the log and later Lira read the intent
+-- without diffing whole rows.
+--
 -- Turning a module off never deletes or changes data: the pages are hidden and refused, and
 -- everything shows again when it is turned back on.
 

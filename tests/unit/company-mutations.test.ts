@@ -171,6 +171,21 @@ describe("company setup actions for an owner", () => {
     expect(update).not.toHaveProperty("pay_day");
   });
 
+  it("sets the business type last, so a refused save changes neither it nor the switches", async () => {
+    const fake = fakeClient({ rows: [] });
+    await expect(
+      runMutation(ctx("owner", fake.client), saveBusinessSpec, {
+        ...BUSINESS,
+        businessType: "services",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(fake.rpc).not.toHaveBeenCalled();
+
+    const ok = fakeClient();
+    await runMutation(ctx("owner", ok.client), saveBusinessSpec, BUSINESS);
+    expect(ok.from.mock.invocationCallOrder[0]).toBeLessThan(ok.rpc.mock.invocationCallOrder[0]!);
+  });
+
   it("requires the pay days from a workforce business", async () => {
     const fake = fakeClient();
     const rest: Partial<typeof BUSINESS> = { ...BUSINESS };
