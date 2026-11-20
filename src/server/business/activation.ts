@@ -69,7 +69,9 @@ export interface EndResult {
   changed: boolean;
   postsClosed: number;
   requirementsClosed: number;
+  requirementsCancelled: number;
   rateCardsClosed: number;
+  rateCardsCancelled: number;
 }
 
 /** Database refusals in plain English; an activation refusal lists every missing item by code. */
@@ -156,7 +158,9 @@ export const endContractSpec: MutationSpec<typeof endContractSchema, EndResult> 
       changed: r.changed === true,
       postsClosed: num(r.posts_closed),
       requirementsClosed: num(r.requirements_closed),
+      requirementsCancelled: num(r.requirements_cancelled),
       rateCardsClosed: num(r.rate_cards_closed),
+      rateCardsCancelled: num(r.rate_cards_cancelled),
     };
   },
 };

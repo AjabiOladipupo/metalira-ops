@@ -206,10 +206,10 @@ begin
   end if;
 
   if (
-    new.organisation_id, new.contract_id, new.site_id, new.headcount_requirement_id, new.name,
+    new.id, new.organisation_id, new.contract_id, new.site_id, new.headcount_requirement_id, new.name,
     new.role, new.band, new.unit, new.opened_on, new.created_at, new.created_by
   ) is distinct from (
-    old.organisation_id, old.contract_id, old.site_id, old.headcount_requirement_id, old.name,
+    old.id, old.organisation_id, old.contract_id, old.site_id, old.headcount_requirement_id, old.name,
     old.role, old.band, old.unit, old.opened_on, old.created_at, old.created_by
   ) then
     raise exception 'A post never changes. Close it and add a new one.' using errcode = 'MLPO1';
@@ -274,11 +274,11 @@ begin
   end if;
 
   if (
-    new.organisation_id, new.post_id, new.contract_id, new.site_id, new.effective_from,
+    new.id, new.organisation_id, new.post_id, new.contract_id, new.site_id, new.effective_from,
     new.days_of_week, new.start_time, new.end_time, new.required_count, new.created_at,
     new.created_by
   ) is distinct from (
-    old.organisation_id, old.post_id, old.contract_id, old.site_id, old.effective_from,
+    old.id, old.organisation_id, old.post_id, old.contract_id, old.site_id, old.effective_from,
     old.days_of_week, old.start_time, old.end_time, old.required_count, old.created_at,
     old.created_by
   ) then
@@ -335,8 +335,8 @@ grant select on table public.roster_requirements to authenticated;
 -- 5. Rate cards follow the posts (replaces the 2.4 placeholder)
 -- ---------------------------------------------------------------------------
 
--- The rate keys of the contract's posts that are open today or later: a rate change must keep
--- every one of them (add_rate_card_version, MLRC5).
+-- The rate keys of the contract's posts that are open today or later, on contracts priced per
+-- row: a rate change must keep every one of them (add_rate_card_version, MLRC5).
 create or replace function private.rate_card_open_post_keys(p_organisation_id uuid, p_contract_id uuid)
 returns table (role text, band text, unit text)
 language sql
@@ -345,8 +345,12 @@ set search_path = ''
 as $$
   select distinct p.role, p.band, p.unit
   from public.posts p
+  join public.contracts c on c.id = p.contract_id and c.organisation_id = p.organisation_id
   where p.organisation_id = p_organisation_id
     and p.contract_id = p_contract_id
+    -- Only per-row priced contracts (as headcount_unpriced_rows): fixed_monthly and per_job
+    -- bill an agreed amount, so their posts need no rate line.
+    and c.type in ('manned_post', 'per_visit')
     and (p.closed_on is null or p.closed_on >= private.org_today(p_organisation_id))
 $$;
 
@@ -409,7 +413,10 @@ begin
   v_ending := old.status = 'active'
     and coalesce(current_setting('metalira.contract_ending', true), '') = new.id::text
     and new.end_date is not null
-    and (old.end_date is null or new.end_date <= old.end_date);
+    and (old.end_date is null or new.end_date <= old.end_date)
+    -- end_reason has no column grant, so only end_contract can satisfy this as well.
+    and old.end_reason is null
+    and new.end_reason is not null;
 
   if old.status <> 'draft' and (
     new.name, new.type, new.start_date, new.billing_frequency,
@@ -436,8 +443,8 @@ revoke all on function private.contracts_before_write() from public, anon, authe
 -- ---------------------------------------------------------------------------
 
 -- One row per post and date from p_from to p_to (62 days at most): the requirement in force
--- that day, when the weekday is one of its days, the post is open that day, and the contract is
--- active and on or before its end date. A shift belongs to the day it starts; times are the
+-- that day, when the weekday is one of its days, the post is open that day, and the contract has
+-- gone live and the day is on or before its end date. A shift belongs to the day it starts; times are the
 -- company's wall clock in its time zone, so a night shift ends the next morning. Read by every
 -- manager role of the organisation (as posts are); anyone else gets no rows.
 create function private.required_shifts(p_organisation_id uuid, p_from date, p_to date)
@@ -498,7 +505,9 @@ begin
     and (p.closed_on is null or p.closed_on >= d.day)
   join public.contracts c
     on c.id = p.contract_id
-    and c.status = 'active'
+    -- Ended contracts too: the dates bound them (posts and requirements close on the end
+    -- date), so a night shift on the last day and past days stay visible after the job runs.
+    and c.status in ('active', 'ended')
     and (c.go_live_date is null or c.go_live_date <= d.day)
     and (c.end_date is null or c.end_date >= d.day)
   order by d.day, r.start_time, p.name, p.id;
@@ -596,6 +605,7 @@ declare
   v_failures jsonb := '[]'::jsonb;
   v_list text;
   v_has_card boolean;
+  v_version record;
   v_posts integer;
   v_requirements integer;
 begin
@@ -694,14 +704,36 @@ begin
     v_failures := v_failures || jsonb_build_object('code', 'MLCT4',
       'message', 'No rate card is in force on ' || to_char(v_go_live, 'FMDD Mon YYYY') || '.');
   else
-    -- MLCT5: every headcount row has a matching rate line on that card.
-    select string_agg(distinct u.role || ' · ' || u.band || ' (' || u.unit || ')', ', ')
-    into v_list
-    from private.headcount_unpriced_rows(p_organisation_id, p_contract_id, v_go_live) u;
-    if v_list is not null then
-      v_failures := v_failures || jsonb_build_object('code', 'MLCT5',
-        'message', 'No rate for ' || v_list || '. Add it to the rate card.');
-    end if;
+    -- MLCT5: every headcount row has a matching rate line on every rate card version from the
+    -- go-live date to the end (a change scheduled while the contract was a draft too: nothing
+    -- re-checks it once the posts exist). Keys are written as the app writes them
+    -- (formatRateKey: "Guard · Night (shift)", "Guard (shift)" for the standard band).
+    for v_version in
+      select greatest(r.effective_from, v_go_live) as on_date
+      from public.rate_cards r
+      where r.contract_id = p_contract_id
+        and (r.effective_to is null or r.effective_to >= v_go_live)
+        and (v_contract.end_date is null or r.effective_from <= v_contract.end_date)
+      order by r.effective_from
+    loop
+      select string_agg(k.label, ', ' order by k.first_seen)
+      into v_list
+      from (
+        select u.role || case when lower(u.band) = 'standard' then '' else ' · ' || u.band end
+            || ' (' || u.unit || ')' as label,
+          min(u.ord) as first_seen
+        from private.headcount_unpriced_rows(p_organisation_id, p_contract_id, v_version.on_date)
+          with ordinality as u(headcount_requirement_id, role, band, unit, ord)
+        group by 1
+      ) k;
+      if v_list is not null then
+        v_failures := v_failures || jsonb_build_object('code', 'MLCT5',
+          'message', 'No rate for ' || v_list
+            || case when v_version.on_date = v_go_live then ''
+               else ' from ' || to_char(v_version.on_date, 'FMDD Mon YYYY') end
+            || '. Add it to the rate card.');
+      end if;
+    end loop;
     -- MLCT9: every line in force carries a service type and WHT rate (the table guarantees it).
     if exists (
       select 1 from public.rate_cards r
@@ -736,6 +768,14 @@ begin
     activated_at = now(),
     activated_by = auth.uid()
   where c.id = p_contract_id;
+
+  -- A fixed-term contract's last rate card version closes with it, so no version is left open
+  -- past the end once the contract has ended (and can no longer be written).
+  if v_contract.end_date is not null then
+    update public.rate_cards r
+    set effective_to = v_contract.end_date
+    where r.contract_id = p_contract_id and r.effective_to is null;
+  end if;
 
   insert into public.posts (
     organisation_id, contract_id, site_id, headcount_requirement_id, name, role, band, unit,
@@ -906,10 +946,12 @@ begin
   get diagnostics v_reqs_closed = row_count;
 
   -- Posts: closed on the end date (a post that would only have opened later was never staffed).
+  -- The reason itself stays on the contract (readers of contracts only): posts are read by hr
+  -- and line managers too.
   update public.posts p
   set status = 'closed',
     closed_on = greatest(p_end_date, p.opened_on - 1),
-    closed_reason = left('Contract ended: ' || v_reason, 500)
+    closed_reason = 'Contract ended'
   where p.contract_id = p_contract_id and p.status = 'open';
   get diagnostics v_posts = row_count;
 
@@ -1008,20 +1050,24 @@ select cron.schedule(
 -- ---------------------------------------------------------------------------
 
 -- BEFORE INSERT/UPDATE on worker_assignments, after worker_assignments_before_write has filled
--- the client from the site (triggers run in name order). A new row, or a row whose site or
--- client changes, can't point at an archived site or client. Existing rows are left alone:
--- closing one (effective_to) is never refused. Definer so the status read doesn't depend on what
--- the caller may see.
+-- the client from the site (triggers run in name order). A new row, a row whose site or client
+-- changes, or a closed row whose end moves later (reopening it) can't point at an archived site
+-- or client. Existing rows are otherwise left alone: closing one (effective_to) is never refused.
+-- Runs as the caller (owner, admin and hr read sites and clients' status under RLS), so a row
+-- aimed at another company's site learns nothing here and is refused by RLS instead.
 create function private.worker_assignments_target_active()
 returns trigger
 language plpgsql
-security definer
 set search_path = ''
 as $$
 begin
   if tg_op = 'UPDATE'
     and new.site_id is not distinct from old.site_id
-    and new.client_id is not distinct from old.client_id then
+    and new.client_id is not distinct from old.client_id
+    and not (
+      old.effective_to is not null
+      and (new.effective_to is null or new.effective_to > old.effective_to)
+    ) then
     return new;
   end if;
   if new.site_id is not null and exists (

@@ -182,6 +182,37 @@ describe("planActivation", () => {
     expect(past.issues.map((i) => i.message)).toContain("The go-live date is in the past.");
   });
 
+  it("checks every rate card version from the go-live date, not only the first", () => {
+    const later: RateCardVersion = {
+      id: "v2",
+      effectiveFrom: "2027-01-01",
+      effectiveTo: null,
+      note: null,
+      lines: [rate({ rateKobo: 1_300_000n })],
+    };
+    const plan = planActivation(
+      input({ versions: [{ ...card, effectiveTo: "2026-12-31" }, later] }),
+    );
+    expect(plan.issues).toEqual([
+      {
+        code: "MLCT5",
+        message: "No rate for Guard · Night (shift) from 1 Jan 2027. Add it to the rate card.",
+      },
+    ]);
+    // A version that ends before go-live doesn't count.
+    const before = planActivation(
+      input({
+        contract: { status: "draft", type: "manned_post", startDate: "2026-11-01", endDate: null },
+        today: "2027-01-05",
+        versions: [
+          { ...card, effectiveFrom: "2026-11-01", effectiveTo: "2026-12-31", lines: [rate({})] },
+          { ...later, lines: card.lines },
+        ],
+      }),
+    );
+    expect(before.ready).toBe(true);
+  });
+
   it("doesn't price headcount on fixed-monthly contracts, nor require it", () => {
     const plan = planActivation(
       input({

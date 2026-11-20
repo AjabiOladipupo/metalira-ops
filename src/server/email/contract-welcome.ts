@@ -17,6 +17,15 @@ import { ContractWelcomeEmail, contractWelcomeSubject } from "./templates/contra
 
 const name = z.string().trim().min(1).max(200);
 
+/**
+ * A name safe to show the client: as `emailDisplayName`, and never one carrying a run of 10 or
+ * more digits (it could pass for an account number in an email that must carry no bank details).
+ */
+export function welcomeDisplayName(value: string | null): string | null {
+  if (value && /\d{10}/.test(value.replace(/[\s-]/g, ""))) return null;
+  return emailDisplayName(value);
+}
+
 const welcomeSchema = z.object({
   to: z.email(),
   contractId: z.uuid(),
@@ -36,17 +45,17 @@ export async function sendContractWelcomeEmail(
   input: ContractWelcomeInput,
 ): Promise<SendEmailResult> {
   const data = welcomeSchema.parse(input);
-  const organisationName = emailDisplayName(data.organisationName);
+  const organisationName = welcomeDisplayName(data.organisationName);
   return sendEmail({
     to: data.to,
     subject: contractWelcomeSubject(organisationName, data.goLiveDate),
     react: createElement(ContractWelcomeEmail, {
       organisationName,
-      contactName: emailDisplayName(data.contactName),
-      contractName: emailDisplayName(data.contractName),
+      contactName: welcomeDisplayName(data.contactName),
+      contractName: welcomeDisplayName(data.contractName),
       reference: data.reference,
       sites: data.sites.flatMap((s) => {
-        const safe = emailDisplayName(s);
+        const safe = welcomeDisplayName(s);
         return safe ? [safe] : [];
       }),
       goLiveDate: data.goLiveDate,

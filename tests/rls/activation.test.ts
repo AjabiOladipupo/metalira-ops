@@ -308,6 +308,49 @@ describe("activate_contract", () => {
     expect(new Set(reqs?.map((r) => `${r.effective_from}/${r.effective_to}`))).toEqual(
       new Set([`${goLive}/${end}`]),
     );
+    // The open rate card version closes with the contract, so none stays open past the end.
+    const { data: cards } = await admin
+      .from("rate_cards")
+      .select("effective_to")
+      .eq("contract_id", id);
+    expect(cards).toEqual([{ effective_to: end }]);
+  });
+
+  it("checks rate changes scheduled on the draft, not only the card on the go-live date", async () => {
+    const id = await draftContract();
+    const from = addDays(monday, 21);
+    const later = await ops.client.rpc("add_rate_card_version", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: from,
+      p_lines: [{ role: "Guard", band: "Day", unit: "shift", rate_kobo: "1300000" }] as Json,
+    });
+    expect(later.error).toBeNull();
+    const { error } = await activate(id);
+    expect(codesOf(error)).toEqual(["MLCT5"]);
+    expect(error?.message).toContain("No rate for Guard · Night (shift) from ");
+    expect(await count("posts", id)).toBe(0);
+  });
+
+  it("doesn't ask fixed-monthly contracts for per-shift rates, before or after going live", async () => {
+    const id = await draftContract({ type: "fixed_monthly", card: false });
+    const card = await ops.client.rpc("save_draft_rate_card", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: monday,
+      p_lines: [{ role: "Facility management", unit: "month", rate_kobo: "250000000" }] as Json,
+    });
+    expect(card.error).toBeNull();
+    const { data, error } = await activate(id);
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ posts: 4 });
+    const change = await ops.client.rpc("add_rate_card_version", {
+      p_organisation_id: owner.orgId,
+      p_contract_id: id,
+      p_effective_from: addDays(monday, 30),
+      p_lines: [{ role: "Facility management", unit: "month", rate_kobo: "260000000" }] as Json,
+    });
+    expect(change.error).toBeNull();
   });
 
   it("refuses with every missing item listed, and creates nothing", async () => {
@@ -529,9 +572,16 @@ describe("required_shifts", () => {
         },
       ],
     });
-    ended = await draftContract({ client: org, sites: [s1, s2] });
+    ended = await draftContract({ client: org, sites: [s1, s2], end: addDays(monday, 30) });
     for (const id of [coastline, weekdays, ended]) expect((await activate(id)).error).toBeNull();
-    await db.query("update public.contracts set status = 'ended' where id = $1", [ended]);
+    // Ended after its Wednesday (as end_contract and the daily job leave it).
+    await db.query("begin");
+    await db.query("select set_config('metalira.contract_ending', $1, true)", [ended]);
+    await db.query(
+      "update public.contracts set end_date = $2, end_reason = 'Done', status = 'ended' where id = $1",
+      [ended, addDays(monday, 2)],
+    );
+    await db.query("commit");
   });
 
   async function shifts(from: string, to: string, by: Client = ops.client) {
@@ -577,8 +627,12 @@ describe("required_shifts", () => {
     );
     expect(reception.every((s) => s.required_count === 2)).toBe(true);
 
-    // An ended contract has no shifts.
-    expect(week.filter((s) => s.contract_id === ended)).toEqual([]);
+    // An ended contract keeps its shifts up to and including its last day, none after.
+    const endedDates = new Set(
+      week.filter((s) => s.contract_id === ended).map((s) => s.shift_date),
+    );
+    expect([...endedDates].sort()).toEqual([monday, addDays(monday, 1), addDays(monday, 2)]);
+    expect(week.filter((s) => s.contract_id === ended)).toHaveLength(12);
   });
 
   it("starts on the go-live date", async () => {
@@ -656,7 +710,7 @@ describe("end_contract", () => {
       .select("status, closed_on, closed_reason")
       .eq("contract_id", id);
     expect(new Set(posts?.map((p) => `${p.status}/${p.closed_on}/${p.closed_reason}`))).toEqual(
-      new Set([`closed/${last}/Contract ended: Client gave notice`]),
+      new Set([`closed/${last}/Contract ended`]),
     );
     const { data: reqs } = await admin
       .from("roster_requirements")
@@ -814,6 +868,12 @@ describe("assignments to archived sites and clients (owner decision, 19 Nov 2026
       .update({ effective_to: addDays(today, 1) })
       .eq("id", existing.data!.id);
     expect(close.error).toBeNull();
+    // ...but once closed it can't be reopened at the archived site.
+    const reopen = await hr.client
+      .from("worker_assignments")
+      .update({ effective_to: null })
+      .eq("id", existing.data!.id);
+    expect(reopen.error?.code).toBe("MLAS6");
 
     // An archived client refuses its sites too, and client-only assignments.
     await admin.from("clients").update({ status: "archived" }).eq("id", client);

@@ -78,15 +78,13 @@ async function seedCoastline(gateBFenced: boolean) {
     .single();
   expect(contract.error).toBeNull();
   const contractId = contract.data!.id;
-  const links = await admin
-    .from("contract_sites")
-    .insert(
-      sites.data!.map((s) => ({
-        organisation_id: owner.orgId,
-        contract_id: contractId,
-        site_id: s.id,
-      })),
-    );
+  const links = await admin.from("contract_sites").insert(
+    sites.data!.map((s) => ({
+      organisation_id: owner.orgId,
+      contract_id: contractId,
+      site_id: s.id,
+    })),
+  );
   expect(links.error).toBeNull();
   const card = await admin
     .from("rate_cards")

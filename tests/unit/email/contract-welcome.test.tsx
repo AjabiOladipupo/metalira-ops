@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { welcomeRecipients } from "@/server/business/activation";
+import { welcomeDisplayName } from "@/server/email/contract-welcome";
 import { renderEmail } from "@/server/email/render";
 import {
   ContractWelcomeEmail,
@@ -98,5 +99,13 @@ describe("contract welcome email (slice 2.7)", () => {
       ]),
     ).toHaveLength(1);
     expect(welcomeRecipients([])).toEqual([]);
+  });
+
+  it("leaves out names that look like a web address or carry an account-like number", () => {
+    expect(welcomeDisplayName("Coastline guarding")).toBe("Coastline guarding");
+    expect(welcomeDisplayName("Pay deposit to 0123456789 GTB")).toBeNull();
+    expect(welcomeDisplayName("Pay to 0123 456 789 0")).toBeNull();
+    expect(welcomeDisplayName("verify at paypal-secure.co")).toBeNull();
+    expect(welcomeDisplayName("Gate 12")).toBe("Gate 12");
   });
 });

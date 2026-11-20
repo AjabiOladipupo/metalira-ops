@@ -8,7 +8,7 @@ import {
   loadActivationPlan,
   loadPosts,
 } from "@/server/business/activation-data";
-import { organisationToday } from "@/server/business/contracts-data";
+import { loadRateCardVersions, organisationToday } from "@/server/business/contracts-data";
 
 import type { PreviewFn } from "./types";
 
@@ -69,7 +69,11 @@ export const previewEndContract: PreviewFn<typeof endContractSchema> = async ({
     organisationToday(supabase, organisationId),
   ]);
   if (!context) return { summary: "That contract wasn't found.", changes: [] };
-  const posts = await loadPosts(supabase, organisationId, data.contractId, today);
+  const [posts, rates] = await Promise.all([
+    loadPosts(supabase, organisationId, data.contractId, today),
+    loadRateCardVersions(supabase, organisationId, data.contractId),
+  ]);
+  const cancelled = rates.versions.filter((v) => v.effectiveFrom > data.endDate);
   const open = posts.filter((p) => p.status === "open");
   const plan = planEndContract({
     status: context.contract.status,
@@ -89,6 +93,11 @@ export const previewEndContract: PreviewFn<typeof endContractSchema> = async ({
         before: context.contract.endDate ? formatDate(context.contract.endDate) : "Rolling",
         after: formatDate(data.endDate),
       },
+      ...cancelled.map((v) => ({
+        label: `Rate change from ${formatDate(v.effectiveFrom)}`,
+        before: "Scheduled",
+        after: "Cancelled",
+      })),
       ...open.map((p) => ({
         label: `${p.name} at ${p.siteName}`,
         before: "Open",

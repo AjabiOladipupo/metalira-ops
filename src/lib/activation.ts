@@ -166,12 +166,26 @@ export function planActivation(input: ActivationInput): ActivationPlan {
   if (!version) {
     add("MLCT4", `No rate card is in force on ${formatDate(goLive)}.`);
   } else if (headcountIsPriced(contract.type)) {
-    const missing = missingRateKeys(input.headcount.map(headcountRateKey), version);
-    if (missing.length > 0) {
-      add(
-        "MLCT5",
-        `No rate for ${missing.map(formatRateKey).join(", ")}. Add it to the rate card.`,
-      );
+    // Every version from the go-live date to the end, so a change scheduled while the contract
+    // was a draft can't leave a post unpriced later.
+    const keys = input.headcount.map(headcountRateKey);
+    const versions = [...input.versions]
+      .filter(
+        (v) =>
+          (v.effectiveTo === null || v.effectiveTo >= goLive) &&
+          (contract.endDate === null || v.effectiveFrom <= contract.endDate),
+      )
+      .sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? -1 : 1));
+    for (const v of versions) {
+      const on = v.effectiveFrom > goLive ? v.effectiveFrom : goLive;
+      const missing = missingRateKeys(keys, v);
+      if (missing.length > 0) {
+        const from = on === goLive ? "" : ` from ${formatDate(on)}`;
+        add(
+          "MLCT5",
+          `No rate for ${missing.map(formatRateKey).join(", ")}${from}. Add it to the rate card.`,
+        );
+      }
     }
   }
 
