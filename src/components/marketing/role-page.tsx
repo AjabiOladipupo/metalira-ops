@@ -134,7 +134,8 @@ export function RolePage({ slug }: { slug: RoleSlug }) {
         ) : (
           <>
             <h2 id="role-cta" className="m-0 max-w-[640px] type-mkt-h3 lg:type-mkt-h2">
-              Bring last month&apos;s staff list. Leave with a payroll and an invoice run.
+              {role.cta ??
+                "Bring last month's staff list. Leave with a payroll and an invoice run."}
             </h2>
             <CtaLink href="/sign-up" className="self-start lg:self-auto">
               Start setup

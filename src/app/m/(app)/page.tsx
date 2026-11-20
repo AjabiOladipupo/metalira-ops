@@ -74,6 +74,64 @@ async function Header() {
 }
 
 /**
+ * Today's shift card and the shortcut tiles. When the company has Shifts switched off (slice
+ * 3.0) there is no shift card and no My shifts tile.
+ */
+async function HomeBody() {
+  const lookup = await lookupWorkerPageSession();
+  const shifts = lookup.type !== "worker" || lookup.session.shiftsEnabled;
+  const tiles = shifts ? TILES : TILES.filter((t) => t.href !== "/m/shifts");
+  return (
+    <>
+      {shifts ? (
+        <section
+          aria-labelledby="shift-today"
+          className="flex items-center gap-3 rounded-xl border border-line px-4 py-3.5"
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <h2 id="shift-today" className="m-0 type-label text-fg-muted">
+              {copy.shiftLabel}
+            </h2>
+            <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
+            <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
+          </div>
+          <Illustration name="clock-in" size="worker" decorative />
+        </section>
+      ) : null}
+
+      <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
+        {tiles.map(({ href, label, Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            className="flex h-[104px] flex-col justify-between rounded-xl bg-surface p-4 text-[17px] font-semibold text-foreground no-underline hover:bg-line hover:text-foreground"
+          >
+            <span className="flex items-start justify-between">
+              <Icon strokeWidth={1.75} className="size-[26px]" aria-hidden />
+              <ChevronRight strokeWidth={1.75} className="size-4 text-fg-muted" aria-hidden />
+            </span>
+            {label}
+          </Link>
+        ))}
+      </nav>
+    </>
+  );
+}
+
+function HomeBodySkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-3">
+      <span className="h-[106px] rounded-xl bg-surface" />
+      <div className="grid grid-cols-2 gap-3 pt-2">
+        {TILES.map((t) => (
+          <span key={t.href} className="h-[104px] rounded-xl bg-surface" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Worker home, from the WkHome board (slice 1.10): greeting, today's shift ("No shift today"
  * until rosters exist), shortcut tiles, and the location line. The board's language picker is
  * hidden: English only for now (owner decision 16).
@@ -92,35 +150,9 @@ export default function WorkerHomePage() {
         <Header />
       </Suspense>
 
-      <section
-        aria-labelledby="shift-today"
-        className="flex items-center gap-3 rounded-xl border border-line px-4 py-3.5"
-      >
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <h2 id="shift-today" className="m-0 type-label text-fg-muted">
-            {copy.shiftLabel}
-          </h2>
-          <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
-          <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
-        </div>
-        <Illustration name="clock-in" size="worker" decorative />
-      </section>
-
-      <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
-        {TILES.map(({ href, label, Icon }) => (
-          <Link
-            key={href}
-            href={href}
-            className="flex h-[104px] flex-col justify-between rounded-xl bg-surface p-4 text-[17px] font-semibold text-foreground no-underline hover:bg-line hover:text-foreground"
-          >
-            <span className="flex items-start justify-between">
-              <Icon strokeWidth={1.75} className="size-[26px]" aria-hidden />
-              <ChevronRight strokeWidth={1.75} className="size-4 text-fg-muted" aria-hidden />
-            </span>
-            {label}
-          </Link>
-        ))}
-      </nav>
+      <Suspense fallback={<HomeBodySkeleton />}>
+        <HomeBody />
+      </Suspense>
 
       <p className="m-0 mt-auto pt-4 text-center text-[13px] text-fg-muted">{copy.location}</p>
     </main>

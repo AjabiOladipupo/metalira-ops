@@ -4,6 +4,8 @@
 
 Nigerian SMEs with 10–500 shift-based workers: security and guarding, cleaning, facility management, staffing and outsourcing, logistics, field sales. Many workers use low-end Android phones with patchy data; many have no email.
 
+Services businesses, freelancers and sole proprietors who invoice clients (agencies, consultants, studios) use it too: at setup they choose "We deliver services or projects to clients" and start with Business Ops only, with Shifts, People and Payroll switched off until they hire (slice 3.0).
+
 ## Roles
 
 | Role | Can do |

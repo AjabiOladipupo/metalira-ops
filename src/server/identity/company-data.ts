@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 
 import { resumeSetupSlug, setupStepHref } from "@/lib/company";
+import { isBusinessType, type BusinessType, type Modules } from "@/lib/modules";
 import { createServerSupabase } from "@/lib/supabase/server";
 
 import { LOGO_SIGNED_URL_OPTIONS, ORG_ASSETS_BUCKET } from "./company";
@@ -33,10 +34,13 @@ export interface Company {
   companyCode: string;
   setupStep: number;
   setupCompletedAt: string | null;
+  /** Slice 3.0: what the business does, and which parts of the app it has on. */
+  businessType: BusinessType;
+  modules: Modules;
 }
 
 const COLUMNS =
-  "id, name, legal_name, trading_name, rc_number, tin, industry, head_office_state, address, phone, logo_path, invoice_email, invoice_number_start, payment_terms_days, vat_registered, auto_email_receipts, plan, expected_workers, pay_cycle_start_day, pay_day, company_code, setup_step, setup_completed_at";
+  "id, name, legal_name, trading_name, rc_number, tin, industry, head_office_state, address, phone, logo_path, invoice_email, invoice_number_start, payment_terms_days, vat_registered, auto_email_receipts, plan, expected_workers, pay_cycle_start_day, pay_day, company_code, setup_step, setup_completed_at, business_type, shifts_enabled, people_enabled, payroll_enabled";
 
 /**
  * An organisation's company details, read under RLS as the signed-in user (so only a member gets
@@ -78,6 +82,12 @@ export const getCompany = cache(async (organisationId: string): Promise<Company 
     companyCode: data.company_code,
     setupStep: data.setup_step,
     setupCompletedAt: data.setup_completed_at,
+    businessType: isBusinessType(data.business_type) ? data.business_type : "workforce",
+    modules: {
+      shifts: data.shifts_enabled,
+      people: data.people_enabled,
+      payroll: data.payroll_enabled,
+    },
   };
 });
 
@@ -124,5 +134,5 @@ export async function pendingSetupHref(): Promise<string | null> {
   if (role !== "owner" && role !== "admin") return null;
   const company = await getActiveCompany();
   if (!company || company.setupCompletedAt !== null) return null;
-  return setupStepHref(resumeSetupSlug(company.setupStep, false));
+  return setupStepHref(resumeSetupSlug(company.setupStep, false, company.businessType));
 }

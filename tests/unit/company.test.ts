@@ -8,6 +8,9 @@ import {
   previousSetupStep,
   resumeSetupSlug,
   setupDoneCount,
+  setupStepsFor,
+  setupTotal,
+  hasSetupStep,
 } from "@/lib/company";
 import {
   businessStepSchema,
@@ -99,6 +102,7 @@ describe("planStepSchema", () => {
 
 describe("businessStepSchema", () => {
   const valid = {
+    businessType: "workforce",
     legalName: "Adebayo Facility Services Ltd",
     tradingName: "Adebayo Facility Services",
     rcNumber: "rc 1234567",
@@ -162,6 +166,7 @@ describe("businessStepSchema", () => {
     ["payCycleStartDay", "29"],
     ["payCycleStartDay", "0"],
     ["payDay", "32"],
+    ["businessType", "farming"],
   ])("refuses %s = %j", (field, value) => {
     const result = businessStepSchema.safeParse({ ...valid, [field]: value });
     expect(result.success).toBe(false);
@@ -301,6 +306,43 @@ describe("setup wizard steps", () => {
     expect(previousSetupStep("business")?.slug).toBe("plan");
     expect(nextSetupStep("employees")?.slug).toBe("ready");
     expect(nextSetupStep("ready")).toBeNull();
+  });
+
+  describe("a services business skips Employees (slice 3.0)", () => {
+    it("has five steps, Clients then Ready", () => {
+      expect(setupStepsFor("services").map((s) => s.slug)).toEqual([
+        "plan",
+        "business",
+        "invoices",
+        "clients",
+        "ready",
+      ]);
+      expect(setupStepsFor("workforce")).toHaveLength(6);
+      expect(hasSetupStep("employees", "services")).toBe(false);
+      expect(hasSetupStep("employees", "workforce")).toBe(true);
+      expect(nextSetupStep("clients", "services")?.slug).toBe("ready");
+      expect(nextSetupStep("clients", "workforce")?.slug).toBe("employees");
+      expect(previousSetupStep("ready", "services")?.slug).toBe("clients");
+      expect(previousSetupStep("ready", "workforce")?.slug).toBe("employees");
+    });
+
+    it("counts 4 steps to do instead of 5", () => {
+      expect(setupTotal("services")).toBe(4);
+      expect(setupTotal("workforce")).toBe(5);
+      expect(setupDoneCount(4, false, "services")).toBe(3);
+      expect(setupDoneCount(5, false, "services")).toBe(4);
+      expect(setupDoneCount(6, false, "services")).toBe(4);
+      expect(setupDoneCount(1, true, "services")).toBe(4);
+    });
+
+    it("never resumes at Employees", () => {
+      // A company that reached Employees as workforce, then changed to services.
+      expect(resumeSetupSlug(5, false, "services")).toBe("clients");
+      expect(resumeSetupSlug(6, false, "services")).toBe("clients");
+      expect(resumeSetupSlug(5, false, "workforce")).toBe("employees");
+      expect(resumeSetupSlug(2, false, "services")).toBe("business");
+      expect(resumeSetupSlug(2, true, "services")).toBe("ready");
+    });
   });
 
   it("formats days, invoice numbers and plan names", () => {

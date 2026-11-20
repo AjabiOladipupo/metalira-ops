@@ -49,6 +49,8 @@ export const LIRA_FOR_ROLE = {
     "Ask Lira to prepare the pay run or this month's invoices for your approval, and to match bank-statement payments to invoices. It never moves money.",
   operations:
     "Ask “Who hasn't clocked in at Lekki today?” or “Which posts are short this week?” and Lira answers from your rosters and clock-ins.",
+  freelancers:
+    "Ask “Which invoices are still unpaid?” and Lira answers from your bank statement matches, then drafts a reminder for you to send.",
 } as const;
 
 /** Every role page but /for/workers carries a Lira line. */

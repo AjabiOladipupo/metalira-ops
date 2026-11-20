@@ -11,6 +11,7 @@ import {
   PAPER,
   Person,
   Phone,
+  Slip,
 } from "./ink";
 import { FoldedMap } from "./later";
 import type { Scene } from "./types";
@@ -270,6 +271,36 @@ export const LANDING_SCENES = {
             </g>
           }
         />
+      </>
+    ),
+  },
+  "role-freelancer": {
+    viewBox: [200, 160],
+    size: "empty",
+    label: "A freelancer holding up an invoice and pointing at a naira sign in a speech bubble",
+    draw: (lw) => (
+      <>
+        <Person
+          x={78}
+          y={157}
+          s={0.93}
+          lw={lw}
+          hair="braids"
+          top="shirt"
+          build="slim"
+          stance="lean-right"
+          turn={1}
+          left="chest"
+          right="point"
+          held={
+            <g transform="translate(-6 -92) rotate(-6)">
+              <Slip w={22} h={30} naira />
+            </g>
+          }
+        />
+        <Bubble cx={152} cy={36} r={17} toward={[124, 44]} lw={lw}>
+          <Icon.naira />
+        </Bubble>
       </>
     ),
   },

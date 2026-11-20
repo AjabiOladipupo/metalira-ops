@@ -11,6 +11,7 @@ import { getPageSession } from "@/server/identity/session";
 import { BusinessForm } from "../../_company/business-form";
 import { InvoicesForm } from "../../_company/invoices-form";
 import { LogoForm } from "../../_company/logo-form";
+import { ModulesForm } from "../../_company/modules-form";
 import { PlanForm } from "../../_company/plan-form";
 import { RouteGate } from "../../_shell/slots";
 
@@ -93,6 +94,14 @@ async function CompanySettings() {
         description="Invoices go out from your email. Clients pay into accounts you own."
       >
         <InvoicesForm mode="settings" company={company} rails={rails} />
+      </Section>
+
+      <Section
+        id="modules"
+        title="Modules"
+        description="Switch off the parts of the app your business doesn't use. Nothing is deleted, and turning a part back on shows everything again."
+      >
+        <ModulesForm key={JSON.stringify(company.modules)} modules={company.modules} />
       </Section>
 
       <Section id="plan" title="Plan">
