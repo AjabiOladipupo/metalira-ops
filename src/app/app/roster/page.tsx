@@ -108,7 +108,9 @@ async function RosterPage({
         <span className="hidden flex-1 sm:block" />
         {canEdit ? (
           <Button asChild variant="outline">
-            <Link href={`/app/roster/copy?site=${site.id}&week=${weekStart}`}>Copy last week</Link>
+            <Link href={`/app/roster/copy?site=${site.id}&week=${weekStart}`} prefetch={false}>
+              Copy last week
+            </Link>
           </Button>
         ) : null}
         <Button disabled title="Publishing comes next" aria-describedby="publish-note">

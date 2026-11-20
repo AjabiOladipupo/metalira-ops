@@ -488,17 +488,91 @@ create policy shifts_select on public.shifts for select to authenticated
       and site_id in (select private.line_manager_site_ids(organisation_id))
     )
     -- Through shift_assignments' own policy: the worker's own rows and a line manager's
-    -- reportees' rows.
+    -- reportees' rows. Only shifts they are on now: a removed assignment doesn't count.
     or exists (
       select 1 from public.shift_assignments a
       where a.shift_id = shifts.id and a.organisation_id = shifts.organisation_id
+        and a.status = 'assigned'
     )
   );
 
 revoke all on table public.shifts from anon, authenticated;
 revoke all on table public.shift_assignments from anon, authenticated;
 grant select on table public.shifts to authenticated;
-grant select on table public.shift_assignments to authenticated;
+-- Who assigned or removed someone, and why, is not granted: a worker reading their own rows
+-- must not see a manager's reason or ids. Owner, admin and ops_manager read them through
+-- public.roster_assignment_details.
+grant select (
+  id, organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status,
+  assigned_at, removed_at, created_at
+) on table public.shift_assignments to authenticated;
+
+-- Who assigned and removed each assignment at a site between two days, and why (owner, admin
+-- and ops_manager; 62 days at most). Anyone else gets 42501.
+create function private.roster_assignment_details(
+  p_organisation_id uuid,
+  p_site_id uuid,
+  p_from date,
+  p_to date
+)
+returns table (
+  id uuid,
+  assigned_by uuid,
+  assigned_at timestamptz,
+  removed_by uuid,
+  removed_at timestamptz,
+  removed_reason text
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if private.session_uid() is null or p_organisation_id is null
+    or not private.has_role(p_organisation_id, array['owner', 'admin', 'ops_manager']) then
+    raise exception 'Your role can''t read roster history.' using errcode = '42501';
+  end if;
+  if p_from is null or p_to is null or p_to < p_from or p_to - p_from > 61 then
+    raise exception 'Ask for 62 days or fewer at a time.' using errcode = '22023';
+  end if;
+  return query
+  select a.id, a.assigned_by, a.assigned_at, a.removed_by, a.removed_at, a.removed_reason
+  from public.shift_assignments a
+  where a.organisation_id = p_organisation_id
+    and a.site_id = p_site_id
+    and a.shift_date between p_from and p_to
+  order by a.shift_date, a.assigned_at;
+end;
+$$;
+
+revoke all on function private.roster_assignment_details(uuid, uuid, date, date) from public, anon;
+grant execute on function private.roster_assignment_details(uuid, uuid, date, date) to authenticated;
+
+create function public.roster_assignment_details(
+  p_organisation_id uuid,
+  p_site_id uuid,
+  p_from date,
+  p_to date
+)
+returns table (
+  id uuid,
+  assigned_by uuid,
+  assigned_at timestamptz,
+  removed_by uuid,
+  removed_at timestamptz,
+  removed_reason text
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.roster_assignment_details(p_organisation_id, p_site_id, p_from, p_to)
+$$;
+
+revoke all on function public.roster_assignment_details(uuid, uuid, date, date) from public, anon;
+grant execute on function public.roster_assignment_details(uuid, uuid, date, date) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 6. Writes
@@ -622,6 +696,9 @@ begin
     raise exception 'That employee wasn''t found.' using errcode = 'P0002';
   end if;
 
+  -- Shared with other assigns at the site, exclusive with copy_last_week, so a copy and a
+  -- hand assignment on one site never interleave.
+  perform pg_advisory_xact_lock_shared(hashtextextended('roster_copy:' || v_site_id::text, 0));
   v_shift_id := private.materialise_shift(p_organisation_id, p_post_id, p_shift_date);
   -- The guard fills the site, day and times, and checks everything else.
   insert into public.shift_assignments (
@@ -762,6 +839,8 @@ declare
   v_code text;
   v_message text;
   v_result jsonb;
+  v_existing uuid;
+  v_required integer;
 begin
   perform private.require_roster_role(p_organisation_id);
   if p_week_start is null or extract(isodow from p_week_start) <> 1 then
@@ -788,10 +867,47 @@ begin
         and a.status = 'assigned'
         and a.shift_date between p_week_start - 7 and p_week_start - 1
       order by a.shift_date, a.starts_at, p.name, w.last_name, w.first_name, a.id
-      limit 5000
+      limit 1000
     loop
       v_total := v_total + 1;
       v_target := v_source.shift_date + 7;
+
+      -- The cheap refusals in plain SQL first (no subtransaction): already on the shift, or the
+      -- shift already full by the requirement in force. The block below stays as the backstop.
+      select s.id into v_existing
+      from public.shifts s
+      where s.post_id = v_source.post_id and s.shift_date = v_target
+        and s.organisation_id = p_organisation_id;
+      if v_existing is not null then
+        if exists (
+          select 1 from public.shift_assignments a
+          where a.shift_id = v_existing and a.worker_id = v_source.worker_id
+            and a.status = 'assigned'
+        ) then
+          v_already := v_already + 1;
+          continue;
+        end if;
+        select r.required_count into v_required
+        from private.post_day_requirement(p_organisation_id, v_source.post_id, v_target) r;
+        if v_required is not null and (
+          select count(*) from public.shift_assignments a
+          where a.shift_id = v_existing and a.status = 'assigned'
+        ) >= v_required then
+          v_skipped := v_skipped || jsonb_build_object(
+            'post_id', v_source.post_id,
+            'post_name', v_source.post_name,
+            'shift_date', v_target,
+            'worker_id', v_source.worker_id,
+            'worker_name', v_source.worker_name,
+            'code', 'MLRS4',
+            'reason', format('%s on %s already has the %s %s it needs.', v_source.post_name,
+              to_char(v_target, 'FMDy FMDD Mon'), v_required,
+              case when v_required = 1 then 'person' else 'people' end)
+          );
+          continue;
+        end if;
+      end if;
+
       begin
         v_shift_id := private.materialise_shift(p_organisation_id, v_source.post_id, v_target);
         insert into public.shift_assignments (

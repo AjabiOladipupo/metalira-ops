@@ -73,6 +73,10 @@ export const tables: TableSpec[] = [
   {
     table: "shift_assignments",
     key: "id",
+    // removed_reason, assigned_by and removed_by aren't granted (workers must not see them);
+    // managers read them through roster_assignment_details.
+    selectColumns:
+      "id, organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status, assigned_at, removed_at, created_at",
     tenantColumn: "organisation_id",
     tenantValue: (side) => side.orgId,
     seed: async ({ admin, side }) => {
@@ -105,6 +109,6 @@ export const tables: TableSpec[] = [
       starts_at: "2026-12-01T05:00:00Z",
       ends_at: "2026-12-01T17:00:00Z",
     }),
-    patch: { removed_reason: "Hijacked" },
+    patch: { status: "removed" },
   },
 ];

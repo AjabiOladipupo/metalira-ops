@@ -1148,6 +1148,11 @@ isOneToOne: false
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"roster_assignment_details":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_site_id": string,"p_to": string }; Returns: {
+              "assigned_at": string,"assigned_by": string,"id": string,"removed_at": string,"removed_by": string,"removed_reason": string
+            }[]
+                           },
 "rotate_checkpoint_qr":
 { Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined
                            },

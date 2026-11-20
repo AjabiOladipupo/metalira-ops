@@ -23,14 +23,11 @@ export function canEditRoster(role: ManagerRole): boolean {
   return ROSTER_EDITORS.includes(role);
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const NO_URL = /:\/\/|www\./i;
-
-const date = (message: string) => z.string().trim().regex(ISO_DATE, message);
 
 export const assignShiftSchema = z.object({
   postId: z.uuid("Choose a post"),
-  date: date("Choose a day"),
+  date: z.iso.date("Choose a day"),
   workerId: z.uuid("Choose an employee"),
 });
 
@@ -48,10 +45,9 @@ export const removeAssignmentSchema = z.object({
 
 export const copyLastWeekSchema = z.object({
   siteId: z.uuid("Choose a site"),
-  weekStart: date("Choose a week").refine(
-    (v) => isoWeekday(v) === 1,
-    "A roster week starts on a Monday",
-  ),
+  weekStart: z.iso
+    .date("Choose a week")
+    .refine((v) => isoWeekday(v) === 1, "A roster week starts on a Monday"),
 });
 
 /** Database refusals in plain English. */
@@ -61,6 +57,12 @@ export function fromRosterDbError(error: PostgrestError): never {
   }
   if (error.code === "P0002") {
     throw new MutationError("invalid", `${error.message} Reload the page.`);
+  }
+  if (error.code === "40P01" || error.code === "40001") {
+    throw new MutationError(
+      "invalid",
+      "Someone else changed this roster at the same time. Try again.",
+    );
   }
   if (error.code === "23P01") {
     throw new MutationError("invalid", "This employee is already on an overlapping shift.");

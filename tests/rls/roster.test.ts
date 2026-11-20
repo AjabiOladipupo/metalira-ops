@@ -629,18 +629,80 @@ describe("copy_last_week", () => {
 });
 
 describe("who reads and writes", () => {
-  it("a worker sees only their own assignments and the shifts they are on", async () => {
+  it("a worker sees only their own assignments and the shifts they are on, without who or why", async () => {
+    // A shift Musa was taken off: it no longer shows on his phone.
+    const gone = await assigned(post.early, addDays(monday, 21), worker.a);
+    const removed = await ops.client.rpc("remove_assignment", {
+      p_organisation_id: owner.orgId,
+      p_assignment_id: gone,
+      p_reason: "Client asked for someone else.",
+    });
+    expect(removed.error).toBeNull();
+    const { data: goneRow } = await admin
+      .from("shift_assignments")
+      .select("shift_id")
+      .eq("id", gone)
+      .single();
+
     const client = await workerSession(worker.a);
-    const rows = await client.from("shift_assignments").select("worker_id, shift_id");
+    const rows = await client.from("shift_assignments").select("worker_id, shift_id, status");
     expect(rows.error).toBeNull();
     expect(rows.data!.length).toBeGreaterThan(0);
     expect(new Set(rows.data!.map((r) => r.worker_id))).toEqual(new Set([worker.a]));
     const shifts = await client.from("shifts").select("id");
-    expect(new Set(shifts.data!.map((s) => s.id))).toEqual(
-      new Set(rows.data!.map((r) => r.shift_id)),
+    const onShifts = new Set(
+      rows.data!.filter((r) => r.status === "assigned").map((r) => r.shift_id),
     );
-    // No names of anyone else through the roster, and no writing.
+    expect(new Set(shifts.data!.map((s) => s.id))).toEqual(onShifts);
+    expect(onShifts.has(goneRow!.shift_id)).toBe(false);
+
+    // Who assigned or removed them, and why, stays with managers.
+    for (const column of ["removed_reason", "assigned_by", "removed_by"]) {
+      const hidden = await client.from("shift_assignments").select(column);
+      expect(hidden.error?.code, column).toBe("42501");
+    }
+    const details = await client.rpc("roster_assignment_details", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_from: addDays(monday, 21),
+      p_to: addDays(monday, 21),
+    });
+    expect(details.error?.code).toBe("42501");
+    const forOps = await ops.client.rpc("roster_assignment_details", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_from: addDays(monday, 21),
+      p_to: addDays(monday, 21),
+    });
+    expect(forOps.error).toBeNull();
+    expect(forOps.data).toContainEqual(
+      expect.objectContaining({
+        id: gone,
+        assigned_by: ops.id,
+        removed_by: ops.id,
+        removed_reason: "Client asked for someone else.",
+      }),
+    );
+
+    // No writing.
     expect((await assign(post.night, day(6), worker.a, client)).error?.code).toBe("42501");
+  });
+
+  it("two assigns at once onto a one-person shift give one success and one MLRS4", async () => {
+    const date = addDays(monday, 22);
+    const results = await Promise.all([
+      assign(post.night, date, worker.d, ops.client),
+      assign(post.night, date, worker.e, owner.client),
+    ]);
+    const codes = results.map((r) => r.error?.code ?? "ok").sort();
+    expect(codes).toEqual(["MLRS4", "ok"]);
+    const { count } = await admin
+      .from("shift_assignments")
+      .select("id", { count: "exact", head: true })
+      .eq("organisation_id", owner.orgId)
+      .eq("shift_date", date)
+      .eq("status", "assigned");
+    expect(count).toBe(1);
   });
 
   it("a line manager reads their reportees' assignments and the shifts at their sites, read-only", async () => {
@@ -675,11 +737,24 @@ describe("who reads and writes", () => {
     // Its own organisation with our post and worker: not found.
     const own = await assign(post.night, day(6), worker.a, other.client, other.orgId);
     expect(own.error?.code).toBe("P0002");
+    const { data: victimRow } = await admin
+      .from("shift_assignments")
+      .select("id")
+      .eq("organisation_id", owner.orgId)
+      .eq("status", "assigned")
+      .limit(1)
+      .single();
     const remove = await other.client.rpc("remove_assignment", {
       p_organisation_id: other.orgId,
-      p_assignment_id: "00000000-0000-0000-0000-000000000001",
+      p_assignment_id: victimRow!.id,
     });
     expect(remove.error?.code).toBe("P0002");
+    const still = await admin
+      .from("shift_assignments")
+      .select("status")
+      .eq("id", victimRow!.id)
+      .single();
+    expect(still.data!.status).toBe("assigned");
     const copy = await other.client.rpc("copy_last_week", {
       p_organisation_id: other.orgId,
       p_site_id: apapa,
