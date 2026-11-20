@@ -198,7 +198,7 @@ test.describe("clock in", () => {
     expect(punch!.flags).not.toContain("outside");
 
     // Home now offers Clock out.
-    await page.getByRole("link", { name: "Back to home" }).click();
+    await page.getByTestId("clock-done").getByRole("link", { name: "Back to home" }).click();
     await expect(page.getByTestId("clock-button")).toHaveText(/Clock out/);
     await context.close();
   });
