@@ -66,6 +66,8 @@ describe("punch codes", () => {
     expect(codeFromSqlState("MLPU7")).toBe("bad_site");
     expect(codeFromSqlState("MLPU8")).toBe("rate_limited");
     expect(codeFromSqlState("MLPU9")).toBe("wrong_session");
+    for (const state of ["22003", "22008", "23514"])
+      expect(codeFromSqlState(state)).toBe("invalid");
     expect(codeFromSqlState("08006")).toBe("failed");
     expect(codeFromSqlState(undefined)).toBe("failed");
   });

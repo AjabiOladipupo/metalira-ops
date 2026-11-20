@@ -8,15 +8,16 @@ import { getSession } from "@/server/identity/session";
 
 /**
  * A punch's selfie, opened by a manager (slice 3.5): a 60-second signed URL made with the
- * manager's own session, so Storage's punch_photos_select policy decides (owner, admin and
- * ops_manager of the company, a line manager for their reportees; never public). The link is
- * never logged.
+ * manager's own session, so Storage's punch_photos_select policy decides (owner, admin,
+ * ops_manager and hr of the company, as the selfie notice says, and a line manager for their
+ * reportees; never public). The link is never logged.
  */
 
 export const SELFIE_READERS: readonly ManagerRole[] = [
   "owner",
   "admin",
   "ops_manager",
+  "hr",
   "line_manager",
 ];
 

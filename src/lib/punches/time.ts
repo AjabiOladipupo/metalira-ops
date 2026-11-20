@@ -17,6 +17,11 @@
 export const MAX_ELAPSED_MS = 7 * 24 * 60 * 60_000;
 /** More than this between the phone's clock and the corrected time is `clock_drift`. */
 export const CLOCK_DRIFT_FLAG_SECONDS = 5 * 60;
+/**
+ * Received more than this after it happened is `delayed`: the event time rests on the phone's
+ * word, so Phase 4 reviews it (security review M1).
+ */
+export const DELAYED_MS = 5 * 60_000;
 /** Received more than this after it happened is `late_sync`. */
 export const LATE_SYNC_MS = 2 * 60 * 60_000;
 

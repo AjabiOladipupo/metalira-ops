@@ -131,11 +131,12 @@ async function signInAndAgree(page: Page, token: string) {
 
   await page.getByTestId("clock-button").click();
   await expect(page.getByTestId("clock-consent")).toBeVisible();
-  for (const kind of ["location", "selfie"]) {
-    const card = page.getByTestId(`consent-${kind}`);
-    await card.getByRole("button", { name: "I agree" }).click();
-    await expect(card).toHaveAttribute("data-agreed", "yes", { timeout: 15_000 });
-  }
+  // Selfie first: agreeing to location opens the clock flow in place of the notices.
+  const selfie = page.getByTestId("consent-selfie");
+  await selfie.getByRole("button", { name: "I agree" }).click();
+  await expect(selfie).toHaveAttribute("data-agreed", "yes", { timeout: 15_000 });
+  await page.getByTestId("consent-location").getByRole("button", { name: "I agree" }).click();
+  await expect(page.getByTestId("clock-consent")).toHaveCount(0, { timeout: 15_000 });
   await page.goto("/m/clock");
   await expect(page.getByTestId("clock-title")).toHaveText("Clock in");
 }
