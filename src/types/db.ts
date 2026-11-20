@@ -669,6 +669,70 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id","contract_id","site_id"]
     }
                   ]
+                },"shift_assignments": {
+                  Row: {
+                    "assigned_at": string,"assigned_by": string | null,"created_at": string,"ends_at": string,"id": string,"organisation_id": string,"removed_at": string | null,"removed_by": string | null,"removed_reason": string | null,"shift_date": string,"shift_id": string,"site_id": string,"starts_at": string,"status": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "assigned_at"?: string,"assigned_by"?: string | null,"created_at"?: string,"ends_at": string,"id"?: string,"organisation_id": string,"removed_at"?: string | null,"removed_by"?: string | null,"removed_reason"?: string | null,"shift_date": string,"shift_id": string,"site_id": string,"starts_at": string,"status"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "assigned_at"?: string,"assigned_by"?: string | null,"created_at"?: string,"ends_at"?: string,"id"?: string,"organisation_id"?: string,"removed_at"?: string | null,"removed_by"?: string | null,"removed_reason"?: string | null,"shift_date"?: string,"shift_id"?: string,"site_id"?: string,"starts_at"?: string,"status"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "shift_assignments_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "shift_assignments_shift_fkey"
+      columns: ["organisation_id","shift_id","site_id","shift_date"]
+isOneToOne: false
+      referencedRelation: "shifts"
+      referencedColumns: ["organisation_id","id","site_id","shift_date"]
+    },{
+      foreignKeyName: "shift_assignments_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"shifts": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"created_by": string | null,"ends_at": string,"id": string,"organisation_id": string,"post_id": string,"required_count": number,"requirement_id": string | null,"shift_date": string,"site_id": string,"starts_at": string,"status": string,"updated_at": string,"work_unit_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"ends_at": string,"id"?: string,"organisation_id": string,"post_id": string,"required_count": number,"requirement_id"?: string | null,"shift_date": string,"site_id": string,"starts_at": string,"status"?: string,"updated_at"?: string,"work_unit_id"?: string | null
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"ends_at"?: string,"id"?: string,"organisation_id"?: string,"post_id"?: string,"required_count"?: number,"requirement_id"?: string | null,"shift_date"?: string,"site_id"?: string,"starts_at"?: string,"status"?: string,"updated_at"?: string,"work_unit_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "shifts_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "shifts_post_fkey"
+      columns: ["organisation_id","post_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "posts"
+      referencedColumns: ["organisation_id","id","contract_id","site_id"]
+    },{
+      foreignKeyName: "shifts_requirement_fkey"
+      columns: ["organisation_id","requirement_id"]
+isOneToOne: false
+      referencedRelation: "roster_requirements"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"site_checkpoints": {
                   Row: {
                     "created_at": string,"created_by": string | null,"id": string,"location": unknown,"name": string,"organisation_id": string,"qr_rotated_at": string | null,"qr_token": string,"retired_at": string | null,"retired_by": string | null,"site_id": string,"sort_order": number,"status": string,"updated_at": string
@@ -971,6 +1035,9 @@ isOneToOne: false
 "apply_due_org_bank_accounts":
 { Args: { "p_organisation_id": string }; Returns: number
                            },
+"assign_worker_to_shift":
+{ Args: { "p_organisation_id": string,"p_post_id": string,"p_shift_date": string,"p_worker_id": string }; Returns: Json
+                           },
 "begin_bank_account_lookup":
 { Args: { "p_bank_account_digest": string,"p_bank_account_last4": string,"p_bank_code": string,"p_client_ip"?: string,"p_organisation_id": string,"p_purpose": Database["public"]['Enums']["bank_lookup_purpose"],"p_user_id": string,"p_worker_id": string }; Returns: string
                            },
@@ -1019,6 +1086,9 @@ isOneToOne: false
                            },
 "contract_welcome_allowed":
 { Args: { "p_contact_ids": (string)[],"p_contract_id": string,"p_organisation_id": string }; Returns: string[]
+                           },
+"copy_last_week":
+{ Args: { "p_dry_run"?: boolean,"p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
                            },
 "create_client":
 { Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
@@ -1102,6 +1172,9 @@ isOneToOne: false
 "reject_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"remove_assignment":
+{ Args: { "p_assignment_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
+                           },
 "remove_contract_document":
 { Args: { "p_document_id": string,"p_organisation_id": string,"p_reason": string }; Returns: undefined
                            },
@@ -1132,6 +1205,11 @@ isOneToOne: false
                            },
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
+"roster_assignment_details":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_site_id": string,"p_to": string }; Returns: {
+              "assigned_at": string,"assigned_by": string,"id": string,"removed_at": string,"removed_by": string,"removed_reason": string
+            }[]
                            },
 "rotate_checkpoint_qr":
 { Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined
