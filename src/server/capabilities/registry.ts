@@ -155,11 +155,7 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
-import {
-  previewAddPost,
-  previewChangeRequirement,
-  previewClosePost,
-} from "./live-change-previews";
+import { previewAddPost, previewChangeRequirement, previewClosePost } from "./live-change-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -1484,7 +1480,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "posts.change_requirement",
     description:
-      "Changes how many people a live post needs, or its days and hours, from a date: closes the version in force the day before and adds the new one.",
+      "Changes a live post's people, days or hours from a date, closing the version in force the day before.",
     kind: "write",
     audience: "manager",
     ...fromSpec(changeRequirementSpec),
@@ -1497,7 +1493,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "posts.add",
     description:
-      "Adds a post to a live contract from a date with its days, hours and people, adding the client's site to the contract when asked.",
+      "Adds a post to a live contract from a date, with its days, hours and people (and its site when asked).",
     kind: "write",
     audience: "manager",
     ...fromSpec(addPostSpec),
@@ -1510,7 +1506,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "posts.close",
     description:
-      "Closes a live post after its last day staffed, with a reason; changes scheduled after that day are removed.",
+      "Closes a live post after its last day staffed, with a reason; later scheduled changes are removed.",
     kind: "write",
     audience: "manager",
     ...fromSpec(closePostSpec),
@@ -1523,7 +1519,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "posts.history",
     description:
-      "Shows one post's every requirement version (from, to, days, hours, people) and the changes made to it, with reasons.",
+      "Shows every requirement version of one post and the changes made to it, with reasons.",
     kind: "read",
     audience: "manager",
     roles: CONTRACT_READERS,

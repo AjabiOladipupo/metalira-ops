@@ -361,10 +361,14 @@ function PostsTab({
           {contract.endReason && contract.endDate
             ? ` · ends ${formatDate(contract.endDate)} (${contract.endReason})`
             : ""}
-          {changeable ? " · open a post to change its headcount from a date or close it" : ""}
         </p>
         {addPost}
       </div>
+      {changeable ? (
+        <p className="m-0 text-sm text-fg-muted">
+          Open a post to see its history, change its headcount from a date or close it.
+        </p>
+      ) : null}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm" data-testid="posts-table">
           <caption className="sr-only">Posts</caption>

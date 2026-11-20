@@ -130,7 +130,11 @@ export const previewClosePost: PreviewFn<typeof closePostSchema> = async ({
   return {
     summary: plan.summary,
     changes: [
-      { label: detail.post.name, before: "Open", after: `Closed after ${formatDate(data.lastDay)}` },
+      {
+        label: detail.post.name,
+        before: "Open",
+        after: `Closed after ${formatDate(data.lastDay)}`,
+      },
       ...detail.versions
         .filter((v) => plan.cancels.includes(v.id))
         .map((v) => ({

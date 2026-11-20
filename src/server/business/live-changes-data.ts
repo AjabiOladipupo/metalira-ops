@@ -241,7 +241,8 @@ export async function loadAddPostContext(
     loadRateCardVersions(supabase, organisationId, contractId),
   ]);
   for (const result of [linked, clientSites, posts]) {
-    if (result.error) throw new Error(`Could not read the contract's sites: ${result.error.message}`);
+    if (result.error)
+      throw new Error(`Could not read the contract's sites: ${result.error.message}`);
   }
   const on = new Set((linked.data ?? []).map((l) => l.site_id));
   const sites: PostSite[] = (clientSites.data ?? [])

@@ -37,7 +37,7 @@ import type { CompanyFormState } from "@/server/identity/company-form-state";
 
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-type Errors = Record<string, string> | undefined;
+type Errors = Partial<Record<string, string>> | undefined;
 
 function RequirementFields({
   value,
@@ -300,7 +300,9 @@ export function AddPostForm({
   const errors = state && !state.ok ? state.fieldErrors : undefined;
   const v = state?.values;
   const onContract = sites.filter((s) => s.onContract);
-  const [siteId, setSiteId] = useState(v?.siteId ?? (onContract.length === 1 ? onContract[0]!.id : ""));
+  const [siteId, setSiteId] = useState(
+    v?.siteId ?? (onContract.length === 1 ? onContract[0]!.id : ""),
+  );
   const [postName, setPostName] = useState(v?.postName ?? "");
   const [role, setRole] = useState(v?.role ?? "");
   const [band, setBand] = useState(v?.band ?? "");
@@ -353,7 +355,12 @@ export function AddPostForm({
   ];
 
   return (
-    <form action={action} noValidate aria-label="Add post" className="flex max-w-[960px] flex-col gap-6">
+    <form
+      action={action}
+      noValidate
+      aria-label="Add post"
+      className="flex max-w-[960px] flex-col gap-6"
+    >
       <input type="hidden" name="clientId" value={clientId} />
       <input type="hidden" name="contractId" value={contract.id} />
       <input type="hidden" name="addSite" value={site && !site.onContract ? "true" : "false"} />

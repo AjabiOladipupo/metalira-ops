@@ -125,7 +125,10 @@ const FIELD: Record<string, string> = {
 };
 
 /** Database refusals in plain English, under the field they belong to. */
-export function fromLiveChangeDbError(error: PostgrestError, fields: Record<string, string> = {}): never {
+export function fromLiveChangeDbError(
+  error: PostgrestError,
+  fields: Record<string, string> = {},
+): never {
   if (error.code === "42501") {
     throw new MutationError("forbidden", "Your role can't make this change.");
   }

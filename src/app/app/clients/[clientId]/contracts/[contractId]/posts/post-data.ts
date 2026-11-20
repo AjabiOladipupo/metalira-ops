@@ -19,11 +19,7 @@ export async function loadPostPage(
 ): Promise<{ ctx: ClientsPageContext; detail: PostDetail; base: string; postPath: string }> {
   const ctx = await clientsPageContext();
   const detail = await loadPostDetail(ctx.supabase, ctx.organisationId, postId);
-  if (
-    !detail ||
-    detail.post.contractId !== contractId ||
-    detail.contract.clientId !== clientId
-  ) {
+  if (!detail || detail.post.contractId !== contractId || detail.contract.clientId !== clientId) {
     notFound();
   }
   const base = `/app/clients/${clientId}/contracts/${contractId}`;

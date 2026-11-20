@@ -287,7 +287,10 @@ describe("change_post_requirement", () => {
       .eq("entity_id", night)
       .eq("action", "post.requirement_changed");
     expect(audit).toHaveLength(1);
-    expect(audit![0]).toMatchObject({ actor_id: ops.id, after: { count: 2, effective_from: monday } });
+    expect(audit![0]).toMatchObject({
+      actor_id: ops.id,
+      after: { count: 2, effective_from: monday },
+    });
   });
 
   it("replaces a change that hasn't started when changed again from the same day", async () => {
@@ -345,9 +348,9 @@ describe("change_post_requirement", () => {
     expect(
       (await change(night, addDays(monday, 14), 2, ops.client, { start: "18:10" })).error?.code,
     ).toBe("MLPC8");
-    expect((await change(night, addDays(monday, 14), 2, ops.client, { days: [] })).error?.code).toBe(
-      "MLPC8",
-    );
+    expect(
+      (await change(night, addDays(monday, 14), 2, ops.client, { days: [] })).error?.code,
+    ).toBe("MLPC8");
   });
 
   it("refuses dates past the end, and keeps a changed version inside an ending contract", async () => {
@@ -416,7 +419,9 @@ describe("add_post", () => {
     expect(none.error?.code).toBe("MLPC4");
     expect(none.error?.message).toContain("No rate for Supervisor · Day (shift)");
     // Keys compare as rate_key_part does.
-    expect((await addPost(id, { role: "  GUARD ", band: "night", name: "Gate D" })).error).toBeNull();
+    expect(
+      (await addPost(id, { role: "  GUARD ", band: "night", name: "Gate D" })).error,
+    ).toBeNull();
 
     const later = addDays(monday, 14);
     const card = await ops.client.rpc("add_rate_card_version", {
@@ -432,7 +437,9 @@ describe("add_post", () => {
     expect(card.error).toBeNull();
     const gap = await addPost(id, { role: "Dog handler", band: "", name: "Kennel" });
     expect(gap.error?.code).toBe("MLPC4");
-    expect((await addPost(id, { role: "Dog handler", band: "", name: "Kennel", from: later })).error).toBeNull();
+    expect(
+      (await addPost(id, { role: "Dog handler", band: "", name: "Kennel", from: later })).error,
+    ).toBeNull();
   });
 
   it("adds a client site with a geofence only when asked, and records it", async () => {
@@ -510,7 +517,11 @@ describe("close_post", () => {
     expect((await change(night, addDays(monday, 7), 2)).error).toBeNull();
     const { data, error } = await closePost(night, monday);
     expect(error).toBeNull();
-    expect(data).toMatchObject({ closed_on: monday, requirements_cancelled: 1, requirements_closed: 1 });
+    expect(data).toMatchObject({
+      closed_on: monday,
+      requirements_cancelled: 1,
+      requirements_closed: 1,
+    });
     expect(await versions(night)).toEqual([
       { effective_from: today, effective_to: monday, required_count: 1 },
     ]);
@@ -555,9 +566,9 @@ describe("close_post", () => {
     const post = (added.data as { post_id: string }).post_id;
     expect((await closePost(post, addDays(monday, 6))).error).toBeNull();
     expect(await versions(post)).toEqual([]);
-    expect((await closePost(await postId(id, "Gate A · Day"), today, "x".repeat(501))).error?.code).toBe(
-      "MLPC7",
-    );
+    expect(
+      (await closePost(await postId(id, "Gate A · Day"), today, "x".repeat(501))).error?.code,
+    ).toBe("MLPC7");
   });
 });
 
@@ -613,7 +624,11 @@ describe("add_contract_site and the change log", () => {
       effective_on: monday,
     } as never);
     expect(insert.error?.code).toBe("42501");
-    const { data: row } = await admin.from("contract_changes").select("id").eq("post_id", night).single();
+    const { data: row } = await admin
+      .from("contract_changes")
+      .select("id")
+      .eq("post_id", night)
+      .single();
     await expect(
       db.query("update public.contract_changes set reason = 'x' where id = $1", [row!.id]),
     ).rejects.toMatchObject({ code: "MLPO1" });

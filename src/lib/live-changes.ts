@@ -32,15 +32,7 @@ export interface RateKeyVersion extends DatedVersion {
 }
 
 export type LiveChangeCode =
-  | "MLPC1"
-  | "MLPC2"
-  | "MLPC3"
-  | "MLPC4"
-  | "MLPC5"
-  | "MLPC6"
-  | "MLPC7"
-  | "MLPC8"
-  | "MLPC9";
+  "MLPC1" | "MLPC2" | "MLPC3" | "MLPC4" | "MLPC5" | "MLPC6" | "MLPC7" | "MLPC8" | "MLPC9";
 
 export interface LiveContract {
   status: "draft" | "active" | "ended";
@@ -135,7 +127,11 @@ export function valuesRefusal(values: RequirementValues): Refusal | null {
   if (!quarterHour(values.startTime) || !quarterHour(values.endTime)) {
     return refuse("MLPC8", "Times are on the quarter hour.");
   }
-  if (!Number.isInteger(values.requiredCount) || values.requiredCount < 1 || values.requiredCount > 200) {
+  if (
+    !Number.isInteger(values.requiredCount) ||
+    values.requiredCount < 1 ||
+    values.requiredCount > 200
+  ) {
     return refuse("MLPC8", "People required is 1 to 200.");
   }
   return null;
@@ -258,7 +254,10 @@ export function planRequirementChange(args: {
   const current = versionInForce(args.versions, from);
   if (!current) return refuse("MLPC2", `This post has no requirement on ${formatDate(from)}.`);
   if (sameValues(current, next)) {
-    return refuse("MLPC9", `Nothing changes: the post already needs that from ${formatDate(from)}.`);
+    return refuse(
+      "MLPC9",
+      `Nothing changes: the post already needs that from ${formatDate(from)}.`,
+    );
   }
   if (current.effectiveFrom === from && from <= today) {
     return refuse("MLPC2", "This post's requirement started today. Change it from tomorrow.");
@@ -277,7 +276,11 @@ export function planRequirementChange(args: {
     ok: true,
     closes: replaced
       ? null
-      : { id: current.id, effectiveFrom: current.effectiveFrom, effectiveToAfter: addDays(from, -1) },
+      : {
+          id: current.id,
+          effectiveFrom: current.effectiveFrom,
+          effectiveToAfter: addDays(from, -1),
+        },
     replaces: replaced ? { id: current.id } : null,
     starts: { effectiveFrom: from, effectiveTo: current.effectiveTo },
     before: current,
@@ -365,7 +368,11 @@ export function planAddPost(args: {
   } else if (site.archived) {
     return refuse("MLPC5", `${site.name} is archived. Restore it first.`);
   }
-  const line = { postName: input.postName.trim() || null, role, band: input.band.trim() || "standard" };
+  const line = {
+    postName: input.postName.trim() || null,
+    role,
+    band: input.band.trim() || "standard",
+  };
   const name = postLabel(line);
   const nameKey = normaliseKeyPart(name);
   if (args.openPostNames.some((n) => normaliseKeyPart(n) === nameKey)) {
@@ -439,7 +446,10 @@ export function planClosePost(args: {
   const blocked = contractRefusal(contract, today);
   if (blocked) return blocked;
   if (post.status === "closed") {
-    return refuse("MLPC6", `This post already closes after ${formatDate(post.closedOn ?? lastDay)}.`);
+    return refuse(
+      "MLPC6",
+      `This post already closes after ${formatDate(post.closedOn ?? lastDay)}.`,
+    );
   }
   if (lastDay < today) return refuse("MLPC2", "The last day can't be in the past.");
   if (lastDay < addDays(post.openedOn, -1)) {
@@ -459,7 +469,9 @@ export function planClosePost(args: {
   if (reason.length > 500) return refuse("MLPC7", "Keep it to 500 characters of plain text.");
   const cancels = args.versions.filter((v) => v.effectiveFrom > lastDay).map((v) => v.id);
   const closes = args.versions
-    .filter((v) => v.effectiveFrom <= lastDay && (v.effectiveTo === null || v.effectiveTo > lastDay))
+    .filter(
+      (v) => v.effectiveFrom <= lastDay && (v.effectiveTo === null || v.effectiveTo > lastDay),
+    )
     .map((v) => v.id);
   const inForce = versionInForce(args.versions, today > post.openedOn ? today : post.openedOn);
   const neverStaffed = lastDay < post.openedOn;
