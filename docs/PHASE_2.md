@@ -41,7 +41,8 @@ Lira is the future in-product ops agent (docs/LIRA.md). Nothing here calls an AI
 | Clients, sites, checkpoints (names, address, geofence) | owner, admin, hr, finance, ops_manager, line_manager (keeps the 1.3 read rule); a worker reads the ones they're assigned to | owner, admin, ops_manager. hr keeps **insert only**, because the people import creates name-only clients and sites. Checkpoint QR tokens can be read by owner, admin and ops_manager only |
 | Client contacts | owner, admin, finance, ops_manager | owner, admin, finance, ops_manager |
 | Company bank account | full number: owner, finance (decision 7 pattern, `pii.reveal` audited); last 4 digits: every manager | request: owner, admin, finance. Approve: owner or finance, never the requester (the first account during setup excepted, below) |
-| Contracts, contract sites, headcount, documents, contract WHT rates | owner, admin, finance, ops_manager | owner, admin, ops_manager (WHT rates: owner, admin, finance) |
+| Contracts, contract sites, headcount, documents | owner, admin, finance, ops_manager | owner, admin, ops_manager |
+| Client tax settings (`clients.deducts_wht`, `clients.withholds_vat`) | owner, admin, finance, ops_manager (through `client_billing`) | owner, admin, finance, through `set_client_tax_settings` (audited with a reason) |
 | Rate cards and lines | owner, admin, finance, ops_manager | owner, admin, ops_manager, through SQL functions only |
 | Posts, roster requirements | owner, admin, hr, finance, ops_manager, line_manager | none directly. Only `activate_contract`, `change_post_requirement`, `add_post`, `close_post` and `end_contract` write them (owner, admin, ops_manager) |
 
@@ -100,14 +101,15 @@ Replaces the "Connect in Phase 2" placeholder on Setup step 3 and in Settings (D
 
 ### 2.3b Bank picker and account name check (owner request, 19 Nov 2026)
 Wherever bank details are entered (the company account; Add employee; Change bank details; the worker app's bank change), the bank is picked from a searchable list with its bank code (`src/lib/banks.ts`, codes from Monnify's Supported Banks page) and the person types only the 10-digit number. The server asks the bank network for the account name with Metalira's own provider account (Monnify "Validate Bank Account", free per its docs; `src/lib/payments/`, called only from `src/server/billing/bank-lookup.ts`) and shows it read-only.
-- Migration `20261119115000_bank_account_lookup.sql`: `bank_account_lookups` (secret key writes only; 30 lookups an hour per user, 100 per company; the number kept as a keyed digest and last 4); `bank_code`, `bank_lookup_id`, `bank_account_digest`, `name_check` (match, near, not_checked), `name_check_reason`, `name_check_source` on `organisation_bank_accounts` and `bank_detail_changes`; `bank_code` and the last check (`bank_checked_*`) on `workers`. A request that names a lookup gets the bank's name from it, whatever the caller sent; a lookup backs one request, by its own user, within 30 minutes, for the same bank and number.
-- Name matching (`src/lib/bank-name-match.ts`): companies against the legal, trading and display names (suffixes normalised: LTD/LIMITED, NIG/NIGERIA, SVCS/SERVICES...); workers against first and last name in any order, middle names allowed. `match` accepts; `near` needs a reason of 10+ characters the approver sees; `no_match` is refused. The server recomputes it on approval from the stored name and refuses a no match, a near match without a reason, or a number other than the one checked (digest).
+- Migration `20261119115000_bank_account_lookup.sql`: `bank_account_lookups` (secret key writes only; 30 lookups an hour per user, 60 per network address, 20 an hour per company for its own account and 100 for employees, 10 a day while setup is unfinished, a platform ceiling; the number kept as a keyed digest and last 4); `bank_code`, `bank_lookup_id`, `bank_account_digest`, `name_check` (match, near, not_checked), `name_check_reason`, `name_check_source` on `organisation_bank_accounts` and `bank_detail_changes`; `bank_code` and the last check (`bank_checked_*`) on `workers`. A request that names a lookup gets the bank's name from it, whatever the caller sent; a lookup backs one request, by its own user, within 30 minutes, for the same bank and number.
+- Name matching (`src/lib/bank-name-match.ts`): companies against the legal and trading names (suffixes normalised: LTD/LIMITED, NIG/NIGERIA, SVCS/SERVICES...); workers against first and last name in any order, middle names allowed. `match` accepts; `near` needs a reason of 10+ characters the approver sees; `no_match` is refused. The server recomputes it on approval from the stored name and refuses a no match, a near match without a reason, or a number other than the one checked (digest).
 - Without provider keys: the deterministic test resolver outside production ("Test lookup" on screen); production refuses with a clear message.
-- Imports don't look names up per row: their requests are `not_checked`, and "Check bank details" on the person page checks the details on file later.
+- Imports don't look names up per row: their requests are `not_checked` (raised only through the import's definer function; signed-in users can't raise unchecked requests, `MLBL7`), approving one needs a note saying how the account was confirmed, and "Check bank details" on the person page checks the details on file later.
+- Test and sandbox lookups back requests only where the database allows them (`private.settings`, seeded on local and CI databases only); the hosted project, which previews share, shows them but refuses to use or approve them.
 
 **Accept:** an account in someone else's name can't be sent; a close match carries a reason to the approver; the approver sees the bank's name and the result; tests, CI and previews without keys use the test resolver.
 
-### 2.4 Contracts, dated rate cards and WHT (after 2.1; can run alongside 2.2)
+### 2.4 Contracts, dated rate cards and WHT per line (after 2.1; can run alongside 2.2)
 - Migration `<ts>_contracts_rate_cards.sql`:
   - `contracts`:
     - client_id, `reference` (unique per organisation ignoring case; generated as `CTR-0001` when left blank, never reused), name, type: **manned_post, per_visit, fixed_monthly, per_job** (milestone and cost_plus come later: milestone needs Phase 8 projects, cost_plus needs markup rules nobody has written).
@@ -117,13 +119,13 @@ Wherever bank details are entered (the company account; Add employee; Change ban
   - `contract_sites`: contract_id, site_id, unique pair. A trigger requires the site to belong to the contract's client. Locked once the contract is active; 2.8 adds sites to a live contract.
   - `rate_cards`: contract_id, effective_from, effective_to, note. No overlaps, and versions sit inside the contract's dates.
   - `rate_card_lines`: rate_card_id, role, `band` (default `standard`; for example Day, Night, Supervisor), unit (shift, hour, visit, month, job), `rate_kobo` (above 0, up to ₦1bn), currency, **`ot_rate_kobo`** (null, or above 0: the line's own overtime rate per hour, owner decision), `ot_multiplier_bps` (null, or 10000–30000; shown as "overtime 1.5×" when no hourly rate is set). Unique on `(rate_card_id, lower(role), lower(band), unit)`. The **rate key** is (role, band, unit).
-  - **`contract_wht_rates`** (WHT is per contract, owner decision, because the rate depends on the service): contract_id, rate_bps (0–2000), effective_from, effective_to. Dated, no overlaps, and past versions are frozen (the `pay_rates` trigger pattern). Written by owner, admin and finance; read by the contract readers. RULES_NIGERIA still has the base as a gap: Phase 6 applies it.
+  - ~~`contract_wht_rates`~~ (superseded 19 Nov 2026, owner's accountant): WHT is set **per rate line** (`service_type`, `wht_rate_bps`), see "As built" below.
 - Writes are SQL functions only (no insert or update grants on the rate tables):
   - `save_draft_rate_card(contract, effective_from, lines jsonb)` replaces the card while the contract is a draft. Nothing has used it yet, and the audit row keeps the before and after.
   - `add_rate_card_version(contract, effective_from, lines jsonb)` is for active contracts. It runs in one transaction, needs `effective_from >= org_today` (backdating waits for Phase 6, like decision 17), closes the previous version the day before, and refuses the change if any open post's rate key is missing from the new lines.
   - `cancel_rate_card_version(id)` works only on a version that hasn't started yet, and only the latest one; it reopens the version before it.
-  - `add_contract_wht_rate(contract, rate_bps, effective_from)` and `cancel_contract_wht_rate(id)`, the same dating rules.
-- Pure library `src/server/business/rate-cards.ts`:
+  - (No WHT functions: WHT lives on the rate lines and is versioned with the card.)
+- Pure library `src/lib/rate-cards.ts` (isomorphic, built in 2.4 so the rate card editor shows the same preview in the browser; it imports nothing from `src/server/`):
   - `rateCardInForce(versions, date)`.
   - `planNewVersion(versions, from, today)`, which returns the row to close and the new row, or a reason it can't (also the preview for "Change rates from").
   - `findRateLine(version, key)`.
@@ -131,17 +133,31 @@ Wherever bank details are entered (the company account; Add employee; Change ban
   - `formatRateSummary(lines)`, which gives "₦12,500 day · ₦15,000 night shift · overtime 1.5×" for the setup table and client page.
   - No billing arithmetic beyond that. Pricing a Work Unit is Phase 6.
 - Routes:
-  - `/app/clients/[clientId]/contracts/new` takes type, name, reference, dates, sites, terms, VAT, WHT and SLA.
+  - `/app/clients/[clientId]/contracts/new` takes type, name, reference, dates, sites, terms, VAT and SLA (WHT is on the rate lines).
   - `/app/clients/[clientId]/contracts/[contractId]` has the tabs Details · Rate card · Headcount · Documents and an Activate button with a checklist in the header (2.7). The Rate card tab shows the version in force, scheduled versions and history, with "Change rates from"; Details shows the WHT history with "Change WHT rate from".
   - The client's Contracts tab and the Setup step 4 Rate column fill in.
 - Register the actions (rate changes are `money` with previews); add `fixtures/lira/contracts.md`.
 - Tests:
   - Unit tests on `rate-cards.ts`: an overlap refused, a past version frozen, the previous version closed the day before, the scheduled version cancelled, the exact kobo round trip of `"12,500"` and `"12500.50"`, a missing key reported, the summary text with and without `ot_rate_kobo`.
-  - Database tests for the triggers, including the WHT versions.
+  - Database tests for the triggers, including the per-line WHT defaults.
   - RLS for the five tables.
   - money-reviewer before merge.
 
-**Accept:** a draft Coastline contract gets a rate card (Guard Day ₦12,500 a shift, Guard Night ₦15,000 a shift, overtime 1.5×) and a 5% WHT rate; after activation in 2.7, "Change rates from 1 Jan" adds a version and closes the old one on 31 Dec; editing a past version is refused by the database.
+- **As built (2.4):**
+  - Rate card writes are private security definer functions (role checked through `private.has_role`, so untrusted sessions are refused) behind public invoker wrappers, because the tables have no write grants. The audit actor is still the caller. Contracts and contract sites are written as the caller (`create_contract`, `update_draft_contract`).
+  - "Frozen" applies once the contract has left draft: on a draft nothing has used the card, so `save_draft_rate_card` replaces it whole and versions may be cancelled. `add_rate_card_version` also works on a draft (a change already agreed, from after the current card), which is how "Change rates from" is shown before activation exists.
+  - Lines are insert-only. `private.rate_card_open_post_keys(org, contract)` returns nothing until 2.7 replaces it with the open posts' keys; `add_rate_card_version` already refuses (`MLRC5`) a change that leaves one out.
+  - Moving a draft's start date moves its first rate card with it; anything else left outside the dates is refused (`MLCO4`).
+  - The first rate card always starts on the contract's start date (`save_draft_rate_card` refuses anything else, `MLRC4`), so no day of the contract goes unpriced. Once live, `end_date` is frozen like the other terms (`MLCO1`); 2.7's `end_contract` must let it through and close the dated versions with it.
+  - **Overtime (owner confirmed 19 Nov 2026):** what bills is `ot_rate_kobo`, charged per overtime hour. The multiplier is an entry helper: on an hourly line the editor works the rate out as `roundHalfUp(rate_kobo × bps / 10000)` (half up, once, on the final amount) and stores both; on shift, visit, month and job lines a multiplier alone can't make an hourly rate, so `ot_rate_kobo` is required when overtime is offered (check `rate_card_lines_ot_needs_rate`), and any multiplier is display-only.
+  - **WHT per line (owner's accountant, 19 Nov 2026; supersedes per-contract WHT).** Each rate line has a `service_type` (`services` default, `management_fee`, `rent_hire`, `goods`, `other`) and a `wht_rate_bps` (0–20%) that defaults from the type (2%, 5%, 10%, 2%, 2%; `private.default_wht_rate_bps` and `DEFAULT_WHT_BPS`), is editable per line and is versioned with the card (insert-only, frozen with the line). The editor prefills it from the type, with the hint to split facility management into service lines and a separate management fee line. `formatRateSummary`, the diff and the preview include WHT. Phase 6 computes the expected WHT per invoice line on the amount before VAT and sums it.
+  - **Client tax settings.** `clients.deducts_wht` (`expected` default, `not_deducted`) and `clients.withholds_vat` (default false; government MDAs and appointed VAT withholding agents), read through `client_billing` like the other billing columns (not hr or line managers), written by owner, admin and finance through `set_client_tax_settings` (row audit plus `clients.tax_settings_changed` with the reason), shown on the client Overview. The app applies no turnover threshold; Phase 6 learns from payments and flags differences.
+  - `rateCardInForce(versions, date, contractEndDate)` puts nothing in force after the contract's end date, even on an open version.
+  - Pages work out "today" in the company's own time zone (`todayIn(organisations.timezone)`), as `private.org_today` does. Registry previews still use Lagos time.
+  - `billing_frequency` is monthly, fortnightly, weekly or on_completion (owner confirmed 19 Nov 2026). Refusal codes: `MLCO1`–`MLCO4`, `MLRC1`–`MLRC8`, `MLCL1` (MLCT stays for 2.7).
+  - Routes: `/app/clients/[clientId]/contracts/new`, `/app/clients/[clientId]/contracts/[contractId]` (Details, Rate card with versions including each line's service type and WHT, Headcount and Documents placeholders), `.../edit` (draft only) and `.../rates` (draft card or `?mode=change`), each with a Review step that shows the preview before saving.
+
+**Accept:** a draft Coastline contract gets a rate card (Guard Day ₦12,500 a shift, Guard Night ₦15,000 a shift, overtime 1.5×, WHT 2% per line); after activation in 2.7, "Change rates from 1 Jan" adds a version and closes the old one on 31 Dec; editing a past version is refused by the database.
 
 ### 2.5 Headcount (after 2.4)
 - Migration `<ts>_headcount.sql` creates `headcount_requirements`. This is the draft plan the client signs up to, and is frozen at activation.
@@ -183,12 +199,13 @@ Wherever bank details are entered (the company account; Add employee; Change ban
     - A contract site has no geofence.
     - There is no rate card version in force on the go-live date.
     - A headcount row has no matching rate line.
+    - (No separate WHT check: every rate line carries a service type and WHT rate, which the defaults guarantee.)
     - A manned_post contract has no headcount.
     - The end date is before the go-live date.
   - It sets `go_live_date = greatest(start_date, org_today)`. Then it inserts one `posts` row per headcount row (`opened_on = go_live_date`) and one `roster_requirements` row per post copying the days, times and count (`effective_from = go_live_date`, `effective_to = end_date`). Finally it sets status `active`, activated_at and activated_by, and logs `contract.activated` with the post and requirement counts.
   - Calling it again on an active contract changes nothing and returns the existing posts (idempotent).
   - A pure preview (`planActivation`) gives the checklist and "Creates 4 posts and 4 roster requirements from 1 Dec 2026" before the call.
-- **`end_contract(p_contract_id, p_end_date, p_reason)`** sets end_date, closes every open post and requirement on that date, and sets the status to `ended` once the date has passed (pg_cron daily). An end date in the past is refused.
+- **`end_contract(p_contract_id, p_end_date, p_reason)`** sets end_date, closes every open post and requirement on that date, and sets the status to `ended` once the date has passed (pg_cron daily). An end date in the past is refused. It must close (or cancel, if they start after the end date) the open rate card versions on that date **before** the status becomes `ended`: the 2.4 guards refuse every rate card write once a contract is ended, and freeze `end_date` once it is live (`contracts_before_write` must be replaced to let `end_contract` through).
 - **Welcome email** (owner decision): on by default. With `p_send_welcome`, an email is sent with `after()` to the client's primary ops and billing contacts. It names the company, the contract, the sites, the go-live date and the address invoices will come from. No bank details; they appear on invoices only. The company's `invoice_email` is the reply-to. The ops managers get an in-app or email notice.
 - UI: an Activate dialog shows the checklist (each item ticked or showing the reason, with a link to fix it), the preview line, and a "Send welcome email" checkbox, ticked. After activation the contract page shows a Posts table: Post · Site · Days · Hours · Required · From.
 - Tests:
@@ -236,9 +253,9 @@ Wave 1: 2.1 and 2.3. Wave 2, off 2.1's branch: 2.2 and 2.4. Wave 3, off 2.4's br
   - Zod schemas for site, geofence, contract and SLA.
   - Templates for the welcome and bank-account emails.
   - Magic-byte check for documents.
-- **Database (Vitest against `supabase start`, alongside the RLS suite):** the contact triggers and `create_client` (2.1), rate card, WHT and requirement triggers, exclusion constraints, geofence trigger and check function, `activate_contract` (refusals, idempotent, concurrent), `required_shifts`, `end_contract`, the 2.8 functions, two-person rule and hold on the bank account.
+- **Database (Vitest against `supabase start`, alongside the RLS suite):** the contact triggers and `create_client` (2.1), rate card (with per-line WHT defaults) and requirement triggers, exclusion constraints, geofence trigger and check function, `activate_contract` (refusals, idempotent, concurrent), `required_shifts`, `end_contract`, the 2.8 functions, two-person rule and hold on the bank account.
 - **RLS:**
-  - `tests/rls/tables/business.ts` registers `client_contacts` (2.1), then `site_checkpoints`, `organisation_bank_accounts`, `contracts`, `contract_sites`, `rate_cards`, `rate_card_lines`, `contract_wht_rates`, `headcount_requirements`, `contract_documents`, `posts` and `roster_requirements`. The existing `clients` and `sites` entries stay in `people.ts`.
+  - `tests/rls/tables/business.ts` registers `client_contacts` (2.1), then `site_checkpoints`, `organisation_bank_accounts`, `contracts`, `contract_sites`, `rate_cards`, `rate_card_lines`, `headcount_requirements`, `contract_documents`, `posts` and `roster_requirements`. The existing `clients` and `sites` entries stay in `people.ts`.
   - Role matrix tests per the roles table, plus storage-path tests for `contract-docs`.
 - **Playwright:**
   - `tests/e2e/clients.spec.ts` (2.1): ops_manager adds a client with two contacts at 390px and 1440px; finance reads without editing.
@@ -267,8 +284,13 @@ Wave 1: 2.1 and 2.3. Wave 2, off 2.1's branch: 2.2 and 2.4. Wave 3, off 2.4's br
 ## Answered questions (owner, 18–19 Nov 2026)
 1. **Map for geofences.** Leaflet with MapTiler tiles: one key, restricted to ops.metaliratech.com, *.vercel.app and localhost, in `NEXT_PUBLIC_MAPTILER_KEY` (added in Vercel). Plus "Use my location".
 2. **Company bank account approval.** Changes wait out a 72-hour hold, as worker bank changes do. The first account during setup is allowed with one approver and audited.
-3. **Overtime billing on shift-priced lines.** Each rate-card line carries its own overtime rate (`ot_rate_kobo`), with the multiplier kept for display and lines that have no hourly rate.
-4. **WHT.** Per contract, not per client: `contract_wht_rates` in 2.4 (no `client_wht_rates` table).
+3. **Overtime billing on shift-priced lines.** Each rate-card line carries its own overtime rate (`ot_rate_kobo`), with the multiplier kept for display and lines that have no hourly rate. Refined by 9 below.
+4. **WHT.** ~~Per contract~~ Superseded 19 Nov 2026 (owner's accountant): WHT is set per rate line by service type (see 12).
 5. **Contract types.** manned_post, per_visit, fixed_monthly and per_job now; milestone and cost_plus later.
 6. **Welcome email.** Sent on activation to the client's ops and billing contacts, on by default, with the sites, go-live date and invoice sender, and no bank details.
 7. **"Import clients from Excel"** (Setup board button). Later. The people import already creates clients and sites by name.
+8. **Billing frequencies** (owner confirmed 19 Nov 2026). monthly, fortnightly, weekly and on_completion.
+9. **Overtime billing** (owner confirmed 19 Nov 2026). Overtime is billed as each line's per-hour overtime rate (`ot_rate_kobo`); the multiplier is only an entry shortcut (on hourly lines it works the rate out, half up once).
+10. **WHT base** (owner, 19 Nov 2026). WHT is calculated on the service amount before VAT. Rates, remittance and VAT withholding are in RULES_NIGERIA.md "WHT and VAT withholding".
+11. **Clients that withhold VAT** (owner, 19 Nov 2026). Government MDAs and appointed VAT withholding agents pay the VAT to the tax authority; it is a client setting, `clients.withholds_vat` (a government client withholds VAT on all its contracts).
+12. **WHT per line** (owner and accountant, 19 Nov 2026). Each rate line has a service type and its WHT rate (services 2%, management fee 5%, rent or hire 10%, goods 2%, other 2%), editable per line and versioned with the card. Staffing is 2%; facility management is split into service lines (2%) and a separate management fee line (5%). Whether a client deducts WHT is a client setting (`clients.deducts_wht`, expected or not deducted), learned from payments in Phase 6; the app applies no small-company threshold (₦50m under the Nigeria Tax Act, but the client's decision).

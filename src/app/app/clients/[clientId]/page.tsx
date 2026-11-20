@@ -8,7 +8,15 @@ import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { paymentTermsLabel } from "@/lib/company";
 import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/dates";
+import { formatRateSummary } from "@/lib/rate-cards";
 import { loadClient, type ClientDetail } from "@/server/business/clients-data";
+import { CONTRACT_TYPE_LABELS } from "@/server/business/contract-schemas";
+import {
+  currentOrNextVersion,
+  listContracts,
+  type ContractRow,
+} from "@/server/business/contracts-data";
 import { CONTACT_ROLE_HINTS, CONTACT_ROLE_LABELS, CONTACT_ROLES } from "@/server/business/schemas";
 import { getActiveCompany } from "@/server/identity/company-data";
 import { listClientSites, summariseSites, type SiteRow } from "@/server/sites/sites-data";
@@ -17,6 +25,8 @@ import { RouteGate } from "../../_shell/slots";
 import { DetailList, Section, plural } from "../../people/_components/display";
 import { AddContactForm, ClientStatusForm, ContactRowForm } from "../_components/contact-forms";
 import { clientsPageContext, type ClientsPageContext } from "../_components/context";
+import { ContractStatusChip } from "../_components/contract-status";
+import { TaxSettingsForm } from "../_components/tax-settings-form";
 
 export const metadata: Metadata = { title: "Client" };
 
@@ -70,10 +80,12 @@ function Overview({
   client,
   companyTermsDays,
   canEdit,
+  canEditTax,
 }: {
   client: ClientDetail;
   companyTermsDays: number;
   canEdit: boolean;
+  canEditTax: boolean;
 }) {
   const billing = client.contacts.find((c) => c.role === "billing" && c.isPrimary);
   return (
@@ -133,10 +145,37 @@ function Overview({
           <p className="m-0 text-[15px] whitespace-pre-line">{client.notes}</p>
         </Section>
       ) : null}
-      <Section id="withholding" title="Withholding tax">
-        <p className="m-0 text-sm text-fg-muted">
-          Set on each contract, because the rate depends on the service.
-        </p>
+      <Section
+        id="tax"
+        title="Tax"
+        description="The WHT rate is set on each contract's rate lines by service type. These say how this client pays."
+      >
+        <DetailList
+          items={[
+            {
+              label: "Withholding tax",
+              value:
+                client.deductsWht === "expected"
+                  ? "Deducts WHT from payments"
+                  : "Doesn't deduct WHT",
+              testId: "client-deducts-wht",
+            },
+            {
+              label: "VAT",
+              value: client.withholdsVat
+                ? "Pays the VAT to the tax authority itself"
+                : "Pays the VAT with each payment",
+              testId: "client-withholds-vat",
+            },
+          ]}
+        />
+        {canEditTax ? (
+          <TaxSettingsForm
+            clientId={client.id}
+            deductsWht={client.deductsWht}
+            withholdsVat={client.withholdsVat}
+          />
+        ) : null}
       </Section>
       {canEdit ? (
         <Section
@@ -280,6 +319,69 @@ function Contacts({ client, canEdit }: { client: ClientDetail; canEdit: boolean 
   );
 }
 
+function Contracts({
+  client,
+  contracts,
+  canEdit,
+  today,
+}: {
+  client: ClientDetail;
+  contracts: ContractRow[];
+  canEdit: boolean;
+  today: string;
+}) {
+  const add = canEdit ? (
+    <Button asChild className="h-11 px-4">
+      <Link href={`/app/clients/${client.id}/contracts/new`}>Add contract</Link>
+    </Button>
+  ) : null;
+  if (contracts.length === 0) {
+    return (
+      <EmptyState
+        message="No contracts yet. Add what you do for this client and on what terms."
+        action={add}
+      />
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {add ? <div className="flex justify-end">{add}</div> : null}
+      <ul
+        aria-label="Contracts"
+        className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0"
+      >
+        {contracts.map((contract) => {
+          const version = currentOrNextVersion(contract.versions, today);
+          return (
+            <li key={contract.id}>
+              <Link
+                href={`/app/clients/${client.id}/contracts/${contract.id}`}
+                className="flex flex-col gap-1 px-4 py-3 no-underline hover:bg-surface"
+              >
+                <span className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-foreground">
+                    {contract.name}{" "}
+                    <span className="text-sm font-normal text-fg-muted">{contract.reference}</span>
+                  </span>
+                  <ContractStatusChip status={contract.status} />
+                </span>
+                <span className="text-sm text-fg-muted">
+                  {CONTRACT_TYPE_LABELS[contract.type]} · from {formatDate(contract.startDate)}
+                  {contract.endDate ? ` to ${formatDate(contract.endDate)}` : ""} ·{" "}
+                  {contract.siteCount} {contract.siteCount === 1 ? "site" : "sites"}
+                </span>
+                <span className="text-sm text-foreground" data-testid="contract-rates">
+                  {version ? formatRateSummary(version.lines) : "No rate card yet"}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 async function ClientPage({
   params,
   searchParams,
@@ -290,11 +392,13 @@ async function ClientPage({
   const [{ clientId }, query] = await Promise.all([params, searchParams]);
   const tab = parseTab(query.tab);
   const ctx = await clientsPageContext();
-  const [client, company] = await Promise.all([
+  const [client, company, contracts] = await Promise.all([
     loadClient(ctx.supabase, ctx.organisationId, clientId),
     getActiveCompany(),
+    listContracts(ctx.supabase, ctx.organisationId, { clientId }),
   ]);
   if (!client) notFound();
+  const activeContracts = contracts.filter((c) => c.status === "active").length;
 
   const activeSites = client.sites.filter((s) => s.status === "active").length;
   const status =
@@ -316,7 +420,11 @@ async function ClientPage({
           activeSites === 1 ? "site" : "sites"
         } · ${client.contacts.length.toLocaleString("en-NG")} ${
           client.contacts.length === 1 ? "contact" : "contacts"
-        } · no contracts yet`}
+        } · ${
+          contracts.length === 0
+            ? "no contracts yet"
+            : `${contracts.length.toLocaleString("en-NG")} ${contracts.length === 1 ? "contract" : "contracts"}, ${activeContracts.toLocaleString("en-NG")} active`
+        }`}
         actions={status}
       />
       <TabLinks clientId={client.id} current={tab} />
@@ -325,6 +433,7 @@ async function ClientPage({
           client={client}
           companyTermsDays={company?.paymentTermsDays ?? 30}
           canEdit={ctx.canEdit}
+          canEditTax={ctx.canEditClientTax}
         />
       ) : null}
       {tab === "sites" ? (
@@ -336,7 +445,12 @@ async function ClientPage({
         />
       ) : null}
       {tab === "contracts" ? (
-        <EmptyState message="No contracts yet. Contracts and rate cards are added here next." />
+        <Contracts
+          client={client}
+          contracts={contracts}
+          canEdit={ctx.canEditContracts}
+          today={ctx.today}
+        />
       ) : null}
       {tab === "contacts" ? <Contacts client={client} canEdit={ctx.canEditContacts} /> : null}
     </>

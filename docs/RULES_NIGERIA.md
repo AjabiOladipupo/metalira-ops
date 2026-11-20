@@ -50,7 +50,36 @@ Open points (ask before Phase 5 code depends on them):
 
 ## Invoicing
 - VAT 7.5% on taxable services, shown as its own line.
-- Withholding tax: clients may deduct WHT on payment (rate per client in `clients.wht_rate_bps`). Matching must accept amount = total − WHT and record the WHT credit. **Confirm the rate per service type.**
+- Withholding tax: clients may deduct WHT on payment. The rate is set **per rate line** by service type and versioned with the rate card (`rate_card_lines.service_type`, `wht_rate_bps`, slice 2.4, owner's accountant 19 Nov 2026). Whether a client deducts it at all is a client setting (`clients.deducts_wht`). The rules are below.
+
+## WHT and VAT withholding (owner, 19 Nov 2026; confirm with accountant where marked)
+
+- **Base.** WHT is calculated on the service amount **before VAT**. A ₦1,000,000 fee plus ₦75,000 VAT gives WHT on ₦1,000,000.
+- **Rules.** The Deduction of Tax at Source (Withholding) Regulations 2024. Rates for payments to resident companies:
+  - commission, consultancy, technical, management and professional fees: 5%;
+  - services not specifically listed: 2%;
+  - supply of goods by a non-manufacturer: 2%;
+  - rent, hire and lease: 10%.
+- **The rate depends on the service and the payee**, not on the kind of client. Government bodies must deduct.
+- **Accountant's views (19 Nov 2026):**
+  - Security guarding and cleaning: "services not specifically listed", 2%.
+  - Staffing: 2% (wages passed through, "services not specifically listed").
+  - Facility management: 5% if invoiced as one lump sum; otherwise 2% on the service lines and 5% only on a separate management-fee line. **Always split.** ₦1,000,000 of which a ₦100,000 management fee gives WHT of ₦23,000 (2% of ₦900,000 plus 5% of ₦100,000) instead of ₦50,000.
+  - So the app sets WHT per rate line by service type: services 2%, management fee 5%, rent or hire 10%, goods 2%, other 2%, editable per line.
+- **No TIN.** A payee without a TIN is charged twice the rate, up to 20% (hence the 0–20% range on `wht_rate_bps`). The company's TIN must be printed on every invoice (Phase 6), and the app should warn when the organisation has no TIN.
+- **Small-client exemption.** A small client need not deduct WHT where the supplier has a valid TIN and the transaction value is ₦2m or less in the calendar month. "Small" is ₦50m turnover (the Nigeria Tax Act definition, replacing CITA's ₦25m; the Tax Administration Act's ₦100m "small business" is not used for WHT; an NRS circular may follow). It is the client's decision, so **the app applies no threshold** and learns per client (`clients.deducts_wht`).
+- **Penalty.** A payer that under-deducts faces a penalty of 40% of the WHT not deducted, which is why payers lean towards the higher rate.
+- **VAT withholding.** Government MDAs and companies appointed as VAT withholding agents pay the VAT straight to the tax authority (remitted by the 14th of the following month), so their payment can arrive as the service amount less WHT, without the VAT. A client records this as `clients.withholds_vat` (slice 2.4).
+- **Remittance.** WHT deducted from payments to companies goes to the Nigeria Revenue Service (NRS, formerly FIRS) by the 21st of the following month; WHT on payments to individuals and unincorporated entities goes to the State IRS. The customer company's WHT credit notes are NRS credits.
+- **Phase 6 implications:**
+  - Expected WHT is worked out per invoice line on the pre-VAT amount (the line's `wht_rate_bps`), rounded once per line, and summed.
+  - Record the WHT actually deducted on each payment and flag differences from the expected amount.
+  - `clients.deducts_wht` is learned from payments (a client that pays in full is flagged, not assumed small).
+  - Bank matching accepts three patterns: the full amount; the amount less WHT; the amount less WHT and VAT (clients that withhold VAT).
+  - Invoice lines are split by rate-card version, so each line has one WHT rate.
+  - WHT on credit-note (negative) lines rounds half away from zero, symmetric with `roundHalfUp`, so a credit mirrors the line it reverses.
+  - A WHT credit-note tracker per client.
+  - A warning when the organisation has no TIN.
 
 ## Rounding
 - Compute in kobo integers. Round once, at the final value of each line, half-up. Use `allocateKobo` when splitting so parts sum to the whole.
