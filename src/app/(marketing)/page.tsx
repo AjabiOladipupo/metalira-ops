@@ -80,6 +80,14 @@ const STEPS = [
   },
 ];
 
+/** Slice 3.0: what a services business, freelancer or sole proprietor uses. */
+const FREELANCERS = [
+  "Clients, contracts and dated rate cards",
+  "Invoices with 7.5% VAT and the WHT each client deducts",
+  "Payments matched from your bank statement",
+  "No rosters, staff or payroll until you need them",
+];
+
 const PILOT = [
   "Workforce Ops, Business Ops and the Revenue Layer",
   "The worker app for every person on your list",
@@ -156,6 +164,23 @@ export default function LandingPage() {
             </li>
           ))}
         </ul>
+      </Section>
+
+      <Section id="freelancers" aria-labelledby="freelancers-title">
+        <div className="grid items-start gap-8 rounded-lg border border-line p-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)] lg:gap-12 lg:p-10">
+          <div className="flex flex-col gap-5">
+            <SectionHeading
+              id="freelancers-title"
+              eyebrow="Working on your own"
+              title="Also open to freelancers and sole proprietors"
+              intro="Choose “We deliver services or projects to clients” when you set up, and Metalira Ops starts with Business Ops only: no rosters, staff or payroll until you hire."
+            />
+            <CtaLink href="/for/freelancers" variant="outline" className="self-start">
+              For freelancers
+            </CtaLink>
+          </div>
+          <DotList items={FREELANCERS} className="text-base" />
+        </div>
       </Section>
 
       <Section id="how-it-works" aria-labelledby="how-title">

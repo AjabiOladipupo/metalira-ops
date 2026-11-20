@@ -43,6 +43,7 @@ describe("illustrations", () => {
         "role-finance",
         "role-operations",
         "role-worker",
+        "role-freelancer",
         "lira-chat",
       ]),
     );

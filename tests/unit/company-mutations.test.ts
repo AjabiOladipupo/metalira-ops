@@ -8,6 +8,7 @@ import {
   saveBusinessSpec,
   saveInvoicesSpec,
   savePlanSpec,
+  setModulesSpec,
   uploadLogoSpec,
 } from "@/server/identity/company-mutations";
 import { MutationError, runMutation, type MutationContext } from "@/server/identity/mutate";
@@ -29,6 +30,10 @@ function fakeClient({ rows = [{ id: ORG }] }: { rows?: unknown[] } = {}) {
     };
   }
   builder.then = (resolve: (value: unknown) => void) => resolve({ data: rows, error: null });
+  builder.maybeSingle = () => {
+    calls.push({ op: "maybeSingle", args: [] });
+    return Promise.resolve({ data: rows[0] ?? null, error: null });
+  };
 
   const bucket = {
     upload: vi.fn().mockResolvedValue({ data: { path: "x" }, error: null }),
@@ -49,6 +54,7 @@ function ctx(role: ManagerRole, client: SupabaseClient<Database>): MutationConte
 
 const PLAN = { plan: "workforce", expectedWorkers: "162", advance: "yes" };
 const BUSINESS = {
+  businessType: "workforce",
   legalName: "Adebayo Facility Services Ltd",
   tradingName: "Adebayo Facility Services",
   rcNumber: "RC 1234567",
@@ -74,6 +80,7 @@ const SPECS = [
   { name: "clients step", spec: advanceSetupSpec, input: { step: "clients" } },
   { name: "finish setup", spec: completeSetupSpec, input: {} },
   { name: "logo upload", spec: uploadLogoSpec, input: { file: PNG } },
+  { name: "modules", spec: setModulesSpec, input: { people: "on", confirmed: "yes" } },
 ] as const;
 
 const NON_ADMINS: ManagerRole[] = ["hr", "finance", "ops_manager", "line_manager"];
@@ -118,6 +125,10 @@ describe("company setup actions for an owner", () => {
   it("saves business details scoped to the active organisation, trading name as the app name", async () => {
     const fake = fakeClient();
     await runMutation(ctx("owner", fake.client), saveBusinessSpec, BUSINESS);
+    expect(fake.rpc).toHaveBeenCalledWith("set_company_business_type", {
+      p_organisation_id: ORG,
+      p_business_type: "workforce",
+    });
     expect(fake.calls[0]).toEqual({ op: "from", args: ["organisations"] });
     expect(fake.calls[1]).toEqual({
       op: "update",
@@ -138,6 +149,135 @@ describe("company setup actions for an owner", () => {
       ],
     });
     expect(fake.calls[2]).toEqual({ op: "eq", args: ["id", ORG] });
+  });
+
+  it("lets a services business leave out the pay days, keeping the saved ones (slice 3.0)", async () => {
+    const fake = fakeClient();
+    const rest: Partial<typeof BUSINESS> = { ...BUSINESS };
+    delete rest.payCycleStartDay;
+    delete rest.payDay;
+    await runMutation(ctx("owner", fake.client), saveBusinessSpec, {
+      ...rest,
+      businessType: "services",
+      industry: "digital_services",
+    });
+    expect(fake.rpc).toHaveBeenCalledWith("set_company_business_type", {
+      p_organisation_id: ORG,
+      p_business_type: "services",
+    });
+    const update = fake.calls.find((c) => c.op === "update")?.args[0] as Record<string, unknown>;
+    expect(update.industry).toBe("digital_services");
+    expect(update).not.toHaveProperty("pay_cycle_start_day");
+    expect(update).not.toHaveProperty("pay_day");
+  });
+
+  it("sets the business type last, so a refused save changes neither it nor the switches", async () => {
+    const fake = fakeClient({ rows: [] });
+    await expect(
+      runMutation(ctx("owner", fake.client), saveBusinessSpec, {
+        ...BUSINESS,
+        businessType: "services",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect(fake.rpc).not.toHaveBeenCalled();
+
+    const ok = fakeClient();
+    await runMutation(ctx("owner", ok.client), saveBusinessSpec, BUSINESS);
+    expect(ok.from.mock.invocationCallOrder[0]).toBeLessThan(ok.rpc.mock.invocationCallOrder[0]!);
+  });
+
+  it("requires the pay days from a workforce business", async () => {
+    const fake = fakeClient();
+    const rest: Partial<typeof BUSINESS> = { ...BUSINESS };
+    delete rest.payDay;
+    await expect(
+      runMutation(ctx("owner", fake.client), saveBusinessSpec, rest),
+    ).rejects.toMatchObject({ code: "invalid", fieldErrors: { payDay: expect.any(String) } });
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+
+  it("moves a workforce business from Clients to Employees", async () => {
+    const fake = fakeClient({ rows: [{ id: ORG, business_type: "workforce" }] });
+    const next = await runMutation(ctx("owner", fake.client), advanceSetupSpec, {
+      step: "clients",
+    });
+    expect(next).toBe("employees");
+    expect(fake.calls).toContainEqual({ op: "update", args: [{ setup_step: 5 }] });
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+
+  it("finishes setup from Clients for a services business: no Employees step (slice 3.0)", async () => {
+    const fake = fakeClient({ rows: [{ id: ORG, business_type: "services" }] });
+    const next = await runMutation(ctx("owner", fake.client), advanceSetupSpec, {
+      step: "clients",
+    });
+    expect(next).toBe("ready");
+    expect(fake.rpc).toHaveBeenCalledWith("complete_company_setup", { p_organisation_id: ORG });
+    expect(fake.calls).not.toContainEqual({ op: "update", args: [{ setup_step: 5 }] });
+  });
+
+  describe("modules (slice 3.0)", () => {
+    const ALL_ON = {
+      id: ORG,
+      business_type: "workforce",
+      shifts_enabled: true,
+      people_enabled: true,
+      payroll_enabled: true,
+    };
+
+    it("needs the confirm step to turn a part off, and writes nothing without it", async () => {
+      const fake = fakeClient({ rows: [ALL_ON] });
+      await expect(
+        runMutation(ctx("owner", fake.client), setModulesSpec, { people: "on", payroll: "on" }),
+      ).rejects.toMatchObject({ code: "invalid", message: "Confirm before turning a part off." });
+      expect(fake.rpc).not.toHaveBeenCalled();
+    });
+
+    it("turns Shifts off through set_company_modules once confirmed", async () => {
+      const fake = fakeClient({ rows: [ALL_ON] });
+      fake.rpc.mockResolvedValueOnce({ data: { changed: true }, error: null });
+      const result = await runMutation(ctx("admin", fake.client), setModulesSpec, {
+        people: "on",
+        payroll: "on",
+        confirmed: "yes",
+      });
+      expect(fake.rpc).toHaveBeenCalledWith("set_company_modules", {
+        p_organisation_id: ORG,
+        p_shifts_enabled: false,
+        p_people_enabled: true,
+        p_payroll_enabled: true,
+      });
+      expect(result).toEqual({ organisationId: ORG, changed: true });
+    });
+
+    it("refuses Payroll or Shifts without People before calling the database", async () => {
+      for (const input of [
+        { payroll: "on", confirmed: "yes" },
+        { shifts: "on", confirmed: "yes" },
+      ]) {
+        const fake = fakeClient({ rows: [ALL_ON] });
+        await expect(
+          runMutation(ctx("owner", fake.client), setModulesSpec, input),
+        ).rejects.toMatchObject({
+          code: "invalid",
+          message: expect.stringMatching(/needs? People/),
+        });
+        expect(fake.rpc).not.toHaveBeenCalled();
+      }
+    });
+
+    it("turns parts on without a confirm step", async () => {
+      const fake = fakeClient({
+        rows: [{ ...ALL_ON, shifts_enabled: false, people_enabled: false, payroll_enabled: false }],
+      });
+      await runMutation(ctx("owner", fake.client), setModulesSpec, { people: "on" });
+      expect(fake.rpc).toHaveBeenCalledWith("set_company_modules", {
+        p_organisation_id: ORG,
+        p_shifts_enabled: false,
+        p_people_enabled: true,
+        p_payroll_enabled: false,
+      });
+    });
   });
 
   it("fails as forbidden when row-level security updates no row", async () => {

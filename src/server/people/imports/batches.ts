@@ -371,6 +371,7 @@ export interface StartedImport {
 }
 
 export const startImportSpec: MutationSpec<typeof startImportSchema, StartedImport> = {
+  module: "people",
   schema: startImportSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -401,6 +402,7 @@ export const checkImportSpec: MutationSpec<
   z.ZodObject<{ batchId: typeof batchIdSchema }>,
   CheckedImport
 > = {
+  module: "people",
   schema: z.object({ batchId: batchIdSchema }),
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, userId, data }) => {
@@ -482,6 +484,7 @@ export const applyImportFixSpec: MutationSpec<
   typeof applyImportFixSchema,
   { rowNumber: number; label: string; columns: string[] }
 > = {
+  module: "people",
   schema: applyImportFixSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -577,6 +580,7 @@ const commitResultSchema = z.object({
 });
 
 export const commitImportSpec: MutationSpec<typeof commitImportSchema, CommittedImport> = {
+  module: "people",
   schema: commitImportSchema,
   roles: PEOPLE_EDITORS,
   // Workers, pay rates and name-only clients created here are logged as coming from an import.
@@ -663,6 +667,7 @@ export const cancelImportSpec: MutationSpec<
   z.ZodObject<{ batchId: typeof batchIdSchema }>,
   { batchId: string }
 > = {
+  module: "people",
   schema: z.object({ batchId: batchIdSchema }),
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, userId, data }) => {

@@ -4,9 +4,10 @@ import { PlanCard } from "@/components/shell/app-sidebar";
 import { NavLinks, NavSkeleton } from "@/components/shell/nav-links";
 import { OrgSwitcher } from "@/components/shell/org-switcher";
 import { OrgSwitcherSkeleton } from "@/components/shell/top-bar";
+import { SwitchedOffPage } from "@/components/shell/switched-off-page";
 import { UserMenu, UserMenuFallback } from "@/components/shell/user-menu";
 import { planName } from "@/lib/company";
-import { navForRole } from "@/lib/nav";
+import { moduleForHref, navForRole } from "@/lib/nav";
 import { ROLE_LABELS } from "@/lib/roles";
 import { signOut, switchOrganisation } from "@/server/identity/actions";
 import { getActiveCompany, getActiveCompanyLogoUrl } from "@/server/identity/company-data";
@@ -19,9 +20,10 @@ import { getPageSession, requireAppAccess } from "@/server/identity/session";
  */
 
 async function RoleNavInner() {
-  const session = await getPageSession();
+  const [session, company] = await Promise.all([getPageSession(), getActiveCompany()]);
   if (!session?.active) return null;
-  return <NavLinks groups={navForRole(session.active.role)} />;
+  // The company's module switches (slice 3.0) hide the parts it has turned off.
+  return <NavLinks groups={navForRole(session.active.role, company?.modules)} />;
 }
 
 export function RoleNav() {
@@ -108,7 +110,17 @@ export function AccessGate() {
 }
 
 async function RouteGateInner({ href, children }: { href: string; children: React.ReactNode }) {
-  await requireAppAccess(href);
+  const session = await requireAppAccess(href);
+  // Slice 3.0: a page the role may open, in a part the company has switched off, shows "This
+  // part is switched off" in its place (the sidebar already hides it).
+  const part = moduleForHref(href);
+  if (part) {
+    const company = await getActiveCompany();
+    if (company && !company.modules[part]) {
+      const role = session.active.role;
+      return <SwitchedOffPage module={part} canManage={role === "owner" || role === "admin"} />;
+    }
+  }
   return children;
 }
 
@@ -123,8 +135,8 @@ function PageSkeleton() {
 }
 
 /**
- * Per-page check against the role-to-nav decision, so typing a URL is refused the same way
- * the sidebar hides the link. Every page under /app wraps its content in this. Layouts cannot
+ * Per-page check against the role-to-nav decision and the company's module switches, so typing
+ * a URL is refused the same way the sidebar hides the link. Every page under /app wraps its content in this. Layouts cannot
  * see the pathname, which is why the check lives in the page.
  */
 export function RouteGate({ href, children }: { href: string; children: React.ReactNode }) {

@@ -96,6 +96,7 @@ describe("marketing copy", () => {
       ["finance", "role-finance"],
       ["operations", "role-operations"],
       ["workers", "role-worker"],
+      ["freelancers", "role-freelancer"],
     ]);
     for (const role of ROLES) {
       expect(role.blocks).toHaveLength(3);
@@ -119,6 +120,14 @@ describe("site URL", () => {
 });
 
 describe("landing sections", () => {
+  it("says it is open to freelancers and sole proprietors, linking /for/freelancers (slice 3.0)", () => {
+    const landing = FILES.find((f) => f.name === "src/app/(marketing)/page.tsx")!.text;
+    expect(landing).toContain('id="freelancers"');
+    expect(landing).toContain("freelancers and sole proprietors");
+    expect(landing).toContain('href="/for/freelancers"');
+    expect(MARKETING_PATHS).toContain("/for/freelancers");
+  });
+
   it("names the pilot section Pilot, at #pilot, and shows no Pricing link", () => {
     expect(SECTION_LINKS).toContainEqual({ href: "/#pilot", label: "Pilot" });
     expect(SECTION_LINKS.map((l) => l.label)).not.toContain("Pricing");
@@ -158,7 +167,13 @@ describe("Lira (coming soon)", () => {
   });
 
   it("is on every manager role page and not on the workers page", () => {
-    expect(Object.keys(LIRA_FOR_ROLE).sort()).toEqual(["finance", "hr", "operations", "owners"]);
+    expect(Object.keys(LIRA_FOR_ROLE).sort()).toEqual([
+      "finance",
+      "freelancers",
+      "hr",
+      "operations",
+      "owners",
+    ]);
     expect(ROLES.map((r) => r.slug).filter((s) => !(s in LIRA_FOR_ROLE))).toEqual(["workers"]);
   });
 

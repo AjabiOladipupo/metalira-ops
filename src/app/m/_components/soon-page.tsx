@@ -14,6 +14,19 @@ async function Gate() {
 }
 
 /**
+ * The screen's sentence. Clock and My shifts say the company doesn't use them when it has Shifts
+ * switched off (slice 3.0); the nav and Home already hide their links.
+ */
+async function Body({ which }: { which: SoonKey }) {
+  const copy = workerMessages.soon[which];
+  if (which === "clock" || which === "shifts") {
+    const worker = await requireWorkerPageSession();
+    if (!worker.shiftsEnabled) return <>{workerMessages.shiftsOff}</>;
+  }
+  return <>{copy.body}</>;
+}
+
+/**
  * A worker screen whose feature arrives in a later phase (Clock and My shifts with rosters,
  * Leave, Payslips) or that is plain text (Help): a heading and one sentence.
  */
@@ -31,7 +44,11 @@ export function SoonPage({ which }: { which: SoonKey }) {
         </WorkerTopBar>
       </div>
       <div className="px-4 pt-2 pb-4">
-        <p className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]">{copy.body}</p>
+        <p className="m-0 rounded-xl bg-surface px-4 py-3 text-[15px]">
+          <Suspense fallback={copy.body}>
+            <Body which={which} />
+          </Suspense>
+        </p>
       </div>
     </main>
   );

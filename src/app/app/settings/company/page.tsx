@@ -13,6 +13,7 @@ import { AttendanceForm } from "../../_company/attendance-form";
 import { BusinessForm } from "../../_company/business-form";
 import { InvoicesForm } from "../../_company/invoices-form";
 import { LogoForm } from "../../_company/logo-form";
+import { ModulesForm } from "../../_company/modules-form";
 import { PlanForm } from "../../_company/plan-form";
 import { RouteGate } from "../../_shell/slots";
 
@@ -96,7 +97,16 @@ async function CompanySettings() {
         <InvoicesForm mode="settings" company={company} rails={rails} />
       </Section>
 
-      {attendance ? (
+      <Section
+        id="modules"
+        title="Modules"
+        description="Switch off the parts of the app your business doesn't use. Nothing is deleted, and turning a part back on shows everything again."
+      >
+        <ModulesForm key={JSON.stringify(company.modules)} modules={company.modules} />
+      </Section>
+
+      {/* Late and no-show rules belong to Shifts: hidden while it is switched off (slice 3.0). */}
+      {attendance && company.modules.shifts ? (
         <Section
           id="attendance"
           title="Attendance"

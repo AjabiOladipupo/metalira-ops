@@ -1,6 +1,6 @@
 import type { IllustrationName } from "@/components/illustration";
 
-export type RoleSlug = "owners" | "hr" | "finance" | "operations" | "workers";
+export type RoleSlug = "owners" | "hr" | "finance" | "operations" | "workers" | "freelancers";
 
 export type Role = {
   slug: RoleSlug;
@@ -19,6 +19,8 @@ export type Role = {
   blocks: readonly { problem: string; outcome: string }[];
   /** "What you do in Metalira Ops". */
   tasks: readonly string[];
+  /** The closing call to action's heading, when the staff-list line doesn't fit the reader. */
+  cta?: string;
 };
 
 export const ROLES: readonly Role[] = [
@@ -203,6 +205,44 @@ export const ROLES: readonly Role[] = [
       "Read your payslips",
       "Update your details and bank account safely",
     ],
+  },
+  {
+    slug: "freelancers",
+    href: "/for/freelancers",
+    nav: "For freelancers",
+    eyebrow: "For freelancers and sole proprietors",
+    illustration: "role-freelancer",
+    headline: "Invoice your clients and see who has paid.",
+    subline:
+      "Clients, contracts and rate cards in one place. Invoices show 7.5% VAT and the WHT your client deducts, and your bank statement shows which ones are paid. No staff or payroll needed.",
+    title: "For freelancers",
+    description:
+      "Clients, contracts, dated rate cards, invoices with WHT and VAT, and payments matched from your bank statement, for freelancers and sole proprietors.",
+    blocks: [
+      {
+        problem: "Each client's rate lives in a different email thread.",
+        outcome:
+          "Every client has a contract with a dated rate card, so a new rate starts on the day you agreed and earlier invoices keep the old one.",
+      },
+      {
+        problem: "A client pays 2% or 5% less than the invoice and you can't tell why.",
+        outcome:
+          "Each invoice line carries its WHT rate, 2% on services and 5% on management fees, worked out before 7.5% VAT, so a short payment is explained.",
+      },
+      {
+        problem: "You scroll through bank alerts to work out who has paid.",
+        outcome:
+          "Upload your bank statement and each credit is matched to an invoice, including part payments and amounts net of WHT. Receipts go out by email.",
+      },
+    ],
+    tasks: [
+      "Add clients and their billing contacts",
+      "Agree contracts with dated rate cards",
+      "Send invoices with 7.5% VAT and WHT shown",
+      "Upload bank statements and confirm matches",
+      "Turn on People and Payroll when you hire",
+    ],
+    cta: "Bring your client list. Leave with your first invoice.",
   },
 ];
 

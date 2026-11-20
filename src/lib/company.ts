@@ -1,3 +1,5 @@
+import type { BusinessType } from "@/lib/modules";
+
 /**
  * Company setup choices and the setup wizard's steps. Isomorphic: the forms render these lists
  * and src/server/identity/company.ts validates against them. The database checks the same values
@@ -26,6 +28,8 @@ export const INDUSTRIES = [
   { id: "staffing", name: "Staffing and outsourcing" },
   { id: "field_sales", name: "Field sales and distribution" },
   { id: "logistics", name: "Logistics" },
+  { id: "digital_services", name: "Digital services (design, software, marketing)" },
+  { id: "professional_services", name: "Professional services (consulting, legal, accounting)" },
   { id: "other", name: "Other" },
 ] as const;
 
@@ -136,25 +140,71 @@ export function setupStep(slug: SetupSlug): SetupStep {
   return step;
 }
 
-/** The step after `slug`, or null after Ready. */
-export function nextSetupStep(slug: SetupSlug): SetupStep | null {
-  return SETUP_STEPS.find((s) => s.number === setupStep(slug).number + 1) ?? null;
+/**
+ * The wizard's steps for a business type. A services business (slice 3.0) has no Employees step:
+ * it starts with People, Shifts and Payroll off, so Clients and contracts leads straight to Ready.
+ * Step numbers stay the same (they are what organisations.setup_step stores).
+ */
+export function setupStepsFor(type: BusinessType = "workforce"): readonly SetupStep[] {
+  return type === "services" ? SETUP_STEPS.filter((s) => s.slug !== "employees") : SETUP_STEPS;
 }
 
-/** The step before `slug`, or null on Plan. */
-export function previousSetupStep(slug: SetupSlug): SetupStep | null {
-  return SETUP_STEPS.find((s) => s.number === setupStep(slug).number - 1) ?? null;
+/** True when the wizard for `type` has the step `slug`. */
+export function hasSetupStep(slug: SetupSlug, type: BusinessType = "workforce"): boolean {
+  return setupStepsFor(type).some((s) => s.slug === slug);
 }
 
-/** "Setup N of 5 done": every step before the furthest one reached, never more than five. */
-export function setupDoneCount(furthestStep: number, completed: boolean): number {
-  if (completed) return 5;
-  return Math.max(0, Math.min(5, furthestStep - 1));
+/** The step after `slug` for `type`, or null after Ready. */
+export function nextSetupStep(slug: SetupSlug, type: BusinessType = "workforce"): SetupStep | null {
+  const number = setupStep(slug).number;
+  return setupStepsFor(type).find((s) => s.number > number) ?? null;
 }
 
-/** Where /app/setup sends the owner: the furthest step reached, Ready once complete. */
-export function resumeSetupSlug(furthestStep: number, completed: boolean): SetupSlug {
+/** The step before `slug` for `type`, or null on Plan. */
+export function previousSetupStep(
+  slug: SetupSlug,
+  type: BusinessType = "workforce",
+): SetupStep | null {
+  const number = setupStep(slug).number;
+  return (
+    setupStepsFor(type)
+      .filter((s) => s.number < number)
+      .at(-1) ?? null
+  );
+}
+
+/** How many steps there are to do before Ready: 5, or 4 for a services business. */
+export function setupTotal(type: BusinessType = "workforce"): number {
+  return setupStepsFor(type).length - 1;
+}
+
+/**
+ * "Setup N of 5 done" (4 for a services business): the steps before the furthest one reached,
+ * never more than the total.
+ */
+export function setupDoneCount(
+  furthestStep: number,
+  completed: boolean,
+  type: BusinessType = "workforce",
+): number {
+  const total = setupTotal(type);
+  if (completed) return total;
+  const done = setupStepsFor(type).filter((s) => s.slug !== "ready" && s.number < furthestStep);
+  return Math.min(total, done.length);
+}
+
+/**
+ * Where /app/setup sends the owner: the furthest step reached that the type's wizard has, Ready
+ * once complete.
+ */
+export function resumeSetupSlug(
+  furthestStep: number,
+  completed: boolean,
+  type: BusinessType = "workforce",
+): SetupSlug {
   if (completed) return "ready";
-  const step = SETUP_STEPS.find((s) => s.number === Math.min(Math.max(furthestStep, 1), 5));
-  return step?.slug ?? "plan";
+  const reached = setupStepsFor(type).filter(
+    (s) => s.slug !== "ready" && s.number <= Math.max(furthestStep, 1),
+  );
+  return reached.at(-1)?.slug ?? "plan";
 }

@@ -67,6 +67,7 @@ function fromDbError(error: PostgrestError): never {
 }
 
 export const unlockSignInSpec: MutationSpec<typeof unlockSignInSchema, { workerId: string }> = {
+  module: "people",
   schema: unlockSignInSchema,
   roles: SIGN_IN_UNLOCKERS,
   run: async ({ supabase, organisationId, data }) => {

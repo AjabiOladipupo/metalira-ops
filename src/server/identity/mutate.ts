@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 
 import type { SendableAuditChannel } from "@/lib/audit-channel";
+import { moduleName, type ModuleId } from "@/lib/modules";
 import { createServerSupabase } from "@/lib/supabase/server";
 import type { ManagerRole } from "@/lib/roles";
 import type { Database } from "@/types/db";
@@ -58,6 +59,12 @@ export interface MutationSpec<S extends z.ZodType, R> {
    * the manager app (`web`); the people import commit sets `import`.
    */
   channel?: SendableAuditChannel;
+  /**
+   * The module switch this change belongs to (slice 3.0). `mutate()` refuses it with "This part
+   * is switched off" when the company has that module off. A product switch, not a permission:
+   * row-level security still governs the Data API whatever the switches say.
+   */
+  module?: ModuleId;
   /** Makes the change. Scope every query to `organisationId`. */
   run: (args: MutationContext & { data: z.output<S> }) => Promise<R>;
   /** Optional app-level audit entry, written after `run()` succeeds. Not for row changes. */
@@ -103,6 +110,37 @@ export async function runMutation<S extends z.ZodType, R>(
   return result;
 }
 
+const MODULE_COLUMNS = {
+  shifts: "shifts_enabled",
+  people: "people_enabled",
+  payroll: "payroll_enabled",
+} as const satisfies Record<ModuleId, string>;
+
+/**
+ * Refuses a change in a module the organisation has switched off (slice 3.0), read under RLS as
+ * the caller. A company row the caller can't read is left to the change itself to refuse.
+ */
+export async function assertModuleOn(
+  supabase: SupabaseClient<Database>,
+  organisationId: string,
+  module: ModuleId,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("organisations")
+    .select("shifts_enabled, people_enabled, payroll_enabled")
+    .eq("id", organisationId)
+    .maybeSingle();
+  if (error) {
+    throw new MutationError("failed", "The change was not saved.", {}, { cause: error });
+  }
+  if (data && data[MODULE_COLUMNS[module]] === false) {
+    throw new MutationError(
+      "forbidden",
+      `This part is switched off. ${moduleName(module)} is off for your company.`,
+    );
+  }
+}
+
 /** Authorises, validates, runs and audits one change for the signed-in manager. */
 export async function mutate<S extends z.ZodType, R>(
   spec: MutationSpec<S, R>,
@@ -113,6 +151,9 @@ export async function mutate<S extends z.ZodType, R>(
   if (!session.active) throw new MutationError("forbidden", "Your role can't make this change.");
 
   const supabase = await createServerSupabase({ channel: spec.channel });
+  if (spec.module) {
+    await assertModuleOn(supabase, session.active.organisationId, spec.module);
+  }
   return runMutation(
     {
       supabase,

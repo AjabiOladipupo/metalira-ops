@@ -19,6 +19,11 @@ const PAGES = [
     heading: "Clock in from your phone, even with no data.",
     scene: "role-worker",
   },
+  {
+    path: "/for/freelancers",
+    heading: "Invoice your clients and see who has paid.",
+    scene: "role-freelancer",
+  },
 ] as const;
 
 async function horizontalOverflow(page: Page): Promise<number> {
@@ -43,6 +48,32 @@ for (const { path, heading, scene } of PAGES) {
     await expect(page.getByRole("link", { name: /^(privacy|terms)/i })).toHaveCount(0);
   });
 }
+
+test("the landing says it is open to freelancers, and /for/freelancers fits a phone (slice 3.0)", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const section = page.locator("#freelancers");
+  await section.scrollIntoViewIfNeeded();
+  await expect(section.getByRole("heading", { level: 2 })).toHaveText(
+    "Also open to freelancers and sole proprietors",
+  );
+  await section.getByRole("link", { name: "For freelancers" }).click();
+  await expect(page).toHaveURL(/\/for\/freelancers$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Invoice your clients and see who has paid.",
+  );
+  const main = page.getByRole("main");
+  for (const words of ["contract", "rate card", "WHT", "VAT", "bank statement"]) {
+    await expect(main, words).toContainText(words);
+  }
+  await expect(page.locator("#role-cta")).toHaveText(
+    "Bring your client list. Leave with your first invoice.",
+  );
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+  const text = await main.innerText();
+  expect(text).not.toMatch(/₦\s?\d|NGN\s?\d/);
+});
 
 test("the Lira section says coming soon and fits the page", async ({ page }, testInfo) => {
   await page.goto("/");
@@ -86,7 +117,7 @@ test("the Lira section says coming soon and fits the page", async ({ page }, tes
 });
 
 test("manager role pages carry a Lira card; the workers page does not", async ({ page }) => {
-  for (const { path } of PAGES.slice(1, 5)) {
+  for (const { path } of PAGES.filter((p) => p.path !== "/" && p.path !== "/for/workers")) {
     await page.goto(path);
     const card = page.getByTestId("lira-card");
     await expect(card, path).toBeVisible();
@@ -205,7 +236,12 @@ test("at 360px the header fits with 44px controls, and a role page's back arrow 
 }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile-390", "Phone widths only.");
   await page.setViewportSize({ width: 360, height: 780 });
-  for (const { path } of PAGES) {
+  // /for/workers last: the checks below read its page.
+  const ordered = [
+    ...PAGES.filter((p) => p.path !== "/for/workers"),
+    ...PAGES.filter((p) => p.path === "/for/workers"),
+  ];
+  for (const { path } of ordered) {
     await page.goto(path);
     expect(await horizontalOverflow(page), path).toBeLessThanOrEqual(0);
   }

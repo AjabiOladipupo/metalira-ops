@@ -3,7 +3,17 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { activeNavHref, canAccessHref, NAV, NAV_ITEMS, navForRole } from "@/lib/nav";
+import {
+  activeNavHref,
+  canAccessHref,
+  homeCopy,
+  moduleForHref,
+  NAV,
+  NAV_ITEMS,
+  navForRole,
+  pageAccess,
+} from "@/lib/nav";
+import { ALL_MODULES_ON, type Modules } from "@/lib/modules";
 import { MANAGER_ROLES, ROLES, type Role } from "@/lib/roles";
 
 const labels = (role: Role) => navForRole(role).flatMap((g) => g.items.map((i) => i.label));
@@ -253,5 +263,89 @@ describe("nav by role", () => {
   it("refuses paths that sit under no nav item", () => {
     expect(canAccessHref("owner", "/app/secret-admin")).toBe(false);
     expect(canAccessHref("owner", "/design-system")).toBe(false);
+  });
+});
+
+describe("module switches (slice 3.0)", () => {
+  const OFF: Modules = { shifts: false, people: false, payroll: false };
+  const PEOPLE_ONLY: Modules = { shifts: false, people: true, payroll: false };
+  const ownerLabels = (modules: Modules) =>
+    navForRole("owner", modules).flatMap((g) => g.items.map((i) => i.label));
+
+  it("maps each Workforce and Payroll page to its module", () => {
+    const modules = Object.fromEntries(NAV_ITEMS.map((i) => [i.label, i.module ?? null]));
+    expect(modules).toMatchObject({
+      Roster: "shifts",
+      "Live attendance": "shifts",
+      People: "people",
+      "My team": "people",
+      Leave: "people",
+      Timesheets: "people",
+      "Payroll run": "payroll",
+      Home: null,
+      Clients: null,
+      Settings: null,
+    });
+  });
+
+  it("shows everything with every module on, as before", () => {
+    expect(navForRole("owner", ALL_MODULES_ON)).toEqual(navForRole("owner"));
+  });
+
+  it("hides Roster and Live attendance when Shifts is off", () => {
+    const labels = ownerLabels({ ...ALL_MODULES_ON, shifts: false });
+    expect(labels).not.toContain("Roster");
+    expect(labels).not.toContain("Live attendance");
+    expect(labels).toContain("People");
+    expect(labels).toContain("Payroll run");
+  });
+
+  it("drops the Workforce and Payroll groups for a services business", () => {
+    expect(navForRole("owner", OFF).map((g) => g.label)).toEqual([
+      null,
+      "Business",
+      "Revenue",
+      "Settings",
+    ]);
+    // A line manager sees Home only.
+    expect(navForRole("line_manager", OFF).map((g) => g.label)).toEqual([null]);
+  });
+
+  it("keeps People pages and drops Payroll when only People is on", () => {
+    expect(ownerLabels(PEOPLE_ONLY)).toEqual(
+      expect.arrayContaining(["Timesheets", "People", "My team", "Leave"]),
+    );
+    expect(ownerLabels(PEOPLE_ONLY)).not.toContain("Payroll run");
+  });
+
+  it("finds the module of a page and every page below it", () => {
+    expect(moduleForHref("/app/roster")).toBe("shifts");
+    expect(moduleForHref("/app/attendance")).toBe("shifts");
+    expect(moduleForHref("/app/people/[id]/edit")).toBe("people");
+    expect(moduleForHref("/app/people/import")).toBe("people");
+    expect(moduleForHref("/app/payroll/runs/1")).toBe("payroll");
+    expect(moduleForHref("/app/clients")).toBeNull();
+    expect(moduleForHref("/app/settings/company")).toBeNull();
+    expect(moduleForHref("/app/setup/employees")).toBeNull();
+  });
+
+  it("says switched_off for a page the role may open, and forbidden for one it never may", () => {
+    expect(pageAccess("owner", "/app/roster", OFF)).toBe("switched_off");
+    expect(pageAccess("ops_manager", "/app/roster", OFF)).toBe("switched_off");
+    expect(pageAccess("finance", "/app/roster", OFF)).toBe("forbidden");
+    expect(pageAccess("owner", "/app/people/import", OFF)).toBe("switched_off");
+    expect(pageAccess("owner", "/app/clients", OFF)).toBe("allow");
+    expect(pageAccess("owner", "/app/roster", ALL_MODULES_ON)).toBe("allow");
+    expect(canAccessHref("owner", "/app/roster", OFF)).toBe(false);
+    expect(canAccessHref("owner", "/app/roster")).toBe(true);
+  });
+
+  it("never points Home at a part that is switched off", () => {
+    expect(homeCopy(ALL_MODULES_ON).description).toMatch(/Shifts/);
+    for (const modules of [OFF, PEOPLE_ONLY]) {
+      const copy = homeCopy(modules);
+      expect(`${copy.description} ${copy.empty}`).not.toMatch(/shift|roster|payroll|site/i);
+    }
+    expect(homeCopy(OFF).empty).not.toMatch(/people/i);
   });
 });

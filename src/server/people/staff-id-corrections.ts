@@ -154,6 +154,7 @@ export const requestStaffIdCorrectionSpec: MutationSpec<
   typeof requestStaffIdCorrectionSchema,
   StaffIdCorrectionResult
 > = {
+  module: "people",
   schema: requestStaffIdCorrectionSchema,
   roles: STAFF_ID_CORRECTORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -186,6 +187,7 @@ export const decideStaffIdCorrectionSpec: MutationSpec<
   typeof decideStaffIdCorrectionSchema,
   StaffIdCorrectionResult
 > = {
+  module: "people",
   schema: decideStaffIdCorrectionSchema,
   roles: STAFF_ID_CORRECTORS,
   run: async ({ supabase, organisationId, data }) => {
@@ -217,6 +219,7 @@ export const withdrawStaffIdCorrectionSpec: MutationSpec<
   typeof withdrawStaffIdCorrectionSchema,
   StaffIdCorrectionResult
 > = {
+  module: "people",
   schema: withdrawStaffIdCorrectionSchema,
   roles: STAFF_ID_CORRECTORS,
   run: async ({ supabase, organisationId, data }) => {

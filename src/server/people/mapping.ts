@@ -110,6 +110,7 @@ function fromDbError(error: PostgrestError): never {
 }
 
 export const saveMappingSpec: MutationSpec<typeof saveMappingSchema, SavedMapping> = {
+  module: "people",
   schema: saveMappingSchema,
   roles: PEOPLE_EDITORS,
   run: async ({ supabase, organisationId, userId, data }) => {
