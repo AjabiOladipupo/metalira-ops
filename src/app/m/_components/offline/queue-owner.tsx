@@ -10,6 +10,8 @@ import {
 } from "@/lib/offline/active-queue";
 import { countPending, countUnsent } from "@/lib/offline/queue";
 import { setQueueSender, testSender } from "@/lib/offline/senders";
+import { createPunchSender } from "@/lib/punches/sender";
+import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
 import { requestPersistentStorage } from "@/lib/offline/storage";
 import type { QueueOwner } from "@/lib/offline/types";
 
@@ -27,8 +29,12 @@ declare global {
   }
 }
 
+const punchActions = {
+  recordPunch: recordPunchAction,
+  uploadSelfie: uploadPunchSelfieAction,
+};
+
 function installTestHooks() {
-  setQueueSender(testSender);
   window.__metaliraQueue = {
     async queuePing(note) {
       const item = await queueEvent({ kind: "test_ping", payload: { note } });
@@ -53,6 +59,11 @@ function installTestHooks() {
 export function QueueOwnerSync({ organisationId, workerId }: QueueOwner) {
   useEffect(() => {
     if (TEST_HOOKS) installTestHooks();
+    // Punches go to the server through this sender, bound to the queue's owner (slice 3.5). The
+    // test build also sends its ping kind through the test sender.
+    setQueueSender(
+      createPunchSender({ organisationId, workerId }, punchActions, TEST_HOOKS ? testSender : null),
+    );
     try {
       activateQueue({ organisationId, workerId });
     } catch {
@@ -60,7 +71,10 @@ export function QueueOwnerSync({ organisationId, workerId }: QueueOwner) {
       return;
     }
     void requestPersistentStorage();
-    return () => deactivateQueue();
+    return () => {
+      deactivateQueue();
+      setQueueSender(null);
+    };
   }, [organisationId, workerId]);
   return null;
 }
