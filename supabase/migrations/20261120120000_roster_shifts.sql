@@ -447,8 +447,10 @@ create trigger shift_assignments_audit
 -- the shift rows they are on. Shift rows carry no names, and a worker never sees another
 -- worker's assignment. No write grants: only the functions below write.
 
--- Sites where the caller's own worker record or one of their reportees is mapped today or later.
-create function private.line_manager_site_ids(p_organisation_id uuid)
+-- The sites of the organisations where the caller is a line manager at which their own worker
+-- record or one of their reportees is mapped today or later. A set, computed once per statement
+-- (slice 3.1: policies never call a helper per row).
+create function private.line_manager_site_ids()
 returns setof uuid
 language sql
 stable
@@ -456,44 +458,37 @@ security definer
 set search_path = ''
 as $$
   select distinct wa.site_id
-  from public.worker_assignments wa
-  join public.workers w on w.id = wa.worker_id and w.organisation_id = wa.organisation_id
-  where wa.organisation_id = p_organisation_id
-    and wa.site_id is not null
-    and (wa.effective_to is null or wa.effective_to >= private.org_today(p_organisation_id))
+  from private.my_line_manager_keys() k
+  join public.worker_assignments wa on wa.organisation_id = k.organisation_id
+  where wa.site_id is not null
+    and (wa.effective_to is null or wa.effective_to >= private.org_today(k.organisation_id))
     and (
-      w.id in (select private.my_worker_ids())
-      or private.is_line_manager_for(p_organisation_id, w.line_manager_worker_id, w.line_manager_membership_id)
+      wa.worker_id = k.worker_id
+      or wa.worker_id in (select private.my_reportee_ids())
     )
 $$;
 
-revoke all on function private.line_manager_site_ids(uuid) from public, anon;
-grant execute on function private.line_manager_site_ids(uuid) to authenticated, service_role;
+revoke all on function private.line_manager_site_ids() from public, anon;
+grant execute on function private.line_manager_site_ids() to authenticated, service_role;
 
 alter table public.shifts enable row level security;
 alter table public.shift_assignments enable row level security;
 
 create policy shift_assignments_select on public.shift_assignments for select to authenticated
   using (
-    private.has_role(organisation_id, array['owner', 'admin', 'ops_manager'])
+    organisation_id in (select private.role_org_ids(array['owner', 'admin', 'ops_manager']))
     or worker_id in (select private.my_worker_ids())
-    or (private.has_role(organisation_id, array['line_manager']) and private.is_reportee(worker_id))
+    or worker_id in (select private.my_reportee_ids())
   );
 
 create policy shifts_select on public.shifts for select to authenticated
   using (
-    private.has_role(organisation_id, array['owner', 'admin', 'ops_manager'])
-    or (
-      private.has_role(organisation_id, array['line_manager'])
-      and site_id in (select private.line_manager_site_ids(organisation_id))
-    )
-    -- Through shift_assignments' own policy: the worker's own rows and a line manager's
-    -- reportees' rows. Only shifts they are on now: a removed assignment doesn't count.
-    or exists (
-      select 1 from public.shift_assignments a
-      where a.shift_id = shifts.id and a.organisation_id = shifts.organisation_id
-        and a.status = 'assigned'
-    )
+    organisation_id in (select private.role_org_ids(array['owner', 'admin', 'ops_manager']))
+    or site_id in (select private.line_manager_site_ids())
+    -- Through shift_assignments' own policy (an uncorrelated subquery, once per statement): the
+    -- worker's own rows and a line manager's reportees' rows. Only shifts they are on now: a
+    -- removed assignment doesn't count.
+    or id in (select a.shift_id from public.shift_assignments a where a.status = 'assigned')
   );
 
 revoke all on table public.shifts from anon, authenticated;
