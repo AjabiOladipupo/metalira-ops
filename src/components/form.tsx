@@ -125,18 +125,21 @@ export function SubmitButton({
   pendingLabel,
   size = "md",
   className,
+  disabled = false,
 }: {
   children: React.ReactNode;
   pendingLabel: string;
   size?: "md" | "lg";
   className?: string;
+  /** Not sendable yet (for example, the bank hasn't given the account name). */
+  disabled?: boolean;
 }) {
   const { pending } = useFormStatus();
   return (
     <Button
       type="submit"
-      disabled={pending}
-      aria-disabled={pending}
+      disabled={pending || disabled}
+      aria-disabled={pending || disabled}
       className={cn(
         "w-full text-sm",
         size === "lg" ? "h-[52px] rounded-xl text-base" : "h-11 rounded-lg",

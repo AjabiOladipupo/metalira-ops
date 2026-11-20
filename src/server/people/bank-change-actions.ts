@@ -10,6 +10,7 @@ import { formatDateTime } from "@/lib/dates";
 import type { CompanyFormState as BankFormState } from "@/server/identity/company-form-state";
 import { MutationError } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
+import type { BankLookupView } from "@/server/billing/bank-lookup";
 import { getSession } from "@/server/identity/session";
 
 import {
@@ -18,6 +19,7 @@ import {
 } from "./bank-change-notices";
 import { decideBankChange, requestBankChange, withdrawBankChange } from "./bank-changes";
 import type { RevealResult } from "./actions";
+import { checkWorkerBankDetails, lookupWorkerBankAccount } from "./bank-lookups";
 import { echoableValues } from "./form-input";
 import { PiiAccessError, PiiRecordNotFoundError, revealPii } from "./pii-access";
 
@@ -168,4 +170,26 @@ export async function revealBankChangeAccount(input: unknown): Promise<RevealRes
     console.error("people.reveal_failed:", error instanceof Error ? error.name : "unknown");
     return { ok: false, message: "This can't be shown right now. Try again in a minute." };
   }
+}
+
+/**
+ * "Check" in Add employee and Change bank details: the bank's account name for the number, and
+ * how it compares with the employee's name (slice 2.3b). Returns a lookup id the form sends.
+ */
+export async function lookupWorkerBankAccountAction(input: unknown): Promise<BankLookupView> {
+  return lookupWorkerBankAccount(input);
+}
+
+/**
+ * "Check bank details" on the person page: looks the bank details on file up with the bank and
+ * keeps the result on the employee (slice 2.3b). The number never leaves the server.
+ */
+export async function checkWorkerBankDetailsAction(input: unknown): Promise<BankLookupView> {
+  const result = await checkWorkerBankDetails(input);
+  const workerId =
+    typeof input === "object" && input !== null && "workerId" in input
+      ? String((input as { workerId: unknown }).workerId)
+      : undefined;
+  if (result.ok && workerId && z.uuid().safeParse(workerId).success) refresh(workerId);
+  return result;
 }

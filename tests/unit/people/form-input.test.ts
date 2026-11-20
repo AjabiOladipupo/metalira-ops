@@ -14,8 +14,8 @@ const form = {
   employmentType: "permanent",
   startDate: "2026-11-16",
   lineManager: `w:${W}`,
-  bankName: "GTBank",
-  accountName: "Musa Ibrahim",
+  bankCode: "058",
+  bankLookupId: "d0000000-0000-4000-8000-0000000000aa",
   bankAccountNumber: "0123457712",
   nin: "12345678901",
   rsaPin: "PEN100012344421",
@@ -46,7 +46,13 @@ describe("workerFormInput", () => {
 
   it("never sends the staff ID or bank details in an update", () => {
     const input = workerFormInput({ ...form, workerId: W, staffId: "EMP-9" }, "update");
-    for (const key of ["staffId", "bankName", "accountName", "bankAccountNumber"]) {
+    for (const key of [
+      "staffId",
+      "bankCode",
+      "bankLookupId",
+      "nameCheckReason",
+      "bankAccountNumber",
+    ]) {
       expect(input).not.toHaveProperty(key);
     }
     expect(updateWorkerSchema.safeParse(input).success).toBe(true);
@@ -75,7 +81,7 @@ describe("echoableValues", () => {
     expect(echoed).not.toHaveProperty("bankAccountNumber");
     expect(echoed).not.toHaveProperty("rsaPin");
     expect(Object.keys(echoed).some((k) => k.startsWith("$ACTION"))).toBe(false);
-    expect(echoed).toMatchObject({ firstName: "Musa", bankName: "GTBank", lineManager: `w:${W}` });
+    expect(echoed).toMatchObject({ firstName: "Musa", bankCode: "058", lineManager: `w:${W}` });
     expect(JSON.stringify(echoed)).not.toContain("12345678901");
     expect(JSON.stringify(echoed)).not.toContain("0123457712");
   });

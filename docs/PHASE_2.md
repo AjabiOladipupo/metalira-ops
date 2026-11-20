@@ -99,6 +99,16 @@ Replaces the "Connect in Phase 2" placeholder on Setup step 3 and in Settings (D
 
 **Accept:** an account requested by the owner stays pending until a finance user approves it, then applies after 72 hours and shows masked in setup and settings; a requester approving their own request is refused by the database; security-reviewer has no high findings.
 
+### 2.3b Bank picker and account name check (owner request, 19 Nov 2026)
+Wherever bank details are entered (the company account; Add employee; Change bank details; the worker app's bank change), the bank is picked from a searchable list with its bank code (`src/lib/banks.ts`, codes from Monnify's Supported Banks page) and the person types only the 10-digit number. The server asks the bank network for the account name with Metalira's own provider account (Monnify "Validate Bank Account", free per its docs; `src/lib/payments/`, called only from `src/server/billing/bank-lookup.ts`) and shows it read-only.
+- Migration `20261119115000_bank_account_lookup.sql`: `bank_account_lookups` (secret key writes only; 30 lookups an hour per user, 60 per network address, 20 an hour per company for its own account and 100 for employees, 10 a day while setup is unfinished, a platform ceiling; the number kept as a keyed digest and last 4); `bank_code`, `bank_lookup_id`, `bank_account_digest`, `name_check` (match, near, not_checked), `name_check_reason`, `name_check_source` on `organisation_bank_accounts` and `bank_detail_changes`; `bank_code` and the last check (`bank_checked_*`) on `workers`. A request that names a lookup gets the bank's name from it, whatever the caller sent; a lookup backs one request, by its own user, within 30 minutes, for the same bank and number.
+- Name matching (`src/lib/bank-name-match.ts`): companies against the legal and trading names (suffixes normalised: LTD/LIMITED, NIG/NIGERIA, SVCS/SERVICES...); workers against first and last name in any order, middle names allowed. `match` accepts; `near` needs a reason of 10+ characters the approver sees; `no_match` is refused. The server recomputes it on approval from the stored name and refuses a no match, a near match without a reason, or a number other than the one checked (digest).
+- Without provider keys: the deterministic test resolver outside production ("Test lookup" on screen); production refuses with a clear message.
+- Imports don't look names up per row: their requests are `not_checked` (raised only through the import's definer function; signed-in users can't raise unchecked requests, `MLBL7`), approving one needs a note saying how the account was confirmed, and "Check bank details" on the person page checks the details on file later.
+- Test and sandbox lookups back requests only where the database allows them (`private.settings`, seeded on local and CI databases only); the hosted project, which previews share, shows them but refuses to use or approve them.
+
+**Accept:** an account in someone else's name can't be sent; a close match carries a reason to the approver; the approver sees the bank's name and the result; tests, CI and previews without keys use the test resolver.
+
 ### 2.4 Contracts, dated rate cards and WHT per line (after 2.1; can run alongside 2.2)
 - Migration `<ts>_contracts_rate_cards.sql`:
   - `contracts`:

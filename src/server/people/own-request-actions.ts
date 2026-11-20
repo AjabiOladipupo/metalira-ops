@@ -6,12 +6,18 @@ import { after } from "next/server";
 
 import { WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
+import type { BankLookupView } from "@/server/billing/bank-lookup";
 import type { CompanyFormState as RequestFormState } from "@/server/identity/company-form-state";
 import { MutationError } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 
 import { notifyApproversOfBankChange } from "./bank-change-notices";
-import { ownContext, runOwnBankChange, runOwnChangeRequest } from "./own-requests";
+import {
+  ownContext,
+  runOwnBankChange,
+  runOwnBankLookup,
+  runOwnChangeRequest,
+} from "./own-requests";
 
 /**
  * Server Actions behind "Request a change" in the worker app (slice 1.10). The worker's own
@@ -59,8 +65,8 @@ export async function requestOwnBankChangeAction(
   const fields = formFields(formData);
   // Never echo the account number back to the browser.
   const values = {
-    bankName: fields.bankName ?? "",
-    accountName: fields.accountName ?? "",
+    bankCode: fields.bankCode ?? "",
+    nameCheckReason: fields.nameCheckReason ?? "",
     reason: fields.reason ?? "",
   };
   let raised: { id: string };
@@ -75,6 +81,25 @@ export async function requestOwnBankChangeAction(
   after(() => notifyApproversOfBankChange(organisationId, raised.id));
   refresh();
   return { ok: true, status: 200, message: copy.bankSent };
+}
+
+/**
+ * "Check" on the worker's own bank form (slice 2.3b): the bank's account name, compared with the
+ * worker's own name. Returns a lookup id the form sends; never echoes the number.
+ */
+export async function lookupOwnBankAccountAction(input: unknown): Promise<BankLookupView> {
+  try {
+    return await runOwnBankLookup(await ownContext(), input);
+  } catch (error) {
+    if (error instanceof MutationError && error.code === "unauthenticated") {
+      redirect(WORKER_SIGN_IN_PATH);
+    }
+    console.error(
+      "people.own_bank_lookup_failed:",
+      error instanceof Error ? error.name : "unknown",
+    );
+    return { ok: false, message: copy.failed };
+  }
 }
 
 /** Anything else: a request HR sees on the worker page. */

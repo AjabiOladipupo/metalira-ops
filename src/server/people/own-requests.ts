@@ -14,13 +14,16 @@ import {
   normaliseRequestText,
   type WorkerChangeTopic,
 } from "@/lib/worker-requests";
+import { isKnownBankCode } from "@/lib/banks";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { nameCheckReasonSchema } from "@/server/billing/bank-check-schema";
+import { runBankLookup, takeCheckedName, type BankLookupView } from "@/server/billing/bank-lookup";
 import { sealPii } from "@/server/crypto/pii";
 import { MutationError } from "@/server/identity/mutate";
 import { lookupWorkerSession } from "@/server/identity/worker-session";
 import type { Database } from "@/types/db";
 
-import { bankAccountContext } from "./bank-changes";
+import { bankAccountContext, checkedColumns } from "./bank-changes";
 
 /**
  * "Request a change" from the worker app (slice 1.10). The worker writes with their own session
@@ -47,6 +50,10 @@ export interface OwnContext {
   supabase: Client;
   organisationId: string;
   workerId: string;
+  /** The worker's login (for the account name lookup's limits). */
+  userId: string;
+  firstName: string;
+  lastName: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,30 +63,28 @@ export interface OwnContext {
 const digitsOnly = (value: string) => value.replace(/[\s-]/g, "");
 const NO_CONTROL = /^[^\p{Cc}<>]*$/u;
 
-function line(required: string, max = 200) {
-  return z
-    .string(required)
-    .trim()
-    .min(1, required)
-    .max(max, copy.tooLong(max))
-    .regex(NO_CONTROL, copy.plainText);
-}
-
-export const ownBankChangeSchema = z.object({
-  bankName: line(copy.bankNameRequired),
-  accountName: line(copy.accountNameRequired).refine(
-    (value) => !/(:\/\/|www\.)/i.test(value),
-    copy.accountNameNoLinks,
-  ),
-  bankAccountNumber: z
+const accountNumber = () =>
+  z
     .string(copy.accountNumberInvalid)
     .trim()
     .transform(digitsOnly)
-    .pipe(z.string().regex(/^\d{10}$/, copy.accountNumberInvalid)),
+    .pipe(z.string().regex(/^\d{10}$/, copy.accountNumberInvalid));
+
+/** The bank's account name is not an input: it comes from the worker's own lookup (2.3b). */
+export const ownBankChangeSchema = z.object({
+  bankCode: z.string(copy.bankRequired).trim().refine(isKnownBankCode, copy.bankRequired),
+  bankLookupId: z.uuid(copy.checkFirst),
+  nameCheckReason: nameCheckReasonSchema,
+  bankAccountNumber: accountNumber(),
   reason: z.preprocess(
     (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
     z.string().trim().max(500, copy.tooLong(500)).regex(NO_CONTROL, copy.plainText).optional(),
   ),
+});
+
+export const ownBankLookupSchema = z.object({
+  bankCode: z.string(copy.bankRequired).trim().refine(isKnownBankCode, copy.bankRequired),
+  bankAccountNumber: accountNumber(),
 });
 
 export const ownChangeRequestSchema = z.object({
@@ -115,6 +120,14 @@ function fromDbError(error: PostgrestError, field: string): never {
   switch (error.code) {
     case "42501":
       throw new MutationError("forbidden", copy.failed);
+    case "MLBL3":
+    case "MLBL4":
+    case "MLBL5":
+    case "MLBL6":
+    case "MLBL7":
+      throw new MutationError("invalid", "", { bankAccountNumber: copy.checkAgain });
+    case "MLBLT":
+      throw new MutationError("invalid", "", { bankAccountNumber: copy.testLookup });
     case "MLBK5":
     case "MLCR1":
       throw new MutationError("invalid", copy.left);
@@ -143,6 +156,16 @@ export async function runOwnBankChange(ctx: OwnContext, input: unknown): Promise
   const parsed = ownBankChangeSchema.safeParse(input);
   if (!parsed.success) throw invalid(parsed.error);
   const data = parsed.data;
+  const checked = await takeCheckedName(ctx.supabase, {
+    organisationId: ctx.organisationId,
+    lookupId: data.bankLookupId,
+    purpose: "worker_bank",
+    workerId: ctx.workerId,
+    bankCode: data.bankCode,
+    accountNumber: data.bankAccountNumber,
+    expected: { kind: "person", firstName: ctx.firstName, lastName: ctx.lastName },
+    reason: data.nameCheckReason,
+  });
   const sealed = sealPii(
     data.bankAccountNumber,
     bankAccountContext(ctx.organisationId, ctx.workerId),
@@ -156,8 +179,7 @@ export async function runOwnBankChange(ctx: OwnContext, input: unknown): Promise
     .insert({
       organisation_id: ctx.organisationId,
       worker_id: ctx.workerId,
-      bank_name: data.bankName,
-      account_name: data.accountName,
+      ...checkedColumns(checked, data.bankLookupId),
       bank_account_enc: sealed.enc,
       bank_account_last4: sealed.last4,
       reason: data.reason ?? null,
@@ -203,5 +225,31 @@ export async function ownContext(): Promise<OwnContext> {
     supabase: await createServerSupabase({ channel: "worker_app" }),
     organisationId: lookup.session.organisationId,
     workerId: lookup.session.workerId,
+    userId: lookup.session.userId,
+    firstName: lookup.session.firstName,
+    lastName: lookup.session.lastName,
   };
+}
+
+/** "Check" on the worker's own bank form: the bank's name for the account, against theirs. */
+export async function runOwnBankLookup(ctx: OwnContext, input: unknown): Promise<BankLookupView> {
+  const parsed = ownBankLookupSchema.safeParse(input);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const key = issue?.path[0];
+    return {
+      ok: false,
+      message: issue?.message ?? copy.accountNumberInvalid,
+      ...(key === "bankCode" || key === "bankAccountNumber" ? { field: key } : {}),
+    };
+  }
+  return runBankLookup({
+    organisationId: ctx.organisationId,
+    userId: ctx.userId,
+    purpose: "worker_bank",
+    workerId: ctx.workerId,
+    bankCode: parsed.data.bankCode,
+    accountNumber: parsed.data.bankAccountNumber,
+    expected: { kind: "person", firstName: ctx.firstName, lastName: ctx.lastName },
+  });
 }

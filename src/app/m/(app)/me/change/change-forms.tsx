@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useActionState, useId, useState } from "react";
 
+import { BankAccountFields, type BankLookupState } from "@/components/bank-account-fields";
 import { Field, FormAlert, SubmitButton } from "@/components/form";
 import { workerMessages } from "@/lib/messages/worker";
 import { cn } from "@/lib/utils";
 import { CHANGE_REQUEST_MAX, REQUEST_CHOICES, type RequestChoice } from "@/lib/worker-requests";
 import {
+  lookupOwnBankAccountAction,
   requestOwnBankChangeAction,
   requestOwnChangeAction,
 } from "@/server/people/own-request-actions";
@@ -33,6 +35,7 @@ function Sent({ message }: { message: string }) {
 /** New bank details: a request HR approves, then 72 hours before pay goes there. */
 function BankForm() {
   const [state, action] = useActionState(requestOwnBankChangeAction, null);
+  const [lookup, setLookup] = useState<BankLookupState>({ status: "idle" });
   if (state?.ok && state.message) return <Sent message={state.message} />;
   const errors = state && !state.ok ? state.fieldErrors : undefined;
   const typed = state && !state.ok ? state.values : undefined;
@@ -45,34 +48,14 @@ function BankForm() {
       className="flex flex-col gap-4"
     >
       <p className="m-0 text-[15px]">{workerMessages.me.bankNote}</p>
-      <Field
-        label={copy.bankName}
-        name="bankName"
+      <BankAccountFields
+        lookup={lookupOwnBankAccountAction}
         inputSize="lg"
-        hint={copy.bankNameHint}
-        maxLength={200}
-        defaultValue={typed?.bankName ?? ""}
-        error={errors?.bankName}
-      />
-      <Field
-        label={copy.accountName}
-        name="accountName"
-        inputSize="lg"
-        hint={copy.accountNameHint}
-        maxLength={200}
-        autoComplete="off"
-        defaultValue={typed?.accountName ?? ""}
-        error={errors?.accountName}
-      />
-      <Field
-        label={copy.accountNumber}
-        name="bankAccountNumber"
-        inputSize="lg"
-        inputMode="numeric"
-        autoComplete="off"
-        hint={copy.accountNumberHint}
-        maxLength={14}
-        error={errors?.bankAccountNumber}
+        defaultBankCode={typed?.bankCode ?? ""}
+        defaultReason={typed?.nameCheckReason ?? ""}
+        errors={errors}
+        onStateChange={setLookup}
+        whose="your own"
       />
       <Field
         label={copy.reason}
@@ -84,7 +67,15 @@ function BankForm() {
         error={errors?.reason}
       />
       <FormAlert message={state && !state.ok ? state.formError : undefined} />
-      <SubmitButton size="lg" pendingLabel={copy.pending}>
+      <SubmitButton
+        size="lg"
+        pendingLabel={copy.pending}
+        disabled={
+          lookup.status !== "done" ||
+          lookup.result.result === "no_match" ||
+          Boolean(lookup.result.blocked)
+        }
+      >
         {copy.bankSubmit}
       </SubmitButton>
     </form>

@@ -18,6 +18,8 @@ const WORK_RECORD_TABLES: readonly string[] = [];
 /** Tables with a worker_id that are not work records, and why. */
 const NOT_WORK_RECORDS: Record<string, string> = {
   bank_detail_changes: "bank-detail requests; nothing worked or paid",
+  bank_account_lookups:
+    "account name lookups from the bank network (slice 2.3b); nothing worked or paid",
   import_rows: "the import row that created the worker",
   memberships: "the worker's login",
   pay_rates: "rates of pay, not payments",

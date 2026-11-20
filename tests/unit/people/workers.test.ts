@@ -14,6 +14,8 @@ import {
 } from "@/server/people/workers";
 import type { Database } from "@/types/db";
 
+import { LOOKUP_ID, lookupRow } from "../helpers/bank-lookup";
+
 vi.mock("next/headers", () => ({ cookies: vi.fn(), headers: vi.fn() }));
 
 const ORG = "a0000000-0000-4000-8000-000000000001";
@@ -30,6 +32,8 @@ interface FakeOptions {
   phoneTaken?: boolean;
   rpc?: (name: string, args: Record<string, unknown>) => Result;
   updated?: Result;
+  /** The account name the bank lookup gave (slice 2.3b). */
+  bankName?: string;
 }
 
 /** A Supabase client double that records writes. Reads answer from `options`. */
@@ -81,7 +85,17 @@ function fakeSupabase(options: FakeOptions = {}) {
         state.range = [start, end];
         return builder;
       },
-      maybeSingle: async () => options.updated ?? { data: { id: WORKER }, error: null },
+      maybeSingle: async () =>
+        state.table === "bank_account_lookups"
+          ? {
+              data: lookupRow({
+                organisationId: ORG,
+                accountNumber: NUBAN,
+                accountName: options.bankName ?? "IBRAHIM MUSA",
+              }),
+              error: null,
+            }
+          : (options.updated ?? { data: { id: WORKER }, error: null }),
       then(resolve: (value: Result) => unknown, reject: (reason: unknown) => unknown) {
         return Promise.resolve(answer()).then(resolve, reject);
       },
@@ -113,9 +127,9 @@ const newWorker = {
   phone: "0803 000 0002",
   employmentType: "permanent",
   startDate: "2024-03-03",
-  bankName: "GTBank",
-  accountName: "Musa Ibrahim",
+  bankCode: "058",
   bankAccountNumber: NUBAN,
+  bankLookupId: LOOKUP_ID,
   nin: NIN,
   rsaPin: RSA_PIN,
   annualRentDeclared: "360,000",
@@ -156,6 +170,13 @@ describe("createWorker", () => {
       bank_account_last4: "7712",
       rsa_pin_last4: "4421",
       annual_rent_declared_kobo: "36000000",
+      // Slice 2.3b: the bank from the picker, the name from the bank lookup, and the check.
+      bank_name: "GTBank (Guaranty Trust Bank)",
+      account_name: "IBRAHIM MUSA",
+      bank_code: "058",
+      bank_lookup_id: LOOKUP_ID,
+      name_check: "match",
+      name_check_reason: null,
     });
     expect(decryptPii(worker.nin_enc!, ctx("nin_enc", result.id))).toBe(NIN);
     expect(decryptPii(worker.bank_account_enc!, ctx("bank_account_enc", result.id))).toBe(NUBAN);
@@ -165,6 +186,48 @@ describe("createWorker", () => {
 
     const sent = JSON.stringify(args);
     for (const secret of [NIN, NUBAN, RSA_PIN]) expect(sent).not.toContain(secret);
+  });
+
+  it("refuses bank details in someone else's name", async () => {
+    const fake = fakeSupabase({ bankName: "OKONKWO CHIDINMA BLESSING" });
+    const error = await runMutation(context(fake.client), createWorkerSpec, newWorker).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ code: "invalid" });
+    expect((error as MutationError).fieldErrors.bankAccountNumber).toContain(
+      "OKONKWO CHIDINMA BLESSING",
+    );
+    expect(fake.rpc).not.toHaveBeenCalled();
+  });
+
+  it("asks for a reason when the bank's name is only close, and sends it with the request", async () => {
+    const near = fakeSupabase({ bankName: "IBRAHIM M" });
+    const error = await runMutation(context(near.client), createWorkerSpec, newWorker).catch(
+      (e: unknown) => e,
+    );
+    expect((error as MutationError).fieldErrors.nameCheckReason).toBeDefined();
+
+    const withReason = fakeSupabase({ bankName: "IBRAHIM M" });
+    await runMutation(context(withReason.client), createWorkerSpec, {
+      ...newWorker,
+      nameCheckReason: "Bank shortens first names; letter on file",
+    });
+    const [, args] = withReason.rpc.mock.calls[0]!;
+    expect(args.p_worker).toMatchObject({
+      name_check: "near",
+      name_check_reason: "Bank shortens first names; letter on file",
+    });
+  });
+
+  it("needs the bank's account name before bank details are sent", async () => {
+    const fake = fakeSupabase();
+    const error = await runMutation(context(fake.client), createWorkerSpec, {
+      ...newWorker,
+      bankLookupId: "",
+    }).catch((e: unknown) => e);
+    expect((error as MutationError).fieldErrors.bankAccountNumber).toBe(
+      "Wait for the bank to give the account name",
+    );
   });
 
   it("sends the first pay rate as whole kobo strings from the start date", async () => {
