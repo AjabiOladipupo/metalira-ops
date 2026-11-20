@@ -179,7 +179,10 @@ export function hasCompanyName(expected: ExpectedNames): boolean {
 /** How the expected names are recorded on a request (the database sets the same at insert). */
 export function expectedLabel(expected: ExpectedNames): string {
   return expected.kind === "company"
-    ? expected.names.map((n) => (n ?? "").trim()).filter(Boolean).join(" / ")
+    ? expected.names
+        .map((n) => (n ?? "").trim())
+        .filter(Boolean)
+        .join(" / ")
     : `${expected.firstName} ${expected.lastName}`;
 }
 
@@ -289,7 +292,11 @@ export async function runBankLookup(input: RunBankLookupInput): Promise<BankLook
     p_client_ip: input.clientIp ?? (await requestIp()) ?? undefined,
   });
   if (beginError || !lookupId) {
-    if (beginError?.code === "MLBL1" || beginError?.code === "MLBL2" || beginError?.code === "MLBL9") {
+    if (
+      beginError?.code === "MLBL1" ||
+      beginError?.code === "MLBL2" ||
+      beginError?.code === "MLBL9"
+    ) {
       return { ok: false, message: beginError.message };
     }
     if (beginError?.code === "42501") {

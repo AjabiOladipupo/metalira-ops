@@ -54,7 +54,9 @@ beforeEach(() => {
   vi.stubEnv("MONNIFY_SECRET_KEY", "");
   session.current = { role: "hr" };
   adminRpc.mockReset();
-  adminRpc.mockResolvedValueOnce({ data: LOOKUP, error: null }).mockResolvedValue({ data: true, error: null });
+  adminRpc
+    .mockResolvedValueOnce({ data: LOOKUP, error: null })
+    .mockResolvedValue({ data: true, error: null });
   userRpc.mockClear();
 });
 
