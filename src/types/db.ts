@@ -123,6 +123,32 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"contract_documents": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"file_deleted_at": string | null,"file_ext": string,"file_name": string,"id": string,"kind": string,"mime_type": string,"organisation_id": string,"removed_at": string | null,"removed_by": string | null,"removed_reason": string | null,"sha256": string | null,"size_bytes": number | null,"status": string,"storage_path": string,"title": string,"updated_at": string,"uploaded_at": string | null,"uploaded_by": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"file_deleted_at"?: string | null,"file_ext": string,"file_name": string,"id"?: string,"kind": string,"mime_type": string,"organisation_id": string,"removed_at"?: string | null,"removed_by"?: string | null,"removed_reason"?: string | null,"sha256"?: string | null,"size_bytes"?: number | null,"status"?: string,"storage_path"?: string,"title": string,"updated_at"?: string,"uploaded_at"?: string | null,"uploaded_by"?: string
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"file_deleted_at"?: string | null,"file_ext"?: string,"file_name"?: string,"id"?: string,"kind"?: string,"mime_type"?: string,"organisation_id"?: string,"removed_at"?: string | null,"removed_by"?: string | null,"removed_reason"?: string | null,"sha256"?: string | null,"size_bytes"?: number | null,"status"?: string,"storage_path"?: string,"title"?: string,"updated_at"?: string,"uploaded_at"?: string | null,"uploaded_by"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "contract_documents_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "contract_documents_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"contract_sites": {
                   Row: {
                     "contract_id": string,"created_at": string,"created_by": string | null,"id": string,"organisation_id": string,"site_id": string
@@ -778,6 +804,9 @@ isOneToOne: false
 "complete_company_setup":
 { Args: { "p_organisation_id": string }; Returns: string
                            },
+"confirm_contract_document":
+{ Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: undefined
+                           },
 "create_client":
 { Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
                            },
@@ -853,6 +882,12 @@ isOneToOne: false
 { Args: { "p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
+                           },
+"reject_contract_document":
+{ Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
+"remove_contract_document":
+{ Args: { "p_document_id": string,"p_organisation_id": string,"p_reason": string }; Returns: undefined
                            },
 "remove_member":
 { Args: { "p_membership_id": string,"p_organisation_id": string }; Returns: {
