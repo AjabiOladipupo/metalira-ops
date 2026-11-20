@@ -70,6 +70,9 @@ export default defineConfig({
         // needs server-only settings too (tests/e2e/helpers/server-env.ts).
         env: {
           NEXT_PUBLIC_APP_URL: baseURL,
+          // The worker app's offline queue drains with a test sender and exposes test hooks
+          // (slice 3.4, tests/e2e/offline.spec.ts). Never set outside the test build.
+          NEXT_PUBLIC_OFFLINE_TEST_SENDER: "1",
           ...appServerEnv(process.env.NEXT_PUBLIC_SUPABASE_URL),
         },
       },

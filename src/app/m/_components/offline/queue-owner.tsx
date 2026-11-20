@@ -1,0 +1,64 @@
+"use client";
+
+import { useEffect } from "react";
+
+import { activateQueue, deactivateQueue } from "@/lib/offline/active-queue";
+import { requestPersistentStorage } from "@/lib/offline/storage";
+import type { QueueOwner } from "@/lib/offline/types";
+import { createBrowserSupabase } from "@/lib/supabase/client";
+
+/**
+ * Test hooks only in the Playwright build (playwright.config.ts), and never in a Vercel build
+ * even if the flag leaked (next.config.ts also refuses it there). Both values are inlined at
+ * build time, so in production the import below is dead code and its module is not bundled.
+ */
+const TEST_HOOKS =
+  process.env.NEXT_PUBLIC_OFFLINE_TEST_SENDER === "1" && !process.env.NEXT_PUBLIC_VERCEL_ENV;
+
+/**
+ * True while the browser's Supabase session is still `userId` (read from the session cookie,
+ * no network unless the token needs a refresh). Another worker signing in on this phone, or a
+ * sign-out in another tab, stops this tab's queue from sending (security review M2).
+ */
+function sessionIs(userId: string): () => Promise<boolean> {
+  return async () => {
+    try {
+      const { data } = await createBrowserSupabase().auth.getSession();
+      return data.session?.user.id === userId;
+    } catch {
+      return false;
+    }
+  };
+}
+
+/**
+ * Opens the signed-in worker's offline queue and starts its sync engine. Rendered by the
+ * signed-in worker layout with ids from the verified session, so the queue always belongs to
+ * the worker and organisation the server says are signed in. Renders nothing.
+ */
+export function QueueOwnerSync({
+  organisationId,
+  workerId,
+  userId,
+}: QueueOwner & { userId: string }) {
+  useEffect(() => {
+    let cancelled = false;
+    if (TEST_HOOKS) {
+      void import("@/lib/offline/test-hooks").then(({ installTestHooks }) => {
+        if (!cancelled) installTestHooks();
+      });
+    }
+    try {
+      activateQueue({ organisationId, workerId }, { isOwnerSignedIn: sessionIs(userId) });
+    } catch {
+      // IndexedDB unavailable (some private modes): the app works online without the queue.
+      return;
+    }
+    void requestPersistentStorage();
+    return () => {
+      cancelled = true;
+      deactivateQueue();
+    };
+  }, [organisationId, workerId, userId]);
+  return null;
+}

@@ -132,6 +132,12 @@ describe("proxyDecision for the worker app (slice 1.9)", () => {
     expect(proxyDecision("/m/sign-in", "", false)).toEqual({ type: "next" });
     expect(proxyDecision(`/m/invite/${"a".repeat(64)}`, "", false)).toEqual({ type: "next" });
     expect(proxyDecision(`/m/invite/${"a".repeat(64)}`, "", true, true)).toEqual({ type: "next" });
+    // The offline screen is precached by the service worker, signed in or not (slice 3.4).
+    expect(proxyDecision("/m/offline", "", false)).toEqual({ type: "next" });
+    expect(proxyDecision("/m/offline/x", "", false)).toEqual({
+      type: "redirect",
+      location: "/m/sign-in",
+    });
   });
 
   it("sends a worker session away from the manager app and its sign-in pages", () => {

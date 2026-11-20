@@ -9,3 +9,4 @@ fixtures/
 supabase/.temp/
 *.md
 src/types/db.ts
+public/sw.js

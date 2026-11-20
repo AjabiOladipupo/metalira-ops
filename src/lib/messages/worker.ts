@@ -76,6 +76,37 @@ export const workerMessages = {
     payslips: "Payslips",
     me: "Me",
   },
+  /** Offline banner, offline page, install card and update prompt (slice 3.4). */
+  offline: {
+    /** The black banner, per the WkHome and WkClock boards. */
+    banner: "No network. Saved on phone, will send when network returns.",
+    saved: (count: number) =>
+      count === 1 ? "1 punch saved on phone" : `${count} punches saved on phone`,
+    sending: (count: number) =>
+      count === 1 ? "Sending 1 punch saved on phone." : `Sending ${count} punches saved on phone.`,
+    storageLow:
+      "Phone storage is nearly full. Free up some space so new punches can be saved on the phone.",
+    pageTitle: "No network",
+    pageBody:
+      "This screen needs the internet. Anything you saved on the phone stays here and sends when the network returns.",
+    retry: "Try again",
+    home: "Go to home",
+    updateReady: "New version ready.",
+    updateReload: "Tap to reload",
+    installTitle: "Add to home screen",
+    installBody: "Open Metalira Ops like any other app, even with weak network.",
+    installButton: "Add to home screen",
+    installIos: "In Safari, tap Share, then Add to Home Screen.",
+    installDismiss: "Not now",
+    signOutTitle: (count: number) =>
+      count === 1 ? "1 punch is not sent yet" : `${count} punches are not sent yet`,
+    signOutBody:
+      "They are saved only on this phone. If you sign out now they will be deleted and your company will not get them. Stay signed in until you have network, then try again.",
+    signOutStay: "Stay signed in",
+    signOutAnyway: "Sign out and delete them",
+    signOutOffline:
+      "You have no network, so you can't sign out right now. Try again when you have network.",
+  },
   home: {
     hello: (firstName: string) => `Hello, ${firstName}`,
     myProfile: "My profile",
