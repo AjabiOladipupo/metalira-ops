@@ -2,8 +2,10 @@ import "server-only";
 
 import { formatDate } from "@/lib/dates";
 import { formatShortDay } from "@/lib/roster";
-import type { copyLastWeekSchema } from "@/server/workforce/roster";
+import { formatChangeCounts, type PublishResult } from "@/lib/roster-publish";
+import type { copyLastWeekSchema, publishRosterSchema } from "@/server/workforce/roster";
 import { previewCopyLastWeek } from "@/server/workforce/roster-data";
+import { previewPublishRoster } from "@/server/workforce/roster-publish-data";
 
 import type { CapabilityPreview, PreviewFn } from "./types";
 
@@ -46,4 +48,40 @@ export const previewCopyWeek: PreviewFn<typeof copyLastWeekSchema> = async ({
 }) => {
   const result = await previewCopyLastWeek(supabase, organisationId, data.siteId, data.weekStart);
   return describeCopyPreview(result);
+};
+
+const KIND_LABEL = { added: "Added", removed: "Taken off", changed: "Shifts changed" } as const;
+
+/**
+ * Preview for "Publish roster" (slice 3.3): publish_roster's dry run, so the confirm step shows
+ * exactly who will be told. Names only; the shifts themselves are on the roster.
+ */
+export function describePublishPreview(result: PublishResult): CapabilityPreview {
+  const week = formatDate(result.weekStart);
+  const people = (n: number) => `${n} ${n === 1 ? "person" : "people"}`;
+  const told = result.affected.length;
+  let summary: string;
+  if (result.nothingChanged) {
+    summary = `Nothing has changed since version ${result.previousVersion ?? 0} was published for the week of ${week}.`;
+  } else if (result.previousVersion === null) {
+    summary = `Publishes version 1 for the week of ${week}: ${people(result.assigned)} on shifts, ${result.open} open. ${told} ${told === 1 ? "worker is" : "workers are"} told.`;
+  } else {
+    summary = `Publishes version ${result.version} for the week of ${week}: ${formatChangeCounts(result.counts)}. ${told === 1 ? "Only this worker is" : `Only these ${told} workers are`} told.`;
+  }
+  return {
+    summary,
+    changes: result.affected.map((a) => ({
+      label: a.workerName,
+      after: `${KIND_LABEL[a.kind]} · ${a.shifts.length} ${a.shifts.length === 1 ? "shift" : "shifts"} that week`,
+    })),
+  };
+}
+
+export const previewPublishWeek: PreviewFn<typeof publishRosterSchema> = async ({
+  supabase,
+  organisationId,
+  data,
+}) => {
+  const result = await previewPublishRoster(supabase, organisationId, data.siteId, data.weekStart);
+  return describePublishPreview(result);
 };

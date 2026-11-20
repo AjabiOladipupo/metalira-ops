@@ -71,6 +71,7 @@ export function RosterBoard({
   tray,
   candidates,
   canEdit,
+  changedCells = [],
 }: {
   siteId: string;
   weekStart: string;
@@ -81,7 +82,10 @@ export function RosterBoard({
   tray: TrayCard[];
   candidates: RosterCandidates;
   canEdit: boolean;
+  /** `${postId}|${date}` for the post-days that changed since the latest publish (slice 3.3). */
+  changedCells?: string[];
 }) {
+  const changed = useMemo(() => new Set(changedCells), [changedCells]);
   const todayIndex = week.days.findIndex((d) => d.date === today);
   const [dayIndex, setDayIndex] = useState(todayIndex >= 0 ? todayIndex : 0);
   const [picking, setPicking] = useState<PickTarget | null>(null);
@@ -128,6 +132,15 @@ export function RosterBoard({
     }
     return (
       <div className="flex flex-col gap-1.5">
+        {changed.has(`${post.postId}|${cell.date}`) ? (
+          <span
+            className="flex items-center gap-1.5 px-1 text-[11px] leading-tight text-fg-muted"
+            data-testid="changed-since-publish"
+          >
+            <StatusDot tone="partial" />
+            Changed since publish
+          </span>
+        ) : null}
         {cell.assigned.map((a) => {
           const notes = [
             a.mapped ? null : "Not mapped to this site",

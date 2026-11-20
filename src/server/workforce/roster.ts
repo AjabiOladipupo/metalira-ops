@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { isoWeekday } from "@/lib/headcount";
 import type { ManagerRole } from "@/lib/roles";
+import { toPublishResult, type PublishResult } from "@/lib/roster-publish";
 import { MutationError, type MutationSpec } from "@/server/identity/mutate";
 
 /**
@@ -70,7 +71,7 @@ export function fromRosterDbError(error: PostgrestError): never {
   if (error.code === "23505") {
     throw new MutationError("invalid", "This employee is already on this shift.");
   }
-  if (/^MLRS\d$/.test(error.code) || error.code === "22023") {
+  if (/^MLR[SP]\d$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code}): ${error.message}`);
@@ -184,4 +185,70 @@ export const copyLastWeekSpec: MutationSpec<typeof copyLastWeekSchema, CopyWeekR
     if (error) fromRosterDbError(error);
     return toCopyWeekResult(result, data.weekStart);
   },
+};
+
+export const publishRosterSchema = z.object({
+  siteId: z.uuid("Choose a site"),
+  weekStart: z.iso
+    .date("Choose a week")
+    .refine((v) => isoWeekday(v) === 1, "A roster week starts on a Monday"),
+});
+
+/**
+ * Publishes one site's week (slice 3.3): `publish_roster` checks the role, refuses a week that has
+ * passed or a republish with nothing changed, takes the site's roster lock and inserts the next
+ * version. The result carries the organisation from the verified session, so the action can tell
+ * each affected worker (src/server/workforce/roster-notify.ts) without trusting request input.
+ */
+export const publishRosterSpec: MutationSpec<
+  typeof publishRosterSchema,
+  PublishResult & { organisationId: string }
+> = {
+  schema: publishRosterSchema,
+  roles: ROSTER_EDITORS,
+  module: "shifts",
+  run: async ({ supabase, organisationId, data }) => {
+    const { data: result, error } = await supabase.rpc("publish_roster", {
+      p_organisation_id: organisationId,
+      p_site_id: data.siteId,
+      p_week_start: data.weekStart,
+      p_dry_run: false,
+    });
+    if (error) fromRosterDbError(error);
+    return { ...toPublishResult(result), organisationId };
+  },
+};
+
+/**
+ * "Send notices again" for the latest version of a site's week (slice 3.3): when a publish's
+ * notices died part-way, `roster_notice_targets` lists the workers that version affected who have
+ * no inbox item for it yet (owner, admin, ops_manager). The action tells only them, under the
+ * same caps; the database refuses a second item per worker per version. Audited as
+ * `roster.notices_resent`.
+ */
+export const resendPublishNoticesSpec: MutationSpec<
+  typeof publishRosterSchema,
+  PublishResult & { organisationId: string }
+> = {
+  schema: publishRosterSchema,
+  roles: ROSTER_EDITORS,
+  module: "shifts",
+  run: async ({ supabase, organisationId, data }) => {
+    const { data: result, error } = await supabase.rpc("roster_notice_targets", {
+      p_organisation_id: organisationId,
+      p_site_id: data.siteId,
+      p_week_start: data.weekStart,
+    });
+    if (error) fromRosterDbError(error);
+    return { ...toPublishResult(result), organisationId };
+  },
+  event: ({ result }) =>
+    result.publicationId
+      ? {
+          action: "roster.notices_resent",
+          entity: "roster_publications",
+          entityId: result.publicationId,
+          after: { version: result.version, workers: result.affected.length },
+        }
+      : null,
 };

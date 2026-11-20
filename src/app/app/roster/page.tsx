@@ -4,11 +4,13 @@ import { redirect } from "next/navigation";
 
 import { EmptyState } from "@/components/empty-state";
 import { Illustration } from "@/components/illustration";
+import { StatusDot } from "@/components/status";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
 import { addDays, todayIn } from "@/lib/dates";
-import { formatCoverage, formatWeekOf, mondayOf, parseWeekParam } from "@/lib/roster";
+import { formatCoverage, formatWeekOf, mondayOf, parseWeekParam, weekEnd } from "@/lib/roster";
+import { formatPublicationStatus, type PublicationStatus } from "@/lib/roster-publish";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getPageSession } from "@/server/identity/session";
 import { canEditRoster } from "@/server/workforce/roster";
@@ -19,6 +21,7 @@ import {
   loadRosterWeek,
   trayCards,
 } from "@/server/workforce/roster-data";
+import { loadPublicationStatus } from "@/server/workforce/roster-publish-data";
 
 import { RouteGate } from "../_shell/slots";
 import { RosterBoard } from "./_components/roster-board";
@@ -68,12 +71,17 @@ async function RosterPage({
 
   const requested = first(query.site);
   const site = sites.find((s) => s.id === requested) ?? sites.find((s) => !s.archived) ?? sites[0]!;
-  const [data, candidates] = await Promise.all([
+  const [data, candidates, status] = await Promise.all([
     loadRosterWeek(supabase, organisationId, site.id, weekStart, settings.timeZone),
     loadRosterCandidates(supabase, organisationId, weekStart),
+    canEditRoster(role)
+      ? loadPublicationStatus(supabase, organisationId, site.id, weekStart)
+      : Promise.resolve<PublicationStatus | null>(null),
   ]);
   const { week } = data;
   const canEdit = canEditRoster(role) && !site.archived;
+  const canPublish = canEdit && weekEnd(weekStart) >= today;
+  const upToDate = status !== null && status.version !== null && status.changed.length === 0;
   const tray = trayCards(week, site.id, candidates, settings, today);
   const thisWeek = mondayOf(today);
 
@@ -113,12 +121,20 @@ async function RosterPage({
             </Link>
           </Button>
         ) : null}
-        <Button disabled title="Publishing comes next" aria-describedby="publish-note">
-          Publish roster
-        </Button>
-        <span id="publish-note" className="sr-only">
-          Publishing comes next.
-        </span>
+        {canPublish && !upToDate ? (
+          <Button asChild>
+            <Link href={`/app/roster/publish?site=${site.id}&week=${weekStart}`} prefetch={false}>
+              Publish roster
+            </Link>
+          </Button>
+        ) : (
+          <Button
+            disabled
+            title={upToDate ? "Nothing has changed since it was published" : undefined}
+          >
+            {upToDate ? "Published" : "Publish roster"}
+          </Button>
+        )}
       </div>
 
       <PageHeader
@@ -130,6 +146,21 @@ async function RosterPage({
             : formatCoverage(week.totals)
         }
       />
+      {status ? (
+        <p
+          className="m-0 -mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+          data-testid="publication-status"
+        >
+          <StatusDot tone={status.version === null ? "pending" : upToDate ? "done" : "partial"} />
+          <span>{formatPublicationStatus(status, settings.timeZone)}</span>
+          {status.version !== null && status.workersAffected > 0 ? (
+            <span className="text-fg-muted">
+              · Changes for {status.workersAffected}{" "}
+              {status.workersAffected === 1 ? "worker" : "workers"} not published yet
+            </span>
+          ) : null}
+        </p>
+      ) : null}
 
       {week.posts.length === 0 ? (
         <EmptyState
@@ -147,6 +178,7 @@ async function RosterPage({
           tray={tray}
           candidates={candidates}
           canEdit={canEdit}
+          changedCells={status?.version != null ? status.changed : []}
         />
       )}
     </div>

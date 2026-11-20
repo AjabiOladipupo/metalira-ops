@@ -152,6 +152,23 @@ export const workerMessages = {
       body: "For help with this app, your shifts or your pay, ask your supervisor or HR. If you forget your PIN, HR can send you a new invite.",
     },
   },
+  /** My shifts and the home card (slice 3.3): published shifts only. */
+  shifts: {
+    title: "My shifts",
+    upcoming: "Next 14 days",
+    earlier: "Last 7 days",
+    today: "Today",
+    tomorrow: "Tomorrow",
+    empty:
+      "No shifts in the next 14 days. Your shifts show here once your company publishes a roster.",
+    earlierEmpty: "No shifts in the last 7 days.",
+    /** "Gate A · Day at Apapa Warehouse 3". */
+    where: (post: string, site: string) => `${post} at ${site}`,
+    /** The home card's second line. */
+    homeWhere: (post: string, site: string) => `${post} · ${site}`,
+    alsoToday: (n: number) => `And ${n} more today`,
+    allShifts: "All my shifts",
+  },
   me: {
     title: "Me",
     tabs: "Me sections",

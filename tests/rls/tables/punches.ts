@@ -1,5 +1,5 @@
 /**
- * Isolation registry for slice 3.5 (punches). Loads after people.ts (a worker per organisation).
+ * Isolation registry for slice 3.5 (punches), on a worker made here for it.
  * Nobody, the secret key included, has write grants on punches (record_punch is the only
  * writer), so the seed inserts as the database owner. `location` is not granted to signed-in
  * users, so it is left out of the select.
@@ -9,13 +9,22 @@ import { randomUUID } from "node:crypto";
 import type { TableSpec } from "../helpers/registry";
 import { pgClient, type Client } from "../helpers/supabase";
 
-async function firstWorker(admin: Client, orgId: string): Promise<string> {
+/**
+ * A worker of its own for the punch: a punch is a work record, and the staff ID registry
+ * (staff_id.ts) corrects the organisation's first worker, which must have none.
+ */
+async function punchWorker(admin: Client, orgId: string): Promise<string> {
   const { data, error } = await admin
     .from("workers")
+    .insert({
+      organisation_id: orgId,
+      staff_id: `PUN-${randomUUID().slice(0, 8)}`,
+      first_name: "Isolation",
+      last_name: "Puncher",
+      employment_type: "permanent",
+      start_date: "2025-01-06",
+    })
     .select("id")
-    .eq("organisation_id", orgId)
-    .order("created_at")
-    .limit(1)
     .single();
   if (error) throw new Error(error.message);
   return data.id;
@@ -30,7 +39,7 @@ export const tables: TableSpec[] = [
     tenantColumn: "organisation_id",
     tenantValue: (side) => side.orgId,
     seed: async ({ admin, side }) => {
-      const worker = await firstWorker(admin, side.orgId);
+      const worker = await punchWorker(admin, side.orgId);
       const db = await pgClient();
       try {
         await db.query(

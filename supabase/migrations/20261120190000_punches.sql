@@ -16,7 +16,8 @@
 --      phone's clock (flagged time_unverified). Never in the future, never more than 7 days back.
 --      clock_drift_seconds = device_time - recorded_at.
 --    * the shift: the worker's assigned (not removed) assignment whose window, 2 hours before the
---      start to 4 hours after the end, holds recorded_at. None: recorded anyway, flagged no_shift.
+--      start to 4 hours after the end, holds recorded_at, a published one (slice 3.3) first.
+--      None: recorded anyway, flagged no_shift.
 --    * the geofence result with private.site_geofence_check, for the organisation of the session,
 --      and the distance to the site.
 --    * flags (private.punch_flags), fixed at insert.
@@ -618,7 +619,15 @@ begin
       and a.status = 'assigned'
       and v_recorded >= a.starts_at - interval '2 hours'
       and v_recorded <= a.ends_at + interval '4 hours'
-    order by abs(extract(epoch from (v_recorded - a.starts_at))), a.starts_at
+    -- A published assignment (slice 3.3) before an unpublished one, then the nearest start.
+    order by exists (
+        select 1 from public.roster_publications rp
+        where rp.organisation_id = a.organisation_id
+          and rp.site_id = a.site_id
+          and rp.week_start = a.shift_date - (extract(isodow from a.shift_date)::integer - 1)
+          and rp.snapshot @> jsonb_build_array(jsonb_build_object('a', a.id::text))
+      ) desc,
+      abs(extract(epoch from (v_recorded - a.starts_at))), a.starts_at
     limit 1;
   end if;
 
@@ -965,7 +974,7 @@ revoke all on function private.punch_selfie_path(public.punches, text) from publ
 
 -- Secret key only: records the checked upload on the actor's own punch. The server names the
 -- worker login it verified (p_actor), checked here as if they had called.
-create function public.attach_punch_selfie(p_punch_id uuid, p_actor uuid, p_path text)
+create function private.attach_punch_selfie(p_punch_id uuid, p_actor uuid, p_path text)
 returns void
 language plpgsql
 volatile
@@ -1012,7 +1021,7 @@ end;
 $$;
 
 -- Secret key only: selfies past 90 days whose punch is not under review, oldest first.
-create function public.punch_selfies_due(p_limit integer default 500)
+create function private.punch_selfies_due(p_limit integer default 500)
 returns table (punch_id uuid, selfie_path text)
 language plpgsql
 stable
@@ -1035,7 +1044,7 @@ end;
 $$;
 
 -- Secret key only: records that a selfie's file was deleted (the row stays).
-create function public.clear_punch_selfie(p_punch_id uuid)
+create function private.clear_punch_selfie(p_punch_id uuid)
 returns boolean
 language plpgsql
 volatile
@@ -1061,7 +1070,7 @@ end;
 $$;
 
 -- Secret key only: uploads older than a day that no punch holds (an attach that failed).
-create function public.punch_photo_orphans(p_limit integer default 500)
+create function private.punch_photo_orphans(p_limit integer default 500)
 returns setof text
 language plpgsql
 stable
@@ -1082,6 +1091,48 @@ begin
     limit least(greatest(coalesce(p_limit, 500), 1), 1000);
 end;
 $$;
+
+revoke all on function private.attach_punch_selfie(uuid, uuid, text) from public, anon, authenticated;
+revoke all on function private.punch_selfies_due(integer) from public, anon, authenticated;
+revoke all on function private.clear_punch_selfie(uuid) from public, anon, authenticated;
+revoke all on function private.punch_photo_orphans(integer) from public, anon, authenticated;
+grant execute on function private.attach_punch_selfie(uuid, uuid, text) to service_role;
+grant execute on function private.punch_selfies_due(integer) to service_role;
+grant execute on function private.clear_punch_selfie(uuid) to service_role;
+grant execute on function private.punch_photo_orphans(integer) to service_role;
+
+-- The Data API names (invoker wrappers; the secret key only).
+create function public.attach_punch_selfie(p_punch_id uuid, p_actor uuid, p_path text)
+returns void
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$ select private.attach_punch_selfie(p_punch_id, p_actor, p_path) $$;
+
+create function public.punch_selfies_due(p_limit integer default 500)
+returns table (punch_id uuid, selfie_path text)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select * from private.punch_selfies_due(p_limit) $$;
+
+create function public.clear_punch_selfie(p_punch_id uuid)
+returns boolean
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$ select private.clear_punch_selfie(p_punch_id) $$;
+
+create function public.punch_photo_orphans(p_limit integer default 500)
+returns setof text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$ select * from private.punch_photo_orphans(p_limit) $$;
 
 revoke all on function public.attach_punch_selfie(uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.punch_selfies_due(integer) from public, anon, authenticated;

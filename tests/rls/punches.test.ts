@@ -236,7 +236,7 @@ async function liveAllDayPost(): Promise<string> {
     post_name: "Gate A",
     band: "Day",
     start_time: "00:00",
-    end_time: "23:59",
+    end_time: "23:45",
   } as never);
   expect(headcount.error).toBeNull();
   const live = await staff.ops.client.rpc("activate_contract", {
@@ -546,7 +546,7 @@ describe("record_punch: time, shift and sequence", () => {
     expect(result.flags).not.toContain("no_shift");
     // The grace is 10 minutes: now is late unless the day started under 10 minutes ago.
     if (Date.now() > start + 11 * 60_000) expect(result.flags).toContain("late");
-    // A clock-out belongs to the same shift and is early (the shift ends at 23:59).
+    // A clock-out belongs to the same shift and is early (the shift ends at 23:45).
     const out = await recorded(w, { kind: "out" });
     expect((await row(out.id)).shift_assignment_id).toBe(assignment);
     if (Date.now() < end - 11 * 60_000) expect(out.flags).toContain("early_out");
@@ -693,6 +693,7 @@ describe("who reads punches", () => {
       .select("after")
       .eq("entity", "punches")
       .eq("entity_id", mineId)
+      .eq("action", "punches.insert")
       .single();
     expect(audit.error).toBeNull();
     expect(audit.data!.after).not.toHaveProperty("location");
