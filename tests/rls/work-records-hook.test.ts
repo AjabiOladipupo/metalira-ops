@@ -23,6 +23,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
   import_rows: "the import row that created the worker",
   memberships: "the worker's login",
   pay_rates: "rates of pay, not payments",
+  shift_assignments:
+    "the roster (slice 3.2): planned shifts, not work done; punches (3.5) are the work records",
   staff_id_corrections: "the corrections themselves",
   worker_assignments: "mapping to clients, sites and projects",
   worker_change_requests: "profile change requests from the worker app",
