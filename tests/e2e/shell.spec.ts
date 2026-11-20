@@ -14,11 +14,17 @@ async function expectNoHorizontalScroll(page: Page) {
   expect(overflow).toBeLessThanOrEqual(0);
 }
 
+/** Pages built past the placeholder, with the empty state a new company sees instead. */
+const BUILT_EMPTY: Record<string, string> = {
+  // Slice 3.2: the roster grid; a company with no live contract has no posts to roster.
+  "/app/roster": "No posts to roster yet.",
+};
+
 for (const item of NAV_ITEMS) {
   test(`${item.href} loads with its heading`, async ({ page }) => {
     await page.goto(item.href);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(item.label);
-    await expect(page.getByText(item.empty)).toBeVisible();
+    await expect(page.getByText(BUILT_EMPTY[item.href] ?? item.empty)).toBeVisible();
     await expectNoHorizontalScroll(page);
   });
 }

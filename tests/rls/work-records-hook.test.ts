@@ -24,6 +24,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
   inbox_items: "messages to the worker in the worker app (slice 3.1); nothing worked or paid",
   memberships: "the worker's login",
   pay_rates: "rates of pay, not payments",
+  shift_assignments:
+    "the roster (slice 3.2): planned shifts, not work done; punches (3.5) are the work records",
   staff_id_corrections: "the corrections themselves",
   worker_assignments: "mapping to clients, sites and projects",
   worker_change_requests: "profile change requests from the worker app",
