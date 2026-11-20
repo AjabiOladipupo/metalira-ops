@@ -173,6 +173,7 @@ export interface CreatedInvite {
 
 /** Creates the invites as the signed-in manager. The raw tokens exist only in the result. */
 export const createInvitesSpec: MutationSpec<typeof createInvitesSchema, CreatedInvite[]> = {
+  module: "people",
   schema: createInvitesSchema,
   roles: INVITERS,
   run: async ({ supabase, organisationId, data }) => {

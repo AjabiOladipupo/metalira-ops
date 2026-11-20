@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { INDUSTRY_IDS, NIGERIAN_STATES, PLAN_IDS } from "@/lib/company";
+import { BUSINESS_TYPE_IDS } from "@/lib/modules";
 
 import { plainText } from "./names";
 
@@ -106,7 +107,16 @@ export const planStepSchema = z.object({
   expectedWorkers: wholeNumber(1, 1_000_000, "Enter a number of workers from 1 to 1,000,000"),
 });
 
-export const businessStepSchema = z.object({
+const PAY_CYCLE_MESSAGE = "Choose a day from 1 to 28";
+const PAY_DAY_MESSAGE = "Choose a day from 1 to 31";
+
+/**
+ * Business details (step 2). Slice 3.0 adds "What does your business do?". A services business
+ * has no pay fields on the form (it starts with Payroll off), so the pay days are optional and,
+ * when left out, the saved ones are kept; a workforce business must choose them.
+ */
+export const businessStepFields = z.object({
+  businessType: z.enum(BUSINESS_TYPE_IDS, "Choose what your business does"),
   legalName: plainText(
     z
       .string()
@@ -124,9 +134,25 @@ export const businessStepSchema = z.object({
   headOfficeState: z.enum(NIGERIAN_STATES, "Choose the head office state"),
   address: optional(plainText(z.string().max(300, "Use 300 characters or fewer"), "Address")),
   phone: optional(businessPhone),
-  payCycleStartDay: wholeNumber(1, 28, "Choose a day from 1 to 28"),
-  payDay: wholeNumber(1, 31, "Choose a day from 1 to 31"),
+  payCycleStartDay: wholeNumber(1, 28, PAY_CYCLE_MESSAGE).optional(),
+  payDay: wholeNumber(1, 31, PAY_DAY_MESSAGE).optional(),
 });
+
+/** A workforce business must choose its pay days. */
+export function requirePayDays(
+  data: Pick<z.output<typeof businessStepFields>, "businessType" | "payCycleStartDay" | "payDay">,
+  ctx: z.RefinementCtx,
+): void {
+  if (data.businessType !== "workforce") return;
+  if (data.payCycleStartDay === undefined) {
+    ctx.addIssue({ code: "custom", path: ["payCycleStartDay"], message: PAY_CYCLE_MESSAGE });
+  }
+  if (data.payDay === undefined) {
+    ctx.addIssue({ code: "custom", path: ["payDay"], message: PAY_DAY_MESSAGE });
+  }
+}
+
+export const businessStepSchema = businessStepFields.superRefine(requirePayDays);
 
 export const invoicesStepSchema = z.object({
   invoiceEmail: z
@@ -150,6 +176,25 @@ export const invoicesStepSchema = z.object({
 export const advanceStepSchema = z.object({
   step: z.enum(["clients", "employees"]),
 });
+
+/**
+ * Settings > Company > Modules (slice 3.0). Each switch is a checkbox: present ("on") when ticked.
+ * `confirmed` comes from the confirm step and is required when any part is being turned off
+ * (checked against the saved switches in the mutation).
+ */
+const checkbox = z
+  .string()
+  .optional()
+  .transform((value) => value === "on");
+
+export const modulesSchema = z.object({
+  shifts: checkbox,
+  people: checkbox,
+  payroll: checkbox,
+  confirmed: z.enum(["yes"]).optional(),
+});
+
+export type ModulesInput = z.output<typeof modulesSchema>;
 
 export type PlanStepInput = z.output<typeof planStepSchema>;
 export type BusinessStepInput = z.output<typeof businessStepSchema>;

@@ -126,6 +126,9 @@ export const workerMessages = {
     unlinked:
       "Your login isn't linked to your staff record yet. Ask HR to send you an invite, then open it on this phone.",
   },
+  /** Clock and My shifts when the company has Shifts switched off (slice 3.0). */
+  shiftsOff:
+    "Your company doesn't use clock-in or shifts in this app. Ask your supervisor or HR how your hours are recorded.",
   /** Screens whose feature arrives in a later phase. */
   soon: {
     clock: {

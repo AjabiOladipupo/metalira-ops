@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { PlaceholderPage } from "@/components/shell/placeholder-page";
-import { pendingSetupHref } from "@/server/identity/company-data";
+import { getActiveCompany, pendingSetupHref } from "@/server/identity/company-data";
 
 import { RouteGate } from "./_shell/slots";
 
@@ -12,7 +12,8 @@ export const metadata: Metadata = { title: "Home" };
 async function Home() {
   const setupHref = await pendingSetupHref();
   if (setupHref) redirect(setupHref);
-  return <PlaceholderPage href="/app" />;
+  const company = await getActiveCompany();
+  return <PlaceholderPage href="/app" modules={company?.modules} />;
 }
 
 export default function Page() {

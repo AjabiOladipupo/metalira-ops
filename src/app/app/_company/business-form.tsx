@@ -1,9 +1,11 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { Field, SelectField } from "@/components/form";
 import { INDUSTRIES, NIGERIAN_STATES, ordinal } from "@/lib/company";
+import { BUSINESS_TYPES, isBusinessType, type BusinessType } from "@/lib/modules";
+import { cn } from "@/lib/utils";
 import { saveBusiness } from "@/server/identity/company-actions";
 import type { Company } from "@/server/identity/company-data";
 
@@ -33,11 +35,18 @@ export type BusinessDetails = Pick<
   | "phone"
   | "payCycleStartDay"
   | "payDay"
+  | "businessType"
+  | "modules"
 >;
 
 /**
- * Business step: what goes on payslips, invoices and receipts, and the monthly pay settings.
- * Weekly pay and "last working day" from the board wait until payroll rules cover them.
+ * Business step: what the business does, what goes on payslips, invoices and receipts, and the
+ * monthly pay settings. Weekly pay and "last working day" from the board wait until payroll
+ * rules cover them.
+ *
+ * Slice 3.0: "What does your business do?" comes first. A services business starts with Payroll
+ * off, so the pay fields show only for a workforce business, or in settings once Payroll is on.
+ * In setup, changing the answer sets the module switches to the new type's defaults.
  */
 export function BusinessForm({
   mode,
@@ -61,10 +70,50 @@ export function BusinessForm({
     phone: fieldValue(state, "phone", company.phone),
     payCycleStartDay: fieldValue(state, "payCycleStartDay", company.payCycleStartDay),
     payDay: fieldValue(state, "payDay", company.payDay),
+    businessType: fieldValue(state, "businessType", company.businessType),
   };
+  const [businessType, setBusinessType] = useState<BusinessType>(
+    isBusinessType(defaults.businessType) ? defaults.businessType : "workforce",
+  );
+  const showPay = businessType === "workforce" || (mode === "settings" && company.modules.payroll);
 
   return (
     <form key={JSON.stringify(defaults)} action={action} noValidate className="flex flex-col gap-6">
+      <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
+        <legend className="mb-3 type-h3">What does your business do?</legend>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {BUSINESS_TYPES.map((option) => (
+            <label
+              key={option.id}
+              className={cn(
+                "flex cursor-pointer flex-col gap-1.5 rounded-xl border border-line bg-background p-4 text-foreground",
+                "has-checked:border-foreground has-checked:bg-foreground has-checked:text-background",
+                "has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-signal",
+              )}
+            >
+              <input
+                type="radio"
+                name="businessType"
+                value={option.id}
+                defaultChecked={defaults.businessType === option.id}
+                onChange={() => setBusinessType(option.id)}
+                className="sr-only"
+              />
+              <span className="text-base font-semibold">{option.label}</span>
+              <span className="text-[13px] opacity-85">{option.hint}</span>
+            </label>
+          ))}
+        </div>
+        {mode === "settings" ? (
+          <p className="m-0 text-[13px] text-fg-muted">
+            Changing this keeps your data. Turn parts of the app on or off under Modules below.
+          </p>
+        ) : null}
+        {errors?.businessType ? (
+          <p className="m-0 text-xs font-medium">{errors.businessType}</p>
+        ) : null}
+      </fieldset>
+
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4">
         <Field
           label="Registered business name"
@@ -133,28 +182,30 @@ export function BusinessForm({
         />
       </div>
 
-      <fieldset className="m-0 flex flex-col gap-4 border-0 p-0">
-        <legend className="mb-1 type-h3">Pay</legend>
-        <p className="m-0 text-sm text-fg-muted">
-          Monthly pay. The cycle runs from the start day to the day before it in the next month.
-        </p>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4">
-          <SelectField
-            label="Pay cycle starts on"
-            name="payCycleStartDay"
-            options={CYCLE_DAYS}
-            defaultValue={defaults.payCycleStartDay}
-            error={errors?.payCycleStartDay}
-          />
-          <SelectField
-            label="Pay day"
-            name="payDay"
-            options={PAY_DAYS}
-            defaultValue={defaults.payDay}
-            error={errors?.payDay}
-          />
-        </div>
-      </fieldset>
+      {showPay ? (
+        <fieldset className="m-0 flex flex-col gap-4 border-0 p-0">
+          <legend className="mb-1 type-h3">Pay</legend>
+          <p className="m-0 text-sm text-fg-muted">
+            Monthly pay. The cycle runs from the start day to the day before it in the next month.
+          </p>
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-4">
+            <SelectField
+              label="Pay cycle starts on"
+              name="payCycleStartDay"
+              options={CYCLE_DAYS}
+              defaultValue={defaults.payCycleStartDay}
+              error={errors?.payCycleStartDay}
+            />
+            <SelectField
+              label="Pay day"
+              name="payDay"
+              options={PAY_DAYS}
+              defaultValue={defaults.payDay}
+              error={errors?.payDay}
+            />
+          </div>
+        </fieldset>
+      ) : null}
 
       <CompanyFormFooter mode={mode} state={state} backHref={backHref} />
     </form>

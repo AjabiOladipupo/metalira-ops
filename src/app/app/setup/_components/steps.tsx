@@ -3,7 +3,13 @@ import { redirect } from "next/navigation";
 
 import { DataTable } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
-import { previousSetupStep, resumeSetupSlug, setupStepHref, type SetupSlug } from "@/lib/company";
+import {
+  hasSetupStep,
+  previousSetupStep,
+  resumeSetupSlug,
+  setupStepHref,
+  type SetupSlug,
+} from "@/lib/company";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { lagosToday } from "@/lib/dates";
 import { formatRateSummary } from "@/lib/rate-cards";
@@ -39,14 +45,20 @@ async function requireCompany(): Promise<Company> {
   return company;
 }
 
-function backHref(slug: SetupSlug): string | undefined {
-  const previous = previousSetupStep(slug);
+function backHref(slug: SetupSlug, company?: Pick<Company, "businessType">): string | undefined {
+  const previous = previousSetupStep(slug, company?.businessType);
   return previous ? setupStepHref(previous.slug) : undefined;
+}
+
+function resumeHref(company: Company): string {
+  return setupStepHref(
+    resumeSetupSlug(company.setupStep, company.setupCompletedAt !== null, company.businessType),
+  );
 }
 
 export async function ResumeSetup(): Promise<never> {
   const company = await requireCompany();
-  redirect(setupStepHref(resumeSetupSlug(company.setupStep, company.setupCompletedAt !== null)));
+  redirect(resumeHref(company));
 }
 
 export async function PlanStep() {
@@ -175,13 +187,20 @@ export async function ClientsStep() {
         Client, project and site names in your employee file are kept. New names become clients you
         can finish later under Clients.
       </p>
-      <StepForm action={continueFromClients} backHref={setupStepHref("invoices")} />
+      <StepForm
+        action={continueFromClients}
+        backHref={setupStepHref("invoices")}
+        // A services business has no Employees step: Continue here finishes setup (slice 3.0).
+        continueLabel={company.businessType === "services" ? "Finish setup" : undefined}
+      />
     </SetupFrame>
   );
 }
 
 export async function EmployeesStep({ batchId }: { batchId?: string }) {
   const company = await requireCompany();
+  // A services business has no Employees step (slice 3.0): back to where it is in the wizard.
+  if (!hasSetupStep("employees", company.businessType)) redirect(resumeHref(company));
   return (
     <SetupFrame
       current="employees"
@@ -209,8 +228,7 @@ function initials(name: string): string {
 
 export async function ReadyStep() {
   const [company, logoUrl] = await Promise.all([requireCompany(), getActiveCompanyLogoUrl()]);
-  if (company.setupCompletedAt === null)
-    redirect(setupStepHref(resumeSetupSlug(company.setupStep, false)));
+  if (company.setupCompletedAt === null) redirect(resumeHref(company));
 
   return (
     <SetupFrame current="ready" company={company} title={`${company.name} is set up`}>
@@ -242,9 +260,15 @@ export async function ReadyStep() {
           <Button asChild className="h-11 rounded-lg px-5">
             <Link href="/app">Go to the dashboard</Link>
           </Button>
-          <Button asChild variant="outline" className="h-11 rounded-lg px-4">
-            <Link href="/app/people">Add your people</Link>
-          </Button>
+          {company.modules.people ? (
+            <Button asChild variant="outline" className="h-11 rounded-lg px-4">
+              <Link href="/app/people">Add your people</Link>
+            </Button>
+          ) : (
+            <Button asChild variant="outline" className="h-11 rounded-lg px-4">
+              <Link href="/app/clients">Add your clients</Link>
+            </Button>
+          )}
           <Button asChild variant="outline" className="h-11 rounded-lg px-4">
             <Link href="/app/settings/company">Company settings</Link>
           </Button>

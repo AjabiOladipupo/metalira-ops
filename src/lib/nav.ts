@@ -1,3 +1,4 @@
+import { ALL_MODULES_ON, type ModuleId, type Modules } from "@/lib/modules";
 import { MANAGER_ROLES, type Role } from "@/lib/roles";
 
 /**
@@ -34,6 +35,11 @@ export type NavItem = {
   description: string;
   /** Empty-state sentence until the feature is built. */
   empty: string;
+  /**
+   * The module switch this page belongs to (slice 3.0). When the company has it off, the item
+   * leaves the sidebar and the page, and every page below it, shows "This part is switched off".
+   */
+  module?: ModuleId;
 };
 
 export type NavGroup = {
@@ -63,6 +69,7 @@ export const NAV: NavGroup[] = [
     items: [
       {
         label: "Roster",
+        module: "shifts",
         href: "/app/roster",
         roles: ["owner", "admin", "ops_manager"],
         icon: "roster",
@@ -71,6 +78,7 @@ export const NAV: NavGroup[] = [
       },
       {
         label: "Live attendance",
+        module: "shifts",
         href: "/app/attendance",
         roles: ["owner", "admin", "ops_manager", "line_manager"],
         icon: "attendance",
@@ -79,6 +87,7 @@ export const NAV: NavGroup[] = [
       },
       {
         label: "Timesheets",
+        module: "people",
         href: "/app/timesheets",
         roles: MANAGERS,
         icon: "timesheets",
@@ -87,6 +96,7 @@ export const NAV: NavGroup[] = [
       },
       {
         label: "People",
+        module: "people",
         href: "/app/people",
         roles: ["owner", "admin", "hr", "ops_manager"],
         icon: "people",
@@ -95,6 +105,7 @@ export const NAV: NavGroup[] = [
       },
       {
         label: "My team",
+        module: "people",
         href: "/app/team",
         roles: ["owner", "admin", "hr", "ops_manager", "line_manager"],
         icon: "team",
@@ -103,6 +114,7 @@ export const NAV: NavGroup[] = [
       },
       {
         label: "Leave",
+        module: "people",
         href: "/app/leave",
         roles: ["owner", "admin", "hr", "ops_manager", "line_manager"],
         icon: "leave",
@@ -116,6 +128,7 @@ export const NAV: NavGroup[] = [
     items: [
       {
         label: "Payroll run",
+        module: "payroll",
         href: "/app/payroll",
         roles: ["owner", "admin", "hr", "finance"],
         icon: "payroll",
@@ -204,12 +217,39 @@ export function activeNavHref(pathname: string): string | undefined {
     .sort((a, b) => b.length - a.length)[0];
 }
 
-/** The sidebar for `role`: items the role may open, with empty groups dropped. */
-export function navForRole(role: Role): NavGroup[] {
+/** True when the item belongs to no module, or to one the company has on. */
+function moduleOn(item: NavItem, modules: Modules): boolean {
+  return item.module === undefined || modules[item.module];
+}
+
+/**
+ * The sidebar for `role` in a company with `modules` on: items the role may open whose module
+ * is on, with empty groups dropped.
+ */
+export function navForRole(role: Role, modules: Modules = ALL_MODULES_ON): NavGroup[] {
   return NAV.map((group) => ({
     label: group.label,
-    items: group.items.filter((item) => item.roles.includes(role)),
+    items: group.items.filter((item) => item.roles.includes(role) && moduleOn(item, modules)),
   })).filter((group) => group.items.length > 0);
+}
+
+/**
+ * Home's description and empty-state sentence, so they never point at a part that is switched
+ * off (slice 3.0).
+ */
+export function homeCopy(modules: Modules): { description: string; empty: string } {
+  const home = findNavItem("/app");
+  if (modules.shifts) return { description: home.description, empty: home.empty };
+  if (modules.people) {
+    return {
+      description: "Approvals and money that need you today.",
+      empty: "Nothing needs you yet. Add a client and your people to get started.",
+    };
+  }
+  return {
+    description: "Clients, invoices and money that need you today.",
+    empty: "Nothing needs you yet. Add your first client to get started.",
+  };
 }
 
 /**
@@ -290,15 +330,53 @@ function extraPage(pathname: string) {
   )[0];
 }
 
-/**
- * True when `role` may open `pathname` (a nav item's page or a page below it, or an extra page).
- * Paths that sit under no nav item are refused, and Home covers only /app itself, so a new page
- * must be added to NAV or EXTRA_PAGES (with its roles) before anyone can reach it.
- */
-export function canAccessHref(role: Role, pathname: string): boolean {
+/** True when `role` may open `pathname` by role alone (see canAccessHref). */
+function roleMayOpen(role: Role, pathname: string): boolean {
   const extra = extraPage(pathname);
   if (extra) return extra.roles.includes(role);
   const href = activeNavHref(pathname);
   if (!href || (href === "/app" && pathname !== "/app")) return false;
   return findNavItem(href).roles.includes(role);
+}
+
+/**
+ * The module `pathname` belongs to: the module of the nav item whose route contains it
+ * (`/app/people/[id]/edit` and `/app/people/import` belong to People), or null.
+ */
+export function moduleForHref(pathname: string): ModuleId | null {
+  const href = activeNavHref(pathname);
+  if (!href) return null;
+  return findNavItem(href).module ?? null;
+}
+
+export type PageAccess = "allow" | "forbidden" | "switched_off";
+
+/**
+ * Whether `role` may open `pathname` in a company with `modules` on. The role comes first, so a
+ * role that could never open the page is refused (no-access) whatever the switches say; a page
+ * the role may open whose module is off is "switched_off".
+ */
+export function pageAccess(
+  role: Role,
+  pathname: string,
+  modules: Modules = ALL_MODULES_ON,
+): PageAccess {
+  if (!roleMayOpen(role, pathname)) return "forbidden";
+  const part = moduleForHref(pathname);
+  if (part && !modules[part]) return "switched_off";
+  return "allow";
+}
+
+/**
+ * True when `role` may open `pathname` (a nav item's page or a page below it, or an extra page)
+ * and, given `modules`, its module is on. Paths that sit under no nav item are refused, and Home
+ * covers only /app itself, so a new page must be added to NAV or EXTRA_PAGES (with its roles)
+ * before anyone can reach it.
+ */
+export function canAccessHref(
+  role: Role,
+  pathname: string,
+  modules: Modules = ALL_MODULES_ON,
+): boolean {
+  return pageAccess(role, pathname, modules) === "allow";
 }

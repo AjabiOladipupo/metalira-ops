@@ -20,6 +20,11 @@ export interface WorkerSession {
   firstName: string;
   lastName: string;
   staffId: string;
+  /**
+   * Whether the company has Shifts on (slice 3.0). When off, the worker app hides Clock, My
+   * shifts and "Your shift today".
+   */
+  shiftsEnabled: boolean;
 }
 
 export type WorkerSessionLookup =
@@ -52,7 +57,7 @@ export async function resolveWorkerSession(
   const memberships = await supabase
     .from("memberships")
     .select(
-      "organisation_id, worker_id, organisations ( name ), workers!memberships_worker_fkey ( first_name, last_name, staff_id )",
+      "organisation_id, worker_id, organisations ( name, shifts_enabled ), workers!memberships_worker_fkey ( first_name, last_name, staff_id )",
     )
     .eq("user_id", userId)
     .eq("role", "worker");
@@ -74,6 +79,8 @@ export async function resolveWorkerSession(
       firstName: row.workers.first_name,
       lastName: row.workers.last_name,
       staffId: row.workers.staff_id,
+      // Anything but an explicit false keeps clock-in on.
+      shiftsEnabled: row.organisations.shifts_enabled !== false,
     },
   };
 }

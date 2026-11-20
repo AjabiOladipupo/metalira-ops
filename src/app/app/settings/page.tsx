@@ -15,7 +15,7 @@ const SECTIONS = [
   {
     href: "/app/settings/company",
     title: "Company",
-    body: "Business details, logo, pay cycle, invoices and plan.",
+    body: "Business details, logo, pay cycle, invoices, modules and plan.",
   },
   {
     href: "/app/settings/bank-account",
