@@ -59,6 +59,14 @@ import { contractIdSchema } from "@/server/business/headcount-schemas";
 import { activateContractSpec, endContractSpec } from "@/server/business/activation";
 import { loadPosts, loadRequiredShiftsSummary } from "@/server/business/activation-data";
 import {
+  addPostSpec,
+  cancelRequirementChangeSpec,
+  changeRequirementSpec,
+  closePostSpec,
+  postIdSchema,
+} from "@/server/business/live-changes";
+import { loadPostDetail } from "@/server/business/live-changes-data";
+import {
   advanceSetupSpec,
   completeSetupSpec,
   saveBusinessSpec,
@@ -148,6 +156,12 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
+import {
+  previewAddPost,
+  previewCancelRequirementChange,
+  previewChangeRequirement,
+  previewClosePost,
+} from "./live-change-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -177,6 +191,8 @@ const FILES = "Takes a file from the person's device: uploads are made on the sc
 const OPEN_FILE = "Hands out a link to a stored file: the agent never opens or passes on files.";
 const GO_LIVE =
   "Makes a contract live or ends it, which starts or stops rosters and billing: kept to people for now (the owner may enable it later).";
+const LIVE_CHANGE =
+  "Changes a live contract's staffing over several dated rows, which rosters and billing follow: kept to people for now (the owner may enable it later).";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -1461,6 +1477,80 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadRequiredShiftsSummary(supabase, organisationId),
+    agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Changes to a live contract (business/live-changes-actions.ts, slice 2.8)
+  // -------------------------------------------------------------------------
+  {
+    name: "posts.change_requirement",
+    description:
+      "Changes a live post's people, days or hours from a date, closing the version in force the day before.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(changeRequirementSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "changeRequirementAction"),
+    preview: previewChangeRequirement,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.cancel_requirement_change",
+    description:
+      "Cancels a scheduled headcount change on a live post before it starts; the version before it runs on.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(cancelRequirementChangeSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "cancelRequirementChangeAction"),
+    preview: previewCancelRequirementChange,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.add",
+    description:
+      "Adds a post to a live contract from a date, with its days, hours and people (and its site when asked).",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addPostSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "addPostAction"),
+    preview: previewAddPost,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.close",
+    description:
+      "Closes a live post after its last day staffed, with a reason; later scheduled changes are removed.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(closePostSpec),
+    changes: "many",
+    action: at("business/live-changes-actions", "closePostAction"),
+    preview: previewClosePost,
+    agent: false,
+    agentNote: LIVE_CHANGE,
+  },
+  {
+    name: "posts.history",
+    description:
+      "Shows every requirement version of one post and the changes made to it (reasons left out).",
+    kind: "read",
+    audience: "manager",
+    roles: CONTRACT_READERS,
+    input: postIdSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { postId } = postIdSchema.parse(input);
+      const detail = await loadPostDetail(supabase, organisationId, postId);
+      // Closing reasons and notes stay with people: the agent gets what changed and when.
+      return detail && { ...detail, changes: detail.changes.map((c) => ({ ...c, reason: null })) };
+    },
     agent: true,
   },
 ];

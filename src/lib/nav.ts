@@ -248,6 +248,16 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // Slice 2.7: activating and ending a contract.
   { href: "/app/clients/[id]/contracts/[id]/activate", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/clients/[id]/contracts/[id]/end", roles: ["owner", "admin", "ops_manager"] },
+  // Slice 2.8: changes to a live contract. A post's history page follows Clients (finance reads).
+  { href: "/app/clients/[id]/contracts/[id]/posts/new", roles: ["owner", "admin", "ops_manager"] },
+  {
+    href: "/app/clients/[id]/contracts/[id]/posts/[id]/change",
+    roles: ["owner", "admin", "ops_manager"],
+  },
+  {
+    href: "/app/clients/[id]/contracts/[id]/posts/[id]/close",
+    roles: ["owner", "admin", "ops_manager"],
+  },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },

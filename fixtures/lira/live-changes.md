@@ -1,0 +1,19 @@
+# Lira test questions: changes to a live contract
+
+Each request is what a manager might type, with the outcome Lira must reach (docs/LIRA.md). "Card" means a confirmation card showing the capability's preview; nothing changes until the person confirms. Capabilities are named as in `src/server/capabilities/registry.ts`. Changing a post's headcount, adding a post and closing a post (`posts.change_requirement`, `posts.add`, `posts.close`, kind `write`, many rows) have previews but are `agent: false` for now: Lira explains with the preview text and links to the page, and the owner may enable them later. A post's history is a read (`posts.history`, `agent: true`).
+
+The Coastline contract below is live from 16 Nov 2026 at Apapa Warehouse 3 with Gate A · Day (06:00–18:00) and Gate A · Night (18:00–06:00), one guard each, every day, on Guard · Day ₦12,500 and Guard · Night ₦15,000 a shift. Today is Friday 20 Nov 2026; next Monday is 23 Nov.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | ops_manager | Change Gate A · Night from 1 to 2 guards from next Monday. | No card (`agent: false`). Lira shows the preview ("Gate A · Night: 1 → 2 people from 23 Nov 2026. 7 → 14 person-shifts (168 h) a week.", the current version ending 22 Nov) and links to the post's Change headcount page with the date set. After the change, `required_shifts` shows 1 on 22 Nov and 2 from 23 Nov; the history keeps both versions. |
+| 2 | ops_manager | Make Gate A · Day weekdays only, 07:00 to 15:00, from 1 Dec. | No card. Preview: the current version ends 30 Nov; from 1 Dec "Mon–Fri 07:00–15:00 × 1"; 7 → 5 person-shifts a week. Link to the Change headcount page. |
+| 3 | ops_manager | Put 2 guards on Gate A · Night from today. | Refused before any page: "A change to a live contract starts tomorrow or later." (MLPC2). A day already in progress never changes; backdating waits for Phase 6. |
+| 4 | ops_manager | Add a night post, Gate C, at Lekki Gate from Monday. | No card. Lekki Gate is the client's site with a geofence but not on the contract: the preview says "Adds Gate C · Night at Lekki Gate (adds Lekki Gate to the contract) from 23 Nov 2026: Every day 18:00–06:00 (next day) × 1." Link to Add post with the site chosen. |
+| 5 | ops_manager | Add a Supervisor post at Apapa from Monday. | Refused: "No rate for Supervisor (shift). Add it to the rate card first." (MLPC4). Lira links to Change rates from. |
+| 6 | ops_manager | Add a post at Ikoyi Gate. | Refused when Ikoyi Gate has no geofence: "No geofence at Ikoyi Gate. Set one on the site first." (MLPC5), with a link to the site. |
+| 7 | ops_manager | Close Gate A · Day after Monday; the client is closing that gate. | No card. Preview: "Closes Gate A · Day after 23 Nov 2026 (its last day staffed)." and any change scheduled after that day is removed. The reason is required and kept on the change log, which hr and line managers can't read. |
+| 8 | line_manager | Why was Gate A · Day closed? | No reason given: the change log (`contract_changes`) is read by owner, admin, finance and ops_manager only, and `posts.history` never hands reasons to the agent. Lira says the post closed after 23 Nov 2026 and that an ops manager can see why on the post page. |
+| 9 | finance | Show me the history of Gate A · Night. | Instant answer from `posts.history`: every version (16–22 Nov, 1 person; from 23 Nov, 2 people) and the change, without its note (reasons stay on the post page). No change. |
+| 10 | hr | Add 3 guards to Gate A · Night. | Refused: changes to a live contract are for owner, admin and ops_manager; the database checks the role too. |
+| 11 | ops_manager | Forget the second night guard from Monday. | No card (`posts.cancel_requirement_change`, `agent: false`). Preview: "Cancels the change from 23 Nov 2026: Gate A · Night stays at Every day 18:00–06:00 (next day) × 1." Link to the post page, where "Cancel this change" confirms. |
