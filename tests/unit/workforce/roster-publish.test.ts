@@ -224,18 +224,21 @@ describe("buildShiftNotice", () => {
 
 describe("formatNotifyTally", () => {
   it("says who was told in the app, by email, and what the daily limit held back", () => {
-    expect(formatNotifyTally({ inApp: 3, emailed: 2, capped: 1, noEmail: 0, failed: 0 })).toBe(
-      "3 workers told in the app, 2 by email, 1 email held back by the daily limit",
-    );
-    expect(formatNotifyTally({ inApp: 1, emailed: 0, capped: 0, noEmail: 1, failed: 0 })).toBe(
-      "1 worker told in the app, 0 by email",
-    );
-    expect(formatNotifyTally({ inApp: 0, emailed: 0, capped: 0, noEmail: 0, failed: 0 })).toBe(
-      "No one needed telling",
-    );
-    expect(formatNotifyTally({ inApp: 2, emailed: 0, capped: 0, noEmail: 0, failed: 1 })).toBe(
-      "2 workers told in the app, 0 by email, 1 message not sent",
-    );
+    expect(
+      formatNotifyTally({ inApp: 2, emailed: 1, capped: 0, noEmail: 0, emailFailed: 1, failed: 0 }),
+    ).toBe("2 workers told in the app, 1 by email, 1 email failed to send");
+    expect(
+      formatNotifyTally({ inApp: 3, emailed: 2, capped: 1, noEmail: 0, emailFailed: 0, failed: 0 }),
+    ).toBe("3 workers told in the app, 2 by email, 1 email held back by the daily limit");
+    expect(
+      formatNotifyTally({ inApp: 1, emailed: 0, capped: 0, noEmail: 1, emailFailed: 0, failed: 0 }),
+    ).toBe("1 worker told in the app, 0 by email");
+    expect(
+      formatNotifyTally({ inApp: 0, emailed: 0, capped: 0, noEmail: 0, emailFailed: 0, failed: 0 }),
+    ).toBe("No one needed telling");
+    expect(
+      formatNotifyTally({ inApp: 2, emailed: 0, capped: 0, noEmail: 0, emailFailed: 0, failed: 1 }),
+    ).toBe("2 workers told in the app, 0 by email, 1 worker not told yet");
   });
 });
 

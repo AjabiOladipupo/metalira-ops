@@ -218,3 +218,37 @@ export const publishRosterSpec: MutationSpec<
     return { ...toPublishResult(result), organisationId };
   },
 };
+
+/**
+ * "Send notices again" for the latest version of a site's week (slice 3.3): when a publish's
+ * notices died part-way, `roster_notice_targets` lists the workers that version affected who have
+ * no inbox item for it yet (owner, admin, ops_manager). The action tells only them, under the
+ * same caps; the database refuses a second item per worker per version. Audited as
+ * `roster.notices_resent`.
+ */
+export const resendPublishNoticesSpec: MutationSpec<
+  typeof publishRosterSchema,
+  PublishResult & { organisationId: string }
+> = {
+  schema: publishRosterSchema,
+  roles: ROSTER_EDITORS,
+  module: "shifts",
+  run: async ({ supabase, organisationId, data }) => {
+    const { data: result, error } = await supabase.rpc("roster_notice_targets", {
+      p_organisation_id: organisationId,
+      p_site_id: data.siteId,
+      p_week_start: data.weekStart,
+    });
+    if (error) fromRosterDbError(error);
+    return { ...toPublishResult(result), organisationId };
+  },
+  event: ({ result }) =>
+    result.publicationId
+      ? {
+          action: "roster.notices_resent",
+          entity: "roster_publications",
+          entityId: result.publicationId,
+          after: { version: result.version, workers: result.affected.length },
+        }
+      : null,
+};

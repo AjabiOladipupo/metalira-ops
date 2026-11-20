@@ -7,7 +7,7 @@ import {
   type PublishResult,
 } from "@/lib/roster-publish";
 
-import { notifyWorker } from "./notify";
+import { AlreadyNotifiedError, notifyWorker } from "./notify";
 
 /**
  * Tells each worker affected by a roster publish (slice 3.3): one inbox item per worker per
@@ -41,13 +41,20 @@ export async function notifyPublishedRoster(
         shifts: next.shifts,
       });
       try {
-        const sent = await notifyWorker(organisationId, next.workerId, message);
+        const sent = await notifyWorker(
+          organisationId,
+          next.workerId,
+          message,
+          result.publicationId ? { rosterPublicationId: result.publicationId } : {},
+        );
         tally.inApp += 1;
         if (sent.email === "sent") tally.emailed += 1;
         else if (sent.email === "skipped_cap") tally.capped += 1;
-        else if (sent.email === "failed") tally.failed += 1;
+        else if (sent.email === "failed") tally.emailFailed += 1;
         else tally.noEmail += 1;
       } catch (error) {
+        // Told already for this version (a resend raced another): nothing to count.
+        if (error instanceof AlreadyNotifiedError) continue;
         tally.failed += 1;
         console.error(
           "roster.notify_failed:",

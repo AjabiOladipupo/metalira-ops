@@ -244,11 +244,20 @@ export interface NotifyTally {
   capped: number;
   /** Workers with no email address (told in the app only). */
   noEmail: number;
-  /** Emails that failed to send, or inbox items that couldn't be added. */
+  /** Emails that failed to send (the inbox item is there). */
+  emailFailed: number;
+  /** Workers not told at all: their inbox item couldn't be added. "Send notices again" retries. */
   failed: number;
 }
 
-export const EMPTY_TALLY: NotifyTally = { inApp: 0, emailed: 0, capped: 0, noEmail: 0, failed: 0 };
+export const EMPTY_TALLY: NotifyTally = {
+  inApp: 0,
+  emailed: 0,
+  capped: 0,
+  noEmail: 0,
+  emailFailed: 0,
+  failed: 0,
+};
 
 /** "3 workers told in the app, 2 by email, 1 email held back by the daily limit". */
 export function formatNotifyTally(tally: NotifyTally): string {
@@ -258,7 +267,10 @@ export function formatNotifyTally(tally: NotifyTally): string {
   if (tally.capped > 0) {
     parts.push(`${plural(tally.capped, "email", "emails")} held back by the daily limit`);
   }
-  if (tally.failed > 0) parts.push(`${plural(tally.failed, "message", "messages")} not sent`);
+  if (tally.emailFailed > 0) {
+    parts.push(`${plural(tally.emailFailed, "email", "emails")} failed to send`);
+  }
+  if (tally.failed > 0) parts.push(`${plural(tally.failed, "worker", "workers")} not told yet`);
   return parts.join(", ");
 }
 

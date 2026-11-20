@@ -16,6 +16,11 @@
 --    their site-week and still assigned, with post and site names (workers can't read posts or
 --    sites). Nothing about anyone else.
 --
+-- 5. `roster_notice_targets(org, site, week_start)`: the workers the latest version affected who
+--    have no inbox item for it yet, for "Send notices again" when a publish's notices died
+--    part-way (a republish is refused while nothing changed). Inbox items made by a publish carry
+--    `roster_publication_id`, unique per worker, so a worker is never told twice for one version.
+--
 -- What a worker sees between publishes (decided here): only what was published. A new
 -- assignment shows on their phone after the next publish. Times are the published ones. A
 -- removal takes effect at once: an assignment that is no longer assigned drops off their list
@@ -28,6 +33,8 @@
 -- for the people on those shifts at the next publish.
 --
 -- Refusals (SQLSTATE):
+--   MLRP0 a publication changed, deleted or truncated (insert only)
+--   MLRP3 the week was never published (notices again)
 --   MLRP1 the week has fully passed
 --   MLRP2 nothing changed since the latest version (a publish, not the dry run)
 --   MLRS3 the site is archived (as in 3.2)
@@ -106,6 +113,73 @@ create policy roster_publications_select on public.roster_publications for selec
 
 revoke all on table public.roster_publications from anon, authenticated;
 grant select on table public.roster_publications to authenticated;
+-- The secret key may insert (the isolation registry seeds rows that way) but never change,
+-- delete or truncate. TRUNCATE skips row triggers, so a statement trigger refuses it as well.
+revoke update, delete, truncate on table public.roster_publications from service_role;
+
+create function private.roster_publications_no_truncate()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  raise exception 'A published roster never changes. Publish again instead.' using errcode = 'MLRP0';
+end;
+$$;
+
+revoke all on function private.roster_publications_no_truncate() from public, anon, authenticated;
+
+create trigger roster_publications_no_truncate
+  before truncate on public.roster_publications
+  for each statement execute function private.roster_publications_no_truncate();
+
+-- Inbox items a publish made point at it: one per worker per version.
+alter table public.inbox_items
+  add column roster_publication_id uuid,
+  add constraint inbox_items_roster_publication_fkey
+    foreign key (organisation_id, roster_publication_id)
+    references public.roster_publications (organisation_id, id);
+
+create unique index inbox_items_publication_worker_key
+  on public.inbox_items (roster_publication_id, worker_id)
+  where roster_publication_id is not null;
+
+-- The inbox guard (slice 3.1) again, with roster_publication_id among the fields that never
+-- change.
+create or replace function private.inbox_items_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'Inbox items are never deleted.' using errcode = 'MLIB1';
+  end if;
+  if (
+    new.id, new.organisation_id, new.worker_id, new.kind, new.title, new.body, new.link_path,
+    new.created_at, new.roster_publication_id
+  ) is distinct from (
+    old.id, old.organisation_id, old.worker_id, old.kind, old.title, old.body, old.link_path,
+    old.created_at, old.roster_publication_id
+  ) then
+    raise exception 'An inbox item never changes.' using errcode = 'MLIB1';
+  end if;
+  if old.read_at is not null then
+    new.read_at := old.read_at;
+  elsif new.read_at is not null then
+    new.read_at := now();
+  end if;
+  if old.emailed_at is not null and new.emailed_at is distinct from old.emailed_at then
+    raise exception 'An inbox item is emailed once.' using errcode = 'MLIB1';
+  end if;
+  if old.emailed_at is null and new.emailed_at is not null then
+    new.emailed_at := now();
+  end if;
+  return new;
+end;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- 2. The roster as it stands, and what changed since a snapshot
@@ -185,6 +259,87 @@ as $$
 $$;
 
 revoke all on function private.roster_snapshot_diff(jsonb, jsonb) from public, anon, authenticated;
+
+-- Each worker a change between two snapshots affects, once: [{worker_id, worker_name, kind,
+-- shifts: [{shift_date, starts_at, ends_at, post_name}]}]. Kind is added or removed when every
+-- change for them is that, else changed; shifts are theirs in the new snapshot. With
+-- p_unnotified_for, only workers with no inbox item for that publication. No role check: only
+-- the definers below call it.
+create function private.roster_affected_workers(
+  p_organisation_id uuid,
+  p_old jsonb,
+  p_new jsonb,
+  p_unnotified_for uuid default null
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with d as (
+    select * from private.roster_snapshot_diff(p_old, p_new)
+  ),
+  per_worker as (
+    select d.worker_id,
+      case
+        when bool_and(d.kind = 'added') then 'added'
+        when bool_and(d.kind = 'removed') then 'removed'
+        else 'changed'
+      end as kind
+    from d
+    group by d.worker_id
+  )
+  select coalesce(jsonb_agg(
+    jsonb_build_object(
+      'worker_id', pw.worker_id,
+      'worker_name', w.first_name || ' ' || w.last_name,
+      'kind', pw.kind,
+      'shifts', (
+        select coalesce(jsonb_agg(
+          jsonb_build_object(
+            'shift_date', e ->> 'd',
+            'starts_at', e ->> 'from',
+            'ends_at', e ->> 'to',
+            'post_name', p.name
+          )
+          order by e ->> 'from'
+        ), '[]'::jsonb)
+        from jsonb_array_elements(coalesce(p_new, '[]'::jsonb)) e
+        join public.posts p on p.id = (e ->> 'p')::uuid
+        where (e ->> 'w')::uuid = pw.worker_id
+      )
+    )
+    order by w.last_name, w.first_name, pw.worker_id
+  ), '[]'::jsonb)
+  from per_worker pw
+  join public.workers w on w.id = pw.worker_id and w.organisation_id = p_organisation_id
+  where p_unnotified_for is null
+    or not exists (
+      select 1 from public.inbox_items i
+      where i.roster_publication_id = p_unnotified_for and i.worker_id = pw.worker_id
+    )
+$$;
+
+revoke all on function private.roster_affected_workers(uuid, jsonb, jsonb, uuid)
+  from public, anon, authenticated;
+
+-- {added, removed, changed} counts of an affected-workers list. Pure.
+create function private.roster_affected_counts(p_affected jsonb)
+returns jsonb
+language sql
+immutable
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'added', count(*) filter (where e ->> 'kind' = 'added'),
+    'removed', count(*) filter (where e ->> 'kind' = 'removed'),
+    'changed', count(*) filter (where e ->> 'kind' = 'changed')
+  )
+  from jsonb_array_elements(coalesce(p_affected, '[]'::jsonb)) e
+$$;
+
+revoke all on function private.roster_affected_counts(jsonb) from public, anon, authenticated;
 
 -- The checks shared by publish and status: role, a Monday, a site of this organisation.
 create function private.roster_publish_check(
@@ -287,53 +442,12 @@ begin
   ) c on true
   where r.site_id = p_site_id;
 
-  with d as (
-    select * from private.roster_snapshot_diff(
-      case when v_prev.id is null then '[]'::jsonb else v_prev.snapshot end,
-      v_snapshot
-    )
-  ),
-  per_worker as (
-    select d.worker_id,
-      case
-        when bool_and(d.kind = 'added') then 'added'
-        when bool_and(d.kind = 'removed') then 'removed'
-        else 'changed'
-      end as kind
-    from d
-    group by d.worker_id
-  )
-  select
-    coalesce(jsonb_agg(
-      jsonb_build_object(
-        'worker_id', pw.worker_id,
-        'worker_name', w.first_name || ' ' || w.last_name,
-        'kind', pw.kind,
-        'shifts', (
-          select coalesce(jsonb_agg(
-            jsonb_build_object(
-              'shift_date', e ->> 'd',
-              'starts_at', e ->> 'from',
-              'ends_at', e ->> 'to',
-              'post_name', p.name
-            )
-            order by e ->> 'from'
-          ), '[]'::jsonb)
-          from jsonb_array_elements(v_snapshot) e
-          join public.posts p on p.id = (e ->> 'p')::uuid
-          where (e ->> 'w')::uuid = pw.worker_id
-        )
-      )
-      order by w.last_name, w.first_name, pw.worker_id
-    ), '[]'::jsonb),
-    jsonb_build_object(
-      'added', count(*) filter (where pw.kind = 'added'),
-      'removed', count(*) filter (where pw.kind = 'removed'),
-      'changed', count(*) filter (where pw.kind = 'changed')
-    )
-  into v_affected, v_counts
-  from per_worker pw
-  join public.workers w on w.id = pw.worker_id and w.organisation_id = p_organisation_id;
+  v_affected := private.roster_affected_workers(
+    p_organisation_id,
+    case when v_prev.id is null then '[]'::jsonb else v_prev.snapshot end,
+    v_snapshot
+  );
+  v_counts := private.roster_affected_counts(v_affected);
 
   select s.name, coalesce(o.timezone, 'Africa/Lagos') into v_site_name, v_zone
   from public.sites s
@@ -401,6 +515,93 @@ $$;
 
 revoke all on function public.publish_roster(uuid, uuid, date, boolean) from public, anon;
 grant execute on function public.publish_roster(uuid, uuid, date, boolean) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 3b. roster_notice_targets ("Send notices again")
+-- ---------------------------------------------------------------------------
+
+-- The latest version of a site's week, in publish_roster's shape, with `affected` limited to the
+-- workers it affected who have no inbox item for it yet. Owner, admin and ops_manager. Reads
+-- only: the server tells them (notifyWorker, the same caps) and audits the resend.
+create function private.roster_notice_targets(
+  p_organisation_id uuid,
+  p_site_id uuid,
+  p_week_start date
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_pub public.roster_publications%rowtype;
+  v_prev jsonb;
+  v_affected jsonb;
+  v_site_name text;
+  v_zone text;
+begin
+  perform private.roster_publish_check(p_organisation_id, p_site_id, p_week_start);
+  select * into v_pub
+  from public.roster_publications p
+  where p.organisation_id = p_organisation_id and p.site_id = p_site_id
+    and p.week_start = p_week_start
+  order by p.version desc
+  limit 1;
+  if v_pub.id is null then
+    raise exception 'This week hasn''t been published yet.' using errcode = 'MLRP3';
+  end if;
+  select p.snapshot into v_prev
+  from public.roster_publications p
+  where p.organisation_id = p_organisation_id and p.site_id = p_site_id
+    and p.week_start = p_week_start and p.version = v_pub.version - 1;
+
+  v_affected := private.roster_affected_workers(
+    p_organisation_id, coalesce(v_prev, '[]'::jsonb), v_pub.snapshot, v_pub.id
+  );
+  select s.name, coalesce(o.timezone, 'Africa/Lagos') into v_site_name, v_zone
+  from public.sites s
+  join public.organisations o on o.id = s.organisation_id
+  where s.id = p_site_id;
+
+  return jsonb_build_object(
+    'publication_id', v_pub.id,
+    'version', v_pub.version,
+    'previous_version', case when v_pub.version > 1 then v_pub.version - 1 end,
+    'published_at', v_pub.published_at,
+    'site_id', p_site_id,
+    'site_name', v_site_name,
+    'time_zone', v_zone,
+    'week_start', p_week_start,
+    'assigned', v_pub.assigned_count,
+    'open', v_pub.open_count,
+    'dry_run', false,
+    'nothing_changed', false,
+    'counts', private.roster_affected_counts(v_affected),
+    'affected', v_affected
+  );
+end;
+$$;
+
+revoke all on function private.roster_notice_targets(uuid, uuid, date) from public, anon;
+grant execute on function private.roster_notice_targets(uuid, uuid, date) to authenticated;
+
+create function public.roster_notice_targets(
+  p_organisation_id uuid,
+  p_site_id uuid,
+  p_week_start date
+)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select private.roster_notice_targets(p_organisation_id, p_site_id, p_week_start)
+$$;
+
+revoke all on function public.roster_notice_targets(uuid, uuid, date) from public, anon;
+grant execute on function public.roster_notice_targets(uuid, uuid, date) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. roster_publication_status
@@ -488,7 +689,7 @@ grant execute on function public.roster_publication_status(uuid, uuid, date) to 
 -- The signed-in worker's own shifts between two days (62 at most): assignments still assigned,
 -- on a shift that isn't cancelled, that are in the latest publication of their site-week, with
 -- the published times, the post's name and the site's name, address and landmark. A worker
--- whose record has ended gets nothing. Never anyone else's: rows come only from the caller's own
+-- whose record has ended, or whose company has Shifts switched off, gets nothing. Never anyone else's: rows come only from the caller's own
 -- worker records (private.my_worker_ids, trusted sessions only).
 create function private.my_published_shifts(p_from date, p_to date)
 returns table (
@@ -523,6 +724,7 @@ begin
   join public.shifts s on s.id = a.shift_id and s.organisation_id = a.organisation_id
   join public.posts p on p.id = s.post_id and p.organisation_id = a.organisation_id
   join public.sites si on si.id = a.site_id and si.organisation_id = a.organisation_id
+  join public.organisations o on o.id = a.organisation_id
   cross join lateral (
     select rp.snapshot
     from public.roster_publications rp
@@ -543,6 +745,8 @@ begin
     and a.shift_date between p_from and p_to
     and w.status = 'active'
     and s.status = 'open'
+    -- Nothing while the company has Shifts switched off (slice 3.0).
+    and o.shifts_enabled
   order by 4, a.id;
 end;
 $$;

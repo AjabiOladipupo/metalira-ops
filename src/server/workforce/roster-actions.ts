@@ -15,6 +15,7 @@ import {
   copyLastWeekSpec,
   publishRosterSpec,
   removeAssignmentSpec,
+  resendPublishNoticesSpec,
 } from "./roster";
 import { notifyPublishedRoster } from "./roster-notify";
 
@@ -133,5 +134,40 @@ export async function publishRosterAction(
     ok: true,
     status: 200,
     message: `Published version ${result.version} · ${formatNotifyTally(tally)}.`,
+    // The form offers "Send notices again" when someone wasn't told.
+    values: { notSent: String(tally.failed) },
+  };
+}
+
+/**
+ * "Send notices again" for the latest version: tells only the workers it affected who have no
+ * inbox item for it yet (a publish whose notices died part-way can't be republished while
+ * nothing changed).
+ */
+export async function resendPublishNoticesAction(
+  _prev: CompanyFormState,
+  formData: FormData,
+): Promise<CompanyFormState> {
+  const fields = formFields(formData);
+  let result;
+  try {
+    result = await mutate(resendPublishNoticesSpec, fields);
+  } catch (error) {
+    return refusal(error, fields);
+  }
+  if (result.affected.length === 0) {
+    return {
+      ok: true,
+      status: 200,
+      message: `Everyone version ${result.version} affected has been told.`,
+      values: { notSent: "0" },
+    };
+  }
+  const tally = await notifyPublishedRoster(result.organisationId, result);
+  return {
+    ok: true,
+    status: 200,
+    message: `Sent again for version ${result.version} · ${formatNotifyTally(tally)}.`,
+    values: { notSent: String(tally.failed) },
   };
 }

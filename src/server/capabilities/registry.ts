@@ -155,6 +155,7 @@ import {
   publishRosterSchema,
   publishRosterSpec,
   removeAssignmentSpec,
+  resendPublishNoticesSpec,
 } from "@/server/workforce/roster";
 import {
   loadMyPublishedShifts,
@@ -1858,6 +1859,19 @@ export const CAPABILITIES: readonly Capability[] = [
     preview: previewPublishWeek,
     agent: false,
     agentNote: PUBLISH_WEEK,
+  },
+  {
+    name: "roster.resend_notices",
+    description:
+      "Tells the workers the latest published version affected who have no message for it yet.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(resendPublishNoticesSpec),
+    changes: "many",
+    action: at("workforce/roster-actions", "resendPublishNoticesAction"),
+    agent: false,
+    agentNote:
+      "Sends messages and emails to workers after a publish whose notices failed: kept to people, from the publish result.",
   },
 ];
 

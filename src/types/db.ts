@@ -357,14 +357,14 @@ isOneToOne: false
                   ]
                 },"inbox_items": {
                   Row: {
-                    "body": string,"created_at": string,"emailed_at": string | null,"id": string,"kind": string,"link_path": string | null,"organisation_id": string,"read_at": string | null,"title": string,"worker_id": string
+                    "body": string,"created_at": string,"emailed_at": string | null,"id": string,"kind": string,"link_path": string | null,"organisation_id": string,"read_at": string | null,"roster_publication_id": string | null,"title": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "body": string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind": string,"link_path"?: string | null,"organisation_id": string,"read_at"?: string | null,"title": string,"worker_id": string
+                    "body": string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind": string,"link_path"?: string | null,"organisation_id": string,"read_at"?: string | null,"roster_publication_id"?: string | null,"title": string,"worker_id": string
                   }
                   Update: {
-                    "body"?: string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind"?: string,"link_path"?: string | null,"organisation_id"?: string,"read_at"?: string | null,"title"?: string,"worker_id"?: string
+                    "body"?: string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind"?: string,"link_path"?: string | null,"organisation_id"?: string,"read_at"?: string | null,"roster_publication_id"?: string | null,"title"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -373,6 +373,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "organisations"
       referencedColumns: ["id"]
+    },{
+      foreignKeyName: "inbox_items_roster_publication_fkey"
+      columns: ["organisation_id","roster_publication_id"]
+isOneToOne: false
+      referencedRelation: "roster_publications"
+      referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "inbox_items_worker_fkey"
       columns: ["organisation_id","worker_id"]
@@ -1244,6 +1250,9 @@ isOneToOne: false
 { Args: { "p_from": string,"p_organisation_id": string,"p_site_id": string,"p_to": string }; Returns: {
               "assigned_at": string,"assigned_by": string,"id": string,"removed_at": string,"removed_by": string,"removed_reason": string
             }[]
+                           },
+"roster_notice_targets":
+{ Args: { "p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
                            },
 "roster_publication_status":
 { Args: { "p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json

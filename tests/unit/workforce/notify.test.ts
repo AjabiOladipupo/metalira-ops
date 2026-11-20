@@ -5,6 +5,7 @@ const { state, sendEmail } = vi.hoisted(() => ({
     inserts: [] as unknown[],
     worker: {} as Record<string, unknown>,
     claim: true,
+    insertError: null as { code: string } | null,
     rpcArgs: [] as unknown[],
   },
   sendEmail: vi.fn(),
@@ -21,7 +22,9 @@ vi.mock("@/server/supabase/admin", () => ({
       };
       builder.single = async () =>
         table === "inbox_items"
-          ? { data: { id: "11111111-1111-4111-8111-111111111111" }, error: null }
+          ? state.insertError
+            ? { data: null, error: state.insertError }
+            : { data: { id: "11111111-1111-4111-8111-111111111111" }, error: null }
           : { data: { ...state.worker, organisations: { name: "Coastline Guards" } }, error: null };
       return builder;
     },
@@ -34,7 +37,7 @@ vi.mock("@/server/supabase/admin", () => ({
 
 vi.mock("@/server/email/send", () => ({ sendEmail }));
 
-import { notifyWorker } from "@/server/workforce/notify";
+import { AlreadyNotifiedError, notifyWorker } from "@/server/workforce/notify";
 
 const ORG = "22222222-2222-4222-8222-222222222222";
 const WORKER = "33333333-3333-4333-8333-333333333333";
@@ -48,6 +51,7 @@ beforeEach(() => {
   state.inserts = [];
   state.rpcArgs = [];
   state.claim = true;
+  state.insertError = null;
   state.worker = { first_name: "Musa", email: "musa@example.com", status: "active" };
   sendEmail.mockReset();
   sendEmail.mockResolvedValue({ status: "sent", id: "e1" });
@@ -102,6 +106,19 @@ describe("notifyWorker", () => {
     });
     const sent = sendEmail.mock.calls[0]![0] as { subject: string };
     expect(sent.subject).toBe("A new message from Coastline Guards");
+  });
+
+  it("ties a roster notice to its publication, once per worker", async () => {
+    const PUB = "44444444-4444-4444-8444-444444444444";
+    await notifyWorker(ORG, WORKER, message, { rosterPublicationId: PUB });
+    expect(state.inserts).toEqual([expect.objectContaining({ roster_publication_id: PUB })]);
+    state.insertError = { code: "23505" };
+    await expect(
+      notifyWorker(ORG, WORKER, message, { rosterPublicationId: PUB }),
+    ).rejects.toBeInstanceOf(AlreadyNotifiedError);
+    await expect(
+      notifyWorker(ORG, WORKER, message, { rosterPublicationId: "not-an-id" }),
+    ).rejects.toThrow();
   });
 
   it("reports a failed send without throwing", async () => {

@@ -462,6 +462,27 @@ describe("publish_roster", () => {
     await expect(
       db.query("delete from public.roster_publications where id = $1", [data!.id]),
     ).rejects.toThrow(/never changes/);
+    // TRUNCATE skips row triggers: a statement trigger refuses it (CASCADE gets past the
+    // inbox_items foreign key and still stops there).
+    await expect(db.query("truncate public.roster_publications cascade")).rejects.toThrow(
+      /never changes/,
+    );
+    await expect(db.query("truncate public.roster_publications")).rejects.toThrow();
+    // The secret key may insert (registry seeds) but not change, delete or truncate.
+    const patched = await admin
+      .from("roster_publications")
+      .update({ open_count: 0 })
+      .eq("id", data!.id);
+    expect(patched.error?.code).toBe("42501");
+    const deleted = await admin.from("roster_publications").delete().eq("id", data!.id);
+    expect(deleted.error?.code).toBe("42501");
+    const { rows } = await db.query<{ update: boolean; delete: boolean; truncate: boolean }>(
+      `select has_table_privilege('service_role', 'public.roster_publications', 'UPDATE') as update,
+              has_table_privilege('service_role', 'public.roster_publications', 'DELETE') as delete,
+              has_table_privilege('service_role', 'public.roster_publications', 'TRUNCATE') as truncate`,
+    );
+    expect(rows[0]).toEqual({ update: false, delete: false, truncate: false });
+    expect(await publications()).toBe(2);
     const write = await ops.client
       .from("roster_publications")
       .insert({ organisation_id: owner.orgId, site_id: apapa, week_start: monday, version: 9 });
@@ -568,6 +589,25 @@ describe("who reads shifts (3.2 verification review)", () => {
     expect((await counts(own.client)).assignments).toBeGreaterThan(0);
   });
 
+  it("an untrusted ops manager can't publish, preview or read the status", async () => {
+    const manager = await untrusted("rp-untrusted-publisher");
+    await addMember(owner.orgId, manager, "ops_manager");
+    expect((await publish({ by: manager.client })).error?.code).toBe("42501");
+    expect((await publish({ by: manager.client, dryRun: true })).error?.code).toBe("42501");
+    const status = await manager.client.rpc("roster_publication_status", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: monday,
+    });
+    expect(status.error?.code).toBe("42501");
+    const targets = await manager.client.rpc("roster_notice_targets", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: monday,
+    });
+    expect(targets.error?.code).toBe("42501");
+  });
+
   it("a finance member sees none", async () => {
     expect(await counts(finance.client)).toEqual({ shifts: 0, assignments: 0 });
   });
@@ -583,5 +623,101 @@ describe("who reads shifts (3.2 verification review)", () => {
     expect(shifts.data!.map((s) => s.site_id)).not.toContain(otherSite);
     const rows = await lm.client.from("shift_assignments").select("organisation_id");
     expect(rows.data!.every((r) => r.organisation_id === owner.orgId)).toBe(true);
+  });
+});
+
+describe("roster_notice_targets (send notices again)", () => {
+  function targets(by: Client = ops.client, week = monday) {
+    return by.rpc("roster_notice_targets", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: week,
+    });
+  }
+
+  it("lists the latest version's affected workers with no message for it, and skips those told", async () => {
+    const first = toPublishResult((await targets()).data);
+    const { data: latest } = await admin
+      .from("roster_publications")
+      .select("id, version")
+      .eq("site_id", apapa)
+      .eq("week_start", monday)
+      .order("version", { ascending: false })
+      .limit(1)
+      .single();
+    expect(first.publicationId).toBe(latest!.id);
+    expect(first.version).toBe(latest!.version);
+    expect(first.affected.length).toBeGreaterThan(0);
+
+    // Tell the first one; they drop off. A second message for the same version is refused.
+    const told = first.affected[0]!.workerId;
+    await db.query(
+      "insert into public.inbox_items (organisation_id, worker_id, kind, title, body, roster_publication_id) values ($1, $2, 'shift_published', 'Your shifts', 'Ready', $3)",
+      [owner.orgId, told, latest!.id],
+    );
+    const second = toPublishResult((await targets()).data);
+    expect(second.affected.map((a) => a.workerId)).not.toContain(told);
+    expect(second.affected).toHaveLength(first.affected.length - 1);
+    await expect(
+      db.query(
+        "insert into public.inbox_items (organisation_id, worker_id, kind, title, body, roster_publication_id) values ($1, $2, 'shift_published', 'Again', 'Again', $3)",
+        [owner.orgId, told, latest!.id],
+      ),
+    ).rejects.toThrow(/inbox_items_publication_worker_key/);
+  });
+
+  it("refuses a week never published, the wrong roles and another company", async () => {
+    expect((await targets(ops.client, addDays(monday, 7))).error?.code).toBe("MLRP3");
+    for (const by of [hr.client, finance.client, other.client]) {
+      expect((await targets(by)).error?.code).toBe("42501");
+    }
+    expect((await targets(anonClient())).error).not.toBeNull();
+  });
+});
+
+describe("my_published_shifts when the worker or the company stops", () => {
+  it("gives a worker ended through end_employment nothing, while the shift is still published", async () => {
+    const kemi = await addWorker(owner.orgId, "Kemi Ade", apapa);
+    const assignment = await assigned(post.day, day(5), kemi);
+    expect((await publish()).error).toBeNull();
+    const phone = await workerSession(kemi);
+    const before = await phone.rpc("my_published_shifts", { p_from: monday, p_to: day(6) });
+    expect(before.data!.map((r) => r.assignment_id)).toEqual([assignment]);
+
+    const ended = await hr.client.rpc("end_employment", {
+      p_organisation_id: owner.orgId,
+      p_worker_id: kemi,
+      p_end_date: today,
+    });
+    expect(ended.error).toBeNull();
+    const { data: row } = await admin
+      .from("shift_assignments")
+      .select("status")
+      .eq("id", assignment)
+      .single();
+    expect(row!.status).toBe("assigned");
+    const after = await phone.rpc("my_published_shifts", { p_from: monday, p_to: day(6) });
+    expect(after.data).toEqual([]);
+  });
+
+  it("gives nothing while the company has Shifts switched off", async () => {
+    const tobi = await addWorker(owner.orgId, "Tobi Lawal", apapa);
+    await assigned(post.night, day(6), tobi);
+    expect((await publish()).error).toBeNull();
+    const sule = await workerSession(tobi);
+    const on = await sule.rpc("my_published_shifts", { p_from: monday, p_to: day(6) });
+    expect(on.data!.length).toBeGreaterThan(0);
+    await db.query("update public.organisations set shifts_enabled = false where id = $1", [
+      owner.orgId,
+    ]);
+    try {
+      const off = await sule.rpc("my_published_shifts", { p_from: monday, p_to: day(6) });
+      expect(off.error).toBeNull();
+      expect(off.data).toEqual([]);
+    } finally {
+      await db.query("update public.organisations set shifts_enabled = true where id = $1", [
+        owner.orgId,
+      ]);
+    }
   });
 });
