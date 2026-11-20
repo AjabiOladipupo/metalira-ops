@@ -362,9 +362,11 @@ describe("turning Shifts off while people are rostered (MLMO3, after slice 3.2)"
       await db.query("set local session_replication_role = replica");
       const { rows } = await db.query<{ id: string }>(
         `insert into public.shift_assignments
-           (organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status)
+           (organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status,
+            removed_at)
          select $1, gen_random_uuid(), gen_random_uuid(), d, gen_random_uuid(),
-                d + time '06:00', d + time '18:00', $3
+                d + time '06:00', d + time '18:00', $3,
+                case when $3 = 'removed' then now() end
          from (select private.org_today($1) + $2::int as d) t
          returning id`,
         [a.orgId, offsetDays, status],
