@@ -321,20 +321,50 @@ function DetailsTab({ contract, termsLabel }: { contract: ContractDetail; termsL
 }
 
 /** The live contract's posts with the requirement in force (slice 2.7). */
-function PostsTab({ contract, posts }: { contract: ContractDetail; posts: PostRow[] }) {
+function PostsTab({
+  contract,
+  posts,
+  today,
+  canEdit,
+}: {
+  contract: ContractDetail;
+  posts: PostRow[];
+  today: string;
+  canEdit: boolean;
+}) {
+  const base = `/app/clients/${contract.clientId}/contracts/${contract.id}`;
+  // Slice 2.8: a live contract whose last day hasn't passed takes changes.
+  const changeable =
+    canEdit &&
+    contract.status === "active" &&
+    (contract.endDate === null || contract.endDate >= today);
+  const addPost = changeable ? (
+    <Button asChild className="h-11 px-4">
+      <Link href={`${base}/posts/new`}>Add post</Link>
+    </Button>
+  ) : null;
   if (posts.length === 0) {
-    return <EmptyState message="No posts. Activation creates one post per headcount row." />;
+    return (
+      <EmptyState
+        message="No posts. Activation creates one post per headcount row."
+        action={addPost}
+      />
+    );
   }
   const open = posts.filter((p) => p.status === "open").length;
   return (
     <div className="flex flex-col gap-4">
-      <p className="m-0 text-sm text-fg-muted" data-testid="posts-summary">
-        {open} open {open === 1 ? "post" : "posts"}
-        {contract.goLiveDate ? ` · live from ${formatDate(contract.goLiveDate)}` : ""}
-        {contract.endReason && contract.endDate
-          ? ` · ends ${formatDate(contract.endDate)} (${contract.endReason})`
-          : ""}
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <p className="m-0 text-sm text-fg-muted" data-testid="posts-summary">
+          {open} open {open === 1 ? "post" : "posts"}
+          {contract.goLiveDate ? ` · live from ${formatDate(contract.goLiveDate)}` : ""}
+          {contract.endReason && contract.endDate
+            ? ` · ends ${formatDate(contract.endDate)} (${contract.endReason})`
+            : ""}
+          {changeable ? " · open a post to change its headcount from a date or close it" : ""}
+        </p>
+        {addPost}
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm" data-testid="posts-table">
           <caption className="sr-only">Posts</caption>
@@ -369,7 +399,12 @@ function PostsTab({ contract, posts }: { contract: ContractDetail; posts: PostRo
                 aria-label={`${post.name} at ${post.siteName}`}
               >
                 <td className="py-2 pr-3">
-                  <span className="font-medium">{post.name}</span>
+                  <Link
+                    href={`${base}/posts/${post.id}`}
+                    className="font-medium underline-offset-4 hover:underline"
+                  >
+                    {post.name}
+                  </Link>
                   {post.status === "closed" && post.closedOn ? (
                     <span className="block text-xs text-fg-muted">
                       Closes after {formatDate(post.closedOn)}
@@ -593,7 +628,14 @@ async function ContractPage({
           canEdit={ctx.canEditContracts}
         />
       ) : null}
-      {tab === "posts" ? <PostsTab contract={contract} posts={posts ?? []} /> : null}
+      {tab === "posts" ? (
+        <PostsTab
+          contract={contract}
+          posts={posts ?? []}
+          today={today}
+          canEdit={ctx.canEditContracts}
+        />
+      ) : null}
       {tab === "documents" ? (
         <DocumentsTab contract={contract} documents={documents} canEdit={ctx.canEditContracts} />
       ) : null}
