@@ -22,7 +22,6 @@ import {
   STANDARD_BAND,
   findRateLine,
   formatRate,
-  formatRateKey,
   normaliseKeyPart,
   rateCardInForce,
   rateKeyId,
