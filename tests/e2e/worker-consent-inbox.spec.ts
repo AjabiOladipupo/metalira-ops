@@ -67,7 +67,10 @@ test("a worker agrees to location, withdraws it from Me, and reads an inbox mess
   await expect(w).toHaveURL(/\/m$/, { timeout: 15_000 });
 
   // No messages yet: no dot.
-  await expect(w.getByTestId("inbox-link")).toHaveAttribute("data-unread", "0");
+  await expect(w.getByRole("link", { name: "Inbox", exact: true })).toHaveAttribute(
+    "data-unread",
+    "0",
+  );
 
   // Me -> Location and selfie.
   await w.getByRole("link", { name: "My profile" }).click();
@@ -134,7 +137,10 @@ test("a worker agrees to location, withdraws it from Me, and reads an inbox mess
   await message.getByRole("button", { name: "Mark as read" }).click();
   await expect(message).toHaveAttribute("data-unread", "no", { timeout: 15_000 });
   await w.goto("/m");
-  await expect(w.getByTestId("inbox-link")).toHaveAttribute("data-unread", "0");
+  await expect(w.getByRole("link", { name: "Inbox", exact: true })).toHaveAttribute(
+    "data-unread",
+    "0",
+  );
   const read = await admin.from("inbox_items").select("read_at").eq("id", item.data!.id).single();
   expect(read.data!.read_at).not.toBeNull();
 
