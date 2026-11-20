@@ -18,11 +18,14 @@ export function PublishWeekForm({
   weekStart,
   version,
   back,
+  nothingToPublish = false,
 }: {
   siteId: string;
   weekStart: string;
   version: number;
   back: string;
+  /** The latest version is up to date: only the way back. */
+  nothingToPublish?: boolean;
 }) {
   const [state, action] = useActionState<CompanyFormState, FormData>(publishRosterAction, null);
   if (state?.ok) {
@@ -40,6 +43,13 @@ export function PublishWeekForm({
           <Link href={back}>Back to the roster</Link>
         </Button>
       </div>
+    );
+  }
+  if (nothingToPublish) {
+    return (
+      <Button asChild variant="outline" className="self-start">
+        <Link href={back}>Back to the roster</Link>
+      </Button>
     );
   }
   return (

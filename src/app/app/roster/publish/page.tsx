@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
-import { Button } from "@/components/ui/button";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
 import { formatDate, todayIn } from "@/lib/dates";
 import { parseWeekParam, weekEnd } from "@/lib/roster";
@@ -118,18 +116,15 @@ async function PublishPage({
         when they have an address, up to the daily email limit. On a republish only the people whose
         shifts changed are told.
       </p>
-      {result.nothingChanged ? (
-        <Button asChild variant="outline" className="self-start">
-          <Link href={back}>Back to the roster</Link>
-        </Button>
-      ) : (
-        <PublishWeekForm
-          siteId={site.id}
-          weekStart={weekStart}
-          version={result.version}
-          back={back}
-        />
-      )}
+      {/* Always mounted: after publishing, the page re-renders with nothing left to publish and
+          the form keeps showing who was told. */}
+      <PublishWeekForm
+        siteId={site.id}
+        weekStart={weekStart}
+        version={result.version}
+        back={back}
+        nothingToPublish={result.nothingChanged}
+      />
     </div>
   );
 }
