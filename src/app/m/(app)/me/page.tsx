@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cache, Suspense } from "react";
@@ -229,6 +230,17 @@ async function ProfilePanel() {
         <Rows key={section.id} section={section} />
       ))}
       <Requests bankChanges={me.bankChanges} requests={me.requests} />
+      <Link
+        href="/m/me/consent"
+        data-testid="me-consent-link"
+        className="flex items-center gap-3 rounded-xl border border-line px-4 py-3 text-foreground no-underline hover:bg-surface hover:text-foreground"
+      >
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-[15px] font-semibold">{workerMessages.consent.meLink}</span>
+          <span className="text-sm text-fg-muted">{workerMessages.consent.meLinkHint}</span>
+        </span>
+        <ChevronRight strokeWidth={1.75} className="size-4 shrink-0 text-fg-muted" aria-hidden />
+      </Link>
       <Button asChild variant="outline" className="h-[52px] rounded-xl text-base">
         <Link href="/m/me/change">{copy.requestChange}</Link>
       </Button>
@@ -252,7 +264,7 @@ export default function MePage() {
   return (
     <main className="flex flex-1 flex-col">
       <div className="px-4 pt-3 pb-1">
-        <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }}>
+        <WorkerTopBar back={{ href: "/m", label: workerMessages.back.home }} inbox>
           <h1 className="m-0 font-display text-xl font-bold">{copy.title}</h1>
         </WorkerTopBar>
       </div>

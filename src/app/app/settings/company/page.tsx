@@ -5,9 +5,11 @@ import { PageHeader } from "@/components/page-header";
 import { planName } from "@/lib/company";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { loadCollectionRails } from "@/server/billing/collection-rails";
+import { loadAttendanceSettings } from "@/server/identity/attendance-settings";
 import { getActiveCompany, getActiveCompanyLogoUrl } from "@/server/identity/company-data";
 import { getPageSession } from "@/server/identity/session";
 
+import { AttendanceForm } from "../../_company/attendance-form";
 import { BusinessForm } from "../../_company/business-form";
 import { InvoicesForm } from "../../_company/invoices-form";
 import { LogoForm } from "../../_company/logo-form";
@@ -48,11 +50,10 @@ async function CompanySettings() {
     getPageSession(),
   ]);
   if (!company || !session?.active) redirect("/no-access");
-  const rails = await loadCollectionRails(
-    await createServerSupabase(),
-    company.id,
-    session.active.role,
-  );
+  const [rails, attendance] = await Promise.all([
+    loadCollectionRails(await createServerSupabase(), company.id, session.active.role),
+    loadAttendanceSettings(company.id),
+  ]);
 
   return (
     <>
@@ -94,6 +95,16 @@ async function CompanySettings() {
       >
         <InvoicesForm mode="settings" company={company} rails={rails} />
       </Section>
+
+      {attendance ? (
+        <Section
+          id="attendance"
+          title="Attendance"
+          description="When a clock-in counts as late, and when a missing one counts as a no-show."
+        >
+          <AttendanceForm settings={attendance} />
+        </Section>
+      ) : null}
 
       <Section id="plan" title="Plan">
         <PlanForm mode="settings" plan={company.plan} expectedWorkers={company.expectedWorkers} />
