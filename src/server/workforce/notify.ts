@@ -37,12 +37,29 @@ export interface NotifyResult {
 
 const idsSchema = z.object({ organisationId: z.uuid(), workerId: z.uuid() });
 
+/** The worker already has the inbox item for this roster publication (slice 3.3). */
+export class AlreadyNotifiedError extends Error {
+  override name = "AlreadyNotifiedError";
+}
+
+export interface NotifyOptions {
+  /**
+   * The roster publication this notice is for (slice 3.3). The database keeps one item per
+   * worker per publication, so a second notice for the same version throws AlreadyNotifiedError.
+   */
+  rosterPublicationId?: string;
+}
+
 export async function notifyWorker(
   organisationId: string,
   workerId: string,
   message: InboxMessage,
+  options: NotifyOptions = {},
 ): Promise<NotifyResult> {
   const ids = idsSchema.parse({ organisationId, workerId });
+  const publicationId = options.rosterPublicationId
+    ? z.uuid().parse(options.rosterPublicationId)
+    : null;
   const data = inboxMessageSchema.parse(message);
   const admin = createAdminSupabase({ channel: "system" });
 
@@ -55,9 +72,13 @@ export async function notifyWorker(
       title: data.title,
       body: data.body,
       link_path: data.link ?? null,
+      ...(publicationId ? { roster_publication_id: publicationId } : {}),
     })
     .select("id")
     .single();
+  if (inserted.error?.code === "23505" && publicationId) {
+    throw new AlreadyNotifiedError("This worker was already told about this roster version");
+  }
   if (inserted.error) {
     throw new Error(`Could not add the inbox item (${inserted.error.code})`);
   }

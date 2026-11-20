@@ -4,7 +4,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { Illustration } from "@/components/illustration";
 import { LogoMark } from "@/components/logo";
 import { ThemeButton } from "@/components/theme/theme-button";
 import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
@@ -16,6 +15,7 @@ import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 import { InboxLink } from "../_components/inbox-link";
 import { InstallCard } from "../_components/offline/install-card";
 import { WorkerSignOutForm } from "../_components/offline/sign-out-form";
+import { ShiftTodayCard } from "../_components/shift-today-card";
 
 export const metadata: Metadata = { title: "Home" };
 
@@ -89,19 +89,11 @@ async function HomeBody() {
   return (
     <>
       {shifts ? (
-        <section
-          aria-labelledby="shift-today"
-          className="flex items-center gap-3 rounded-xl border border-line px-4 py-3.5"
+        <Suspense
+          fallback={<span aria-hidden className="block h-[118px] rounded-xl border border-line" />}
         >
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <h2 id="shift-today" className="m-0 type-label text-fg-muted">
-              {copy.shiftLabel}
-            </h2>
-            <p className="m-0 font-display text-[25px] leading-tight font-bold">{copy.noShift}</p>
-            <p className="m-0 text-sm text-fg-muted">{copy.noShiftHint}</p>
-          </div>
-          <Illustration name="clock-in" size="worker" decorative />
-        </section>
+          <ShiftTodayCard />
+        </Suspense>
       ) : null}
 
       <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
@@ -137,8 +129,8 @@ function HomeBodySkeleton() {
 }
 
 /**
- * Worker home, from the WkHome board (slice 1.10): greeting, today's shift ("No shift today"
- * until rosters exist), shortcut tiles, and the location line. The board's language picker is
+ * Worker home, from the WkHome board (slice 1.10): greeting, today's published shift (slice 3.3),
+ * shortcut tiles, and the location line. The board's language picker is
  * hidden: English only for now (owner decision 16).
  */
 export default function WorkerHomePage() {
