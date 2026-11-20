@@ -1,3 +1,5 @@
+import type { SendResult } from "@/lib/offline/types";
+
 /**
  * The fixed codes a punch send can end with (slice 3.5). The server maps every failure to one of
  * these; the phone's queue stores only the code (never a server message, a name or a place) and
@@ -85,35 +87,39 @@ export type UploadSelfieResult =
   | { ok: true }
   | { ok: false; code: "photo_invalid" | "photo_refused" | PunchErrorCode };
 
+/**
+ * The queue's fixed code for a server code (src/lib/offline/types.ts QUEUE_ERROR_CODES). The
+ * queue keeps only these: never a server message or a payload value.
+ */
+export function queueResultFor(code: PunchErrorCode): SendResult {
+  switch (code) {
+    case "wrong_session":
+    case "signed_out":
+      // Not this session's punch (or no session): it stays queued for its owner.
+      return { ok: false, wrongSession: true };
+    case "rate_limited":
+      return { ok: false, retryable: true, error: "rate_limited" };
+    case "failed":
+    case "photo_failed":
+      return { ok: false, retryable: true, error: "server_error" };
+    case "invalid":
+      return { ok: false, retryable: false, error: "invalid" };
+    default:
+      return { ok: false, retryable: false, error: "rejected" };
+  }
+}
+
 /** The queue's verdict for one send, from the two answers. */
 export function sendOutcome(
   record: RecordPunchResult,
   upload: UploadSelfieResult | null,
-): { ok: true } | { ok: false; retryable: boolean; error: PunchErrorCode | "photo_failed" } {
-  if (!record.ok) {
-    return { ok: false, retryable: isRetryableCode(record.code), error: record.code };
-  }
+): SendResult {
+  if (!record.ok) return queueResultFor(record.code);
   if (upload === null || upload.ok) return { ok: true };
   // The punch is recorded. A photo the server will never take (bad bytes, or the punch no
   // longer wants one) is dropped rather than blocking the queue; anything else is retried, and
   // the resend finds the punch already recorded.
   if (upload.code === "photo_invalid" || upload.code === "photo_refused") return { ok: true };
-  if (isPunchErrorCode(upload.code) && !isRetryableCode(upload.code)) return { ok: true };
-  return { ok: false, retryable: true, error: "photo_failed" };
+  if (!isRetryableCode(upload.code)) return { ok: true };
+  return queueResultFor(upload.code);
 }
-
-/** Plain English for a punch the server refused for good, for the worker. */
-export const PUNCH_CODE_MESSAGES: Record<PunchErrorCode, string> = {
-  wrong_session: "This punch was saved by someone else on this phone. It waits for them.",
-  signed_out: "Sign in again to send this punch.",
-  rate_limited: "Too many punches in the last hour. It will send later.",
-  photo_failed: "The selfie didn't send. It will try again.",
-  failed: "Not sent yet. It will try again.",
-  not_worker: "Only a worker can clock in. Ask your supervisor.",
-  left: "You have left this company, so this punch wasn't recorded.",
-  shifts_off: "Clock-in is switched off for your company. Ask your supervisor.",
-  no_consent: "Agree to share your location first, or ask your supervisor to clock you in.",
-  conflict: "This punch clashed with another. Ask your supervisor to check it.",
-  invalid: "This punch couldn't be recorded. Ask your supervisor to clock you in.",
-  bad_site: "You aren't working at that site. Ask your supervisor to clock you in.",
-};

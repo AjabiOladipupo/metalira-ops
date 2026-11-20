@@ -22,7 +22,6 @@ import {
   type PunchPayload,
   type SitePreview,
 } from "@/lib/punches/clock";
-import { PUNCH_CODE_MESSAGES, isPunchErrorCode } from "@/lib/punches/codes";
 import { timeIn } from "@/lib/roster";
 import { cn } from "@/lib/utils";
 
@@ -123,33 +122,32 @@ function InsideMap({ preview, site }: { preview: SitePreview; site: ClockSite })
   );
 }
 
-/** Watches one queued punch: queued, sending, sent or refused. */
-function useItemStatus(id: string | null): { status: QueueStatus | null; error: string | null } {
+/**
+ * Watches one queued punch: queued, sending, refused, or gone (the queue deletes a punch once the
+ * server has it, so gone means sent). `loading` until the phone's queue answers.
+ */
+function useItemStatus(id: string | null): QueueStatus | "gone" | "loading" {
   const queue = useActiveQueue();
-  const [state, setState] = useState<{ status: QueueStatus | null; error: string | null }>({
-    status: null,
-    error: null,
-  });
+  const [status, setStatus] = useState<QueueStatus | "gone" | "loading">("loading");
   useEffect(() => {
     if (!queue || !id) return;
     const subscription = liveQuery(() => queue.db.punchQueue.get(id)).subscribe({
-      next: (item) => setState({ status: item?.status ?? null, error: item?.last_error ?? null }),
-      error: () => setState({ status: null, error: null }),
+      next: (item) => setStatus(item?.status ?? "gone"),
+      error: () => setStatus("loading"),
     });
     return () => subscription.unsubscribe();
   }, [queue, id]);
-  return state;
+  return status;
 }
 
 function DoneScreen({ stage }: { stage: Extract<Stage, { name: "done" }> }) {
   const online = useOnline();
-  const { status, error } = useItemStatus(stage.id);
+  const status = useItemStatus(stage.id);
   const time = timeIn(new Date(stage.at).toISOString(), LAGOS);
   let line: string;
-  if (status === "sent") line = copy.sent;
-  else if (status === "failed_permanent") {
-    line = isPunchErrorCode(error) ? PUNCH_CODE_MESSAGES[error] : copy.failed;
-  } else if (!online || status === null) line = copy.savedOffline;
+  if (status === "gone") line = copy.sent;
+  else if (status === "failed_permanent") line = copy.refused;
+  else if (!online || status === "loading") line = copy.savedOffline;
   else line = copy.sending;
   return (
     <div className="flex flex-1 flex-col justify-center gap-4" data-testid="clock-done">
@@ -162,7 +160,7 @@ function DoneScreen({ stage }: { stage: Extract<Stage, { name: "done" }> }) {
       <p
         role="status"
         data-testid="clock-send-status"
-        data-status={status ?? "unknown"}
+        data-status={status}
         className="m-0 flex items-center gap-2 text-base"
       >
         <ArrowDownToLine strokeWidth={1.75} className="size-5 shrink-0" aria-hidden />

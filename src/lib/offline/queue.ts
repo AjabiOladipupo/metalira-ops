@@ -61,6 +61,8 @@ export async function enqueue<K extends QueueKind>(
   const elapsed = captureDeviceElapsed(clock);
   const item: QueueItem<K> = {
     client_event_id: input.clientEventId ?? newClientEventId(),
+    organisation_id: db.owner.organisationId,
+    worker_id: db.owner.workerId,
     kind: input.kind,
     payload: input.payload,
     device_time: elapsed.wall_ms,
@@ -71,7 +73,7 @@ export async function enqueue<K extends QueueKind>(
     status: "queued",
     created_at: elapsed.wall_ms,
     next_attempt_at: elapsed.wall_ms,
-    sent_at: null,
+    failed_at: null,
   };
   return db.transaction("rw", db.punchQueue, async () => {
     const existing = await db.punchQueue.get(item.client_event_id);

@@ -373,6 +373,8 @@ export const workerMessages = {
     left: "You have left this company, so you can't clock in.",
     noQueue: "This phone can't save punches (private browsing or storage blocked). Use a normal browser window.",
     failed: "That punch wasn't saved. Try again.",
+    refused:
+      "Your company's system didn't accept this punch. Ask your supervisor to clock you in.",
     homeButtonIn: "Clock in",
     homeButtonOut: "Clock out",
     homeClockedInAt: (time: string) => `Clocked in at ${time}`,

@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs/config";
 
+// The offline queue's test sender and hooks (slice 3.4) are for the Playwright build only. A
+// Vercel build with the flag set would ship them, so it fails instead (security review M1).
+if (process.env.VERCEL && process.env.NEXT_PUBLIC_OFFLINE_TEST_SENDER) {
+  throw new Error("NEXT_PUBLIC_OFFLINE_TEST_SENDER must never be set on Vercel.");
+}
+
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,

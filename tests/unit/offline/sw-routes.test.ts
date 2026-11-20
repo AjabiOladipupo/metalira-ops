@@ -2,6 +2,9 @@
  * Slice 3.4: what the worker app's service worker caches. Personal data (pages, RSC payloads,
  * Server Actions, API, Supabase) must never be classed as cacheable.
  */
+import { readdirSync } from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { WORKER_OFFLINE_PATH } from "@/lib/auth/routes";
@@ -114,5 +117,29 @@ describe("service worker build", () => {
     expect(urls).toContain("/worker.webmanifest");
     expect(urls).toContain("/icons/worker-192.png");
     expect(urls.every((u) => u === "/m/offline" || !u.startsWith("/m"))).toBe(true);
+  });
+});
+
+describe("service worker scope", () => {
+  /**
+   * The service worker's scope "/m" is a prefix match: it would also control /manager or
+   * /marketing. Fail if any top-level URL segment other than `m` starts with "m"
+   * (route groups like (marketing) are not URL segments; their children are).
+   */
+  it("no top-level route other than /m starts with m", () => {
+    const appDir = path.join(process.cwd(), "src", "app");
+    const segments = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .flatMap((e) =>
+          e.name.startsWith("(") && e.name.endsWith(")")
+            ? segments(path.join(dir, e.name))
+            : [e.name],
+        );
+    const clashes = segments(appDir).filter(
+      (name) => name !== "m" && !name.startsWith("_") && !name.startsWith("@") && /^m/i.test(name),
+    );
+    expect(clashes).toEqual([]);
+    expect(segments(appDir)).toContain("m");
   });
 });

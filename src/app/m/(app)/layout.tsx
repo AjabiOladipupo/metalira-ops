@@ -16,6 +16,7 @@ async function QueueOwner() {
     <QueueOwnerSync
       organisationId={lookup.session.organisationId}
       workerId={lookup.session.workerId}
+      userId={lookup.session.userId}
     />
   );
 }

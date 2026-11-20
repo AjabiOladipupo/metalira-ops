@@ -2,52 +2,41 @@
 
 import { useEffect } from "react";
 
-import {
-  activateQueue,
-  deactivateQueue,
-  getActiveQueue,
-  queueEvent,
-} from "@/lib/offline/active-queue";
-import { countPending, countUnsent } from "@/lib/offline/queue";
-import { setQueueSender, testSender } from "@/lib/offline/senders";
-import { createPunchSender } from "@/lib/punches/sender";
-import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
+import { activateQueue, deactivateQueue } from "@/lib/offline/active-queue";
+import { setQueueSender } from "@/lib/offline/senders";
 import { requestPersistentStorage } from "@/lib/offline/storage";
 import type { QueueOwner } from "@/lib/offline/types";
+import { createPunchSender } from "@/lib/punches/sender";
+import { createBrowserSupabase } from "@/lib/supabase/client";
+import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
 
-/** Builds for the Playwright suite only (playwright.config.ts); never set in production. */
-const TEST_HOOKS = process.env.NEXT_PUBLIC_OFFLINE_TEST_SENDER === "1";
-
-declare global {
-  interface Window {
-    /** End-to-end test hooks, present only in NEXT_PUBLIC_OFFLINE_TEST_SENDER=1 builds. */
-    __metaliraQueue?: {
-      queuePing(note: string): Promise<string>;
-      pending(): Promise<number>;
-      unsent(): Promise<number>;
-    };
-  }
-}
-
-const punchActions = {
+/** Punches reach the server through these Server Actions (slice 3.5). */
+const punchSender = createPunchSender({
   recordPunch: recordPunchAction,
   uploadSelfie: uploadPunchSelfieAction,
-};
+});
 
-function installTestHooks() {
-  window.__metaliraQueue = {
-    async queuePing(note) {
-      const item = await queueEvent({ kind: "test_ping", payload: { note } });
-      return item.client_event_id;
-    },
-    async pending() {
-      const queue = getActiveQueue();
-      return queue ? countPending(queue.db) : 0;
-    },
-    async unsent() {
-      const queue = getActiveQueue();
-      return queue ? countUnsent(queue.db) : 0;
-    },
+/**
+ * Test hooks only in the Playwright build (playwright.config.ts), and never in a Vercel build
+ * even if the flag leaked (next.config.ts also refuses it there). Both values are inlined at
+ * build time, so in production the import below is dead code and its module is not bundled.
+ */
+const TEST_HOOKS =
+  process.env.NEXT_PUBLIC_OFFLINE_TEST_SENDER === "1" && !process.env.NEXT_PUBLIC_VERCEL_ENV;
+
+/**
+ * True while the browser's Supabase session is still `userId` (read from the session cookie,
+ * no network unless the token needs a refresh). Another worker signing in on this phone, or a
+ * sign-out in another tab, stops this tab's queue from sending (security review M2).
+ */
+function sessionIs(userId: string): () => Promise<boolean> {
+  return async () => {
+    try {
+      const { data } = await createBrowserSupabase().auth.getSession();
+      return data.session?.user.id === userId;
+    } catch {
+      return false;
+    }
   };
 }
 
@@ -56,25 +45,30 @@ function installTestHooks() {
  * signed-in worker layout with ids from the verified session, so the queue always belongs to
  * the worker and organisation the server says are signed in. Renders nothing.
  */
-export function QueueOwnerSync({ organisationId, workerId }: QueueOwner) {
+export function QueueOwnerSync({
+  organisationId,
+  workerId,
+  userId,
+}: QueueOwner & { userId: string }) {
   useEffect(() => {
-    if (TEST_HOOKS) installTestHooks();
-    // Punches go to the server through this sender, bound to the queue's owner (slice 3.5). The
-    // test build also sends its ping kind through the test sender.
-    setQueueSender(
-      createPunchSender({ organisationId, workerId }, punchActions, TEST_HOOKS ? testSender : null),
-    );
+    let cancelled = false;
+    setQueueSender(punchSender);
+    if (TEST_HOOKS) {
+      void import("@/lib/offline/test-hooks").then(({ installTestHooks }) => {
+        if (!cancelled) installTestHooks();
+      });
+    }
     try {
-      activateQueue({ organisationId, workerId });
+      activateQueue({ organisationId, workerId }, { isOwnerSignedIn: sessionIs(userId) });
     } catch {
       // IndexedDB unavailable (some private modes): the app works online without the queue.
       return;
     }
     void requestPersistentStorage();
     return () => {
+      cancelled = true;
       deactivateQueue();
-      setQueueSender(null);
     };
-  }, [organisationId, workerId]);
+  }, [organisationId, workerId, userId]);
   return null;
 }

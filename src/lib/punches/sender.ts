@@ -1,4 +1,4 @@
-import type { AnyQueueItem, QueueOwner, QueueSender, SendResult } from "@/lib/offline/types";
+import type { AnyQueueItem, QueueOwner, QueueSender, SendResult, SendTiming } from "@/lib/offline/types";
 
 import { isPunchQueueKind } from "./clock";
 import { sendOutcome, type RecordPunchResult, type UploadSelfieResult } from "./codes";
@@ -7,10 +7,10 @@ import { sendOutcome, type RecordPunchResult, type UploadSelfieResult } from "./
  * The offline queue's sender for punches (slice 3.5). Every clock-in and clock-out goes through
  * the queue, online or not; this sends one item: record the punch first, then, if the server
  * wants it, the selfie. The queue's owner goes with every call, so the server records it only
- * for that worker (anything else comes back `wrong_session` and stays queued).
+ * for that worker; anything else comes back `wrongSession` and stays queued for its owner.
  *
- * The queue stores the `error` text: only fixed codes go there (src/lib/punches/codes.ts), never
- * what a server said. Network failures throw, which the sync engine treats as transient.
+ * Only the queue's fixed codes come back (src/lib/punches/codes.ts `queueResultFor`), never what
+ * a server said. Network failures throw, which the sync engine treats as transient.
  *
  * The actions are injected so the mapping is tested without a server.
  */
@@ -20,20 +20,19 @@ export interface PunchActions {
 }
 
 export function createPunchSender(
-  owner: QueueOwner,
   actions: PunchActions,
   /** Sends kinds that aren't punches (the end-to-end test ping), or null. */
   other: QueueSender | null = null,
 ): QueueSender {
   return {
-    async send(item: AnyQueueItem, timing): Promise<SendResult> {
+    async send(item: AnyQueueItem, timing: SendTiming, owner: QueueOwner): Promise<SendResult> {
       if (!isPunchQueueKind(item.kind)) {
-        if (other) return other.send(item, timing);
+        if (other) return other.send(item, timing, owner);
         return { ok: false, retryable: false, error: "invalid" };
       }
       const punch = item as Extract<AnyQueueItem, { kind: "clock_in" | "clock_out" }>;
       const record = await actions.recordPunch({
-        owner,
+        owner: { organisationId: punch.organisation_id, workerId: punch.worker_id },
         client_event_id: punch.client_event_id,
         kind: punch.kind,
         payload: punch.payload,
@@ -46,17 +45,13 @@ export function createPunchSender(
       let upload: UploadSelfieResult | null = null;
       if (record.ok && record.selfieWanted && punch.photo) {
         const form = new FormData();
-        form.set("owner_org", owner.organisationId);
-        form.set("owner_worker", owner.workerId);
+        form.set("owner_org", punch.organisation_id);
+        form.set("owner_worker", punch.worker_id);
         form.set("punch_id", record.punchId);
         form.set("photo", punch.photo, "selfie");
         upload = await actions.uploadSelfie(form);
       }
-      const outcome = sendOutcome(record, upload);
-      if (outcome.ok) return { ok: true };
-      return outcome.retryable
-        ? { ok: false, retryable: true, error: outcome.error }
-        : { ok: false, retryable: false, error: outcome.error };
+      return sendOutcome(record, upload);
     },
   };
 }
