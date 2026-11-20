@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { hasPersonalNumber } from "@/lib/worker-requests";
+
 /**
  * Worker inbox rules shared by the server and its tests (slice 3.1). The database checks the same
  * things again (inbox_items constraints in migration 20261120111000).
@@ -15,7 +17,11 @@ export function isWorkerAppPath(path: string): boolean {
 
 const NO_WEB_ADDRESS = (value: string) => !/:\/\/|www\./i.test(value);
 
-/** What notifyWorker takes. Plain text only, no web addresses: links are internal paths. */
+/**
+ * What notifyWorker takes. Plain text only, no web addresses: links are internal paths. Never
+ * personal numbers (NIN, BVN, account numbers, RSA PIN; rule 9): a run of 10 or more digits is
+ * refused, because each item is also copied to the audit log and owner, admin and HR can read it.
+ */
 export const inboxMessageSchema = z.object({
   kind: z.string().regex(/^[a-z][a-z_]{1,39}$/, "Use a short lower_case kind"),
   title: z
@@ -32,7 +38,8 @@ export const inboxMessageSchema = z.object({
     .max(1000)
     // Line breaks are fine; other control characters and angle brackets are not.
     .refine((value) => !/[\p{Cc}<>]/u.test(value.replace(/\n/g, "")), "Plain text only")
-    .refine(NO_WEB_ADDRESS, "No web addresses"),
+    .refine(NO_WEB_ADDRESS, "No web addresses")
+    .refine((value) => !hasPersonalNumber(value), "No personal numbers"),
   link: z
     .string()
     .refine(isWorkerAppPath, "Links must be a worker-app path such as /m/shifts")

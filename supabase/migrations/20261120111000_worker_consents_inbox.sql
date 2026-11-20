@@ -100,6 +100,9 @@ create policy worker_consents_select on public.worker_consents
 
 revoke all on table public.worker_consents from anon, authenticated;
 grant select on table public.worker_consents to authenticated;
+-- Not even the server's secret key records or changes a consent: only the worker, through
+-- accept_worker_consent and withdraw_worker_consent (security review, slice 3.1).
+revoke insert, update, delete, truncate on table public.worker_consents from service_role;
 
 -- The caller's own worker record in `p_organisation_id` (a worker login), or an error.
 create function private.my_worker_in(p_organisation_id uuid)

@@ -14,9 +14,10 @@ import { createAdminSupabase } from "@/server/supabase/admin";
  * Tells one worker something (slice 3.1): an inbox item in the worker app, always, and an email
  * when the worker has an address and the caps allow. Rule 8: email or in-app only.
  *
- * - Server code only, with the secret key: workers can't add items to their own inbox. The
- *   caller has already decided the worker should hear this; `organisationId` comes from the
- *   caller's verified session or job, never from a form. The database refuses a worker of
+ * - Server code only, with the secret key: workers can't add items to their own inbox. It does
+ *   no authorisation of its own: call it only after the caller has checked who may notify whom,
+ *   with `organisationId` and `workerId` from a verified session (mutate's context) or a job
+ *   record, never from request input. The database refuses a worker of
  *   another organisation (composite foreign key) and any text with a web address or markup.
  * - Email caps (Resend Free: 100 a day for the whole account): at most 30 per company and 80
  *   overall in any 24 hours (INBOX_EMAIL_CAPS), claimed atomically by public.claim_inbox_email.

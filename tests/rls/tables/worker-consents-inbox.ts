@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { TableSpec } from "../helpers/registry";
-import type { Client } from "../helpers/supabase";
+import { pgClient, type Client } from "../helpers/supabase";
 
 async function firstId(
   admin: Client,
@@ -36,14 +36,17 @@ export const tables: TableSpec[] = [
     table: "worker_consents",
     ...byOrg,
     seed: async ({ admin, side }) => {
+      // Not even the secret key may record a consent, so the seed writes as the database owner.
       const workerId = await firstId(admin, "workers", side.orgId);
-      const { error } = await admin.from("worker_consents").insert({
-        organisation_id: side.orgId,
-        worker_id: workerId,
-        kind: "location",
-        notice_version: "2026-11-20.1",
-      });
-      if (error) throw new Error(error.message);
+      const db = await pgClient();
+      try {
+        await db.query(
+          "insert into public.worker_consents (organisation_id, worker_id, kind, notice_version) values ($1, $2, 'location', '2026-11-20.1')",
+          [side.orgId, workerId],
+        );
+      } finally {
+        await db.end();
+      }
     },
     rowOf: ({ admin, side }) => firstId(admin, "worker_consents", side.orgId),
     attackInsert: ({ victim }) => ({

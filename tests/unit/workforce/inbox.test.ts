@@ -48,6 +48,8 @@ describe("inboxMessageSchema", () => {
     { kind: "Bad Kind" },
     { title: "" },
     { body: "x".repeat(1001) },
+    { body: "Your new account is 0123456789." },
+    { body: "NIN 1234 5678 901 on file" },
   ])("refuses %j", (patch) => {
     expect(inboxMessageSchema.safeParse({ ...ok, ...patch }).success).toBe(false);
   });

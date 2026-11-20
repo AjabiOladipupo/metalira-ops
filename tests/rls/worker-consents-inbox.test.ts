@@ -229,20 +229,32 @@ describe("worker_consents", () => {
     expect(del.error?.code).toBe(PERMISSION_DENIED);
   });
 
-  it("is never edited or deleted, even with the secret key", async () => {
+  it("is never written with the secret key, and never edited or deleted by anyone", async () => {
     const { data } = await admin
       .from("worker_consents")
       .select("id, withdrawn_at")
       .eq("worker_id", me)
       .not("withdrawn_at", "is", null)
       .single();
-    const reopen = await admin
+    const forged = await admin.from("worker_consents").insert({
+      organisation_id: owner.orgId,
+      worker_id: me,
+      kind: "selfie",
+      notice_version: VERSION,
+    });
+    expect(forged.error?.code).toBe(PERMISSION_DENIED);
+    const keyUpdate = await admin
       .from("worker_consents")
       .update({ withdrawn_at: null })
       .eq("id", data!.id);
-    expect(reopen.error?.code).toBe("MLCN3");
-    const del = await admin.from("worker_consents").delete().eq("id", data!.id);
-    expect(del.error?.code).toBe("MLCN3");
+    expect(keyUpdate.error?.code).toBe(PERMISSION_DENIED);
+    // The database owner is held by the guard trigger.
+    await expect(
+      db.query("update public.worker_consents set withdrawn_at = null where id = $1", [data!.id]),
+    ).rejects.toMatchObject({ code: "MLCN3" });
+    await expect(
+      db.query("delete from public.worker_consents where id = $1", [data!.id]),
+    ).rejects.toMatchObject({ code: "MLCN3" });
   });
 
   it("a colleague sees only their own; HR, admin and owner see all; others none", async () => {
