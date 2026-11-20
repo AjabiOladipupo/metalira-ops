@@ -816,6 +816,28 @@ function checkNames(drafts: Draft[], ctx: ImportContext): void {
     "project_not_found",
   );
   resolveWithinClient("site", ctx.sites, (d, value) => (d.site = value), "site_not_found");
+
+  // Slice 2.7 (owner decision, 19 Nov 2026): no new assignments to an archived client or site.
+  // The database refuses them too (worker_assignments_target_active).
+  const archivedClients = new Set(ctx.clients.filter((c) => c.archived).map((c) => c.id));
+  const archivedSites = new Set(ctx.sites.filter((s) => s.archived).map((s) => s.id));
+  for (const draft of drafts) {
+    if (draft.client?.kind === "existing" && archivedClients.has(draft.client.id)) {
+      addProblem(
+        draft,
+        "client_archived",
+        "client_company",
+        `Client archived: ${draft.client.name}. Restore it first, or choose another client.`,
+      );
+    } else if (draft.site?.kind === "existing" && archivedSites.has(draft.site.id)) {
+      addProblem(
+        draft,
+        "site_archived",
+        "site",
+        `Site archived: ${draft.site.name}. Restore it first, or choose another site.`,
+      );
+    }
+  }
 }
 
 function checkLineManagers(drafts: Draft[], ctx: ImportContext): void {

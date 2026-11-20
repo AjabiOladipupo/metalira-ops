@@ -110,30 +110,29 @@ function num(value: unknown): number {
   return typeof value === "number" ? value : Number(value ?? 0);
 }
 
-export const activateContractSpec: MutationSpec<typeof activateContractSchema, ActivationResult> =
-  {
-    schema: activateContractSchema,
-    roles: CONTRACT_EDITORS,
-    run: async ({ supabase, organisationId, data }) => {
-      const { data: result, error } = await supabase.rpc("activate_contract", {
-        p_organisation_id: organisationId,
-        p_contract_id: data.contractId,
-        ...(data.goLiveDate ? { p_go_live_date: data.goLiveDate } : {}),
-        p_send_welcome: data.sendWelcome,
-      });
-      if (error) fromActivationDbError(error);
-      const r = (result ?? {}) as Record<string, unknown>;
-      return {
-        contractId: data.contractId,
-        status: String(r.status ?? ""),
-        goLiveDate: typeof r.go_live_date === "string" ? r.go_live_date : null,
-        activatedNow: r.activated_now === true,
-        sendWelcome: r.send_welcome === true,
-        posts: num(r.posts),
-        requirements: num(r.requirements),
-      };
-    },
-  };
+export const activateContractSpec: MutationSpec<typeof activateContractSchema, ActivationResult> = {
+  schema: activateContractSchema,
+  roles: CONTRACT_EDITORS,
+  run: async ({ supabase, organisationId, data }) => {
+    const { data: result, error } = await supabase.rpc("activate_contract", {
+      p_organisation_id: organisationId,
+      p_contract_id: data.contractId,
+      ...(data.goLiveDate ? { p_go_live_date: data.goLiveDate } : {}),
+      p_send_welcome: data.sendWelcome,
+    });
+    if (error) fromActivationDbError(error);
+    const r = (result ?? {}) as Record<string, unknown>;
+    return {
+      contractId: data.contractId,
+      status: String(r.status ?? ""),
+      goLiveDate: typeof r.go_live_date === "string" ? r.go_live_date : null,
+      activatedNow: r.activated_now === true,
+      sendWelcome: r.send_welcome === true,
+      posts: num(r.posts),
+      requirements: num(r.requirements),
+    };
+  },
+};
 
 export function activateContract(input: unknown) {
   return mutate(activateContractSpec, input);
@@ -193,7 +192,13 @@ export interface WelcomePayload {
  * Exported for tests.
  */
 export function welcomeRecipients(
-  contacts: readonly { id: string; name: string; email: string; role: string; is_primary: boolean }[],
+  contacts: readonly {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    is_primary: boolean;
+  }[],
 ): WelcomeRecipient[] {
   const seen = new Set<string>();
   const out: WelcomeRecipient[] = [];

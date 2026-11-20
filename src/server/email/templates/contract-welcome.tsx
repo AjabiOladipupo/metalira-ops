@@ -68,8 +68,8 @@ export function ContractWelcomeEmail({
         <EmailText>Reply to this email with any questions.</EmailText>
       )}
       <EmailText muted>
-        Payment details appear on each invoice only. If anyone sends you different bank details
-        by email, check with {company(organisationName)} by phone before paying.
+        Payment details appear on each invoice only. If anyone sends you different bank details by
+        email, check with {company(organisationName)} by phone before paying.
       </EmailText>
     </EmailLayout>
   );

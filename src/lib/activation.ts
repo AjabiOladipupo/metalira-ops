@@ -21,18 +21,15 @@ import {
   postLabel,
   type HeadcountLine,
 } from "./headcount";
-import { formatRateKey, missingRateKeys, rateCardInForce, type RateCardVersion } from "./rate-cards";
+import {
+  formatRateKey,
+  missingRateKeys,
+  rateCardInForce,
+  type RateCardVersion,
+} from "./rate-cards";
 
 export type ActivationCode =
-  | "MLCT1"
-  | "MLCT2"
-  | "MLCT3"
-  | "MLCT4"
-  | "MLCT5"
-  | "MLCT6"
-  | "MLCT7"
-  | "MLCT8"
-  | "MLCT9";
+  "MLCT1" | "MLCT2" | "MLCT3" | "MLCT4" | "MLCT5" | "MLCT6" | "MLCT7" | "MLCT8" | "MLCT9";
 
 export const ACTIVATION_CODES: readonly ActivationCode[] = [
   "MLCT1",
@@ -156,10 +153,7 @@ export function planActivation(input: ActivationInput): ActivationPlan {
   if (input.clientArchived) add("MLCT8", "The client is archived. Restore it first.");
   const archived = input.sites.filter((s) => s.archived).map((s) => s.name);
   if (archived.length > 0) {
-    add(
-      "MLCT8",
-      `Archived sites: ${list(archived)}. Restore them or take them off the contract.`,
-    );
+    add("MLCT8", `Archived sites: ${list(archived)}. Restore them or take them off the contract.`);
   }
 
   if (input.sites.length === 0) add("MLCT3", "The contract has no sites. Add at least one.");
@@ -337,7 +331,11 @@ export function expandRequiredShifts(args: {
     }
   }
   return shifts.sort((a, b) =>
-    a.startsAt === b.startsAt ? a.postName.localeCompare(b.postName) : a.startsAt < b.startsAt ? -1 : 1,
+    a.startsAt === b.startsAt
+      ? a.postName.localeCompare(b.postName)
+      : a.startsAt < b.startsAt
+        ? -1
+        : 1,
   );
 }
 

@@ -205,6 +205,8 @@ export interface ContractDetail {
   startDate: string;
   endDate: string | null;
   goLiveDate: string | null;
+  /** Set by end_contract (slice 2.7): the contract is ending on endDate. */
+  endReason: string | null;
   billingFrequency: BillingFrequency;
   billingTermsDays: number | null;
   vatApplies: boolean;
@@ -226,7 +228,7 @@ export async function loadContract(
   const { data: row, error } = await supabase
     .from("contracts")
     .select(
-      `id, client_id, reference, name, type, status, start_date, end_date, go_live_date, billing_frequency, billing_terms_days, vat_applies, sla, created_at, clients(name), contract_sites(site_id, sites(id, name)), rate_cards(${VERSION_SELECT})`,
+      `id, client_id, reference, name, type, status, start_date, end_date, go_live_date, end_reason, billing_frequency, billing_terms_days, vat_applies, sla, created_at, clients(name), contract_sites(site_id, sites(id, name)), rate_cards(${VERSION_SELECT})`,
     )
     .eq("organisation_id", organisationId)
     .eq("client_id", clientId)
@@ -249,6 +251,7 @@ export async function loadContract(
     startDate: row.start_date,
     endDate: row.end_date,
     goLiveDate: row.go_live_date,
+    endReason: row.end_reason,
     billingFrequency: row.billing_frequency as BillingFrequency,
     billingTermsDays: row.billing_terms_days,
     vatApplies: row.vat_applies,

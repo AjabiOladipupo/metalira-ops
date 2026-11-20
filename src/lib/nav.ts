@@ -245,6 +245,9 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   { href: "/app/clients/[id]/contracts/[id]/rates", roles: ["owner", "admin", "ops_manager"] },
   // Slice 2.5: adding and changing a draft contract's headcount rows.
   { href: "/app/clients/[id]/contracts/[id]/headcount", roles: ["owner", "admin", "ops_manager"] },
+  // Slice 2.7: activating and ending a contract.
+  { href: "/app/clients/[id]/contracts/[id]/activate", roles: ["owner", "admin", "ops_manager"] },
+  { href: "/app/clients/[id]/contracts/[id]/end", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
   // Slice 1.8: importing employees writes workers, pay and bank details.
   { href: "/app/people/import", roles: ["owner", "admin", "hr"] },

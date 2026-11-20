@@ -626,6 +626,45 @@ describe("clients, projects and sites", () => {
     expect(result.summary.newNames.clients).toEqual([]);
   });
 
+  it("holds back rows naming an archived client or site (slice 2.7)", () => {
+    const result = check(
+      rows(
+        { client_company: "Coastline Logistics", site: "Apapa Warehouse 3" },
+        { client_company: "Greenfield Estates", site: "Lekki Gate" },
+        { client_company: "Greenfield Estates", site: "Ikoyi Gate" },
+      ),
+      {
+        clients: [
+          { id: "c1", name: "Coastline Logistics", archived: true },
+          { id: "c2", name: "Greenfield Estates" },
+        ],
+        sites: [
+          { id: "s1", clientId: "c1", name: "Apapa Warehouse 3" },
+          { id: "s2", clientId: "c2", name: "Lekki Gate", archived: true },
+          { id: "s3", clientId: "c2", name: "Ikoyi Gate" },
+        ],
+      },
+    );
+    expect(row(result, 2).problems).toEqual([
+      {
+        code: "client_archived",
+        column: "client_company",
+        message:
+          "Client archived: Coastline Logistics. Restore it first, or choose another client.",
+        fix: null,
+      },
+    ]);
+    expect(row(result, 3).problems).toEqual([
+      {
+        code: "site_archived",
+        column: "site",
+        message: "Site archived: Lekki Gate. Restore it first, or choose another site.",
+        fix: null,
+      },
+    ]);
+    expect(row(result, 4).problems).toEqual([]);
+  });
+
   it("holds a near miss of an existing client with a one-click match", () => {
     const result = check(rows({ client_company: "Coastline Logistic" }), {
       clients: [{ id: "c1", name: "Coastline Logistics" }],

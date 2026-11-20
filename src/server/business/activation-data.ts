@@ -22,7 +22,6 @@ type Client = SupabaseClient<Database>;
 
 const UUID = /^[0-9a-f-]{36}$/i;
 
-
 export interface ActivationContext {
   contract: {
     id: string;
