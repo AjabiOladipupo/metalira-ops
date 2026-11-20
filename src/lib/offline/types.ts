@@ -30,16 +30,52 @@ export type QueueKind = keyof QueuePayloads & string;
 /**
  * - `queued`: waiting to be sent (first try, or a retry after `next_attempt_at`).
  * - `sending`: handed to the sender; back to `queued` if the app dies before the answer.
- * - `sent`: the server has it (or already had it: it dedupes on `client_event_id`).
- * - `failed_permanent`: the server refused it for good (validation). Kept, never dropped, so a
- *   supervisor can see it; never retried automatically.
+ * - `failed_permanent`: the server refused it for good (validation). Kept 3 days so the worker
+ *   can tell a supervisor, then deleted; never retried automatically.
+ *
+ * There is no `sent` row: once the server acknowledges an item, the row (payload, clocks,
+ * photo) is deleted from the phone (security review M3).
  */
-export type QueueStatus = "queued" | "sending" | "sent" | "failed_permanent";
+export type QueueStatus = "queued" | "sending" | "failed_permanent";
 
 /** Statuses that still need the network (the "saved on phone" count). */
 export const PENDING_STATUSES: readonly QueueStatus[] = ["queued", "sending"];
 /** Statuses that are not on the server (the sign-out warning count). */
 export const UNSENT_STATUSES: readonly QueueStatus[] = ["queued", "sending", "failed_permanent"];
+
+/**
+ * How long rows may stay on the phone (security review M3). Also in the PR as-built notes.
+ * - Sent: deleted on the server's acknowledgement.
+ * - Refused (`failed_permanent`): 3 days after the refusal.
+ * - Unsent: 14 days after the event; a punch that old is no longer useful and only holds
+ *   personal data (location, photo).
+ * - Another worker's queue on a shared phone: deleted at the next sign-in on this phone if it
+ *   holds nothing unsent; otherwise its rows follow the same limits.
+ */
+export const FAILED_RETENTION_MS = 3 * 24 * 60 * 60_000;
+export const UNSENT_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
+
+/**
+ * Fixed error codes, the only values `last_error` may hold (security review L3): never a
+ * server message, an exception text or anything from the payload.
+ */
+export const QUEUE_ERROR_CODES = [
+  "network",
+  "timeout",
+  "server_error",
+  "rate_limited",
+  "rejected",
+  "invalid",
+  "wrong_session",
+  "unknown",
+] as const;
+export type QueueErrorCode = (typeof QUEUE_ERROR_CODES)[number];
+
+export function toErrorCode(value: unknown): QueueErrorCode {
+  return (QUEUE_ERROR_CODES as readonly unknown[]).includes(value)
+    ? (value as QueueErrorCode)
+    : "unknown";
+}
 
 /**
  * The device's clocks at the moment of the event, so the server can correct a wrong phone
@@ -60,22 +96,30 @@ export interface DeviceElapsed {
 export interface QueueItem<K extends QueueKind = QueueKind> {
   /** UUID v4 made on the phone. The server's idempotency key: a resend is never a second punch. */
   client_event_id: string;
+  /**
+   * Whose event it is (security review M2). The server must compare these with the session
+   * and refuse with `wrong_session` on a mismatch; a duplicate client_event_id counts as
+   * already received only for the same worker.
+   */
+  organisation_id: string;
+  worker_id: string;
   kind: K;
   payload: QueuePayloads[K];
   /** When the event happened, by the phone's clock (ms epoch). */
   device_time: number;
   device_elapsed: DeviceElapsed;
-  /** Optional photo (selfie, crew photo), dropped once the item is sent. */
+  /** Optional photo (selfie, crew photo). */
   photo?: Blob;
   /** Send attempts that ended in a failure. */
   attempts: number;
-  last_error: string | null;
+  last_error: QueueErrorCode | null;
   status: QueueStatus;
   /** When the item was saved (ms epoch, phone clock). The send order. */
   created_at: number;
   /** Earliest time the next automatic try may start (ms epoch). Backoff after a failure. */
   next_attempt_at: number;
-  sent_at: number | null;
+  /** When the server refused it for good (`failed_permanent`), for the 3-day clean-up. */
+  failed_at: number | null;
 }
 
 /** A row of any kind, narrowed by `kind`. */
@@ -97,17 +141,25 @@ export interface SendTiming {
 }
 
 /**
- * The sender's answer. Throwing counts as a transient failure (network down, timeout).
- * A duplicate `client_event_id` must come back as `ok` (the server already has it).
+ * The sender's answer. Throwing counts as a transient `network` failure. Errors are fixed
+ * codes only (anything else is stored as `unknown`).
+ *
+ * - `ok`: the server has it. A duplicate `client_event_id` from the same worker is `ok`.
+ * - `retryable`: try again later with backoff.
+ * - not `retryable`: refused for good (`failed_permanent`).
+ * - `wrong_session`: the signed-in session is not the item's owner. The item stays queued
+ *   untouched (no attempt counted, never sent or refused) and the drain stops.
  */
 export type SendResult =
   | { ok: true }
-  | { ok: false; retryable: true; error: string }
-  | { ok: false; retryable: false; error: string };
+  | { ok: false; retryable: true; error: QueueErrorCode }
+  | { ok: false; retryable: false; error: QueueErrorCode }
+  | { ok: false; wrongSession: true };
 
 /** Sends one item to the server. Slice 3.5 provides the real one. */
 export interface QueueSender {
-  send(item: AnyQueueItem, timing: SendTiming): Promise<SendResult>;
+  /** `owner` is the queue's owner; it always equals the item's organisation_id and worker_id. */
+  send(item: AnyQueueItem, timing: SendTiming, owner: QueueOwner): Promise<SendResult>;
 }
 
 /** Whose queue it is: one queue per signed-in worker in one organisation. */

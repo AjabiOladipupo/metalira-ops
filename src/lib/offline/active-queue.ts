@@ -1,5 +1,6 @@
 import { deleteQueueDb, queueDb, type QueueDb } from "./db";
 import { enqueue, type EnqueueInput } from "./queue";
+import { housekeepQueues } from "./retention";
 import { getQueueSender, onQueueSenderChange } from "./senders";
 import { BACKGROUND_SYNC_TAG } from "./sync-constants";
 import { SyncEngine } from "./sync-engine";
@@ -20,6 +21,15 @@ export interface ActiveQueue {
   engine: SyncEngine;
 }
 
+export interface ActivateOptions {
+  /**
+   * True while the browser's session is still this owner's (security review M2). Checked
+   * before every drain, so a tab left open after another worker signs in on the same phone
+   * never sends this worker's punches with the other session.
+   */
+  isOwnerSignedIn?: () => boolean | Promise<boolean>;
+}
+
 let active: ActiveQueue | null = null;
 let stopSenderWatch: (() => void) | null = null;
 const listeners = new Set<() => void>();
@@ -38,7 +48,8 @@ export function getActiveQueue(): ActiveQueue | null {
 }
 
 const sameOwner = (a: QueueOwner, b: QueueOwner) =>
-  a.organisationId === b.organisationId && a.workerId === b.workerId;
+  a.organisationId.toLowerCase() === b.organisationId.toLowerCase() &&
+  a.workerId.toLowerCase() === b.workerId.toLowerCase();
 
 function saveLastOwner(owner: QueueOwner | null) {
   try {
@@ -63,18 +74,36 @@ export function lastQueueOwner(): QueueOwner | null {
   }
 }
 
-/** Opens the worker's queue and starts draining it. Switching owner stops the old engine. */
-export function activateQueue(owner: QueueOwner): ActiveQueue {
+/**
+ * Opens the worker's queue and starts draining it. Switching owner stops the old engine.
+ * Also applies the retention limits to every queue on the phone (types.ts): other workers'
+ * queues with nothing unsent are deleted.
+ */
+export function activateQueue(owner: QueueOwner, options: ActivateOptions = {}): ActiveQueue {
   if (active && sameOwner(active.owner, owner)) return active;
   deactivateQueue();
   const db = queueDb(owner);
-  const engine = new SyncEngine({ db, getSender: getQueueSender });
-  active = { owner, db, engine };
-  saveLastOwner(owner);
+  const engine = new SyncEngine({
+    db,
+    getSender: getQueueSender,
+    ...(options.isOwnerSignedIn ? { isOwnerSignedIn: options.isOwnerSignedIn } : {}),
+  });
+  const current: ActiveQueue = { owner: db.owner, db, engine };
+  active = current;
+
+  // Deleted or upgraded from another tab (a sign-out there), or closed: stop using it here.
+  const release = () => {
+    if (active === current) deactivateQueue();
+  };
+  db.on("versionchange", release);
+  db.on("close", release);
+
+  saveLastOwner(db.owner);
+  void housekeepQueues(db.owner, Date.now()).catch(() => {});
   engine.start();
   stopSenderWatch = onQueueSenderChange(() => void engine.sync("manual"));
   emit();
-  return active;
+  return current;
 }
 
 /** Stops the engine (leaving the signed-in screens). The queue stays on the phone. */

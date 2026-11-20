@@ -1,14 +1,16 @@
 /**
  * Slice 3.4: the offline queue (Dexie on fake-indexeddb), its backoff and the sync engine with
- * fake senders: success, transient failure, permanent failure, a crash mid-send, and one
- * queue per worker and organisation.
+ * fake senders: success, transient failure, permanent failure, a crash mid-send, a wrong
+ * session, one queue per worker and organisation, and the retention limits.
  */
 import "fake-indexeddb/auto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BACKOFF_BASE_MS, BACKOFF_MAX_MS, backoffDelay } from "@/lib/offline/backoff";
-import { deleteQueueDb, QueueDb, queueDb, queueDbName } from "@/lib/offline/db";
+import Dexie from "dexie";
+
+import { deleteQueueDb, ownerFromDbName, QueueDb, queueDb, queueDbName } from "@/lib/offline/db";
 import {
   countPending,
   countUnsent,
@@ -16,14 +18,23 @@ import {
   sendTiming,
   type QueueClock,
 } from "@/lib/offline/queue";
+import { housekeepQueues } from "@/lib/offline/retention";
 import { isStorageLow } from "@/lib/offline/storage";
 import {
   drainQueue,
-  SENT_RETENTION_MS,
+  pruneQueue,
   SyncEngine,
   type SyncEnvironment,
 } from "@/lib/offline/sync-engine";
-import type { AnyQueueItem, QueueOwner, QueueSender, SendResult } from "@/lib/offline/types";
+import {
+  FAILED_RETENTION_MS,
+  toErrorCode,
+  UNSENT_MAX_AGE_MS,
+  type AnyQueueItem,
+  type QueueOwner,
+  type QueueSender,
+  type SendResult,
+} from "@/lib/offline/types";
 
 const ORG_A = "0b6f8a8e-2c4e-4d4f-9a39-0d6a2f2b8a01";
 const ORG_B = "0b6f8a8e-2c4e-4d4f-9a39-0d6a2f2b8a02";
@@ -55,15 +66,17 @@ function fakeClock(start = 1_800_000_000_000, origin = 1_799_999_000_000) {
 
 function recordingSender(results: (SendResult | Error)[]) {
   const sent: AnyQueueItem[] = [];
+  const owners: QueueOwner[] = [];
   const sender: QueueSender = {
-    async send(item) {
+    async send(item, _timing, owner) {
       sent.push(item);
+      owners.push(owner);
       const next = results.length > 1 ? results.shift()! : results[0]!;
       if (next instanceof Error) throw next;
       return next;
     },
   };
-  return { sender, sent };
+  return { sender, sent, owners };
 }
 
 const ok: SendResult = { ok: true };
@@ -77,6 +90,12 @@ describe("queue database", () => {
   it("names one database per organisation and worker, and only for UUIDs", () => {
     expect(queueDbName(owner())).toBe(`metalira-queue:${ORG_A}:${WORKER_1}`);
     expect(() => queueDbName({ organisationId: "../x", workerId: WORKER_1 })).toThrow();
+    expect(ownerFromDbName(`metalira-queue:${ORG_A}:${WORKER_1}`)).toEqual({
+      organisationId: ORG_A,
+      workerId: WORKER_1,
+    });
+    expect(ownerFromDbName("metalira-queue:x:y")).toBeNull();
+    expect(ownerFromDbName("other-db")).toBeNull();
   });
 });
 
@@ -89,6 +108,8 @@ describe("enqueue", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
     expect(item).toMatchObject({
+      organisation_id: ORG_A,
+      worker_id: WORKER_1,
       status: "queued",
       attempts: 0,
       last_error: null,
@@ -156,22 +177,23 @@ describe("send timing", () => {
 });
 
 describe("drainQueue", () => {
-  it("sends due items oldest first and marks them sent, dropping the photo", async () => {
+  it("sends due items oldest first with their owner, and deletes them once acknowledged", async () => {
     const clock = fakeClock();
     const db = queueDb(owner());
     const photo = new Blob([new Uint8Array([9])]);
     const a = await enqueue(db, { kind: "test_ping", payload: { note: "a" }, photo }, clock);
     clock.advance(10);
     const b = await enqueue(db, { kind: "test_ping", payload: { note: "b" } }, clock);
-    const { sender, sent } = recordingSender([ok]);
+    const { sender, sent, owners: seen } = recordingSender([ok]);
 
     const report = await drainQueue(db, sender, opts(clock));
 
     expect(report).toMatchObject({ sent: 2, retried: 0, refused: 0, stopped: null });
     expect(sent.map((i) => i.client_event_id)).toEqual([a.client_event_id, b.client_event_id]);
-    const rowA = await db.punchQueue.get(a.client_event_id);
-    expect(rowA).toMatchObject({ status: "sent", sent_at: clock.now(), last_error: null });
-    expect(rowA?.photo).toBeUndefined();
+    expect(seen).toEqual([db.owner, db.owner]);
+    // Nothing about a sent event (payload, clocks, photo) stays on the phone.
+    expect(await db.punchQueue.get(a.client_event_id)).toBeUndefined();
+    expect(await db.punchQueue.count()).toBe(0);
     expect(await countPending(db)).toBe(0);
     expect(await countUnsent(db)).toBe(0);
   });
@@ -191,7 +213,8 @@ describe("drainQueue", () => {
     expect(await db.punchQueue.get(a.client_event_id)).toMatchObject({
       status: "queued",
       attempts: 1,
-      last_error: "Failed to fetch",
+      // A fixed code, never the exception's message.
+      last_error: "network",
       next_attempt_at: clock.now() + BACKOFF_BASE_MS,
     });
 
@@ -214,7 +237,7 @@ describe("drainQueue", () => {
     await enqueue(db, { kind: "test_ping", payload: { note: "a" } }, clock);
     await drainQueue(
       db,
-      recordingSender([{ ok: false, retryable: true, error: "503" }]).sender,
+      recordingSender([{ ok: false, retryable: true, error: "server_error" }]).sender,
       opts(clock),
     );
     const report = await drainQueue(db, recordingSender([ok]).sender, {
@@ -230,10 +253,7 @@ describe("drainQueue", () => {
     const a = await enqueue(db, { kind: "test_ping", payload: { note: "bad" } }, clock);
     clock.advance(1);
     await enqueue(db, { kind: "test_ping", payload: { note: "good" } }, clock);
-    const { sender } = recordingSender([
-      { ok: false, retryable: false, error: "invalid site" },
-      ok,
-    ]);
+    const { sender } = recordingSender([{ ok: false, retryable: false, error: "invalid" }, ok]);
 
     const report = await drainQueue(db, sender, opts(clock));
 
@@ -241,7 +261,8 @@ describe("drainQueue", () => {
     expect(await db.punchQueue.get(a.client_event_id)).toMatchObject({
       status: "failed_permanent",
       attempts: 1,
-      last_error: "invalid site",
+      last_error: "invalid",
+      failed_at: clock.now(),
     });
     expect(await countPending(db)).toBe(0);
     expect(await countUnsent(db)).toBe(1);
@@ -265,7 +286,7 @@ describe("drainQueue", () => {
     });
 
     // The app starts again: a new connection to the same database.
-    const restarted = new QueueDb(queueDbName(o));
+    const restarted = new QueueDb(o);
     const { sender, sent } = recordingSender([ok]);
     const report = await drainQueue(restarted, sender, opts(clock));
     restarted.close();
@@ -273,7 +294,7 @@ describe("drainQueue", () => {
     expect(report).toMatchObject({ recovered: 1, sent: 1 });
     // Same client_event_id: the server dedupes if the first request did arrive.
     expect(sent[0]?.client_event_id).toBe(a.client_event_id);
-    expect((await db.punchQueue.get(a.client_event_id))?.status).toBe("sent");
+    expect(await db.punchQueue.get(a.client_event_id)).toBeUndefined();
   });
 
   it("does not run twice at once on the same database", async () => {
@@ -292,17 +313,88 @@ describe("drainQueue", () => {
     expect(await first).toMatchObject({ sent: 1 });
   });
 
-  it("removes sent rows after a week, never unsent ones", async () => {
+  it("keeps a row untouched and stops when the server says the session is someone else's", async () => {
     const clock = fakeClock();
     const db = queueDb(owner());
-    await enqueue(db, { kind: "test_ping", payload: { note: "old sent" } }, clock);
-    await drainQueue(db, recordingSender([ok]).sender, opts(clock));
-    await enqueue(db, { kind: "test_ping", payload: { note: "old unsent" } }, clock);
+    const a = await enqueue(db, { kind: "test_ping", payload: { note: "a" } }, clock);
+    clock.advance(1);
+    await enqueue(db, { kind: "test_ping", payload: { note: "b" } }, clock);
+    const { sender, sent } = recordingSender([{ ok: false, wrongSession: true }]);
+
+    const report = await drainQueue(db, sender, { ...opts(clock), force: true });
+
+    expect(report).toMatchObject({ sent: 0, retried: 0, refused: 0, stopped: "wrong_session" });
+    expect(sent).toHaveLength(1);
+    expect(await db.punchQueue.get(a.client_event_id)).toMatchObject({
+      status: "queued",
+      attempts: 0,
+      last_error: null,
+      failed_at: null,
+    });
+    expect(await countPending(db)).toBe(2);
+  });
+
+  it("never hands the sender a row whose owner is not the queue's", async () => {
+    const clock = fakeClock();
+    const db = queueDb(owner());
+    const foreign = await enqueue(db, { kind: "test_ping", payload: { note: "x" } }, clock);
+    await db.punchQueue.update(foreign.client_event_id, { worker_id: WORKER_2 });
+    const { sender, sent } = recordingSender([ok]);
+    await drainQueue(db, sender, { ...opts(clock), force: true });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("stores only fixed error codes", () => {
+    expect(toErrorCode("timeout")).toBe("timeout");
+    expect(toErrorCode("Worker 0114 at Apapa has no shift")).toBe("unknown");
+    expect(toErrorCode(undefined)).toBe("unknown");
+  });
+
+  it("deletes refused rows after 3 days and unsent rows after 14 days", async () => {
+    const clock = fakeClock();
+    const db = queueDb(owner());
+    const refused = await enqueue(db, { kind: "test_ping", payload: { note: "bad" } }, clock);
+    await drainQueue(
+      db,
+      recordingSender([{ ok: false, retryable: false, error: "invalid" }]).sender,
+      opts(clock),
+    );
+    clock.advance(FAILED_RETENTION_MS + 1);
+    const recent = await enqueue(db, { kind: "test_ping", payload: { note: "new" } }, clock);
+    expect(await pruneQueue(db, clock.now())).toBe(1);
+    expect(await db.punchQueue.get(refused.client_event_id)).toBeUndefined();
+    expect(await db.punchQueue.get(recent.client_event_id)).toBeDefined();
+
+    clock.advance(UNSENT_MAX_AGE_MS + 1);
     await drainQueue(db, recordingSender([new Error("down")]).sender, opts(clock));
-    clock.advance(SENT_RETENTION_MS + 1);
-    await drainQueue(db, recordingSender([new Error("down")]).sender, opts(clock));
-    const rows = await db.punchQueue.toArray();
-    expect(rows.map((r) => r.payload)).toEqual([{ note: "old unsent" }]);
+    expect(await db.punchQueue.count()).toBe(0);
+  });
+});
+
+describe("housekeeping on sign-in", () => {
+  it("deletes other workers' queues with nothing unsent and expires old rows everywhere", async () => {
+    const clock = fakeClock();
+    const me = owner(ORG_A, WORKER_1);
+    const emptyOther = owner(ORG_A, WORKER_2);
+    const busyOther = owner(ORG_B, WORKER_1);
+    await enqueue(queueDb(me), { kind: "test_ping", payload: { note: "mine" } }, clock);
+    const e = queueDb(emptyOther);
+    await enqueue(e, { kind: "test_ping", payload: { note: "sent" } }, clock);
+    await drainQueue(e, recordingSender([ok]).sender, opts(clock));
+    await enqueue(queueDb(busyOther), { kind: "test_ping", payload: { note: "waiting" } }, clock);
+
+    const report = await housekeepQueues(me, clock.now());
+
+    const names = await Dexie.getDatabaseNames();
+    expect(report.deletedQueues).toBe(1);
+    expect(names).not.toContain(queueDbName(emptyOther));
+    expect(names).toContain(queueDbName(busyOther));
+    expect(names).toContain(queueDbName(me));
+
+    // Two weeks on, the other worker's unsent row has expired and its queue goes too.
+    const later = await housekeepQueues(me, clock.now() + UNSENT_MAX_AGE_MS + 1);
+    expect(later.deletedQueues).toBe(1);
+    expect(await Dexie.getDatabaseNames()).not.toContain(queueDbName(busyOther));
   });
 });
 
@@ -330,7 +422,7 @@ describe("per-worker isolation", () => {
     await deleteQueueDb({ organisationId: ORG_A, workerId: WORKER_1 });
     expect(await countPending(queueDb({ organisationId: ORG_A, workerId: WORKER_1 }))).toBe(0);
     expect(await countUnsent(a2)).toBe(0);
-    expect(await a2.punchQueue.count()).toBe(1);
+    expect(await a2.punchQueue.count()).toBe(0);
   });
 });
 
@@ -368,6 +460,37 @@ describe("SyncEngine", () => {
     await vi.waitFor(async () => expect(await countPending(db)).toBe(0));
     expect(sent).toHaveLength(1);
     engine.stop();
+  });
+
+  it("sends nothing while the browser session is not the queue's owner", async () => {
+    const clock = fakeClock();
+    const db = queueDb(owner());
+    await enqueue(db, { kind: "test_ping", payload: { note: "a" } }, clock);
+    const { env } = fakeEnv();
+    const { sender, sent } = recordingSender([ok]);
+    let mine = false;
+    const engine = new SyncEngine({
+      db,
+      getSender: () => sender,
+      isOwnerSignedIn: async () => mine,
+      env,
+      drain: opts(clock),
+    });
+    expect(await engine.sync("manual")).toMatchObject({ stopped: "wrong_session" });
+    expect(sent).toHaveLength(0);
+    mine = true;
+    expect(await engine.sync("manual")).toMatchObject({ sent: 1 });
+  });
+
+  it("does nothing after it is stopped", async () => {
+    const db = queueDb(owner());
+    await enqueue(db, { kind: "test_ping", payload: { note: "a" } });
+    const { env } = fakeEnv();
+    const { sender, sent } = recordingSender([ok]);
+    const engine = new SyncEngine({ db, getSender: () => sender, env });
+    engine.stop();
+    expect(await engine.sync("manual")).toMatchObject({ stopped: "stopped" });
+    expect(sent).toHaveLength(0);
   });
 
   it("leaves items queued while no sender is registered (3.5 provides it)", async () => {
