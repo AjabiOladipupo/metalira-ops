@@ -3,25 +3,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type Database = {
   
-  "graphql_public": {
-          Tables: {
-            [_ in never]: never
-          }
-          Views: {
-            [_ in never]: never
-          }
-          Functions: {
-            "graphql":
-{ Args: { "extensions"?: Json,"operationName"?: string,"query"?: string,"variables"?: Json }; Returns: Json
-                           }
-          }
-          Enums: {
-            [_ in never]: never
-          }
-          CompositeTypes: {
-            [_ in never]: never
-          }
-        },"public": {
+  "public": {
           Tables: {
             "audit_log": {
                   Row: {
@@ -1115,11 +1097,7 @@ export type CompositeTypes<
   : never
 
 export const Constants = {
-  "graphql_public": {
-          Enums: {
-            
-          }
-        },"public": {
+  "public": {
           Enums: {
             "bank_detail_change_status": ["pending", "approved", "rejected", "applied", "cancelled"],"employment_type": ["permanent", "contract", "casual", "daily"],"import_batch_status": ["uploaded", "validated", "committed", "cancelled"],"import_row_status": ["ready", "held", "fixed", "imported"],"membership_role": ["owner", "admin", "hr", "finance", "ops_manager", "line_manager", "worker", "client_approver"],"org_bank_account_status": ["pending", "approved", "active", "retired", "rejected", "cancelled"],"owner_change_kind": ["add", "invite", "remove", "demote"],"owner_change_status": ["pending", "approved", "rejected", "cancelled"],"pay_type": ["monthly", "daily", "hourly"],"staff_id_correction_status": ["pending", "approved", "rejected", "cancelled"],"worker_change_request_status": ["open", "done", "declined"],"worker_change_topic": ["name", "phone", "email", "next_of_kin", "nin", "tax_pension", "work", "other"],"worker_status": ["active", "ended"]
           }

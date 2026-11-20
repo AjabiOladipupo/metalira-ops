@@ -134,7 +134,8 @@ as $$
 $$;
 
 revoke all on function private.rate_key_part(text) from public, anon;
-grant execute on function private.rate_key_part(text) to authenticated;
+-- The unique index evaluates it as whoever writes the row: signed-in users and the secret key.
+grant execute on function private.rate_key_part(text) to authenticated, service_role;
 
 -- One post of a name and band per site: "Gate A · Day" once at Apapa. Without a post name the
 -- role names the post. Compared as rate keys are.
