@@ -6,11 +6,6 @@
 -- shift_date on or after the company's own today, private.org_today). Past shifts never block:
 -- turning Shifts off deletes nothing and keeps the history. The message gives the count and the
 -- first date so the owner knows what to remove.
---
--- This file's timestamp sits before 3.2's roster migration (slice 3.0's assigned range). A
--- plpgsql body is resolved when it runs, not when it is created, so the reference to
--- public.shift_assignments is fine on a fresh database; nothing calls the function until the
--- roster exists.
 
 create or replace function private.assert_shifts_can_be_switched_off(p_organisation_id uuid)
 returns void
