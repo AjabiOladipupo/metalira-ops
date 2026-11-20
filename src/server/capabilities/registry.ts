@@ -57,7 +57,11 @@ import {
 } from "@/server/business/headcount-data";
 import { contractIdSchema } from "@/server/business/headcount-schemas";
 import { activateContractSpec, endContractSpec } from "@/server/business/activation";
-import { loadPosts, loadRequiredShiftsSummary } from "@/server/business/activation-data";
+import {
+  loadPosts,
+  loadRequiredShifts,
+  loadRequiredShiftsSummary,
+} from "@/server/business/activation-data";
 import {
   addPostSpec,
   cancelRequirementChangeSpec,
@@ -128,6 +132,10 @@ import {
   updateWorkerSpec,
 } from "@/server/people/workers";
 import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
+import { saveAttendanceSpec, loadAttendanceSettings } from "@/server/identity/attendance-settings";
+import { consentKindSchema } from "@/server/workforce/consents";
+import { CONSENT_READERS, loadConsentsSummary } from "@/server/workforce/consents-data";
+import { markReadSchema } from "@/server/workforce/inbox";
 import {
   addCheckpointSpec,
   createSiteSpec,
@@ -139,6 +147,20 @@ import {
   setSiteStatusSpec,
   updateSiteSpec,
 } from "@/server/sites/sites";
+import {
+  ROSTER_EDITORS,
+  assignShiftSpec,
+  copyLastWeekSpec,
+  removeAssignmentSpec,
+} from "@/server/workforce/roster";
+import {
+  loadRosterCandidates,
+  loadRosterSettings,
+  loadRosterSummary,
+  loadRosterWeek,
+} from "@/server/workforce/roster-data";
+import { rankCandidates } from "@/lib/roster-suggestions";
+import { mondayOf } from "@/lib/roster";
 
 import {
   previewAddContact,
@@ -162,6 +184,7 @@ import {
   previewChangeRequirement,
   previewClosePost,
 } from "./live-change-previews";
+import { previewCopyWeek } from "./roster-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -193,12 +216,25 @@ const GO_LIVE =
   "Makes a contract live or ends it, which starts or stops rosters and billing: kept to people for now (the owner may enable it later).";
 const LIVE_CHANGE =
   "Changes a live contract's staffing over several dated rows, which rosters and billing follow: kept to people for now (the owner may enable it later).";
+const COPY_WEEK =
+  "Writes a whole week of assignments at once: kept to people for now, with its preview on the screen (the owner may enable it later).";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
 /** A contract's id, for the document reads. */
 const contractIdInput = z.object({ contractId: z.uuid("Choose a contract") });
 const documentIdInput = z.object({ documentId: z.uuid("Choose a document") });
+
+/** A site and week on the roster (slice 3.2). */
+const rosterWeekInput = z.object({
+  siteId: z.uuid("Choose a site"),
+  weekStart: z.iso.date("Choose a week").optional(),
+});
+const rosterSummaryInput = z.object({ weekStart: z.iso.date("Choose a week").optional() });
+const rosterSuggestionsInput = z.object({
+  postId: z.uuid("Choose a post"),
+  date: z.iso.date("Choose a day"),
+});
 
 /** Posts, roster requirements and required shifts are read by every manager role (slice 2.7). */
 const POST_READERS = ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"] as const;
@@ -358,6 +394,30 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("identity/company-actions", "uploadLogo"),
     agent: false,
     agentNote: "Takes a file upload.",
+  },
+
+  {
+    name: "company.save_attendance",
+    description:
+      "Sets how many minutes late a clock-in may be, and when a missing one is a no-show.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(saveAttendanceSpec),
+    changes: "one",
+    action: at("identity/attendance-actions", "saveAttendance"),
+    agent: true,
+  },
+  {
+    name: "company.attendance_settings",
+    description: "Reads the late grace period and the no-show time, in minutes.",
+    kind: "read",
+    audience: "manager",
+    roles: ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"],
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ organisationId }) => loadAttendanceSettings(organisationId),
+    agent: true,
   },
 
   // -------------------------------------------------------------------------
@@ -928,6 +988,59 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/staff-id-actions", "unlockSignInAction"),
     agent: false,
     agentNote: "Restores sign-in access: kept to people.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Consents and inbox (workforce/consent-actions.ts, inbox-actions.ts, slice 3.1)
+  // -------------------------------------------------------------------------
+  {
+    name: "me.accept_consent",
+    description: "A worker agrees to share their location or take a selfie at clock-in.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: consentKindSchema,
+    changes: "one",
+    action: at("workforce/consent-actions", "acceptConsentAction"),
+    agent: false,
+    agentNote: "Consent is the worker's own choice, made in the worker app.",
+  },
+  {
+    name: "me.withdraw_consent",
+    description:
+      "A worker withdraws their location or selfie consent; their supervisor clocks them in.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: consentKindSchema,
+    changes: "one",
+    action: at("workforce/consent-actions", "withdrawConsentAction"),
+    agent: false,
+    agentNote: "Consent is the worker's own choice, made in the worker app.",
+  },
+  {
+    name: "me.mark_inbox_read",
+    description: "A worker marks one inbox message, or all of them, as read.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: markReadSchema,
+    changes: "many",
+    action: at("workforce/inbox-actions", "markInboxReadAction"),
+    agent: false,
+    agentNote: "Worker app only.",
+  },
+  {
+    name: "consents.summary",
+    description: "Counts active workers who agreed to location and to selfies at clock-in.",
+    kind: "read",
+    audience: "manager",
+    roles: CONSENT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadConsentsSummary(supabase, organisationId),
+    agent: true,
   },
 
   // -------------------------------------------------------------------------
@@ -1552,6 +1665,125 @@ export const CAPABILITIES: readonly Capability[] = [
       return detail && { ...detail, changes: detail.changes.map((c) => ({ ...c, reason: null })) };
     },
     agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Roster (workforce/roster-actions.ts, slice 3.2)
+  // -------------------------------------------------------------------------
+  {
+    name: "roster.week",
+    description:
+      "Shows one site's roster for a week: each post's people required and assigned per day, and the uncovered shifts.",
+    kind: "read",
+    audience: "manager",
+    roles: ROSTER_EDITORS,
+    input: rosterWeekInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { siteId, weekStart } = rosterWeekInput.parse(input);
+      const [today, settings] = await Promise.all([
+        organisationToday(supabase, organisationId),
+        loadRosterSettings(supabase, organisationId),
+      ]);
+      const { week } = await loadRosterWeek(
+        supabase,
+        organisationId,
+        siteId,
+        mondayOf(weekStart ?? today),
+        settings.timeZone,
+      );
+      return week;
+    },
+    agent: true,
+  },
+  {
+    name: "roster.summary",
+    description:
+      "Counts the shifts required, covered and open for a week, per site (this week unless a week is given).",
+    kind: "read",
+    audience: "manager",
+    roles: ROSTER_EDITORS,
+    input: rosterSummaryInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { weekStart } = rosterSummaryInput.parse(input ?? {});
+      const today = await organisationToday(supabase, organisationId);
+      return loadRosterSummary(supabase, organisationId, today, weekStart);
+    },
+    agent: true,
+  },
+  {
+    name: "roster.suggestions",
+    description:
+      "Ranks who could cover one post on one day: mapped to the site, free then and under the weekly standard hours first.",
+    kind: "read",
+    audience: "manager",
+    roles: ROSTER_EDITORS,
+    input: rosterSuggestionsInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { postId, date } = rosterSuggestionsInput.parse(input);
+      const settings = await loadRosterSettings(supabase, organisationId);
+      const [shifts, candidates] = await Promise.all([
+        loadRequiredShifts(supabase, organisationId, date, date),
+        loadRosterCandidates(supabase, organisationId, mondayOf(date)),
+      ]);
+      const shift = shifts.find((s) => s.postId === postId);
+      if (!shift) return { required: false, suggestions: [] };
+      const ranked = rankCandidates(
+        {
+          postId,
+          siteId: shift.siteId,
+          date,
+          startsAt: shift.startsAt,
+          endsAt: shift.endsAt,
+          weekStart: mondayOf(date),
+        },
+        candidates.workers,
+        candidates.booked,
+        { weeklyStandardMinutes: settings.weeklyStandardMinutes, timeZone: settings.timeZone },
+      );
+      return { required: true, suggestions: ranked.filter((s) => s.eligible).slice(0, 10) };
+    },
+    agent: true,
+  },
+  {
+    name: "roster.assign",
+    description:
+      "Assigns one employee to a post on a day; refused for leavers, closed posts, archived sites, full or overlapping shifts.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(assignShiftSpec),
+    changes: "one",
+    action: at("workforce/roster-actions", "assignShiftAction"),
+    agent: true,
+  },
+  {
+    name: "roster.remove_assignment",
+    description:
+      "Takes an employee off a shift, with an optional reason; the assignment is kept, marked removed.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(removeAssignmentSpec),
+    changes: "one",
+    action: at("workforce/roster-actions", "removeAssignmentAction"),
+    agent: true,
+  },
+  {
+    name: "roster.copy_last_week",
+    description:
+      "Copies last week's assignments at a site into this week, listing every one it can't copy and why.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(copyLastWeekSpec),
+    changes: "many",
+    action: at("workforce/roster-actions", "copyLastWeekAction"),
+    preview: previewCopyWeek,
+    agent: false,
+    agentNote: COPY_WEEK,
   },
 ];
 

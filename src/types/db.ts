@@ -355,6 +355,32 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"inbox_items": {
+                  Row: {
+                    "body": string,"created_at": string,"emailed_at": string | null,"id": string,"kind": string,"link_path": string | null,"organisation_id": string,"read_at": string | null,"title": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "body": string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind": string,"link_path"?: string | null,"organisation_id": string,"read_at"?: string | null,"title": string,"worker_id": string
+                  }
+                  Update: {
+                    "body"?: string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind"?: string,"link_path"?: string | null,"organisation_id"?: string,"read_at"?: string | null,"title"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "inbox_items_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "inbox_items_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"membership_invites": {
                   Row: {
                     "accepted_at": string | null,"accepted_by": string | null,"created_at": string,"created_by": string | null,"email": string,"expires_at": string,"id": string,"organisation_id": string,"owner_change_id": string | null,"revoked_at": string | null,"revoked_by": string | null,"role": Database["public"]['Enums']["membership_role"],"sent_at": string,"token_hash": string
@@ -429,14 +455,14 @@ isOneToOne: false
                   ]
                 },"organisations": {
                   Row: {
-                    "address": string | null,"auto_email_receipts": boolean,"company_code": string,"created_at": string,"created_by": string | null,"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"legal_name": string | null,"logo_path": string | null,"name": string,"pay_cycle_start_day": number,"pay_day": number,"payment_terms_days": number,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
+                    "address": string | null,"auto_email_receipts": boolean,"company_code": string,"created_at": string,"created_by": string | null,"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"no_show_after_minutes": number,"pay_cycle_start_day": number,"pay_day": number,"payment_terms_days": number,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"company_code": string,"created_at"?: string,"created_by"?: string | null,"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"company_code": string,"created_at"?: string,"created_by"?: string | null,"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"no_show_after_minutes"?: number,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Update: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"no_show_after_minutes"?: number,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Relationships: [
                     
@@ -643,6 +669,70 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id","contract_id","site_id"]
     }
                   ]
+                },"shift_assignments": {
+                  Row: {
+                    "assigned_at": string,"assigned_by": string | null,"created_at": string,"ends_at": string,"id": string,"organisation_id": string,"removed_at": string | null,"removed_by": string | null,"removed_reason": string | null,"shift_date": string,"shift_id": string,"site_id": string,"starts_at": string,"status": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "assigned_at"?: string,"assigned_by"?: string | null,"created_at"?: string,"ends_at": string,"id"?: string,"organisation_id": string,"removed_at"?: string | null,"removed_by"?: string | null,"removed_reason"?: string | null,"shift_date": string,"shift_id": string,"site_id": string,"starts_at": string,"status"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "assigned_at"?: string,"assigned_by"?: string | null,"created_at"?: string,"ends_at"?: string,"id"?: string,"organisation_id"?: string,"removed_at"?: string | null,"removed_by"?: string | null,"removed_reason"?: string | null,"shift_date"?: string,"shift_id"?: string,"site_id"?: string,"starts_at"?: string,"status"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "shift_assignments_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "shift_assignments_shift_fkey"
+      columns: ["organisation_id","shift_id","site_id","shift_date"]
+isOneToOne: false
+      referencedRelation: "shifts"
+      referencedColumns: ["organisation_id","id","site_id","shift_date"]
+    },{
+      foreignKeyName: "shift_assignments_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"shifts": {
+                  Row: {
+                    "contract_id": string,"created_at": string,"created_by": string | null,"ends_at": string,"id": string,"organisation_id": string,"post_id": string,"required_count": number,"requirement_id": string | null,"shift_date": string,"site_id": string,"starts_at": string,"status": string,"updated_at": string,"work_unit_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "contract_id": string,"created_at"?: string,"created_by"?: string | null,"ends_at": string,"id"?: string,"organisation_id": string,"post_id": string,"required_count": number,"requirement_id"?: string | null,"shift_date": string,"site_id": string,"starts_at": string,"status"?: string,"updated_at"?: string,"work_unit_id"?: string | null
+                  }
+                  Update: {
+                    "contract_id"?: string,"created_at"?: string,"created_by"?: string | null,"ends_at"?: string,"id"?: string,"organisation_id"?: string,"post_id"?: string,"required_count"?: number,"requirement_id"?: string | null,"shift_date"?: string,"site_id"?: string,"starts_at"?: string,"status"?: string,"updated_at"?: string,"work_unit_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "shifts_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "shifts_post_fkey"
+      columns: ["organisation_id","post_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "posts"
+      referencedColumns: ["organisation_id","id","contract_id","site_id"]
+    },{
+      foreignKeyName: "shifts_requirement_fkey"
+      columns: ["organisation_id","requirement_id"]
+isOneToOne: false
+      referencedRelation: "roster_requirements"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"site_checkpoints": {
                   Row: {
                     "created_at": string,"created_by": string | null,"id": string,"location": unknown,"name": string,"organisation_id": string,"qr_rotated_at": string | null,"qr_token": string,"retired_at": string | null,"retired_by": string | null,"site_id": string,"sort_order": number,"status": string,"updated_at": string
@@ -791,6 +881,32 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"worker_consents": {
+                  Row: {
+                    "accepted_at": string,"channel": string,"created_by": string | null,"id": string,"kind": string,"notice_version": string,"organisation_id": string,"withdrawn_at": string | null,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "accepted_at"?: string,"channel"?: string,"created_by"?: string | null,"id"?: string,"kind": string,"notice_version": string,"organisation_id": string,"withdrawn_at"?: string | null,"worker_id": string
+                  }
+                  Update: {
+                    "accepted_at"?: string,"channel"?: string,"created_by"?: string | null,"id"?: string,"kind"?: string,"notice_version"?: string,"organisation_id"?: string,"withdrawn_at"?: string | null,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "worker_consents_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "worker_consents_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"worker_credentials": {
                   Row: {
                     "auth_user_id": string,"created_at": string,"failed_attempts": number,"held_at": string | null,"id": string,"last_sign_in_at": string | null,"locked_until": string | null,"organisation_id": string,"pin_set_at": string,"privacy_notice_accepted_at": string,"updated_at": string,"worker_id": string
@@ -890,6 +1006,9 @@ isOneToOne: false
             "accept_membership_invite":
 { Args: { "p_token": string }; Returns: string
                            },
+"accept_worker_consent":
+{ Args: { "p_kind": string,"p_notice_version": string,"p_organisation_id": string }; Returns: string
+                           },
 "accept_worker_invite":
 { Args: { "p_auth_user_id": string,"p_pin_hash": string,"p_token": string }; Returns: {
               "organisation_id": string,"pin_reset": boolean,"worker_id": string
@@ -915,6 +1034,9 @@ isOneToOne: false
                            },
 "apply_due_org_bank_accounts":
 { Args: { "p_organisation_id": string }; Returns: number
+                           },
+"assign_worker_to_shift":
+{ Args: { "p_organisation_id": string,"p_post_id": string,"p_shift_date": string,"p_worker_id": string }; Returns: Json
                            },
 "begin_bank_account_lookup":
 { Args: { "p_bank_account_digest": string,"p_bank_account_last4": string,"p_bank_code": string,"p_client_ip"?: string,"p_organisation_id": string,"p_purpose": Database["public"]['Enums']["bank_lookup_purpose"],"p_user_id": string,"p_worker_id": string }; Returns: string
@@ -942,6 +1064,9 @@ isOneToOne: false
 "choose_company_plan":
 { Args: { "p_expected_workers": number,"p_organisation_id": string,"p_plan": string }; Returns: undefined
                            },
+"claim_inbox_email":
+{ Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
+                           },
 "client_billing":
 { Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {
               "billing_address": string,"billing_terms_days": number,"client_id": string,"deducts_wht": string,"legal_name": string,"notes": string,"rc_number": string,"state": string,"tin": string,"withholds_vat": boolean
@@ -961,6 +1086,9 @@ isOneToOne: false
                            },
 "contract_welcome_allowed":
 { Args: { "p_contact_ids": (string)[],"p_contract_id": string,"p_organisation_id": string }; Returns: string[]
+                           },
+"copy_last_week":
+{ Args: { "p_dry_run"?: boolean,"p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
                            },
 "create_client":
 { Args: { "p_billing_address"?: string,"p_billing_terms_days"?: number,"p_contact_email"?: string,"p_contact_name"?: string,"p_contact_phone"?: string,"p_legal_name"?: string,"p_name": string,"p_notes"?: string,"p_organisation_id": string,"p_rc_number"?: string,"p_site_name"?: string,"p_state"?: string,"p_tin"?: string }; Returns: string
@@ -1044,6 +1172,9 @@ isOneToOne: false
 "reject_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"remove_assignment":
+{ Args: { "p_assignment_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
+                           },
 "remove_contract_document":
 { Args: { "p_document_id": string,"p_organisation_id": string,"p_reason": string }; Returns: undefined
                            },
@@ -1074,6 +1205,11 @@ isOneToOne: false
                            },
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
+"roster_assignment_details":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_site_id": string,"p_to": string }; Returns: {
+              "assigned_at": string,"assigned_by": string,"id": string,"removed_at": string,"removed_by": string,"removed_reason": string
+            }[]
                            },
 "rotate_checkpoint_qr":
 { Args: { "p_checkpoint_id": string,"p_organisation_id": string }; Returns: undefined
@@ -1113,6 +1249,9 @@ isOneToOne: false
                            },
 "withdraw_org_bank_account":
 { Args: { "p_id": string,"p_organisation_id": string }; Returns: string
+                           },
+"withdraw_worker_consent":
+{ Args: { "p_kind": string,"p_organisation_id": string }; Returns: boolean
                            },
 "worker_bank_details_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string,"p_worker_id": string }; Returns: {
