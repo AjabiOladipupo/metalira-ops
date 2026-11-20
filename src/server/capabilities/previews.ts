@@ -9,11 +9,7 @@ import {
   type updateContractSchema,
 } from "@/server/business/contract-schemas";
 import { loadRateCardVersions, organisationToday } from "@/server/business/contracts-data";
-import {
-  loadHeadcountContext,
-  organisationToday,
-  pricingFor,
-} from "@/server/business/headcount-data";
+import { loadHeadcountContext, pricingFor } from "@/server/business/headcount-data";
 import type {
   addHeadcountSchema,
   removeHeadcountSchema,

@@ -41,7 +41,6 @@ import {
   contractWeek,
   loadHeadcountContext,
   loadHeadcountSummary,
-  organisationToday,
 } from "@/server/business/headcount-data";
 import { contractIdSchema } from "@/server/business/headcount-schemas";
 import {
