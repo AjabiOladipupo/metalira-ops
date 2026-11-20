@@ -1,12 +1,12 @@
 name: CI
 
-# Actions minutes are limited (private repo, free plan). The quick `check` job runs on every
-# push. The heavy `rls` and `e2e` jobs run only on pull requests labelled `ready-to-merge`
-# (add the label once the slice is done and passes locally), and never again on main after
-# a merge: every PR already includes main before it is merged. Docs-only changes skip CI.
+# The repository is public, so Actions minutes are free. Every pull request push and every
+# push to main runs all three jobs: `check` (typecheck, lint, unit tests), `rls` (database and
+# isolation tests) and `e2e` (Playwright). Agents run the database and screen tests here
+# instead of queueing for the one local Supabase stack. Docs-only changes skip CI.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
     paths-ignore:
       - "docs/**"
       - "**/*.md"
@@ -40,7 +40,6 @@ jobs:
       - run: pnpm test
 
   rls:
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -69,7 +68,6 @@ jobs:
         run: pnpm exec supabase stop --no-backup
 
   e2e:
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ready-to-merge')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
