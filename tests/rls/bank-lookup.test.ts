@@ -235,10 +235,13 @@ describe("who writes and reads lookups", () => {
   });
 
   it("stops a user at 30 lookups an hour", async () => {
-    const busy = await createTestUser("bl-busy", "Busy Hr");
-    await addMember(busy, "hr");
-    for (let i = 0; i < 30; i += 1) await lookup(busy, "worker_bank", { workerId });
-    await expect(lookup(busy, "worker_bank", { workerId })).rejects.toMatchObject({
+    // Its own company, so the company's allowance isn't what stops it.
+    const busy = await createTenantUser("bl-busy", "Busy Lookups Ltd");
+    await db.query("update public.organisations set setup_completed_at = now() where id = $1", [
+      busy.orgId,
+    ]);
+    for (let i = 0; i < 30; i += 1) await lookup(busy, "worker_bank", { orgId: busy.orgId });
+    await expect(lookup(busy, "worker_bank", { orgId: busy.orgId })).rejects.toMatchObject({
       code: "MLBL1",
     });
   });
@@ -255,39 +258,28 @@ describe("who writes and reads lookups", () => {
 
   it("limits one network address to 60 lookups an hour", async () => {
     const ip = `203.0.113.${Math.floor(Math.random() * 200) + 1}`;
-    const users: TestUser[] = [];
-    for (let u = 0; u < 3; u += 1) {
-      const user = await createTestUser(`bl-ip-${u}`, `Ip User ${u}`);
-      await addMember(user, "hr");
-      users.push(user);
+    // Three owners of three companies, so neither the user nor the company limit stops it.
+    const owners: TenantUser[] = [];
+    for (let u = 0; u < 4; u += 1) {
+      const o = await createTenantUser(`bl-ip-${u}`, `Ip Lookups ${u} Ltd`);
+      await db.query("update public.organisations set setup_completed_at = now() where id = $1", [
+        o.orgId,
+      ]);
+      owners.push(o);
     }
-    let made = 0;
-    for (const user of users) {
-      for (let i = 0; i < 20; i += 1) {
-        await makeLookup(admin, {
-          viaServer: true,
-          orgId: owner.orgId,
-          userId: user.id,
-          purpose: "worker_bank",
-          workerId,
-          last4: "7712",
-          clientIp: ip,
-        });
-        made += 1;
-      }
-    }
-    expect(made).toBe(60);
-    await expect(
+    const viaIp = (o: TenantUser) =>
       makeLookup(admin, {
         viaServer: true,
-        orgId: owner.orgId,
-        userId: people.admin.id,
+        orgId: o.orgId,
+        userId: o.id,
         purpose: "worker_bank",
-        workerId,
         last4: "7712",
         clientIp: ip,
-      }),
-    ).rejects.toMatchObject({ code: "MLBL1" });
+      });
+    for (const o of owners.slice(0, 3)) {
+      for (let i = 0; i < 20; i += 1) await viaIp(o);
+    }
+    await expect(viaIp(owners[3]!)).rejects.toMatchObject({ code: "MLBL1" });
   });
 });
 
@@ -472,7 +464,10 @@ describe("test lookups on a database that doesn't allow them (the hosted project
       expect(approve.error?.code).toBe("MLBLT");
 
       // A live bank's answer is still usable.
-      const live = await lookup(people.admin, "worker_bank", { workerId, accountName: "ADEYEMI JOHN" });
+      const live = await lookup(people.admin, "worker_bank", {
+        workerId,
+        accountName: "ADEYEMI JOHN",
+      });
       const liveBank = await makeLookup(admin, {
         viaServer: true,
         orgId: owner.orgId,
