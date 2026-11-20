@@ -347,9 +347,10 @@ create table public.rate_card_lines (
   -- The line's own overtime rate per hour (owner decision), or null.
   ot_rate_kobo bigint
     constraint rate_card_lines_ot_rate_range check (ot_rate_kobo between 1 and 100000000000),
-  -- An entry helper, 10000 = 1.0×. What bills is ot_rate_kobo per overtime hour; on an hourly line
-  -- the app works it out from the multiplier (rounded half up once) and stores both. On any other
-  -- unit a multiplier can't make an hourly rate, so it needs ot_rate_kobo with it.
+  -- An entry helper, 10000 = 1.0×. What bills is ot_rate_kobo per overtime hour. On an hourly line
+  -- rate_card_insert_lines works it out from the multiplier, (rate × bps + 5000) / 10000 (half up
+  -- once, as roundHalfUp), and a typed rate must equal that. On any other unit the multiplier is
+  -- display-only and needs ot_rate_kobo with it.
   ot_multiplier_bps integer
     constraint rate_card_lines_ot_multiplier_range check (ot_multiplier_bps between 10000 and 30000),
   -- What the line pays for, which sets its withholding tax (owner's accountant, 19 Nov 2026):
@@ -369,8 +370,9 @@ create table public.rate_card_lines (
   created_at timestamptz not null default now(),
   created_by uuid default auth.uid(),
   constraint rate_card_lines_organisation_id_id_key unique (organisation_id, id),
+  -- A multiplier never stands alone: the hourly rate it gives (or was typed with) is stored.
   constraint rate_card_lines_ot_needs_rate check (
-    ot_multiplier_bps is null or ot_rate_kobo is not null or unit = 'hour'
+    ot_multiplier_bps is null or ot_rate_kobo is not null
   ),
   constraint rate_card_lines_rate_card_fkey foreign key (organisation_id, rate_card_id)
     references public.rate_cards (organisation_id, id)
@@ -759,6 +761,9 @@ as $$
 declare
   v_line jsonb;
   v_index integer := 0;
+  v_rate bigint;
+  v_ot bigint;
+  v_mult integer;
 begin
   if p_lines is null or jsonb_typeof(p_lines) <> 'array' or jsonb_array_length(p_lines) = 0 then
     raise exception 'Add at least one rate line.' using errcode = 'MLRC8';
@@ -776,11 +781,30 @@ begin
     then
       raise exception 'Rate line % is not in the expected shape.', v_index + 1 using errcode = 'MLRC8';
     end if;
-    -- Whole kobo as digits only, checked before the cast so junk gets a plain reason.
+    -- Whole kobo and whole basis points as digits only, checked before the casts so junk gets a
+    -- plain reason.
     if (v_line ->> 'rate_kobo') !~ '^[0-9]{1,12}$'
       or ((v_line ->> 'ot_rate_kobo') is not null and (v_line ->> 'ot_rate_kobo') !~ '^[0-9]{1,12}$')
     then
       raise exception 'Rate line % needs amounts in whole kobo.', v_index + 1 using errcode = 'MLRC8';
+    end if;
+    if ((v_line ->> 'ot_multiplier_bps') is not null and (v_line ->> 'ot_multiplier_bps') !~ '^[0-9]{1,5}$')
+      or ((v_line ->> 'wht_rate_bps') is not null and (v_line ->> 'wht_rate_bps') !~ '^[0-9]{1,5}$')
+    then
+      raise exception 'Rate line % needs rates in whole basis points.', v_index + 1
+        using errcode = 'MLRC8';
+    end if;
+    v_rate := (v_line ->> 'rate_kobo')::bigint;
+    v_ot := (v_line ->> 'ot_rate_kobo')::bigint;
+    v_mult := (v_line ->> 'ot_multiplier_bps')::integer;
+    -- On an hourly line the multiplier gives the overtime rate, half up once (exact in bigint).
+    if v_line ->> 'unit' = 'hour' and v_mult is not null then
+      if v_ot is null then
+        v_ot := (v_rate * v_mult + 5000) / 10000;
+      elsif v_ot <> (v_rate * v_mult + 5000) / 10000 then
+        raise exception 'Rate line % has an overtime rate that doesn''t match its multiplier.',
+          v_index + 1 using errcode = 'MLRC8';
+      end if;
     end if;
     insert into public.rate_card_lines (
       organisation_id, rate_card_id, role, band, unit, rate_kobo, ot_rate_kobo,
@@ -792,9 +816,9 @@ begin
       btrim(v_line ->> 'role'),
       coalesce(nullif(btrim(v_line ->> 'band'), ''), 'standard'),
       v_line ->> 'unit',
-      (v_line ->> 'rate_kobo')::bigint,
-      (v_line ->> 'ot_rate_kobo')::bigint,
-      (v_line ->> 'ot_multiplier_bps')::integer,
+      v_rate,
+      v_ot,
+      v_mult,
       coalesce(nullif(v_line ->> 'service_type', ''), 'services'),
       (v_line ->> 'wht_rate_bps')::integer,
       v_index
@@ -808,7 +832,7 @@ $$;
 revoke all on function private.rate_card_insert_lines(uuid, uuid, jsonb) from public, anon, authenticated;
 
 -- Locks the contract row and returns its status, after the caller's role is checked. Every
--- rate card and WHT write goes through here first, so writes to one contract happen one at a
+-- rate card write goes through here first, so writes to one contract happen one at a
 -- time.
 create function private.lock_contract_for_rates(
   p_organisation_id uuid,
