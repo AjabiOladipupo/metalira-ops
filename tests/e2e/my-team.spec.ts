@@ -282,9 +282,9 @@ for (const width of [1440, 390] as const) {
     );
     await expectNoHorizontalScroll(page);
     await request.getByRole("button", { name: "Approve, send to HR" }).click();
-    await expect(
-      page.getByRole("status").filter({ hasText: "Approved · sent to HR" }),
-    ).toBeVisible({ timeout: 15_000 });
+    // The decision revalidates the page: the request stays listed, now with HR, and the form goes.
+    await expect(request).toContainText("With HR", { timeout: 15_000 });
+    await expect(request.getByRole("button", { name: "Approve, send to HR" })).toHaveCount(0);
 
     // Queries: New query for Musa with a reply-by date.
     await page.goto("/app/team?tab=queries");
