@@ -99,7 +99,10 @@ export const NAV: NavGroup[] = [
         label: "People",
         module: "people",
         href: "/app/people",
-        roles: ["owner", "admin", "hr", "ops_manager"],
+        // Slice 4.0b (owner, 21 Nov 2026): line managers get the list, showing only their
+        // reportees (public.my_reportees). Adding, importing, editing and invites stay closed
+        // to them in EXTRA_PAGES, and every write action checks its own roles.
+        roles: ["owner", "admin", "hr", "ops_manager", "line_manager"],
         icon: "people",
         description: "Every worker, their pay rate and where they are mapped.",
         empty: "No people yet. Import a staff list to add your team.",
