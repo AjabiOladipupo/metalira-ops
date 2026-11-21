@@ -282,7 +282,9 @@ test("HR approves 3 days of leave and the 3 shifts appear in the Uncovered tray"
   await expect(h.getByTestId("hr-preview")).toContainText("Opens 3 shifts: Gate A · Day,");
   await expectNoHorizontalScroll(h);
   await h.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect(h.getByText(/3 shifts back to uncovered/)).toBeVisible({ timeout: 15_000 });
+  // The decision form leaves the page once the request is decided (it revalidates), so check the
+  // HR step line rather than the form's message.
+  await expect(h.getByText(/Approved by Ngozi Eze/)).toBeVisible({ timeout: 15_000 });
   await hrPhone.close();
 
   // Ops again: the three days are in the tray, with the On leave chip on the grid.
