@@ -21,7 +21,7 @@ import { createAdminSupabase } from "@/server/supabase/admin";
  *   one worker is never recorded under another login (`wrong_session`, retried later).
  * - `runUploadSelfie` takes a punch's selfie: it checks the bytes (type from the magic bytes,
  *   200 KB at most), checks with the worker's own session that the punch is theirs and wants a
- *   selfie, uploads it with the secret key to the punch's own path and records it through
+ *   selfie, checks Shifts is on and the login's hourly cap (begin_punch_selfie_upload), uploads it with the secret key to the punch's own path and records it through
  *   public.attach_punch_selfie (secret key only), which checks all of it again.
  *
  * Every failure comes back as a fixed code (src/lib/punches/codes.ts): never a database message,
@@ -171,6 +171,18 @@ export async function runUploadSelfie(
     ext,
   });
   const admin = createAdminSupabase({ channel: "worker_app" });
+  // Shifts on for the punch's company, and at most 30 uploads an hour per login (review L3).
+  const begun = await admin.rpc("begin_punch_selfie_upload", {
+    p_punch_id: punch.id,
+    p_actor: ctx.userId,
+  });
+  if (begun.error) {
+    if (begun.error.code === "MLPS3") return { ok: false, code: "rate_limited" };
+    if (begun.error.code === "MLPU4") return { ok: false, code: "shifts_off" };
+    if (begun.error.code === "MLPS1") return { ok: false, code: "photo_refused" };
+    console.error("workforce.selfie_failed:", begun.error.code ?? "unknown");
+    return { ok: false, code: "photo_failed" };
+  }
   const upload = await admin.storage.from(PUNCH_PHOTOS_BUCKET).upload(path, bytes, {
     contentType: SELFIE_MIME[ext],
     upsert: false,
