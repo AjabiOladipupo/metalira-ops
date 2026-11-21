@@ -225,6 +225,14 @@ import {
 } from "@/server/workforce/roster-data";
 import { TIMESHEET_READERS, addCorrectionSpec } from "@/server/workforce/timesheets";
 import {
+  approveCleanSpec,
+  approveLineSpec,
+  disputeLineSchema,
+  rejectLineSpec,
+  reopenLineSpec,
+} from "@/server/workforce/timesheet-approval";
+import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-review-data";
+import {
   loadTimesheetLines,
   loadTimesheetSummary,
   summariseLines,
@@ -264,6 +272,7 @@ import {
   previewPreset,
 } from "./leave-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
+import { previewApproveClean, previewCorrection } from "./timesheet-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
 /**
@@ -301,6 +310,8 @@ const PUBLISH_WEEK =
   "Publishes a whole week and tells every affected worker by inbox and email: kept to people for now, with its preview on the screen (the owner may enable it later).";
 const QUERY_DECISION =
   "A query is a disciplinary record about a person: raising, following up and closing one are a manager's decision.";
+const APPROVE_TIMESHEET =
+  "Approving, rejecting or reopening a day decides what a person is paid and a client is billed: a person's decision (owner, Phase 4), with the preview on the screen.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -2406,9 +2417,91 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(addCorrectionSpec),
     changes: "one",
     action: at("workforce/timesheet-actions", "addTimesheetCorrectionAction"),
+    // Slice 4.3 (must-do 4): the preview shows the minutes now against after the correction.
+    preview: previewCorrection,
+    agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Timesheet approval and Work Units (workforce/timesheet-approval-actions.ts, slice 4.3)
+  // -------------------------------------------------------------------------
+  {
+    name: "timesheets.review",
+    description:
+      "Counts a pay period's days to decide, clean, flagged, disputed and approved, with Work Units made and billable.",
+    kind: "read",
+    audience: "manager",
+    roles: TIMESHEET_READERS,
+    input: periodInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { period } = periodInput.parse(input ?? {});
+      return loadReviewSummary(supabase, organisationId, period);
+    },
+    agent: true,
+  },
+  {
+    name: "timesheets.approve",
+    description:
+      "Approves one timesheet day; on a post with minutes it makes the day's Work Unit. Never your own day.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(approveLineSpec),
+    changes: "many",
+    action: at("workforce/timesheet-approval-actions", "approveTimesheetLineAction"),
     agent: false,
-    agentNote:
-      "Changes the hours a person is paid for: kept to people until slice 4.3 adds a preview (current against new minutes).",
+    agentNote: APPROVE_TIMESHEET,
+  },
+  {
+    name: "timesheets.reject",
+    description:
+      "Rejects one timesheet day with a reason and tells the worker. Never your own day.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(rejectLineSpec),
+    changes: "one",
+    action: at("workforce/timesheet-approval-actions", "rejectTimesheetLineAction"),
+    agent: false,
+    agentNote: APPROVE_TIMESHEET,
+  },
+  {
+    name: "timesheets.approve_clean",
+    description:
+      "Approves the clean days of a pay period at once and lists the rest by name for a person to decide.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(approveCleanSpec),
+    changes: "many",
+    action: at("workforce/timesheet-approval-actions", "approveCleanTimesheetLinesAction"),
+    preview: previewApproveClean,
+    agent: false,
+    agentNote: APPROVE_TIMESHEET,
+  },
+  {
+    name: "timesheets.reopen",
+    description:
+      "Reopens an approved or rejected day with a reason, cancelling its Work Unit so it can be decided again.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(reopenLineSpec),
+    changes: "many",
+    action: at("workforce/timesheet-approval-actions", "reopenTimesheetLineAction"),
+    agent: false,
+    agentNote: APPROVE_TIMESHEET,
+  },
+  {
+    name: "timesheets.dispute",
+    description:
+      "Lets a worker say a day on their timesheet is wrong, with a reason, from the worker app.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: disputeLineSchema,
+    changes: "many",
+    action: at("workforce/timesheet-approval-actions", "disputeTimesheetLineAction"),
+    agent: false,
+    agentNote: "A worker's own statement about their day, sent from their phone.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)

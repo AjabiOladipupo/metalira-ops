@@ -219,6 +219,24 @@ async function refresh(client: Client, from = DAY, to = DAY, orgId = owner.orgId
   });
 }
 
+/**
+ * Moves a line's status as the database owner, with the decision row slice 4.3's guard requires
+ * (a line's status follows its latest decision).
+ */
+async function setStatus(lineId: string, status: "pending" | "approved" | "rejected" | "disputed") {
+  const decision = status === "pending" ? "reopened" : status;
+  await db.query(
+    `insert into public.timesheet_decisions (organisation_id, line_id, worker_id, decision, reason,
+       actor_id, scheduled_minutes, worked_minutes, late_minutes, early_minutes, ot_minutes, exceptions)
+     select organisation_id, id, worker_id, $2::text,
+       case when $2::text = 'approved' then null else 'Set by the test' end, $3,
+       scheduled_minutes, worked_minutes, late_minutes, early_minutes, ot_minutes, exceptions
+     from public.timesheet_lines where id = $1`,
+    [lineId, decision, owner.id],
+  );
+  await db.query("update public.timesheet_lines set status = $2 where id = $1", [lineId, status]);
+}
+
 async function lineFor(assignmentId: string): Promise<Line> {
   const { rows } = await db.query<Line>(
     "select *, work_date::text as work_date from public.timesheet_lines where shift_assignment_id = $1",
@@ -689,7 +707,7 @@ describe("frozen lines", () => {
     await punch(w, asg, "in", at(DAY, "07:00"));
     expect((await refresh(owner.client)).error).toBeNull();
     const l = await lineFor(asg);
-    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    await setStatus(l.id, "approved");
     const snapshot = await lineFor(asg);
     await punch(w, asg, "out", at(DAY, "19:00"));
     expect((await refresh(owner.client)).error).toBeNull();
@@ -805,16 +823,16 @@ describe("punch_under_review follows the lines (decision 12)", () => {
     expect(await underReview(p)).toBe(true);
     // A second clock-in the line didn't pick is kept while the shift's line is open.
     expect(await underReview(second)).toBe(true);
-    await db.query("update public.timesheet_lines set status = 'disputed' where id = $1", [l.id]);
+    await setStatus(l.id, "disputed");
     expect(await underReview(p)).toBe(true);
     expect(await underReview(second)).toBe(true);
-    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    await setStatus(l.id, "approved");
     expect(await underReview(p)).toBe(false);
     // Once decided, a punch the line doesn't point at follows the 90-day age rule only (it
     // arrived before the decision): kept now, swept once old (security review L2).
     expect(await underReview(second)).toBe(true);
-    await db.query("update public.timesheet_lines set status = 'pending' where id = $1", [l.id]);
-    await db.query("update public.timesheet_lines set status = 'rejected' where id = $1", [l.id]);
+    await setStatus(l.id, "pending");
+    await setStatus(l.id, "rejected");
     expect(await underReview(p)).toBe(false);
   });
 
@@ -840,7 +858,7 @@ describe("punch_under_review follows the lines (decision 12)", () => {
     await punch(w, asg, "in", at(DAY, "07:00"));
     expect((await refresh(owner.client)).error).toBeNull();
     const l = await lineFor(asg);
-    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    await setStatus(l.id, "approved");
     const decided = await lineFor(asg);
     expect(decided.decided_at).not.toBeNull();
     // The clock-out syncs after the approval.
@@ -878,7 +896,7 @@ describe("punch_under_review follows the lines (decision 12)", () => {
     ).toBeNull();
     expect((await lineFor(asg)).in_punch_id).toBeNull();
     expect(await underReview(p)).toBe(true);
-    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    await setStatus(l.id, "approved");
     expect(await underReview(p)).toBe(false);
   });
 
@@ -920,7 +938,7 @@ describe("punch_under_review follows the lines (decision 12)", () => {
     expect((await refresh(owner.client, day, day)).error).toBeNull();
     const l = await lineFor(asg);
     expect(await due()).toBe(false);
-    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    await setStatus(l.id, "approved");
     expect(await due()).toBe(true);
   });
 });
