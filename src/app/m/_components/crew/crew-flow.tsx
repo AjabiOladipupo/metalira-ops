@@ -398,7 +398,7 @@ export function CrewFlow({
         </ul>
       )}
 
-      <div className="sticky bottom-0 flex flex-col gap-2.5 border-t border-line bg-background px-4 pt-3 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+      <div className="flex flex-col gap-2.5 border-t border-line bg-background px-4 pt-3 pb-4">
         {distance ? (
           <p className="m-0 text-[13px] text-fg-muted">{copy.yourLocation(distance)}</p>
         ) : null}
