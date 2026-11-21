@@ -140,7 +140,7 @@ function QueryActionForm({
   );
 }
 
-function QueryCard({
+export function QueryCard({
   query,
   today,
   canAct,
@@ -238,16 +238,22 @@ function QueryCard({
   );
 }
 
-/** "New query" (Team board): type, subject, what happened, reply-by date. */
-function RaiseQueryForm({
+/**
+ * "New query" (Team board): type, subject, what happened, reply-by date. On the HR file the
+ * employee is fixed; on My team (slice 4.7) `workers` gives the Employee choice.
+ */
+export function RaiseQueryForm({
   workerId,
   workerName,
+  workers,
   minDate,
   maxDate,
   defaultDate,
 }: {
   workerId: string;
   workerName: string;
+  /** The employees to choose from (My team); the fixed employee when left out. */
+  workers?: readonly { id: string; name: string }[];
   minDate: string;
   maxDate: string;
   defaultDate: string;
@@ -272,10 +278,20 @@ function RaiseQueryForm({
         key={state?.ok ? "sent" : JSON.stringify(typed ?? null)}
         action={action}
         noValidate
-        aria-label={`New query for ${workerName}`}
+        aria-label={workers ? "New query" : `New query for ${workerName}`}
         className="flex flex-col gap-3"
       >
-        <input type="hidden" name="workerId" value={workerId} />
+        {workers ? (
+          <SelectField
+            label="Employee"
+            name="workerId"
+            options={workers.map((w) => ({ value: w.id, label: w.name }))}
+            defaultValue={typed?.workerId ?? workerId}
+            error={errors?.workerId}
+          />
+        ) : (
+          <input type="hidden" name="workerId" value={workerId} />
+        )}
         <SelectField
           label="Type"
           name="kind"

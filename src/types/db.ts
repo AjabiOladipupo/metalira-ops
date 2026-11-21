@@ -2087,9 +2087,24 @@ isOneToOne: false
               "area_m2": number,"boundary": Json,"centre_lat": number,"centre_lng": number,"radius_m": number,"site_id": string
             }[]
                            },
+"team_leave_open_shifts":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "assignment_id": string,"ends_at": string,"post_id": string,"post_name": string,"request_id": string,"shift_date": string,"site_id": string,"site_name": string,"starts_at": string
+            }[]
+                           },
 "team_members":
 { Args: { "p_organisation_id": string }; Returns: {
               "email": string,"full_name": string,"joined_at": string,"membership_id": string,"role": Database["public"]['Enums']["membership_role"],"user_id": string
+            }[]
+                           },
+"team_open_shifts":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
+              "assigned_count": number,"ends_at": string,"post_id": string,"post_name": string,"required_count": number,"shift_date": string,"site_id": string,"site_name": string,"starts_at": string
+            }[]
+                           },
+"team_shifts":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
+              "assignment_id": string,"can_remove": boolean,"ends_at": string,"post_id": string,"post_name": string,"shift_date": string,"site_id": string,"site_name": string,"starts_at": string,"worker_id": string
             }[]
                            },
 "timesheet_cron_organisations":

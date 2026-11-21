@@ -56,6 +56,9 @@ async function activeOrganisationId(): Promise<string | null> {
 
 function refresh(requestId?: string): void {
   revalidatePath(LEAVE_PATH);
+  // My team (slice 4.7) shows the same requests at step 1, in both apps.
+  revalidatePath("/app/team");
+  revalidatePath("/m/team");
   if (requestId) revalidatePath(`${LEAVE_PATH}/${requestId}`);
 }
 
