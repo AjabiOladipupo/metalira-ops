@@ -191,7 +191,9 @@ export async function loadTimesheetReview(
 }
 
 /** Undecided first (disputed, flagged, needs review, clean), then decided; by date and name. */
-export function reviewRank(day: Pick<ReviewDay, "status" | "clean" | "needsReview" | "exceptions">) {
+export function reviewRank(
+  day: Pick<ReviewDay, "status" | "clean" | "needsReview" | "exceptions">,
+) {
   if (day.status === "disputed") return 0;
   if (day.status === "pending") {
     if (day.needsReview) return 1;
