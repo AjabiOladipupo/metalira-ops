@@ -2201,35 +2201,27 @@ grant execute on function public.claim_manager_email(uuid, text, uuid, integer, 
 -- 11. Timesheets skip approved leave (slice 4.2's hook)
 -- ---------------------------------------------------------------------------
 
--- Slice 4.2 (migration 20261121120000, PR #62) adds private.timesheet_on_leave as a placeholder
--- returning false and asks this slice to replace it. When 4.2's migration has run first (the
--- normal order: 120000 before 140000), the placeholder is replaced with the real check: a day
--- inside an approved request gives no timesheet line. On a database without 4.2 nothing is made.
-do $$
-begin
-  if to_regprocedure('private.timesheet_on_leave(uuid, uuid, date)') is not null then
-    execute $fn$
-      create or replace function private.timesheet_on_leave(
-        p_organisation_id uuid,
-        p_worker_id uuid,
-        p_date date
-      )
-      returns boolean
-      language sql
-      stable
-      set search_path = ''
-      as $body$
-        select exists (
-          select 1
-          from public.leave_requests r
-          where r.organisation_id = p_organisation_id
-            and r.worker_id = p_worker_id
-            and r.status = 'approved'
-            and p_date between r.start_date and r.end_date
-        )
-      $body$
-    $fn$;
-    execute 'revoke all on function private.timesheet_on_leave(uuid, uuid, date) from public, anon, authenticated';
-  end if;
-end;
+-- Slice 4.2 (migration 20261121120000) made private.timesheet_on_leave a placeholder returning
+-- false. The real check: a day inside an approved request gives no timesheet line (leave is its
+-- own record). Same signature; 4.2's refresh (a definer) calls it.
+create or replace function private.timesheet_on_leave(
+  p_organisation_id uuid,
+  p_worker_id uuid,
+  p_date date
+)
+returns boolean
+language sql
+stable
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.leave_requests r
+    where r.organisation_id = p_organisation_id
+      and r.worker_id = p_worker_id
+      and r.status = 'approved'
+      and p_date between r.start_date and r.end_date
+  )
 $$;
+
+revoke all on function private.timesheet_on_leave(uuid, uuid, date) from public, anon, authenticated;

@@ -117,6 +117,21 @@ import {
 } from "@/server/people/leave-setup";
 import { loadHolidays, loadLeaveSetupSummary } from "@/server/people/leave-setup-data";
 import { holidayYearSchema } from "@/server/people/leave-setup-schemas";
+import { loadBalances, loadLeaveRequests, loadLeaveSummary } from "@/server/people/leave-data";
+import {
+  BALANCE_READERS,
+  LEAVE_READERS,
+  adjustLeaveSpec,
+  cancelLeaveSpec,
+  decideHrSpec,
+  decideLineManagerSpec,
+} from "@/server/people/leave-requests";
+import {
+  cancelOwnLeaveSchema,
+  leaveBalancesSchema,
+  leaveListSchema,
+  requestLeaveSchema,
+} from "@/server/people/leave-request-schemas";
 import {
   applyImportFixSpec,
   cancelImportSpec,
@@ -232,7 +247,12 @@ import {
   previewChangeRequirement,
   previewClosePost,
 } from "./live-change-previews";
-import { previewEntitlement, previewHolidayCopy, previewPreset } from "./leave-previews";
+import {
+  previewEntitlement,
+  previewHolidayCopy,
+  previewHrLeaveDecision,
+  previewPreset,
+} from "./leave-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
@@ -2297,6 +2317,156 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Changes the hours a person is paid for: kept to people until slice 4.3 adds a preview (current against new minutes).",
+  },
+  // -------------------------------------------------------------------------
+  // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)
+  // -------------------------------------------------------------------------
+  {
+    name: "leave.summary",
+    description:
+      "Counts who is on leave today, requests waiting for line managers and HR, and leave starting in 14 days.",
+    kind: "read",
+    audience: "manager",
+    roles: LEAVE_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }) =>
+      loadLeaveSummary(supabase, organisationId, await organisationToday(supabase, organisationId)),
+    agent: true,
+  },
+  {
+    name: "leave.requests",
+    description:
+      "Lists leave requests with dates, days and each step's decision; ops managers see dates and type only.",
+    kind: "read",
+    audience: "manager",
+    roles: LEAVE_READERS,
+    input: leaveListSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const filter = leaveListSchema.parse(input ?? {});
+      const statuses =
+        filter.status === "waiting"
+          ? (["pending_line_manager", "pending_hr"] as const)
+          : filter.status === "approved"
+            ? (["approved"] as const)
+            : null;
+      const rows = await loadLeaveRequests(supabase, organisationId, {
+        statuses: statuses ? [...statuses] : null,
+        from: filter.from ?? null,
+        to: filter.to ?? null,
+      });
+      // No reasons or notes: names, dates, days and status only.
+      return rows.map((r) => ({
+        id: r.id,
+        worker: r.workerName,
+        type: r.leaveTypeName,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        days: r.days,
+        status: r.status,
+        yoursToDecide: r.canDecideStep1 || r.canDecideStep2,
+      }));
+    },
+    agent: true,
+  },
+  {
+    name: "leave.balances",
+    description: "Shows leave balances for the year by worker and type: granted, taken, waiting and left.",
+    kind: "read",
+    audience: "manager",
+    roles: BALANCE_READERS,
+    input: leaveBalancesSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { workerId, year } = leaveBalancesSchema.parse(input ?? {});
+      const today = await organisationToday(supabase, organisationId);
+      return loadBalances(
+        supabase,
+        organisationId,
+        year ?? Number(today.slice(0, 4)),
+        workerId ? [workerId] : undefined,
+      );
+    },
+    agent: true,
+  },
+  {
+    name: "leave.decide_line_manager",
+    description:
+      "Step 1: the worker's line manager approves a leave request (on to HR) or declines it with a note.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(decideLineManagerSpec),
+    changes: "many",
+    action: at("people/leave-request-actions", "decideLeaveLineManagerAction"),
+    agent: false,
+    agentNote: "Approving leave is a person's decision (PHASE_4.md): kept to the line manager.",
+  },
+  {
+    name: "leave.decide_hr",
+    description:
+      "Step 2: HR approves a leave request, taking the days off the balance, or declines it with a note.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(decideHrSpec),
+    changes: "many",
+    action: at("people/leave-request-actions", "decideLeaveHrAction"),
+    preview: previewHrLeaveDecision,
+    agent: false,
+    agentNote:
+      "The final leave approval is a person's decision (PHASE_4.md): kept to HR, with its preview on the screen.",
+  },
+  {
+    name: "leave.cancel",
+    description:
+      "HR cancels a leave request with a reason; cancelling approved leave gives the days back.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(cancelLeaveSpec),
+    changes: "many",
+    action: at("people/leave-request-actions", "cancelLeaveAction"),
+    agent: false,
+    agentNote: NO_PREVIEW,
+  },
+  {
+    name: "leave.adjust_balance",
+    description:
+      "HR adds or takes away leave days for one worker, type and year, with a reason kept in the ledger.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(adjustLeaveSpec),
+    changes: "one",
+    action: at("people/leave-request-actions", "adjustLeaveBalanceAction"),
+    agent: false,
+    agentNote: "Changes a worker's leave balance: kept to HR, who gives the reason.",
+  },
+  {
+    name: "me.request_leave",
+    description:
+      "A worker asks for leave of one type between two dates; the working days are counted for them.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: requestLeaveSchema,
+    changes: "one",
+    action: at("people/own-leave-actions", "requestLeaveAction"),
+    agent: false,
+    agentNote: "Asking for leave is the worker's own request, made in the worker app.",
+  },
+  {
+    name: "me.cancel_leave",
+    description: "A worker cancels their own leave request before the final decision.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: cancelOwnLeaveSchema,
+    changes: "one",
+    action: at("people/own-leave-actions", "cancelOwnLeaveAction"),
+    agent: false,
+    agentNote: "Cancelling is the worker's own choice, made in the worker app.",
   },
 ];
 

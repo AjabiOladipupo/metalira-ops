@@ -358,6 +358,7 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
     if (data.nextOfKinName !== undefined) patch.next_of_kin_name = data.nextOfKinName;
     if (data.nextOfKinPhone !== undefined) patch.next_of_kin_phone = data.nextOfKinPhone;
     if (data.supervisorClockIn !== undefined) patch.supervisor_clock_in = data.supervisorClockIn;
+    if (data.usualWorkDays !== undefined) patch.usual_work_days = data.usualWorkDays;
     if (data.annualRentDeclared !== undefined) {
       patch.annual_rent_declared_kobo = data.annualRentDeclared?.toString() ?? null;
     }

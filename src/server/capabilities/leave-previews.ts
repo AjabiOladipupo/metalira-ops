@@ -17,6 +17,9 @@ import type {
   entitlementVersionSchema,
 } from "@/server/people/leave-setup-schemas";
 
+import { previewHrDecision, type HrDecisionResult } from "@/server/people/leave-data";
+import type { decideLeaveSchema } from "@/server/people/leave-request-schemas";
+
 import type { CapabilityPreview, PreviewFn } from "./types";
 
 /**
@@ -135,3 +138,39 @@ export const previewEntitlement: PreviewFn<typeof entitlementVersionSchema> = as
   organisationId,
   data,
 }) => describeEntitlementChange(await previewEntitlementVersion(supabase, organisationId, data));
+
+// ---------------------------------------------------------------------------
+// Slice 4.4: HR's final decision on a leave request
+// ---------------------------------------------------------------------------
+
+/** What HR's decision does, from public.decide_leave_hr's dry run. No names or reasons. */
+export function describeHrDecision(result: HrDecisionResult): CapabilityPreview {
+  const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+  if (result.status !== "approved") {
+    return {
+      summary: "Declines the request. The balance stays as it is and the worker is told why.",
+      changes: [{ label: "Request", before: "With HR", after: "Declined" }],
+    };
+  }
+  const shifts =
+    result.shifts > 0
+      ? ` It covers ${result.shifts} rostered ${result.shifts === 1 ? "shift" : "shifts"}${result.sites.length ? ` at ${result.sites.join(", ")}` : ""}.`
+      : "";
+  return {
+    summary: `Approves ${days(result.days)}: the balance goes from ${result.balanceBefore} to ${result.balanceAfter}.${shifts}${result.payBelowService ? " Below the service the pay needs: Phase 5 pays it as unpaid." : ""}`,
+    changes: [
+      { label: "Request", before: "With HR", after: "Approved" },
+      {
+        label: "Balance",
+        before: days(result.balanceBefore),
+        after: days(result.balanceAfter),
+      },
+    ],
+  };
+}
+
+export const previewHrLeaveDecision: PreviewFn<typeof decideLeaveSchema> = async ({
+  supabase,
+  organisationId,
+  data,
+}) => describeHrDecision(await previewHrDecision(supabase, organisationId, data));
