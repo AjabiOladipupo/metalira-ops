@@ -10,7 +10,11 @@ import { randomUUID } from "node:crypto";
 import type { TableSpec } from "../helpers/registry";
 import type { Client } from "../helpers/supabase";
 
-type Table = "leave_requests" | "leave_decisions" | "leave_ledger" | "manager_emails";
+type Table =
+  | "leave_requests"
+  | "leave_decisions"
+  | "leave_ledger"
+  | "manager_emails";
 
 async function firstId(admin: Client, table: Table, orgId: string): Promise<string> {
   const { data, error } = await admin
@@ -55,7 +59,6 @@ async function seed(admin: Client, orgId: string, ownerId: string): Promise<void
       start_date: "2030-03-04",
       end_date: "2030-03-06",
       days: 3,
-      pay_percent: 100,
     })
     .select("id")
     .single();
@@ -79,6 +82,13 @@ async function seed(admin: Client, orgId: string, ownerId: string): Promise<void
     days: 15,
   });
   if (grant.error) throw new Error(grant.error.message);
+  const pay = await admin.from("leave_request_pay").insert({
+    request_id: request.data.id,
+    organisation_id: orgId,
+    pay_percent: 100,
+    pay_below_service: false,
+  });
+  if (pay.error) throw new Error(pay.error.message);
   const email = await admin.from("manager_emails").insert({
     organisation_id: orgId,
     kind: "leave_line_manager",
@@ -104,7 +114,6 @@ export const tables: TableSpec[] = [
       start_date: "2030-05-04",
       end_date: "2030-05-04",
       days: 1,
-      pay_percent: 100,
     }),
     patch: { status: "approved" },
   },
@@ -142,6 +151,29 @@ export const tables: TableSpec[] = [
       reason: "Attack",
     }),
     patch: { days: 99 },
+  },
+  {
+    table: "leave_request_pay",
+    key: "request_id",
+    tenantColumn: "organisation_id",
+    tenantValue: (side) => side.orgId,
+    rowOf: async ({ admin, side }) => {
+      const { data, error } = await admin
+        .from("leave_request_pay")
+        .select("request_id")
+        .eq("organisation_id", side.orgId)
+        .limit(1)
+        .single();
+      if (error) throw new Error(error.message);
+      return data.request_id;
+    },
+    attackInsert: ({ victim }) => ({
+      request_id: randomUUID(),
+      organisation_id: victim.orgId,
+      pay_percent: 100,
+      pay_below_service: false,
+    }),
+    patch: { pay_percent: 0 },
   },
   {
     table: "manager_emails",

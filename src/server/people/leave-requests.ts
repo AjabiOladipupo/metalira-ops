@@ -86,7 +86,6 @@ export interface RequestLeaveResult {
   days: number;
   shifts: number;
   sites: string[];
-  payBelowService: boolean;
 }
 
 function parseOrThrow<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
@@ -118,7 +117,6 @@ export async function runRequestLeave(ctx: OwnContext, input: unknown): Promise<
     days: Number(o.days ?? 0),
     shifts: Number(o.shifts ?? 0),
     sites: Array.isArray(o.site_names) ? (o.site_names as string[]) : [],
-    payBelowService: o.pay_below_service === true,
   };
 }
 
