@@ -334,3 +334,44 @@ export function formatCoverage(totals: RosterWeek["totals"]): string {
 export function formatDayCounts(day: Pick<RosterDay, "required" | "scheduled">): string {
   return `Required ${day.required} · Scheduled ${day.scheduled}`;
 }
+
+/** A post-day the live board asked the roster to open (slice 3.7, Send replacement). */
+export interface RosterFocus {
+  postId: string;
+  date: string;
+  /** The late or no-show worker's assignment, to take off the shift first. */
+  assignmentId: string | null;
+}
+
+export interface ReplacementTarget {
+  postId: string;
+  postName: string;
+  date: string;
+  startsAt: string;
+  endsAt: string;
+  /** Still on the shift: remove first, then pick someone. Null when the place is already open. */
+  remove: { assignmentId: string; workerName: string } | null;
+}
+
+/**
+ * What Send replacement opens on the roster: the worker's assignment to remove (the shift is full
+ * while they are on it), then the assign picker for the same post-day. Null when the post-day
+ * isn't on this week, has no times, or has nothing to replace and no open place.
+ */
+export function replacementTarget(week: RosterWeek, focus: RosterFocus): ReplacementTarget | null {
+  const post = week.posts.find((p) => p.postId === focus.postId);
+  const cell = post?.cells.find((c) => c.date === focus.date);
+  if (!post || !cell || !cell.startsAt || !cell.endsAt) return null;
+  const current = focus.assignmentId
+    ? cell.assigned.find((a) => a.id === focus.assignmentId)
+    : undefined;
+  if (!current && cell.open === 0) return null;
+  return {
+    postId: post.postId,
+    postName: post.name,
+    date: cell.date,
+    startsAt: cell.startsAt,
+    endsAt: cell.endsAt,
+    remove: current ? { assignmentId: current.id, workerName: current.workerName } : null,
+  };
+}

@@ -86,6 +86,7 @@ describe("nav by role", () => {
   it("matches the decision for hr, finance, ops_manager and line_manager", () => {
     expect(labels("hr")).toEqual([
       "Home",
+      "Live attendance",
       "Timesheets",
       "People",
       "My team",
