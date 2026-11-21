@@ -23,7 +23,14 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * Opening the page refreshes the period up to today (must-do 5), then reads it through
  * public.timesheet_review_days, which decides who sees which days.
  */
-async function TimesheetsPage({ period }: { period: string | undefined }) {
+async function TimesheetsPage({
+  searchParams,
+}: {
+  searchParams: PageProps<"/app/timesheets">["searchParams"];
+}) {
+  const query = await searchParams;
+  const raw = typeof query.period === "string" ? query.period : undefined;
+  const period = raw && ISO_DATE.test(raw) ? raw : undefined;
   const session = await getPageSession();
   if (!session?.active || !TIMESHEET_READERS.includes(session.active.role)) {
     redirect(NO_ACCESS_PATH);
@@ -45,16 +52,14 @@ async function TimesheetsPage({ period }: { period: string | undefined }) {
   );
 }
 
-export default async function Page({
+export default function Page({
   searchParams,
 }: {
   searchParams: PageProps<"/app/timesheets">["searchParams"];
 }) {
-  const query = await searchParams;
-  const raw = typeof query.period === "string" ? query.period : undefined;
   return (
     <RouteGate href="/app/timesheets">
-      <TimesheetsPage period={raw && ISO_DATE.test(raw) ? raw : undefined} />
+      <TimesheetsPage searchParams={searchParams} />
     </RouteGate>
   );
 }
