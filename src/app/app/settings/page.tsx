@@ -32,11 +32,21 @@ const SECTIONS = [
     title: "Departments",
     body: "Add and rename departments and set who heads each one.",
   },
+  {
+    href: "/app/settings/leave",
+    title: "Leave",
+    body: "Leave types, days a year and pay, from a preset or your own.",
+  },
+  {
+    href: "/app/settings/holidays",
+    title: "Holidays",
+    body: "Public holidays and the working week that leave counts.",
+  },
 ] as const;
 
 /**
  * Settings sections the viewer's role may open (company and team: owner and admin; where clients pay:
- * also finance; departments: also hr).
+ * also finance; departments, leave and holidays: also hr).
  */
 async function SettingsSections() {
   const session = await getPageSession();

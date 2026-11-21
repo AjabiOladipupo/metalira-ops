@@ -105,6 +105,19 @@ import { lookupWorkerBankSchema } from "@/server/people/bank-lookups";
 import { resolveChangeRequestSpec } from "@/server/people/change-requests";
 import { createDepartmentSpec, updateDepartmentSpec } from "@/server/people/departments";
 import {
+  CALENDAR_READERS,
+  addEntitlementVersionSpec,
+  addHolidaySpec,
+  applyPresetSpec,
+  copyHolidaysSpec,
+  createLeaveTypeSpec,
+  removeHolidaySpec,
+  saveLeaveTypeSpec,
+  setWorkWeekSpec,
+} from "@/server/people/leave-setup";
+import { loadHolidays, loadLeaveSetupSummary } from "@/server/people/leave-setup-data";
+import { holidayYearSchema } from "@/server/people/leave-setup-schemas";
+import {
   applyImportFixSpec,
   cancelImportSpec,
   checkImportSpec,
@@ -211,6 +224,7 @@ import {
   previewChangeRequirement,
   previewClosePost,
 } from "./live-change-previews";
+import { previewEntitlement, previewHolidayCopy, previewPreset } from "./leave-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
 
@@ -2106,6 +2120,125 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Sends messages and emails to workers after a publish whose notices failed: kept to people, from the publish result.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Leave setup and the company calendar (people/leave-setup-actions.ts, slice 4.1)
+  // -------------------------------------------------------------------------
+  {
+    name: "leave.setup_summary",
+    description:
+      "Lists the leave types with today's days a year, scheduled changes, the working week and holiday counts.",
+    kind: "read",
+    audience: "manager",
+    roles: CALENDAR_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadLeaveSetupSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "calendar.holidays",
+    description: "Lists a year's public holidays, and the ones removed from it.",
+    kind: "read",
+    audience: "manager",
+    roles: CALENDAR_READERS,
+    input: holidayYearSchema,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { year } = holidayYearSchema.parse(input);
+      return loadHolidays(supabase, organisationId, year);
+    },
+    agent: true,
+  },
+  {
+    name: "calendar.add_holiday",
+    description: "Adds a public holiday on a date; refused when that date is already a holiday.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addHolidaySpec),
+    changes: "one",
+    action: at("people/leave-setup-actions", "addHolidayAction"),
+    agent: true,
+  },
+  {
+    name: "calendar.remove_holiday",
+    description: "Removes a public holiday; the row is kept, marked removed, with who and when.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(removeHolidaySpec),
+    changes: "one",
+    action: at("people/leave-setup-actions", "removeHolidayAction"),
+    agent: true,
+  },
+  {
+    name: "calendar.copy_holidays",
+    description:
+      "Copies one year's holidays into another on the same dates, listing each one it can't copy.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(copyHolidaysSpec),
+    changes: "many",
+    action: at("people/leave-setup-actions", "copyHolidaysAction"),
+    preview: previewHolidayCopy,
+    agent: true,
+  },
+  {
+    name: "calendar.set_work_week",
+    description: "Sets the company's working days, which leave counts when a worker has no roster.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(setWorkWeekSpec),
+    changes: "one",
+    action: at("people/leave-setup-actions", "setWorkWeekAction"),
+    agent: true,
+  },
+  {
+    name: "leave.create_type",
+    description: "Adds a leave type of the company's own with its days a year from 1 January.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(createLeaveTypeSpec),
+    changes: "one",
+    action: at("people/leave-setup-actions", "createLeaveTypeAction"),
+    agent: true,
+  },
+  {
+    name: "leave.save_type",
+    description:
+      "Changes a leave type's name, counting, pay, certificate rule, minimum service or status.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(saveLeaveTypeSpec),
+    changes: "one",
+    action: at("people/leave-setup-actions", "saveLeaveTypeAction"),
+    agent: true,
+  },
+  {
+    name: "leave.add_entitlement_version",
+    description:
+      "Changes a leave type's days a year, carry-over or pay from tomorrow or a future 1 January.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addEntitlementVersionSpec),
+    changes: "many",
+    action: at("people/leave-setup-actions", "addEntitlementVersionAction"),
+    preview: previewEntitlement,
+    agent: true,
+  },
+  {
+    name: "leave.apply_preset",
+    description:
+      "Applies leave preset A or B: adds its types and versions the days of those the company has.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(applyPresetSpec),
+    changes: "many",
+    action: at("people/leave-setup-actions", "applyPresetAction"),
+    preview: previewPreset,
+    agent: true,
   },
 ];
 
