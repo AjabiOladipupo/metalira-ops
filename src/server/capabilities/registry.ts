@@ -184,6 +184,14 @@ import {
   loadRosterSummary,
   loadRosterWeek,
 } from "@/server/workforce/roster-data";
+import { TIMESHEET_READERS, addCorrectionSpec } from "@/server/workforce/timesheets";
+import {
+  loadTimesheetLines,
+  loadTimesheetSummary,
+  summariseLines,
+  timesheetRangeInput,
+  timesheetSummaryInput,
+} from "@/server/workforce/timesheets-data";
 import { rankCandidates } from "@/lib/roster-suggestions";
 import { mondayOf } from "@/lib/roster";
 
@@ -2069,6 +2077,54 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Sends messages and emails to workers after a publish whose notices failed: kept to people, from the publish result.",
+  },
+
+  // -------------------------------------------------------------------------
+  // Timesheets (workforce/timesheet-actions.ts, slice 4.2)
+  // -------------------------------------------------------------------------
+  {
+    name: "timesheets.summary",
+    description:
+      "Counts the timesheet days in a pay period (20th to 19th): pending, approved, flagged, needing review, no clock-out, no-show, and minutes worked and overtime.",
+    kind: "read",
+    audience: "manager",
+    roles: TIMESHEET_READERS,
+    input: timesheetSummaryInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { date } = timesheetSummaryInput.parse(input ?? {});
+      return loadTimesheetSummary(supabase, organisationId, date);
+    },
+    agent: true,
+  },
+  {
+    name: "timesheets.days",
+    description:
+      "Lists the timesheet days between two dates with their minutes, exceptions and status (a line manager sees only their reportees).",
+    kind: "read",
+    audience: "manager",
+    roles: TIMESHEET_READERS,
+    input: timesheetRangeInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { from, to } = timesheetRangeInput.parse(input);
+      const lines = await loadTimesheetLines(supabase, organisationId, from, to, 2000);
+      return { summary: summariseLines(lines, { start: from, end: to }), days: lines };
+    },
+    agent: true,
+  },
+  {
+    name: "timesheets.correct",
+    description:
+      "Corrects one timesheet day with a reason: sets the clock-in or clock-out, the minutes, or sets a punch aside. Never on your own day; the punches never change.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addCorrectionSpec),
+    changes: "one",
+    action: at("workforce/timesheet-actions", "addTimesheetCorrectionAction"),
+    agent: true,
   },
 ];
 
