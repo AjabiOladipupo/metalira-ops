@@ -173,7 +173,7 @@ async function punch(
     `insert into public.punches (organisation_id, worker_id, kind, recorded_by_user, client_event_id,
        shift_assignment_id, site_id, device_time, received_at, recorded_at, time_source,
        clock_drift_seconds, geofence_result, flags, payload_hash)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $8, 'elapsed', 0, $10, $11, md5($5::text))`,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $8, 'elapsed', 0, $10, $11, md5(gen_random_uuid()::text))`,
     [
       orgId,
       workerId,

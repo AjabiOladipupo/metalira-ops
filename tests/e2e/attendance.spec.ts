@@ -113,7 +113,7 @@ async function seedBoard() {
          shift_assignment_id, site_id, device_time, received_at, recorded_at, time_source,
          clock_drift_seconds, geofence_result, outside_reason, flags, payload_hash)
        values ($1, $2, 'in', $3, $4, $5, $6, $7, $7, $7, 'elapsed', 0, 'outside', 'gate_locked',
-         array['outside'], md5($4::text))`,
+         array['outside'], md5(gen_random_uuid()::text))`,
       [org, ids.Ngozi!.worker, randomUUID(), randomUUID(), ids.Ngozi!.assignment, apapa, at],
     );
   } finally {
