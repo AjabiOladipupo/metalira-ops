@@ -7,6 +7,13 @@ import type { ManagerRole } from "@/lib/roles";
 import { correctionReasonOk, type TimesheetException } from "@/lib/timesheets/minutes";
 import { MutationError, type MutationSpec } from "@/server/identity/mutate";
 
+import {
+  adjustedNotice,
+  runCorrectionPreview,
+  tellWorker,
+  type CorrectionPreview,
+} from "./timesheet-approval";
+
 /**
  * Timesheet writes (slice 4.2), as `mutate()` specs. A correction is one SQL function run with the
  * signed-in user's own client: `add_timesheet_correction` checks the caller in the database (the
@@ -149,12 +156,39 @@ export const addCorrectionSpec: MutationSpec<typeof addCorrectionSchema, Correct
     });
     if (error) fromTimesheetDbError(error);
     const r = record(result);
-    return {
+    const out = {
       correctionId: String(r.correction_id ?? ""),
       lineId: String(r.line_id ?? data.lineId),
       workedMinutes: Number(r.worked_minutes ?? 0),
       otMinutes: Number(r.ot_minutes ?? 0),
       exceptions: Array.isArray(r.exceptions) ? (r.exceptions as TimesheetException[]) : [],
     };
+    // Slice 4.3: the worker is told their hours were adjusted (inbox, email inside the caps). The
+    // worker and day come from the database (read as the corrector, under RLS), never the form.
+    const { data: line } = await supabase
+      .from("timesheet_lines")
+      .select("worker_id, work_date")
+      .eq("organisation_id", organisationId)
+      .eq("id", out.lineId)
+      .maybeSingle();
+    if (line) {
+      await tellWorker(
+        organisationId,
+        line.worker_id,
+        adjustedNotice(line.work_date, out.workedMinutes, out.otMinutes, data.reason),
+      );
+    }
+    return out;
   },
+};
+
+/**
+ * "Adjust hours" preview (slice 4.3, must-do 4): the same checks as the correction, through
+ * `mutate()`, and the minutes now and after it. Nothing is saved.
+ */
+export const previewCorrectionSpec: MutationSpec<typeof addCorrectionSchema, CorrectionPreview> = {
+  module: "shifts",
+  schema: addCorrectionSchema,
+  roles: TIMESHEET_CORRECTORS,
+  run: ({ supabase, organisationId, data }) => runCorrectionPreview(supabase, organisationId, data),
 };

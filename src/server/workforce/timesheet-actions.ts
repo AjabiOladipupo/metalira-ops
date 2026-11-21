@@ -9,13 +9,14 @@ import type { CompanyFormState } from "@/server/identity/company-form-state";
 import { MutationError, mutate } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 
-import { addCorrectionSpec } from "./timesheets";
+import { addCorrectionSpec, previewCorrectionSpec } from "./timesheets";
 
 /**
  * Server Actions for timesheets (slice 4.2). A correction goes through `mutate()` (role, then
  * Zod, then one SQL function as the user, which checks the caller again and refuses their own
- * line). Registered in src/server/capabilities/registry.ts. Slice 4.3 puts it on /app/timesheets
- * ("Adjust hours").
+ * line). Registered in src/server/capabilities/registry.ts. On /app/timesheets ("Adjust hours",
+ * slice 4.3) it runs in two steps: the first submit returns the preview (minutes now against
+ * after, nothing saved); the second, with `confirm=1`, saves the correction and tells the worker.
  */
 
 const FORBIDDEN = "Your role can't correct this timesheet.";
@@ -42,12 +43,35 @@ function refusal(error: unknown, values?: Record<string, string>): CompanyFormSt
   return { ok: false, status: 500, formError: FAILED, values };
 }
 
-/** Corrects one day with a reason ("Adjust hours"): a new correction row; the punches never change. */
+function minutesText(worked: number, ot: number): string {
+  return ot > 0
+    ? `${formatMinutes(worked)} worked, ${formatMinutes(ot)} overtime`
+    : `${formatMinutes(worked)} worked`;
+}
+
+/**
+ * Corrects one day with a reason ("Adjust hours"): a new correction row; the punches never
+ * change. Without `confirm=1` it only previews (values.confirm is "ready" when the preview
+ * passed every check, so the screen offers Save).
+ */
 export async function addTimesheetCorrectionAction(
   _prev: CompanyFormState,
   formData: FormData,
 ): Promise<CompanyFormState> {
   const fields = formFields(formData);
+  if (fields.confirm !== "1") {
+    try {
+      const preview = await mutate(previewCorrectionSpec, fields);
+      return {
+        ok: true,
+        status: 200,
+        message: `Now ${minutesText(preview.current.workedMinutes, preview.current.otMinutes)}. After: ${minutesText(preview.next.workedMinutes, preview.next.otMinutes)}.`,
+        values: { ...fields, confirm: "ready" },
+      };
+    } catch (error) {
+      return refusal(error, fields);
+    }
+  }
   let result;
   try {
     result = await mutate(addCorrectionSpec, fields);
@@ -55,7 +79,9 @@ export async function addTimesheetCorrectionAction(
     return refusal(error, fields);
   }
   revalidatePath("/app/timesheets");
-  const parts = [`Corrected · ${formatMinutes(result.workedMinutes)} worked`];
-  if (result.otMinutes > 0) parts.push(`${formatMinutes(result.otMinutes)} overtime`);
-  return { ok: true, status: 200, message: parts.join(" · ") };
+  return {
+    ok: true,
+    status: 200,
+    message: `Corrected · ${minutesText(result.workedMinutes, result.otMinutes)}`,
+  };
 }
