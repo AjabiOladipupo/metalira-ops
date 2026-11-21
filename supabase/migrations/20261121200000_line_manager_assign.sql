@@ -10,7 +10,8 @@
 --    versions with one change each: besides owner, admin and ops_manager, a line_manager may call
 --    them when the worker is one of their reportees (private.my_reportee_ids, never their own
 --    worker record) and the post's (or the assignment's) site is one of
---    private.line_manager_site_ids. Everything else is unchanged, and the guard on
+--    private.line_manager_site_ids; a line manager removes only shifts that haven't started
+--    (MLRS6), so a started shift or a no-show can't be hidden. Everything else is unchanged, and the guard on
 --    shift_assignments still refuses, for every caller, a past day, a full shift, a clash, a
 --    leaver, a closed post, an archived site and approved leave. Publishing (publish_roster),
 --    copying a week (copy_last_week) and "Send notices again" stay with owner, admin and
@@ -174,6 +175,12 @@ begin
     raise exception 'That assignment wasn''t found.' using errcode = 'P0002';
   end if;
   perform private.roster_assert_may_assign(p_organisation_id, v_row.worker_id, v_row.site_id);
+  -- A line manager (not owner, admin or ops_manager) takes people off shifts that haven't
+  -- started only, so a started or finished shift (and a no-show on it) can't be hidden.
+  if not private.has_role(p_organisation_id, array['owner', 'admin', 'ops_manager'])
+    and v_row.starts_at <= now() then
+    raise exception 'This shift has started. Ask ops to change it.' using errcode = 'MLRS6';
+  end if;
   if v_row.status = 'removed' then
     raise exception 'This assignment was already removed.' using errcode = 'MLRS8';
   end if;

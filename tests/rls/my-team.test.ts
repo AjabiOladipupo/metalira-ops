@@ -18,6 +18,7 @@ import {
   adminClient,
   createTenantUser,
   createTestUser,
+  pgClient,
   type Client,
   type TenantUser,
   type TestUser,
@@ -249,6 +250,45 @@ describe("line managers assign within their crews", () => {
       p_assignment_id: assignmentId(data),
     });
     expect(removed.error?.code).toBe("42501");
+  });
+
+  it("can't take a reportee off a shift at a site outside their team's", async () => {
+    const { data, error } = await assign(post.ikoyiDay, day(5), worker.mine, ops.client);
+    expect(error).toBeNull();
+    const removed = await lineManager.client.rpc("remove_assignment", {
+      p_organisation_id: owner.orgId,
+      p_assignment_id: assignmentId(data),
+    });
+    expect(removed.error?.code).toBe("42501");
+  });
+
+  it("can't take a reportee off a shift that has started (ops still can)", async () => {
+    const { data, error } = await assign(post.apapaDay, day(6), worker.mine, lineManager.client);
+    expect(error).toBeNull();
+    const id = assignmentId(data);
+    // Move the shift into the past as the database owner, triggers off for this statement only.
+    const db = await pgClient();
+    try {
+      await db.query("begin");
+      await db.query("set local session_replication_role = replica");
+      await db.query(
+        "update public.shift_assignments set starts_at = now() - interval '1 hour', ends_at = now() + interval '11 hours' where id = $1",
+        [id],
+      );
+      await db.query("commit");
+    } finally {
+      await db.end();
+    }
+    const removed = await lineManager.client.rpc("remove_assignment", {
+      p_organisation_id: owner.orgId,
+      p_assignment_id: id,
+    });
+    expect(removed.error?.code).toBe("MLRS6");
+    const byOps = await ops.client.rpc("remove_assignment", {
+      p_organisation_id: owner.orgId,
+      p_assignment_id: id,
+    });
+    expect(byOps.error).toBeNull();
   });
 
   it("can't publish or copy a week", async () => {

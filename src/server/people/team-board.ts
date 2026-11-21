@@ -173,6 +173,7 @@ export async function loadTeamBoard(
   supabase: Client,
   organisationId: string,
   now: Date = new Date(),
+  { refresh = true }: { refresh?: boolean } = {},
 ): Promise<TeamBoard> {
   const settings = await loadTimesheetSettings(supabase, organisationId);
   const timeZone = settings.timeZone;
@@ -186,7 +187,7 @@ export async function loadTeamBoard(
   );
   // Fresh hours for the week and the period, so nobody waits for the 04:00 cron (4.2). The
   // database narrows a line manager's refresh to their reportees.
-  if (members.length > 0) {
+  if (refresh && members.length > 0) {
     await orEmpty("refresh", refreshTimesheetRange(supabase, organisationId, linesFrom, today), null);
   }
 
@@ -319,5 +320,6 @@ export async function loadMyTeamSummary(
   supabase: Client,
   organisationId: string,
 ): Promise<MyTeamSummary> {
-  return (await loadTeamBoard(supabase, organisationId)).summary;
+  // No refresh: an agent read writes nothing (the hours are as of the last refresh or cron).
+  return (await loadTeamBoard(supabase, organisationId, new Date(), { refresh: false })).summary;
 }
