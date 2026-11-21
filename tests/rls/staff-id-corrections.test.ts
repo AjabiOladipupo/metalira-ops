@@ -312,9 +312,10 @@ describe("when a correction is allowed", () => {
       "MLSI6",
     );
 
-    // A Phase 4 timesheets table appears without the hook being updated: corrections fail closed.
+    // A Phase 5 payslips table appears without the hook being updated: corrections fail closed.
+    // (Timesheet lines have a real check since slice 4.2: tests/rls/timesheets.test.ts.)
     const worker = await addWorker();
-    await db.query("create table public.timesheets (id uuid primary key)");
+    await db.query("create table public.payslips (id uuid primary key)");
     try {
       const { rows: closed } = await db.query<{ has: boolean }>(
         "select private.worker_has_work_records($1, $2) as has",
@@ -324,7 +325,7 @@ describe("when a correction is allowed", () => {
       const { error } = await raise(staff.hr.client, worker.id, `TIMESHEET-${counter}`);
       expect(error?.code).toBe("MLSI6");
     } finally {
-      await db.query("drop table public.timesheets");
+      await db.query("drop table public.payslips");
     }
   });
 
