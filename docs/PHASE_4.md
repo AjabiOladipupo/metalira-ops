@@ -302,3 +302,75 @@ Still open for later phases:
 - Leave attachments (medical certificates): a private bucket and signed URLs like contract documents, with a security review. Until then the approver ticks "Certificate seen".
 - A manager inbox, so "ops told" and "new leave request" don't spend email.
 - The Phase 2 and 3 low hardening follow-ups.
+
+## Sign-off (21 Nov 2026)
+
+Draft: slices 4.0 to 4.6 are merged; 4.7 (My team) is still being built, so its rows say "Pending 4.7" and this section is finalised once it merges. `main` at `c4f4c62` (PR #68) passed CI: `check`, `rls` and `e2e` all green (run 44899575775). Each "done when" item was checked against the code on that commit.
+
+| # | Done when | Verdict | Evidence |
+| --- | --- | --- | --- |
+| 1 | An approved timesheet creates billable Work Units, and approved leave opens the affected shifts; proven in CI and on the Vercel preview | Met with notes | Work Units: `tests/rls/timesheet-approval.test.ts` "approving a manned-post day makes one billable Work Unit with its minutes; reopening cancels it", "billable follows the contract type", "a no-shift day and a 0-minute day make no Work Unit"; `tests/unit/workforce/timesheet-approval.test.ts` "are billable on manned_post and per_visit contracts only"; `tests/e2e/timesheets.spec.ts` "approve clean days, adjust a missing clock-out, and see billable Work Units" (3 approved, billable units of 720 minutes). Leave: `tests/rls/leave-roster.test.ts` "approving removes exactly those, on_leave, by the approver; nothing outside the range", "past days and a shift today that has started stay assigned", "a declined request removes nothing"; `tests/e2e/leave-roster.spec.ts` "HR approves 3 days of leave and the 3 shifts appear in the Uncovered tray" (preview "Opens 3 shifts", 3 "On leave" chips). Notes: the ops email (`notifyOpsOfOpenedShifts` in `src/server/people/leave-cover-notice.ts`) has no test of its own; only the `claim_manager_email` grant is tested (`tests/rls/leave-requests.test.ts` "only the server claims manager emails"). The Vercel preview check is steps 6, 9 and 10 of the live-site list; it was not run for this draft. |
+| 2 | A missing clock-out counts no hours until a correction with a reason; the punches are unchanged | Met | `tests/rls/timesheets.test.ts` "no clock-out is 0 until a correction with a reason sets one; the punches never change" (compares every punch row before and after; a later refresh keeps 720 minutes), "needs a plain-text reason and valid values"; `tests/unit/workforce/timesheet-minutes.test.ts` "no clock-out: 0 until a correction sets one"; `tests/e2e/timesheets.spec.ts` (preview "Now 0 min worked. After: 12 h worked.", then "Corrected · 12 h worked"). |
+| 3 | A punch's selfie is kept while its timesheet day is unapproved or disputed, and deleted after 90 days once decided | Met with notes | `tests/rls/timesheets.test.ts` "is true with no line yet, while pending or disputed; false once approved or rejected", "a punch no line ever uses is kept under 90 days only (security review L1)", "a punch arriving after its day was decided is kept and flags the line (security review L2)", "the 90-day selfie sweep keeps a pending day's selfie and offers a decided or unused one" (a 100-day-old selfie leaves `punch_selfies_due` while its day is pending and returns once approved); `tests/rls/timesheet-approval.test.ts` "a late punch's selfie is kept at most 180 days from when it arrived". Note: the tests prove what `punch_selfies_due` offers; the delete itself is the Phase 3 sweep (`src/server/workforce/punch-photo-sweep.ts`, cron `/api/cron/punch-photos`), unchanged here and not run end to end in a test. |
+| 4 | Both leave presets (A and B) are selectable and editable, each with its source and "confirm with an adviser" | Met | `tests/unit/leave/presets.test.ts` "offers exactly presets A and B", "carries the adviser line and a source on every preset and figure", "keeps preset A's statutory figures (Labour Act s.18, s.16, s.54)"; `tests/rls/leave-setup.test.ts` "match src/lib/leave/presets.ts in the database", "refuses preset C and roles other than owner, admin and hr", "previews without writing, then applies preset B", "versions existing types from the next 1 January when preset A is applied, keeping the rest"; `tests/e2e/leave-setup.spec.ts` "apply preset B, set annual leave to 18 days, and see the adviser line on both presets" (1440px, then 390px). |
+| 5 | Line managers can't read reportees' bank, tax, NIN or RSA columns through the Data API | Met | `tests/rls/my-reportees.test.ts` "gives a line manager no reportee rows, whatever the columns" (`bank_account_last4`, `nin_enc`, `tin`, `rsa_pin_last4`), "returns exactly the safe columns and never a personal number", "matches the column snapshot in the database definition", "gives an untrusted password session nothing until it is trusted"; `tests/unit/people/my-reportees-columns.test.ts` "returns nothing that looks like pay, bank, tax or identity numbers"; `tests/e2e/team-columns.spec.ts` "a line manager's pages still show their reportees, and the Data API shows no bank columns". The plan's `team_members` read was built as `public.my_reportees` (migration `20261121100000`). |
+| 6 | Every Phase 4 table is in the isolation test; corrections, decisions, the leave ledger and query replies can't be edited or deleted by anyone | Met (recheck after 4.7) | The 15 public tables created by migrations `20261121100000` to `20261121190000` each have a registry entry: `public_holidays`, `leave_types`, `leave_entitlements` (`tests/rls/tables/leave_setup.ts`); `timesheets`, `timesheet_lines`, `timesheet_corrections` (`timesheets.ts`); `staff_queries`, `staff_query_replies` (`staff_queries.ts`); `timesheet_decisions`, `work_units` (`timesheet_approval.ts`); `leave_requests`, `leave_decisions`, `leave_ledger`, `leave_request_pay`, `manager_emails` (`people_leave.ts`). `20261121100000` and `20261121190000` create no tables. `tests/rls/isolation.test.ts` "declares exactly the tables in schema public" fails on any table without an entry. Insert-only: `tests/rls/timesheets.test.ts` "are insert-only for everyone, the secret key and the database owner included" (corrections); `tests/rls/timesheet-approval.test.ts` "decisions and Work Units can't be edited or deleted by anyone"; `tests/rls/leave-requests.test.ts` "leave_ledger refuses update, delete and truncate, the database owner included" (the same for `leave_decisions`), "the secret key can't change ledger rows"; `tests/rls/queries.test.ts` "no signed-in role can write either table directly", "the secret key can't change or delete a reply or a query", "not even the database owner can edit, delete or truncate". |
+| 7 | Timesheets, Leave, My team, `/m/leave`, `/m/hours` and `/m/queries` work at 390px and 1440px | Pending 4.7 | My team (`/app/team`) is still the shell placeholder. The rest, through Playwright projects `mobile-390` and `desktop-1440` (`playwright.config.ts`): Timesheets, `tests/e2e/timesheets.spec.ts` "approve clean days, adjust a missing clock-out, and see billable Work Units" runs in both projects. Leave, `tests/e2e/leave-requests.spec.ts` "a worker asks for 3 days; line manager then HR approve; the balance drops by 3" (`/app/leave` at 1440 for the line manager, at 390 for HR) and `tests/e2e/leave-roster.spec.ts` (`/app/leave/[id]` at 390); Settings > Leave and Holidays, `tests/e2e/leave-setup.spec.ts`. Note: `/m/leave` (`leave-requests.spec.ts`), `/m/hours` ("a worker says a day is wrong from /m/hours") and `/m/queries` (`tests/e2e/queries.spec.ts` "a line manager raises a lateness query, the worker replies on the phone, both show on the HR file") are proven at 390px only, as Phase 3's worker screens were; 1440px for them is step 12 of the live-site list. |
+| 8 | Every Phase 4 Server Action is in the capability registry, and every multi-row write has a preview | Met with notes (recheck after 4.7) | Phase 4 added 25 Server Actions across 6 `"use server"` modules, and each is in `src/server/capabilities/registry.ts`: `people/leave-setup-actions.ts` (`addHolidayAction`, `removeHolidayAction`, `copyHolidaysAction`, `setWorkWeekAction`, `createLeaveTypeAction`, `saveLeaveTypeAction`, `addEntitlementVersionAction`, `applyPresetAction`), `people/leave-request-actions.ts` (`decideLeaveLineManagerAction`, `decideLeaveHrAction`, `cancelLeaveAction`, `adjustLeaveBalanceAction`), `people/own-leave-actions.ts` (`requestLeaveAction`, `cancelOwnLeaveAction`), `people/query-actions.ts` (`raiseQueryAction`, `followUpQueryAction`, `closeQueryAction`, `withdrawQueryAction`, `replyToQueryAction`), `workforce/timesheet-actions.ts` (`addTimesheetCorrectionAction`), `workforce/timesheet-approval-actions.ts` (`approveTimesheetLineAction`, `rejectTimesheetLineAction`, `reopenTimesheetLineAction`, `approveCleanTimesheetLinesAction`, `disputeTimesheetLineAction`). `tests/unit/capabilities/registry.test.ts` "registers every exported Server Action" holds the line. 10 are `changes: "many"`. The 4 the plan names have previews used by the screen's confirm step: `timesheets.approve_clean` (`previewApproveClean`), `leave.apply_preset` (`previewPreset`), `leave.decide_hr` (`previewHrLeaveDecision`), `calendar.copy_holidays` (`previewHolidayCopy`); so does `leave.add_entitlement_version` (`previewEntitlement`), and `timesheets.correct` (one row) has `previewCorrection`. Note: 5 multi-row writes have no preview, all `agent: false`: `timesheets.approve` (one day: its decision and Work Unit), `timesheets.reopen` (one day: its decision and cancelled unit), `timesheets.dispute` (the worker's own day), `leave.decide_line_manager` (step 1 opens no shifts) and `leave.cancel`. The registry test requires a preview only when the agent may offer the write. |
+
+### Merged pull requests
+- #54 Phase 4 plan
+- #60 slice 4.0 line-manager column gap
+- #61 slice 4.0b line managers' People list shows only their reportees
+- #62 slice 4.2 timesheet days from punches
+- #63 slice 4.1 company calendar and leave setup
+- #64 slice 4.6 queries and the HR file
+- #65 offline e2e flake fix
+- #66 slice 4.4 leave requests and balances
+- #67 slice 4.3 timesheet approval and Work Units
+- #68 slice 4.5 approved leave opens shifts
+- 4.7 My team: pending
+
+### Owner decisions made during the phase
+- **Presets A and B are kept; preset C is dropped** (decision 14).
+- **Labour Act s.54's 50% maternity pay** was verified against the jurist.ng mirror of the Act.
+- **Line managers get the People list for their reportees only** (4.0b).
+- **Worker-supervisors get My team** in the worker app (4.7, open question 4).
+
+### Coordinator defaults the owner may change
+- Preset A's maternity leave is unpaid for a worker below 6 months' service (`leave_request_pay.pay_below_service`).
+- Only the line manager decides step 1 when the worker has one; another manager decides it only when there is none.
+- Next year's leave opens on 1 January (the daily `/api/cron/leave-year` grants it then).
+- A disputed day cancels its Work Unit until it is decided again.
+- A 0-minute day makes no Work Unit.
+- Shifts removed by leave (`on_leave`) are left out of republish notices.
+- Cancelling approved leave gives the days back but doesn't put the worker back on the opened shifts.
+
+### Carried to Phase 5 and later
+- Phase 5 hooks: `private.timesheet_period_posted` returns false until Phase 5 posts periods (it then blocks Reopen); `leave_request_pay.pay_percent` and `pay_below_service` are stored for payroll to read.
+- Unicode hardening of the inbox and query text rules: refuse `\p{Cf}` (format characters) and count digits after NFKC, so fullwidth digits can't slip a long number past the rule.
+- Hide manager user ids from workers in what the worker app reads.
+- A crew group photo viewer for managers (from Phase 3).
+- Replacing a past-day night shift from the board (from Phase 3).
+- The HR file's "Timesheet exceptions by period" is still a placeholder (`hr-file-timesheet-placeholder`); it can read `timesheet_review_days`.
+- Crons: `vercel.json` has 7 daily crons (`import-uploads`, `contract-documents`, `punch-photos`, `timesheets`, `leave-year`, `query-reminders`, `bank-detail-changes`). Vercel Hobby runs each cron at most once a day, so anything fresher is worked out on read. Schedules are UTC: `query-reminders` at `0 6 * * *` runs at 07:00 Lagos, not the planned 06:00. Check Hobby's cron count limit before adding more.
+- Supabase Pro is needed before the first pilot (selfie and photo storage).
+- For 4.7: the plan's migration name `20261121170000_line_manager_assign.sql` clashes with 4.3's `20261121170000_timesheet_approval.sql`, so 4.7 needs a later timestamp; if it replaces `shift_assignments_guard`, it must keep 4.5's leave check (MLRSL).
+
+### Check on the live site
+On ops.metaliratech.com: managers and HR on a laptop, a worker on a phone at `/m`.
+1. **4.0** As a line manager, open a reportee's page: name, phone and job show; no bank, tax, NIN or RSA fields.
+2. **4.0b** As that line manager, People lists only their reportees, and searching another worker's name finds nothing.
+3. **4.1** As owner, open Settings > Leave: presets A and B sit side by side, each with its source and "Confirm them with an adviser." Apply B after its preview, then set annual leave to 18 days.
+4. **4.1** Open Settings > Holidays: add a holiday, then "Copy last year" after its preview.
+5. **4.2** Open Timesheets for this period: yesterday's days show, flagged ones first, with "No clock-out" or "Late" where they apply.
+6. **4.3** Use "Approve N clean": the preview counts the days, and they approve. Open a "No clock-out" day, Adjust hours with a reason, then Approve: it says a billable Work Unit was made.
+7. **4.3** On the phone, open My hours and say a day is wrong: it shows "With your manager", and the day comes back to the manager as disputed.
+8. **4.4** On the phone, open Leave, pick Annual and three working days: it counts the working days and the shifts they cover. Send it.
+9. **4.4, 4.5** As the line manager, approve step 1 in Leave. As HR, open the request: the preview says "Opens 3 shifts"; approve. The balance drops by 3 and the phone shows the decision.
+10. **4.5** As ops, open Roster for that week: the 3 shifts are in Uncovered with "On leave" chips, and the ops email arrived. Assigning the worker onto those days is refused.
+11. **4.6** As a line manager, raise a lateness query with a reply-by date on the person page. On the phone, the Home banner opens Queries; reply. On the laptop, the HR file shows the query and the reply.
+12. **4.4, 4.6** Open `/m/leave`, `/m/hours` and `/m/queries` at laptop width: the layout holds.
+13. **4.7** (pending) As a line manager, open My team: only their reportees show; assign one to an open shift at their site.
+14. **4.7** (pending) From My team, approve step 1 of a leave request and raise a query, at 1440px and 390px.
+15. **4.7** (pending) As a worker-supervisor on the phone, open My team: timesheet days, leave at step 1 and queries awaiting reply show.
