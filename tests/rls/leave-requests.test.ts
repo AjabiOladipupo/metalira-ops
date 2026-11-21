@@ -357,8 +357,8 @@ describe("asking, deciding and the balance", () => {
     if (!roomInYear) return;
     const { rows } = await db.query<{ id: string }>(
       `insert into public.leave_requests (organisation_id, worker_id, leave_type_id, leave_year,
-         start_date, end_date, days, pay_percent)
-       values ($1, $2, $3, $4, $5, $5, 1, 100) returning id`,
+         start_date, end_date, days)
+       values ($1, $2, $3, $4, $5, $5, 1) returning id`,
       [owner.orgId, lmOwnWorker, sick, year, plus(start, 21)],
     );
     const decided = await staff.lineManager.client.rpc("decide_leave_line_manager", {
@@ -500,6 +500,95 @@ describe("the leave year", () => {
       p_reason: "Nice",
     });
     expect(lm.error?.code).toBe("42501");
+  });
+});
+
+describe("security review fixes (L1 to L4)", () => {
+  async function ledgerRows(workerId: string, y: number, kind?: string): Promise<number> {
+    const { rows } = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.leave_ledger
+        where worker_id = $1 and leave_year = $2 and ($3::text is null or kind = $3)`,
+      [workerId, y, kind ?? null],
+    );
+    return rows[0]!.n;
+  }
+
+  it("L1: workers and line managers never ensure a past year through a balance read", async () => {
+    const past = year - 1;
+    const worker = await meClient.rpc("leave_balances", { p_organisation_id: owner.orgId, p_year: past });
+    expect(worker.error).toBeNull();
+    const lm = await staff.lineManager.client.rpc("leave_balances", {
+      p_organisation_id: owner.orgId,
+      p_year: past,
+    });
+    expect(lm.error).toBeNull();
+    expect(await ledgerRows(me, past)).toBe(0);
+  });
+
+  it("L1: the first run of a year writes a carry_over row for every type, 0 where nothing carries", async () => {
+    const fresh = await addWorker();
+    await balance(staff.hr.client, fresh, annual);
+    const { rows } = await db.query<{ types: number }>(
+      `select count(*)::int as types from public.leave_types
+        where organisation_id = $1 and status = 'active'`,
+      [owner.orgId],
+    );
+    expect(await ledgerRows(fresh, year, "carry_over")).toBe(rows[0]!.types);
+    const { rows: days } = await db.query<{ total: number }>(
+      `select coalesce(sum(days), 0)::int as total from public.leave_ledger
+        where worker_id = $1 and leave_year = $2 and kind = 'carry_over'`,
+      [fresh, year],
+    );
+    expect(days[0]!.total).toBe(0);
+    // A second run adds nothing: the carry-over is decided once.
+    await admin.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    expect(await ledgerRows(fresh, year, "carry_over")).toBe(rows[0]!.types);
+  });
+
+  it("L2: HR's decision and cancellations take the worker's leave lock", async () => {
+    const { rows } = await db.query<{ name: string; src: string }>(
+      `select p.proname as name, p.prosrc as src from pg_proc p
+         join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'private'
+          and p.proname in ('decide_leave_hr', 'cancel_leave_request', 'request_leave', 'adjust_leave_balance')`,
+    );
+    expect(rows).toHaveLength(4);
+    for (const row of rows) expect(row.src, row.name).toContain("'leave_requests:' ||");
+  });
+
+  it("L3: pay terms live in leave_request_pay, read by owner, admin and hr only", async () => {
+    const { rows: columns } = await db.query(
+      `select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'leave_requests'
+          and column_name in ('pay_percent', 'pay_below_service')`,
+    );
+    expect(columns).toEqual([]);
+    const lm = await staff.lineManager.client.from("leave_request_pay").select("request_id");
+    expect(lm.error).toBeNull();
+    expect(lm.data).toEqual([]);
+    const worker = await meClient.from("leave_request_pay").select("request_id");
+    expect(worker.data).toEqual([]);
+    if (roomInYear) {
+      // HR's approval earlier wrote one row for the approved request.
+      const hr = await staff.hr.client.from("leave_request_pay").select("request_id, pay_percent");
+      expect(hr.error).toBeNull();
+      expect(hr.data!.length).toBeGreaterThan(0);
+      expect(hr.data![0]!.pay_percent).toBe(100);
+    }
+    await expect(db.query("update public.leave_request_pay set pay_percent = 0")).rejects.toThrow();
+    await expect(db.query("delete from public.leave_request_pay")).rejects.toThrow();
+  });
+
+  it("L4: only the service role skips the role check when ensuring a year", async () => {
+    const worker = await meClient.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    expect(worker.error?.code).toBe("42501");
+    const anon = await anonClient().rpc("ensure_leave_year", {
+      p_organisation_id: owner.orgId,
+      p_year: year,
+    });
+    expect(anon.error).not.toBeNull();
+    const hr = await staff.hr.client.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    expect(hr.error).toBeNull();
   });
 });
 

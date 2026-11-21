@@ -38,10 +38,17 @@
 -- membership or worker record is on the worker); a worker with no line-manager login goes to an
 -- owner, admin or ops_manager. Step 2 is HR (owner, admin or hr). Nobody decides their own leave.
 --
--- Pay (coordinator, 21 Nov 2026): no money here. The request records the pay_percent of the version
--- in force on its start date and `pay_below_service` when the worker's service at the start is
--- below the version's pay_min_service_months (preset A maternity: unpaid below 6 months). The leave
--- itself is allowed; Phase 5 pays from these fields.
+-- Pay (coordinator, 21 Nov 2026): no money here. HR's approval records, in `leave_request_pay`
+-- (owner, admin and hr read it; line managers don't), the pay_percent of the version in force on the
+-- start date and `pay_below_service` when the worker's service at the start is below the version's
+-- pay_min_service_months (preset A maternity: unpaid below 6 months). The leave itself is allowed;
+-- Phase 5 pays from these fields.
+--
+-- Review (security L1 to L4, 21 Nov 2026): workers and line managers ensure only the current year
+-- through a balance read (past years are read-only to them); the first run of a year writes a
+-- carry_over row for every worker and type, 0 where nothing carries, so the carry-over is decided
+-- once; HR's decision and cancellations take the worker's leave lock before the balance; pay sits
+-- in its own table; the cron's call is recognised by the service_role, not by a missing user.
 --
 -- Refusals (SQLSTATE):
 --   MLLQ1 overlaps another live request
@@ -166,11 +173,6 @@ create table public.leave_requests (
     ),
   -- Ticked by an approver on a type that needs a certificate (no attachments in Phase 4).
   certificate_seen boolean not null default false,
-  -- For Phase 5 (no money here): the version's pay on the start date, and whether the worker's
-  -- service then is below the service the pay needs.
-  pay_percent integer not null
-    constraint leave_requests_pay_range check (pay_percent between 0 and 100),
-  pay_below_service boolean not null default false,
   created_at timestamptz not null default now(),
   created_by uuid default auth.uid(),
   decided_at timestamptz,
@@ -205,6 +207,24 @@ create index leave_requests_worker_idx on public.leave_requests (worker_id, star
 
 comment on table public.leave_requests is
   'A worker''s request for whole days of one leave type inside one calendar year (slice 4.4). Line manager, then HR. Status moves only inside the leave functions; never deleted.';
+
+-- What approved leave pays, for Phase 5 (no money here): written once, at HR's approval.
+create table public.leave_request_pay (
+  request_id uuid primary key,
+  organisation_id uuid not null references public.organisations (id),
+  -- The version's pay on the start date (0 for an unpaid type).
+  pay_percent integer not null
+    constraint leave_request_pay_range check (pay_percent between 0 and 100),
+  -- The worker's service at the start is below the service the pay needs.
+  pay_below_service boolean not null,
+  created_at timestamptz not null default now(),
+  constraint leave_request_pay_organisation_request_key unique (organisation_id, request_id),
+  constraint leave_request_pay_request_fkey foreign key (organisation_id, request_id)
+    references public.leave_requests (organisation_id, id)
+);
+
+comment on table public.leave_request_pay is
+  'The pay terms of approved leave (slice 4.4), for Phase 5: whole percent and whether the worker is below the service the pay needs. Owner, admin and hr read it. Insert-only.';
 
 create table public.leave_decisions (
   id uuid primary key default gen_random_uuid(),
@@ -348,6 +368,10 @@ create trigger manager_emails_no_truncate before truncate on public.manager_emai
   for each statement execute function private.leave_insert_only_guard();
 create trigger leave_requests_no_truncate before truncate on public.leave_requests
   for each statement execute function private.leave_insert_only_guard();
+create trigger leave_request_pay_insert_only before update or delete on public.leave_request_pay
+  for each row execute function private.leave_insert_only_guard();
+create trigger leave_request_pay_no_truncate before truncate on public.leave_request_pay
+  for each statement execute function private.leave_insert_only_guard();
 
 -- BEFORE INSERT/UPDATE/DELETE on leave_requests:
 -- * a new request starts at pending_line_manager, with nothing decided or cancelled;
@@ -420,6 +444,8 @@ create trigger leave_ledger_audit after insert or update or delete on public.lea
   for each row execute function private.audit_row_change();
 create trigger manager_emails_audit after insert or update or delete on public.manager_emails
   for each row execute function private.audit_row_change();
+create trigger leave_request_pay_audit after insert or update or delete on public.leave_request_pay
+  for each row execute function private.audit_row_change();
 
 -- ---------------------------------------------------------------------------
 -- 4. Row-level security and grants
@@ -429,6 +455,7 @@ alter table public.leave_requests enable row level security;
 alter table public.leave_decisions enable row level security;
 alter table public.leave_ledger enable row level security;
 alter table public.manager_emails enable row level security;
+alter table public.leave_request_pay enable row level security;
 
 -- Owner, admin and hr; the line manager for their reportees; the worker their own. ops_manager
 -- reads dates and type only, through public.leave_request_list.
@@ -456,14 +483,20 @@ create policy leave_ledger_select on public.leave_ledger for select to authentic
 create policy manager_emails_select on public.manager_emails for select to authenticated
   using (organisation_id in (select private.role_org_ids(array['owner', 'admin'])));
 
+-- Pay terms: owner, admin and hr only (not line managers, not the worker in Phase 4).
+create policy leave_request_pay_select on public.leave_request_pay for select to authenticated
+  using (organisation_id in (select private.role_org_ids(array['owner', 'admin', 'hr'])));
+
 revoke all on table public.leave_requests from anon, authenticated;
 revoke all on table public.leave_decisions from anon, authenticated;
 revoke all on table public.leave_ledger from anon, authenticated;
 revoke all on table public.manager_emails from anon, authenticated;
+revoke all on table public.leave_request_pay from anon, authenticated;
 grant select on table public.leave_requests to authenticated;
 grant select on table public.leave_decisions to authenticated;
 grant select on table public.leave_ledger to authenticated;
 grant select on table public.manager_emails to authenticated;
+grant select on table public.leave_request_pay to authenticated;
 
 -- The secret key may insert (the isolation registry seeds rows that way) but never change,
 -- delete or truncate; the triggers refuse the database owner too.
@@ -471,6 +504,7 @@ revoke update, delete, truncate on table public.leave_requests from service_role
 revoke update, delete, truncate on table public.leave_decisions from service_role;
 revoke update, delete, truncate on table public.leave_ledger from service_role;
 revoke update, delete, truncate on table public.manager_emails from service_role;
+revoke update, delete, truncate on table public.leave_request_pay from service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. Counting days, versions, balances
@@ -662,13 +696,18 @@ begin
   get diagnostics v_n = row_count;
   v_added := v_added + v_n;
 
-  -- Carry-over: min(last year's remainder, the cap in force on 1 January), once, where last year
-  -- has rows.
+  -- Carry-over: min(last year's remainder, the cap in force on 1 January). Written once for every
+  -- worker and type the first time the year is ensured, 0 where the type has no cap or last year
+  -- has no rows, so the decision is final and can't be added later.
   insert into public.leave_ledger (
     organisation_id, worker_id, leave_type_id, leave_year, kind, days, entitlement_id
   )
   select w.organisation_id, w.id, t.id, p_year, 'carry_over',
-    least(greatest(prev.remainder, 0), e.carry_over_cap_days), e.id
+    case
+      when e.carry_over_cap_days is null or prev.remainder is null then 0
+      else least(greatest(prev.remainder, 0), e.carry_over_cap_days)
+    end,
+    e.id
   from public.workers w
   join public.leave_types t on t.organisation_id = w.organisation_id and t.status = 'active'
   join public.leave_entitlements e
@@ -679,12 +718,10 @@ begin
     from public.leave_ledger l
     where l.organisation_id = w.organisation_id and l.worker_id = w.id
       and l.leave_type_id = t.id and l.leave_year = p_year - 1
-    having count(*) > 0
   ) prev on true
   where w.organisation_id = p_organisation_id
     and w.status = 'active'
     and w.start_date <= v_dec31
-    and e.carry_over_cap_days is not null
     and (p_worker_ids is null or w.id = any (p_worker_ids))
   on conflict do nothing;
   get diagnostics v_n = row_count;
@@ -742,7 +779,8 @@ security definer
 set search_path = ''
 as $$
 begin
-  if auth.uid() is not null then
+  -- Only the cron's secret-key call (service_role, no user) skips the role check.
+  if auth.uid() is not null or coalesce(auth.role(), '') <> 'service_role' then
     perform private.require_leave_setup_role(p_organisation_id);
   end if;
   if p_organisation_id is null or not exists (
@@ -947,6 +985,7 @@ as $$
 declare
   v_workers uuid[];
   v_own uuid;
+  v_may_ensure_past boolean := false;
 begin
   if private.session_uid() is null or p_organisation_id is null then
     raise exception 'Sign in to see leave balances.' using errcode = '42501';
@@ -963,6 +1002,7 @@ begin
   if v_own is not null then
     v_workers := array[v_own];
   elsif private.has_role(p_organisation_id, array['owner', 'admin', 'hr']) then
+    v_may_ensure_past := true;
     select array_agg(w.id) into v_workers
     from public.workers w
     where w.organisation_id = p_organisation_id
@@ -983,7 +1023,11 @@ begin
   if v_workers is null or cardinality(v_workers) = 0 then
     return;
   end if;
-  perform private.leave_ensure_year_core(p_organisation_id, p_year, v_workers);
+  -- Workers and line managers ensure only the current year; past years are read-only to them
+  -- (owner, admin, hr and the cron may ensure a past year).
+  if v_may_ensure_past or p_year = extract(year from private.org_today(p_organisation_id))::integer then
+    perform private.leave_ensure_year_core(p_organisation_id, p_year, v_workers);
+  end if;
 
   return query
   select w.id, t.id,
@@ -1271,8 +1315,18 @@ begin
     case when v_full or v_lm or b.step1_ok then b.reason end,
     b.status,
     b.certificate_seen,
-    case when v_full then b.pay_percent end,
-    case when v_full then b.pay_below_service end,
+    case when v_full then coalesce(
+      pay.pay_percent,
+      case when t.paid then coalesce(ver.pay_percent, 0) else 0 end
+    ) end,
+    case when v_full then coalesce(
+      pay.pay_below_service,
+      coalesce(
+        ver.pay_min_service_months is not null
+          and private.leave_service_months(w.start_date, b.start_date) < ver.pay_min_service_months,
+        false
+      )
+    ) end,
     b.created_at,
     b.decided_at,
     b.cancelled_at,
@@ -1307,6 +1361,14 @@ begin
   left join public.profiles lmdp on lmdp.user_id = lmd.actor
   left join public.leave_decisions hrd on hrd.request_id = b.id and hrd.step = 'hr'
   left join public.profiles hrdp on hrdp.user_id = hrd.actor
+  left join public.leave_request_pay pay on v_full and pay.request_id = b.id
+  left join lateral (
+    select e.pay_percent, e.pay_min_service_months
+    from public.leave_entitlements e
+    where v_full and e.leave_type_id = b.leave_type_id and e.effective_from <= b.start_date
+      and (e.effective_to is null or e.effective_to >= b.start_date)
+    limit 1
+  ) ver on true
   order by b.start_date, w.last_name, w.first_name, b.id
   limit 500;
 end;
@@ -1378,7 +1440,7 @@ grant execute on function public.leave_request_list(uuid, text[], date, date, uu
 -- company, a past start, a range across the new year or in a year not started, a type before its
 -- minimum service, no days to count, an overlap with another live request, and (on a type whose
 -- version gives days a year) fewer days available than asked. Returns {id, days, shifts,
--- site_names, status, pay_below_service}.
+-- site_names, status}.
 create function private.request_leave(
   p_organisation_id uuid,
   p_leave_type_id uuid,
@@ -1480,18 +1542,11 @@ begin
   end if;
 
   insert into public.leave_requests (
-    organisation_id, worker_id, leave_type_id, leave_year, start_date, end_date, days, reason,
-    pay_percent, pay_below_service
+    organisation_id, worker_id, leave_type_id, leave_year, start_date, end_date, days, reason
   )
   values (
     p_organisation_id, v_worker, v_type.id, v_year, p_start_date, p_end_date, v_count.days,
-    v_reason,
-    case when v_type.paid then v_version.pay_percent else 0 end,
-    coalesce(
-      v_version.pay_min_service_months is not null
-        and private.leave_service_months(v_start, p_start_date) < v_version.pay_min_service_months,
-      false
-    )
+    v_reason
   )
   returning id into v_id;
 
@@ -1500,12 +1555,7 @@ begin
     'days', v_count.days,
     'shifts', v_count.shifts,
     'site_names', to_jsonb(v_count.site_names),
-    'status', 'pending_line_manager',
-    'pay_below_service', coalesce(
-      v_version.pay_min_service_months is not null
-        and private.leave_service_months(v_start, p_start_date) < v_version.pay_min_service_months,
-      false
-    )
+    'status', 'pending_line_manager'
   );
 end;
 $$;
@@ -1686,6 +1736,7 @@ declare
   v_certificate boolean;
   v_below boolean;
   v_pay integer;
+  v_lock_worker uuid;
 begin
   if private.session_uid() is null or p_organisation_id is null then
     raise exception 'Sign in to decide leave.' using errcode = '42501';
@@ -1699,6 +1750,15 @@ begin
   end if;
   if p_decision = 'declined' and v_note is null then
     raise exception 'Say why, so the worker knows.' using errcode = '22023';
+  end if;
+
+  -- The worker's leave lock first (as request_leave and adjust_leave_balance take it), so two
+  -- decisions, or a decision and a request, can't both pass the balance check.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
   end if;
 
   select r.* into v_request
@@ -1733,7 +1793,7 @@ begin
       and private.leave_service_months(v_start, v_request.start_date) < v_version.pay_min_service_months,
     false
   );
-  v_pay := case when v_type.paid then coalesce(v_version.pay_percent, v_request.pay_percent) else 0 end;
+  v_pay := case when v_type.paid then coalesce(v_version.pay_percent, 0) else 0 end;
 
   perform private.leave_ensure_year_core(p_organisation_id, v_request.leave_year, array[v_request.worker_id]);
   v_available := private.leave_balance(
@@ -1786,12 +1846,12 @@ begin
   set status = v_status,
       days = case when v_status = 'approved' then v_count.days else r.days end,
       certificate_seen = v_certificate,
-      pay_percent = case when v_status = 'approved' then v_pay else r.pay_percent end,
-      pay_below_service = case when v_status = 'approved' then v_below else r.pay_below_service end,
       decided_at = now()
   where r.id = v_request.id;
 
   if v_status = 'approved' then
+    insert into public.leave_request_pay (request_id, organisation_id, pay_percent, pay_below_service)
+    values (v_request.id, p_organisation_id, v_pay, v_below);
     insert into public.leave_ledger (
       organisation_id, worker_id, leave_type_id, leave_year, kind, days, request_id, actor
     )
@@ -1865,6 +1925,7 @@ declare
   v_reason text := private.leave_clean_text(p_reason, 500);
   v_own uuid;
   v_by_worker boolean;
+  v_lock_worker uuid;
 begin
   if private.session_uid() is null or p_organisation_id is null then
     raise exception 'Sign in to cancel leave.' using errcode = '42501';
@@ -1878,6 +1939,15 @@ begin
   from public.memberships m
   where m.organisation_id = p_organisation_id and m.user_id = private.session_uid()
     and m.role = 'worker' and m.worker_id is not null;
+
+  -- The worker's leave lock first (as request_leave and adjust_leave_balance take it), so two
+  -- decisions, or a decision and a request, can't both pass the balance check.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end if;
 
   select r.* into v_request
   from public.leave_requests r

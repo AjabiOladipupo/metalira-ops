@@ -521,16 +521,42 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
-                },"leave_requests": {
+                },"leave_request_pay": {
                   Row: {
-                    "cancel_reason": string | null,"cancelled_at": string | null,"cancelled_by": string | null,"certificate_seen": boolean,"created_at": string,"created_by": string | null,"days": number,"decided_at": string | null,"end_date": string,"id": string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"pay_below_service": boolean,"pay_percent": number,"reason": string | null,"start_date": string,"status": string,"updated_at": string,"worker_id": string
+                    "created_at": string,"organisation_id": string,"pay_below_service": boolean,"pay_percent": number,"request_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "cancel_reason"?: string | null,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"certificate_seen"?: boolean,"created_at"?: string,"created_by"?: string | null,"days": number,"decided_at"?: string | null,"end_date": string,"id"?: string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"pay_below_service"?: boolean,"pay_percent": number,"reason"?: string | null,"start_date": string,"status"?: string,"updated_at"?: string,"worker_id": string
+                    "created_at"?: string,"organisation_id": string,"pay_below_service": boolean,"pay_percent": number,"request_id": string
                   }
                   Update: {
-                    "cancel_reason"?: string | null,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"certificate_seen"?: boolean,"created_at"?: string,"created_by"?: string | null,"days"?: number,"decided_at"?: string | null,"end_date"?: string,"id"?: string,"leave_type_id"?: string,"leave_year"?: number,"organisation_id"?: string,"pay_below_service"?: boolean,"pay_percent"?: number,"reason"?: string | null,"start_date"?: string,"status"?: string,"updated_at"?: string,"worker_id"?: string
+                    "created_at"?: string,"organisation_id"?: string,"pay_below_service"?: boolean,"pay_percent"?: number,"request_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "leave_request_pay_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "leave_request_pay_request_fkey"
+      columns: ["organisation_id","request_id"]
+isOneToOne: false
+      referencedRelation: "leave_requests"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"leave_requests": {
+                  Row: {
+                    "cancel_reason": string | null,"cancelled_at": string | null,"cancelled_by": string | null,"certificate_seen": boolean,"created_at": string,"created_by": string | null,"days": number,"decided_at": string | null,"end_date": string,"id": string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"reason": string | null,"start_date": string,"status": string,"updated_at": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cancel_reason"?: string | null,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"certificate_seen"?: boolean,"created_at"?: string,"created_by"?: string | null,"days": number,"decided_at"?: string | null,"end_date": string,"id"?: string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"reason"?: string | null,"start_date": string,"status"?: string,"updated_at"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "cancel_reason"?: string | null,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"certificate_seen"?: boolean,"created_at"?: string,"created_by"?: string | null,"days"?: number,"decided_at"?: string | null,"end_date"?: string,"id"?: string,"leave_type_id"?: string,"leave_year"?: number,"organisation_id"?: string,"reason"?: string | null,"start_date"?: string,"status"?: string,"updated_at"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
