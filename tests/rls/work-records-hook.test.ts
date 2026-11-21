@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgClient } from "./helpers/supabase";
 
 /** Tables that record work or pay under the worker's staff ID: checked by the hook. */
-const WORK_RECORD_TABLES: readonly string[] = ["punches"];
+const WORK_RECORD_TABLES: readonly string[] = ["punches", "timesheet_lines"];
 
 /** Tables with a worker_id that are not work records, and why. */
 const NOT_WORK_RECORDS: Record<string, string> = {
@@ -29,6 +29,10 @@ const NOT_WORK_RECORDS: Record<string, string> = {
   staff_id_corrections: "the corrections themselves",
   staff_queries:
     "disciplinary and HR queries (slice 4.6): an HR record about the worker, kept by worker id, not staff ID; nothing worked or paid",
+  timesheet_corrections:
+    "corrections to a timesheet line (slice 4.2); each hangs off a line, which is the work record and is never deleted while a correction points at it",
+  timesheets:
+    "the pay-period container of a worker's timesheet lines (slice 4.2); the lines are the work records",
   worker_assignments: "mapping to clients, sites and projects",
   worker_change_requests: "profile change requests from the worker app",
   worker_consents:
