@@ -114,8 +114,8 @@ test("a worker asks for 3 days; line manager then HR approve; the balance drops 
   await w.goto("/m/leave");
   await expect(w.getByTestId("balance-annual")).toContainText("15");
   await w.getByRole("button", { name: "Annual", exact: true }).click();
-  await w.getByLabel("From").fill(start);
-  await w.getByLabel("To").fill(end);
+  await w.getByLabel("From", { exact: true }).fill(start);
+  await w.getByLabel("To", { exact: true }).fill(end);
   await expect(w.getByTestId("leave-count")).toContainText("3 working days.");
   await expectNoHorizontalScroll(w);
   await w.getByLabel("Reason (optional)").fill("Family visit");
@@ -139,7 +139,8 @@ test("a worker asks for 3 days; line manager then HR approve; the balance drops 
   await m.getByRole("link", { name: /Open Musa Ibrahim's annual leave/ }).click();
   await expect(m.getByTestId("leave-recount")).toContainText("3 working days");
   await m.getByRole("button", { name: "Approve, send to HR" }).click();
-  await expect(m.getByText("Approved · sent to HR")).toBeVisible();
+  // The decided request reloads without the form; its line manager step shows the decision.
+  await expect(m.getByText(/Approved by Kola Adebayo/)).toBeVisible();
   await desk.close();
 
   // HR, at 390 on the manager app.
@@ -155,7 +156,7 @@ test("a worker asks for 3 days; line manager then HR approve; the balance drops 
   await h.getByRole("link", { name: /Open Musa Ibrahim's annual leave/ }).click();
   await expect(h.getByTestId("hr-preview")).toContainText("the balance goes from 15 to 12");
   await h.getByRole("button", { name: "Approve", exact: true }).click();
-  await expect(h.getByText(/Approved · 3 days off the balance, 12 left/)).toBeVisible();
+  await expect(h.getByText(/Approved by Ngozi Eze/)).toBeVisible();
   await expectNoHorizontalScroll(h);
   await hrPhone.close();
 

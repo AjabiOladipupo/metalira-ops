@@ -20,6 +20,8 @@ const BUILT_EMPTY: Record<string, string> = {
   "/app/roster": "No posts to roster yet.",
   // Slice 3.7: the live board; nobody is rostered in a new company.
   "/app/attendance": "No one is rostered for today yet. Publish a roster to see it here.",
+  // Slice 4.4: the Leave board; a new company has no requests.
+  "/app/leave": "No leave requests yet. Workers ask from Leave in the worker app.",
 };
 
 /** Built pages whose heading is a number, as on their prototype. */
