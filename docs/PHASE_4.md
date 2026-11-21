@@ -174,7 +174,7 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 **Accept:** approving a timesheet day on a manned-post shift creates one billable Work Unit with the day's minutes (the BUILD_PLAN "done when"); a reopened day cancels it.
 
 ### 4.4 Leave requests and balances (after 4.1)
-- Migration `20261121140000_leave_requests.sql`.
+- Migration `20261121180000_leave_requests.sql`.
 - `leave_ledger` (insert-only): worker, leave type, leave year, kind (`grant`, `carry_over`, `taken`, `returned`, `adjustment`), days (signed integer), request id null, reason (required for adjustments), actor. A balance is the sum, never a stored column.
 - `ensure_leave_year(org, year)`: idempotent; for each active worker and type, inserts the year's `grant` from the entitlement in force on 1 January (prorated for joiners, decision 2) and, where the type has a cap, a `carry_over` of min(last year's remainder, cap). Run by the daily cron `/api/cron/leave-year` (05:00; it does real work on 1 January and for new joiners) and on first read of a balance.
 - `leave_requests`: worker, leave type, `start_date`, `end_date`, `days` (whole days, decision 3), reason (optional, plain text), status (pending_line_manager, pending_hr, approved, declined, cancelled), `certificate_seen` (set by an approver on types that need one).
@@ -241,7 +241,7 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 
 Wave 1: 4.0, 4.1 and 4.2 (independent; at most three agents at once). Wave 2: 4.3 off 4.2, 4.4 off 4.1, 4.6 off 4.0 (each starts from its dependency's open PR branch and merges `main` in once it lands). Wave 3: 4.5 off 4.4, 4.7 off 4.4 with 4.3 and 4.6 merged in.
 
-Migrations in order: `20261121100000` (4.0), `20261121110000` (4.1), `20261121120000` (4.2), `20261121130000` (4.3), `20261121140000` (4.4), `20261121150000` (4.5), `20261121160000` (4.6), `20261121170000` (4.7). A slice that needs a fix-up migration takes the next free minute in its own hour (for example `20261121120500`).
+Migrations in order: `20261121100000` (4.0), `20261121110000` (4.1), `20261121120000` (4.2), `20261121130000` (4.3), `20261121180000` (4.4), `20261121150000` (4.5), `20261121160000` (4.6), `20261121170000` (4.7). A slice that needs a fix-up migration takes the next free minute in its own hour (for example `20261121120500`).
 
 security-reviewer runs on 4.0, 4.2, 4.3, 4.5, 4.6 and 4.7. No money-reviewer: there is no pay maths and no kobo in Phase 4.
 

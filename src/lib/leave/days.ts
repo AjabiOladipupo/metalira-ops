@@ -1,7 +1,7 @@
 /**
  * Counting leave days (slice 4.4, owner decision 3). Pure: dates are ISO strings, days whole
  * numbers. The database counts the same way (private.leave_count_days in migration
- * 20261121140000_leave_requests.sql) and has the last word; this mirror lets the worker's form
+ * 20261121180000_leave_requests.sql) and has the last word; this mirror lets the worker's form
  * show the count live ("3 working days. Covers 3 rostered shifts at Gate A").
  *
  * - A calendar-day type counts every day in the range.

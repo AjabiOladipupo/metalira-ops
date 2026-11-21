@@ -1,6 +1,6 @@
 /**
  * Leave requests and the leave year (slice 4.4). Pure. The database applies the same rules
- * (migration 20261121140000_leave_requests.sql); these mirror them for screens and tests.
+ * (migration 20261121180000_leave_requests.sql); these mirror them for screens and tests.
  */
 
 import { daysInYear, prorateEntitlement } from "./entitlements";

@@ -2,7 +2,8 @@
  * Isolation registry for slice 4.4 (leave requests and balances), on a worker and a leave type
  * made here. Rows are seeded with the secret key, which may insert but never change, delete or
  * truncate; signed-in roles have no write grants (the SQL functions write), and the triggers
- * refuse changes and deletes from everyone, the database owner included.
+ * refuse changes and deletes from everyone, the database owner included. Named people_leave.ts so
+ * it loads after people.ts: the People registry seeds the organisation's first worker.
  */
 import { randomUUID } from "node:crypto";
 

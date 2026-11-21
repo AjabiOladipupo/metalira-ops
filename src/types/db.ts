@@ -419,6 +419,38 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"leave_decisions": {
+                  Row: {
+                    "actor": string,"certificate_seen": boolean,"created_at": string,"days": number,"decision": string,"id": string,"note": string | null,"organisation_id": string,"request_id": string,"step": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "actor": string,"certificate_seen"?: boolean,"created_at"?: string,"days": number,"decision": string,"id"?: string,"note"?: string | null,"organisation_id": string,"request_id": string,"step": string,"worker_id": string
+                  }
+                  Update: {
+                    "actor"?: string,"certificate_seen"?: boolean,"created_at"?: string,"days"?: number,"decision"?: string,"id"?: string,"note"?: string | null,"organisation_id"?: string,"request_id"?: string,"step"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "leave_decisions_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "leave_decisions_request_fkey"
+      columns: ["organisation_id","request_id"]
+isOneToOne: false
+      referencedRelation: "leave_requests"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "leave_decisions_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"leave_entitlements": {
                   Row: {
                     "carry_over_cap_days": number | null,"created_at": string,"created_by": string | null,"days_per_year": number,"effective_from": string,"effective_to": string | null,"id": string,"leave_type_id": string,"organisation_id": string,"pay_min_service_months": number | null,"pay_percent": number
@@ -445,6 +477,82 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"leave_ledger": {
+                  Row: {
+                    "actor": string | null,"created_at": string,"days": number,"entitlement_id": string | null,"id": string,"kind": string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"reason": string | null,"request_id": string | null,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "actor"?: string | null,"created_at"?: string,"days": number,"entitlement_id"?: string | null,"id"?: string,"kind": string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"reason"?: string | null,"request_id"?: string | null,"worker_id": string
+                  }
+                  Update: {
+                    "actor"?: string | null,"created_at"?: string,"days"?: number,"entitlement_id"?: string | null,"id"?: string,"kind"?: string,"leave_type_id"?: string,"leave_year"?: number,"organisation_id"?: string,"reason"?: string | null,"request_id"?: string | null,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "leave_ledger_entitlement_fkey"
+      columns: ["organisation_id","entitlement_id"]
+isOneToOne: false
+      referencedRelation: "leave_entitlements"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "leave_ledger_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "leave_ledger_request_fkey"
+      columns: ["organisation_id","request_id"]
+isOneToOne: false
+      referencedRelation: "leave_requests"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "leave_ledger_type_fkey"
+      columns: ["organisation_id","leave_type_id"]
+isOneToOne: false
+      referencedRelation: "leave_types"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "leave_ledger_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"leave_requests": {
+                  Row: {
+                    "cancel_reason": string | null,"cancelled_at": string | null,"cancelled_by": string | null,"certificate_seen": boolean,"created_at": string,"created_by": string | null,"days": number,"decided_at": string | null,"end_date": string,"id": string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"pay_below_service": boolean,"pay_percent": number,"reason": string | null,"start_date": string,"status": string,"updated_at": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "cancel_reason"?: string | null,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"certificate_seen"?: boolean,"created_at"?: string,"created_by"?: string | null,"days": number,"decided_at"?: string | null,"end_date": string,"id"?: string,"leave_type_id": string,"leave_year": number,"organisation_id": string,"pay_below_service"?: boolean,"pay_percent": number,"reason"?: string | null,"start_date": string,"status"?: string,"updated_at"?: string,"worker_id": string
+                  }
+                  Update: {
+                    "cancel_reason"?: string | null,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"certificate_seen"?: boolean,"created_at"?: string,"created_by"?: string | null,"days"?: number,"decided_at"?: string | null,"end_date"?: string,"id"?: string,"leave_type_id"?: string,"leave_year"?: number,"organisation_id"?: string,"pay_below_service"?: boolean,"pay_percent"?: number,"reason"?: string | null,"start_date"?: string,"status"?: string,"updated_at"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "leave_requests_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "leave_requests_type_fkey"
+      columns: ["organisation_id","leave_type_id"]
+isOneToOne: false
+      referencedRelation: "leave_types"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "leave_requests_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"leave_types": {
                   Row: {
                     "code": string,"counting": string,"created_at": string,"created_by": string | null,"id": string,"min_service_months": number,"name": string,"needs_certificate": boolean,"organisation_id": string,"paid": boolean,"preset": string | null,"source_label": string | null,"status": string,"updated_at": string
@@ -459,6 +567,26 @@ isOneToOne: false
                   Relationships: [
                     {
       foreignKeyName: "leave_types_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"manager_emails": {
+                  Row: {
+                    "created_at": string,"id": string,"kind": string,"organisation_id": string,"recipients": number,"ref_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"id"?: string,"kind": string,"organisation_id": string,"recipients": number,"ref_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"id"?: string,"kind"?: string,"organisation_id"?: string,"recipients"?: number,"ref_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "manager_emails_organisation_id_fkey"
       columns: ["organisation_id"]
 isOneToOne: false
       referencedRelation: "organisations"
@@ -1414,6 +1542,9 @@ isOneToOne: false
 "add_timesheet_correction":
 { Args: { "p_corrected_at"?: string,"p_kind": string,"p_line_id": string,"p_minutes"?: number,"p_organisation_id": string,"p_ot_minutes"?: number,"p_punch_id"?: string,"p_reason": string }; Returns: Json
                            },
+"adjust_leave_balance":
+{ Args: { "p_days": number,"p_leave_type_id": string,"p_organisation_id": string,"p_reason": string,"p_worker_id": string,"p_year": number }; Returns: Json
+                           },
 "apply_due_bank_detail_changes":
 { Args: { "p_organisation_id": string }; Returns: number
                            },
@@ -1446,6 +1577,9 @@ isOneToOne: false
 "cancel_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"cancel_leave_request":
+{ Args: { "p_organisation_id": string,"p_reason"?: string,"p_request_id": string }; Returns: Json
+                           },
 "cancel_pay_rate":
 { Args: { "p_organisation_id": string,"p_pay_rate_id": string }; Returns: undefined
                            },
@@ -1468,6 +1602,9 @@ isOneToOne: false
                            },
 "claim_inbox_email":
 { Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
+                           },
+"claim_manager_email":
+{ Args: { "p_global_cap": number,"p_kind": string,"p_org_cap": number,"p_organisation_id": string,"p_recipients": number,"p_ref_id": string }; Returns: boolean
                            },
 "claim_staff_query_reminders":
 { Args: { "p_limit": number }; Returns: {
@@ -1537,6 +1674,12 @@ isOneToOne: false
               "batch_id": string,"photo_path": string
             }[]
                            },
+"decide_leave_hr":
+{ Args: { "p_certificate_seen"?: boolean,"p_decision": string,"p_dry_run"?: boolean,"p_note"?: string,"p_organisation_id": string,"p_request_id": string }; Returns: Json
+                           },
+"decide_leave_line_manager":
+{ Args: { "p_certificate_seen"?: boolean,"p_decision": string,"p_note"?: string,"p_organisation_id": string,"p_request_id": string }; Returns: Json
+                           },
 "decide_org_bank_account":
 { Args: { "p_decision": string,"p_id": string,"p_note"?: string,"p_organisation_id": string }; Returns: {
               "applies_after": string,"bank_account_last4": string,"id": string,"status": Database["public"]['Enums']["org_bank_account_status"]
@@ -1559,8 +1702,29 @@ isOneToOne: false
 "end_other_sessions":
 { Args: Record<PropertyKey, never>; Returns: number
                            },
+"ensure_leave_year":
+{ Args: { "p_organisation_id": string,"p_year": number }; Returns: number
+                           },
 "finish_bank_account_lookup":
 { Args: { "p_account_name"?: string,"p_id": string,"p_source"?: string,"p_status": Database["public"]['Enums']["bank_lookup_status"] }; Returns: boolean
+                           },
+"leave_balances":
+{ Args: { "p_organisation_id": string,"p_worker_ids"?: (string)[],"p_year": number }; Returns: {
+              "adjusted": number,"available": number,"balance": number,"carried": number,"granted": number,"leave_type_id": string,"pending": number,"taken": number,"worker_id": string
+            }[]
+                           },
+"leave_day_count":
+{ Args: { "p_from": string,"p_leave_type_id": string,"p_organisation_id": string,"p_to": string,"p_worker_id": string }; Returns: {
+              "days": number,"shifts": number,"site_names": (string)[]
+            }[]
+                           },
+"leave_request_list":
+{ Args: { "p_from"?: string,"p_organisation_id": string,"p_request_id"?: string,"p_statuses"?: (string)[],"p_to"?: string }; Returns: {
+              "can_cancel": boolean,"can_decide_step1": boolean,"can_decide_step2": boolean,"cancel_reason": string,"cancelled_at": string,"certificate_seen": boolean,"counting": string,"created_at": string,"days": number,"decided_at": string,"department_name": string,"end_date": string,"has_line_manager": boolean,"hr_actor_name": string,"hr_decided_at": string,"hr_decision": string,"hr_note": string,"id": string,"leave_type_id": string,"leave_type_name": string,"leave_year": number,"line_manager_name": string,"lm_actor_name": string,"lm_decided_at": string,"lm_decision": string,"lm_note": string,"needs_certificate": boolean,"pay_below_service": boolean,"pay_percent": number,"reason": string,"staff_id": string,"start_date": string,"status": string,"worker_id": string,"worker_name": string
+            }[]
+                           },
+"leave_year_organisations":
+{ Args: Record<PropertyKey, never>; Returns: string[]
                            },
 "list_import_managers":
 { Args: { "p_organisation_id": string }; Returns: {
@@ -1583,6 +1747,9 @@ isOneToOne: false
                            },
 "my_crew_context":
 { Args: { "p_organisation_id": string }; Returns: Json
+                           },
+"my_leave_calendar":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: Json
                            },
 "my_line_manager":
 { Args: { "p_organisation_id": string }; Returns: {
@@ -1662,6 +1829,9 @@ isOneToOne: false
                            },
 "reply_to_staff_query":
 { Args: { "p_body": string,"p_organisation_id": string,"p_query_id": string }; Returns: Json
+                           },
+"request_leave":
+{ Args: { "p_end_date": string,"p_leave_type_id": string,"p_organisation_id": string,"p_reason"?: string,"p_start_date": string }; Returns: Json
                            },
 "request_org_bank_account":
 { Args: { "p_account_name": string,"p_bank_account_digest"?: string,"p_bank_account_enc": string,"p_bank_account_last4": string,"p_bank_code"?: string,"p_bank_lookup_id"?: string,"p_bank_name": string,"p_id": string,"p_name_check"?: Database["public"]['Enums']["bank_name_check"],"p_name_check_reason"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: {
