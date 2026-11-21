@@ -271,6 +271,9 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // Slice 4.1: leave types, presets, holidays and the working week.
   { href: "/app/settings/leave", roles: ["owner", "admin", "hr"] },
   { href: "/app/settings/holidays", roles: ["owner", "admin", "hr"] },
+  // Slice 4.4: leave balances (and HR's adjustments). Ops managers read requests' dates and type
+  // only, never balances. A request's own page follows Leave.
+  { href: "/app/leave/balances", roles: ["owner", "admin", "hr", "line_manager"] },
   // Slice 1.12: inviting, re-roling and removing managers.
   { href: "/app/settings/team", roles: ["owner", "admin"] },
   { href: "/app/people/new", roles: ["owner", "admin", "hr"] },

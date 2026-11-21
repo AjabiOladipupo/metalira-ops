@@ -22,6 +22,12 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "account name lookups from the bank network (slice 2.3b); nothing worked or paid",
   import_rows: "the import row that created the worker",
   inbox_items: "messages to the worker in the worker app (slice 3.1); nothing worked or paid",
+  leave_decisions:
+    "decisions on leave requests (slice 4.4); time off asked for, not work done or pay; Phase 5 pays from payroll lines",
+  leave_ledger:
+    "leave days granted, taken and adjusted (slice 4.4), keyed by the worker record, not the staff ID; nothing worked or paid",
+  leave_requests:
+    "time off a worker asks for (slice 4.4); approved leave days get no timesheet line, so nothing worked is recorded",
   memberships: "the worker's login",
   pay_rates: "rates of pay, not payments",
   shift_assignments:
