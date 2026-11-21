@@ -244,7 +244,10 @@ export function LiveBoard({
                 </tbody>
               </table>
             </div>
-            <ul className="m-0 flex list-none flex-col gap-3 p-0 md:hidden" data-testid="board-cards">
+            <ul
+              className="m-0 flex list-none flex-col gap-3 p-0 md:hidden"
+              data-testid="board-cards"
+            >
               {list.map((row) => (
                 <li
                   key={row.assignmentId}
@@ -301,9 +304,7 @@ export function LiveBoard({
                     <Td num>{site.noShow}</Td>
                     <Td className="text-fg-muted">
                       {formatSince(site.lastSyncAt, now)}
-                      {site.lateSyncs > 0
-                        ? ` · ${site.lateSyncs} sent late today`
-                        : ""}
+                      {site.lateSyncs > 0 ? ` · ${site.lateSyncs} sent late today` : ""}
                     </Td>
                   </tr>
                 ))}

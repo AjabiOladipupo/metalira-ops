@@ -1,6 +1,11 @@
 import { LATE_GRACE, NO_SHOW_AFTER } from "@/lib/attendance";
 import { maskPhone } from "@/lib/mask";
-import { PUNCH_FLAGS, PUNCH_FLAG_LABELS, type PunchFlag, type PunchKind } from "@/lib/punches/flags";
+import {
+  PUNCH_FLAGS,
+  PUNCH_FLAG_LABELS,
+  type PunchFlag,
+  type PunchKind,
+} from "@/lib/punches/flags";
 import { formatShiftHours, timeIn } from "@/lib/roster";
 
 /**
@@ -292,7 +297,9 @@ export function needsAction(row: BoardRow): boolean {
  * What the Call column shows. A `tel:` link only when the number came back in full (roles that
  * read it on the people record); otherwise the masked number, and nothing to dial.
  */
-export function callTarget(row: BoardRow): { href: string; label: string } | { masked: string } | null {
+export function callTarget(
+  row: BoardRow,
+): { href: string; label: string } | { masked: string } | null {
   if (row.phone) {
     const digits = row.phone.replace(/\D/g, "");
     if (digits.length >= 7) return { href: `tel:${digits}`, label: maskPhone(row.phone) };

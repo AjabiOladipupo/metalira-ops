@@ -123,6 +123,13 @@ As in Phase 2 (docs/LIRA.md): every new Server Action is registered in `src/serv
 
 ### 3.7 Live board `/app/attendance`
 - Tiles: On site, Late, No-show, Starting in 2 h, Clocked out; the list; By site with the last sync; Call (`tel:`); Send replacement (opens the tray). Worked out on read and polled every 30 s; no cron.
+- As built (migration `20261120210000_attendance_board.sql`):
+  - `public.attendance_board(org)`: invoker wrapper over a private definer (`search_path ''`), one statement per poll: assignments in the window by `(organisation_id, starts_at)`, their punches by the new `punches_org_assignment_idx`, each site's last sync by `(organisation_id, recorded_at)`. Window: assigned shifts (not cancelled) that end after the company's midnight and start within 2 hours. Nothing while Shifts is off.
+  - Roles: owner, admin, hr, ops_manager every row; a line manager their reportees' rows only (their crews); finance, other companies and untrusted sessions get 42501. The nav item gains hr to match the access table. The phone comes back in full only to roles that read it on the people record (all board roles today); the last four digits always, for masking.
+  - Status (`private.attendance_status`, mirrored in `src/lib/attendance-board.ts`): latest punch out = clocked out; latest punch in = on site (with "N min late" when the clock-in was after the grace); no clock-in = starting (before the start or within the grace), late (after the grace), no-show (after `no_show_after_minutes`, or once the shift ended). Boundaries as the punches' late flag: exactly at the grace is on time.
+  - Screen: tiles filter the list (worker, site · post, shift, last punch, status, flags incl. `delayed`, "By supervisor" and "Not published"), search by name, staff ID or post, a site filter, By site (rostered now, on site, late, no-show, last sync, punches sent late today). Call (`tel:`) and Send replacement on late and no-show rows; Send replacement only for roster editors. Cards below `md`, a table above. Polls by `attendanceBoardAction` every 30 s while the tab is visible.
+  - Send replacement opens `/app/roster?site&week&post&date&replace`: "Remove from shift" prefilled "No-show" for that worker, then the assign picker for the same post-day (or the picker at once if the place is open). Past days can't change (MLRS6).
+  - Capability `attendance.live_board` (read, `agent: true`, phones stripped for Lira); `fixtures/lira/attendance.md` requests 9 to 14.
 
 ### 3.8 QR checkpoint scans (patrols)
 - The scan page follows the carried-forward rule below; scans are punches of kind `checkpoint`. Security review.

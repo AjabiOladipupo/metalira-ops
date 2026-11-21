@@ -72,7 +72,10 @@ export class BoardForbiddenError extends Error {
 }
 
 /** The board now, for the company. Throws BoardForbiddenError on 42501. */
-export async function loadAttendanceBoard(supabase: Client, organisationId: string): Promise<Board> {
+export async function loadAttendanceBoard(
+  supabase: Client,
+  organisationId: string,
+): Promise<Board> {
   const { data, error } = await supabase.rpc("attendance_board", {
     p_organisation_id: organisationId,
   });
@@ -88,37 +91,36 @@ export async function loadAttendanceBoard(supabase: Client, organisationId: stri
     timeZone: first.time_zone,
     lateGraceMinutes: first.late_grace_minutes,
     noShowAfterMinutes: first.no_show_after_minutes,
-    rows: parsed.map(
-      (r): BoardRow => ({
-        assignmentId: r.assignment_id,
-        shiftDate: r.shift_date,
-        startsAt: r.starts_at,
-        endsAt: r.ends_at,
-        siteId: r.site_id,
-        siteName: r.site_name,
-        postId: r.post_id,
-        postName: r.post_name,
-        workerId: r.worker_id,
-        workerName: r.worker_name,
-        staffId: r.staff_id,
-        phone: r.phone,
-        phoneLast4: r.phone_last4,
-        published: r.published,
-        firstInAt: r.first_in_at,
-        lastPunchKind: r.last_punch_kind,
-        lastPunchAt: r.last_punch_at,
-        flags: orderedFlags(r.punch_flags ?? []),
-        bySupervisor: r.by_supervisor,
-        status: r.status,
-        lateMinutes: r.late_minutes,
-        siteLastSyncAt: r.site_last_sync_at,
-        siteLateSyncs: r.site_late_syncs,
-      }),
-    ),
+    rows: parsed.map((r): BoardRow => ({
+      assignmentId: r.assignment_id,
+      shiftDate: r.shift_date,
+      startsAt: r.starts_at,
+      endsAt: r.ends_at,
+      siteId: r.site_id,
+      siteName: r.site_name,
+      postId: r.post_id,
+      postName: r.post_name,
+      workerId: r.worker_id,
+      workerName: r.worker_name,
+      staffId: r.staff_id,
+      phone: r.phone,
+      phoneLast4: r.phone_last4,
+      published: r.published,
+      firstInAt: r.first_in_at,
+      lastPunchKind: r.last_punch_kind,
+      lastPunchAt: r.last_punch_at,
+      flags: orderedFlags(r.punch_flags ?? []),
+      bySupervisor: r.by_supervisor,
+      status: r.status,
+      lateMinutes: r.late_minutes,
+      siteLastSyncAt: r.site_last_sync_at,
+      siteLateSyncs: r.site_late_syncs,
+    })),
   };
 }
 
-export type BoardResult = { ok: true; board: Board } | { ok: false; reason: "forbidden" | "failed" };
+export type BoardResult =
+  { ok: true; board: Board } | { ok: false; reason: "forbidden" | "failed" };
 
 /**
  * One poll (every 30 seconds from the screen). One database call: the session is not loaded

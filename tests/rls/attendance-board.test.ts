@@ -240,8 +240,17 @@ beforeAll(async () => {
   W.later = await addWorker("Ifeoma Okafor");
   A.later = await rostered(owner.orgId, apapa, W.later, now + 3 * 60 * MIN, now + 11 * 60 * MIN);
   W.removed = await addWorker("Rita Ojo");
-  A.removed = await rostered(owner.orgId, apapa, W.removed, now - 30 * MIN, now + 60 * MIN, "removed");
-  W.crew = await addWorker("Chidi Obi", owner.orgId, { line_manager_membership_id: lmMembershipId });
+  A.removed = await rostered(
+    owner.orgId,
+    apapa,
+    W.removed,
+    now - 30 * MIN,
+    now + 60 * MIN,
+    "removed",
+  );
+  W.crew = await addWorker("Chidi Obi", owner.orgId, {
+    line_manager_membership_id: lmMembershipId,
+  });
   A.crew = await rostered(owner.orgId, lekki, W.crew, now - 30 * MIN, now + 7 * 60 * MIN);
   W.other = await addWorker("Ada Obi", other.orgId);
   A.other = await rostered(other.orgId, otherSite, W.other, now - 30 * MIN, now + 60 * MIN);
@@ -276,7 +285,11 @@ describe("attendance_board: statuses worked out on read", () => {
       no_show_after_minutes: 60,
       time_zone: "Africa/Lagos",
     });
-    expect(rows.get(A.noShow)).toMatchObject({ status: "no_show", late_minutes: 90, published: false });
+    expect(rows.get(A.noShow)).toMatchObject({
+      status: "no_show",
+      late_minutes: 90,
+      published: false,
+    });
     expect(rows.get(A.onSite)).toMatchObject({
       status: "on_site",
       late_minutes: 15,

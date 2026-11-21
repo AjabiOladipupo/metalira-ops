@@ -164,7 +164,8 @@ describe("board helpers", () => {
       row({ assignmentId: "2", workerName: "Halima Bello", siteId: "s2", status: "late" }),
       row({ assignmentId: "3", workerName: "Chidi Eze", postName: "Patrol", status: "on_site" }),
     ];
-    const ids = (f: Parameters<typeof filterRows>[1]) => filterRows(rows, f).map((r) => r.assignmentId);
+    const ids = (f: Parameters<typeof filterRows>[1]) =>
+      filterRows(rows, f).map((r) => r.assignmentId);
     expect(ids({ status: "late", siteId: "all", search: "" })).toEqual(["1", "2"]);
     expect(ids({ status: "late", siteId: "s2", search: "" })).toEqual(["2"]);
     expect(ids({ status: "all", siteId: "all", search: "patrol" })).toEqual(["3"]);
@@ -174,7 +175,11 @@ describe("board helpers", () => {
 
   it("summarises each site from the same rows, most no-shows first", () => {
     const rows = [
-      row({ assignmentId: "1", status: "on_site", siteLastSyncAt: new Date(now - 6 * MIN).toISOString() }),
+      row({
+        assignmentId: "1",
+        status: "on_site",
+        siteLastSyncAt: new Date(now - 6 * MIN).toISOString(),
+      }),
       row({ assignmentId: "2", status: "late" }),
       row({
         assignmentId: "3",
@@ -193,8 +198,18 @@ describe("board helpers", () => {
       }),
     ];
     const [first, second] = siteSummaries(rows, now);
-    expect(first).toMatchObject({ siteName: "Lekki Estate", rosteredNow: 1, noShow: 1, lateSyncs: 3 });
-    expect(second).toMatchObject({ siteName: "Apapa Warehouse 3", rosteredNow: 2, onSite: 1, late: 1 });
+    expect(first).toMatchObject({
+      siteName: "Lekki Estate",
+      rosteredNow: 1,
+      noShow: 1,
+      lateSyncs: 3,
+    });
+    expect(second).toMatchObject({
+      siteName: "Apapa Warehouse 3",
+      rosteredNow: 2,
+      onSite: 1,
+      late: 1,
+    });
     expect(formatSince(second!.lastSyncAt, now)).toBe("6 min ago");
     expect(headline(rows, now)).toBe("3 on shift now");
     expect(subline(rows)).toBe("2 sites · 3 punches sent late today");
@@ -210,7 +225,11 @@ describe("board helpers", () => {
     expect(statusText(row(), ZONE, now)).toBe("Late 22 min");
     expect(statusText(row({ status: "no_show" }), ZONE, now)).toBe("No-show");
     expect(
-      statusText(row({ status: "starting", startsAt: new Date(now + 60 * MIN).toISOString() }), ZONE, now),
+      statusText(
+        row({ status: "starting", startsAt: new Date(now + 60 * MIN).toISOString() }),
+        ZONE,
+        now,
+      ),
     ).toBe("Starts 07:22");
     expect(statusText(row({ status: "starting" }), ZONE, START + 5 * MIN)).toBe("Due 06:00");
     expect(statusText(row({ status: "on_site", lateMinutes: 14 }), ZONE, now)).toBe(
@@ -232,6 +251,8 @@ describe("board helpers", () => {
       "By supervisor",
       "Not published",
     ]);
+    // 3.5's delayed flag shows like any other.
+    expect(flagLabels(row({ flags: ["delayed", "late"] }))).toEqual(["Time not checked live"]);
   });
 
   it("dials only a number returned in full, and masks it otherwise", () => {
@@ -279,7 +300,9 @@ describe("replacementTarget (roster side of Send replacement)", () => {
   } as RosterWeek;
 
   it("removes the worker first, then picks for the same post-day", () => {
-    expect(replacementTarget(week, { postId: "p1", date: "2026-11-21", assignmentId: "a1" })).toEqual({
+    expect(
+      replacementTarget(week, { postId: "p1", date: "2026-11-21", assignmentId: "a1" }),
+    ).toEqual({
       postId: "p1",
       postName: "Gate A · Day",
       date: "2026-11-21",
@@ -297,7 +320,11 @@ describe("replacementTarget (roster side of Send replacement)", () => {
     expect(
       replacementTarget(open, { postId: "p1", date: "2026-11-21", assignmentId: "a1" })?.remove,
     ).toBeNull();
-    expect(replacementTarget(week, { postId: "p1", date: "2026-11-21", assignmentId: "zz" })).toBeNull();
-    expect(replacementTarget(week, { postId: "p9", date: "2026-11-21", assignmentId: "a1" })).toBeNull();
+    expect(
+      replacementTarget(week, { postId: "p1", date: "2026-11-21", assignmentId: "zz" }),
+    ).toBeNull();
+    expect(
+      replacementTarget(week, { postId: "p9", date: "2026-11-21", assignmentId: "a1" }),
+    ).toBeNull();
   });
 });
