@@ -18,12 +18,21 @@ async function expectNoHorizontalScroll(page: Page) {
 const BUILT_EMPTY: Record<string, string> = {
   // Slice 3.2: the roster grid; a company with no live contract has no posts to roster.
   "/app/roster": "No posts to roster yet.",
+  // Slice 3.7: the live board; nobody is rostered in a new company.
+  "/app/attendance": "No one is rostered for today yet. Publish a roster to see it here.",
+};
+
+/** Built pages whose heading is a number, as on their prototype. */
+const BUILT_HEADING: Record<string, string> = {
+  "/app/attendance": "0 on shift now",
 };
 
 for (const item of NAV_ITEMS) {
   test(`${item.href} loads with its heading`, async ({ page }) => {
     await page.goto(item.href);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText(item.label);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      BUILT_HEADING[item.href] ?? item.label,
+    );
     await expect(page.getByText(BUILT_EMPTY[item.href] ?? item.empty)).toBeVisible();
     await expectNoHorizontalScroll(page);
   });

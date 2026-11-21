@@ -1158,6 +1158,11 @@ isOneToOne: false
 "attach_punch_selfie":
 { Args: { "p_actor": string,"p_path": string,"p_punch_id": string }; Returns: undefined
                            },
+"attendance_board":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "assignment_id": string,"board_at": string,"by_supervisor": boolean,"ends_at": string,"first_in_at": string,"last_punch_at": string,"last_punch_kind": string,"late_grace_minutes": number,"late_minutes": number,"no_show_after_minutes": number,"phone": string,"phone_last4": string,"post_id": string,"post_name": string,"published": boolean,"punch_flags": (string)[],"shift_date": string,"site_id": string,"site_last_sync_at": string,"site_late_syncs": number,"site_name": string,"staff_id": string,"starts_at": string,"status": string,"time_zone": string,"worker_id": string,"worker_name": string
+            }[]
+                           },
 "begin_bank_account_lookup":
 { Args: { "p_bank_account_digest": string,"p_bank_account_last4": string,"p_bank_code": string,"p_client_ip"?: string,"p_organisation_id": string,"p_purpose": Database["public"]['Enums']["bank_lookup_purpose"],"p_user_id": string,"p_worker_id": string }; Returns: string
                            },
