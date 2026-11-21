@@ -135,7 +135,7 @@ export function WorkWeekForm({ days }: { days: number[] }) {
               defaultChecked={typed ? typed[`day_${d.iso}`] === "on" : days.includes(d.iso)}
               className="size-4 accent-[var(--signal)]"
             />
-            <span aria-label={d.long}>{d.short}</span>
+            <span title={d.long}>{d.short}</span>
           </label>
         ))}
       </fieldset>
