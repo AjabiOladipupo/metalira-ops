@@ -144,6 +144,13 @@ import {
 } from "@/server/workforce/attendance-board";
 import { SELFIE_READERS, selfieLinkSchema } from "@/server/workforce/punch-selfie-link";
 import { recordPunchSchema, uploadSelfieSchema } from "@/server/workforce/punches";
+import { recordCheckpointScanSchema } from "@/server/workforce/checkpoint-scans";
+import {
+  PATROL_READERS,
+  loadPatrolDay,
+  loadPatrolSettings,
+  loadPatrolSummary,
+} from "@/server/workforce/patrol-data";
 import { markReadSchema } from "@/server/workforce/inbox";
 import {
   addCheckpointSpec,
@@ -248,6 +255,11 @@ const documentIdInput = z.object({ documentId: z.uuid("Choose a document") });
 const rosterWeekInput = z.object({
   siteId: z.uuid("Choose a site"),
   weekStart: z.iso.date("Choose a week").optional(),
+});
+/** One site and, optionally, a day (today in the company's zone when left out; slice 3.8). */
+const patrolDayInput = z.object({
+  siteId: z.uuid(),
+  day: z.iso.date("Choose a day").optional(),
 });
 /** The worker's own published shifts, at most 62 days (slice 3.3). */
 const myShiftsInput = z
@@ -1118,6 +1130,65 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadTodayPunchSummary(supabase, organisationId),
+    agent: true,
+  },
+  // -------------------------------------------------------------------------
+  // Patrol checkpoint scans (workforce/checkpoint-scan-actions.ts, slice 3.8)
+  // -------------------------------------------------------------------------
+  {
+    name: "me.checkpoint_scan_context",
+    description:
+      "Tells the checkpoint scan page who is signed in and whether they may scan (Shifts on, location agreed).",
+    kind: "read",
+    audience: "worker",
+    roles: [],
+    input: null,
+    changes: "none",
+    action: at("workforce/checkpoint-scan-actions", "checkpointScanContextAction"),
+    agent: false,
+    agentNote: "Worker app only.",
+  },
+  {
+    name: "me.record_checkpoint_scan",
+    description:
+      "Records a patrol guard's checkpoint scan from the phone's queue: the checkpoint, the shift, the time and the site check.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: recordCheckpointScanSchema,
+    changes: "one",
+    action: at("workforce/checkpoint-scan-actions", "recordCheckpointScanAction"),
+    agent: false,
+    agentNote: "A scan is the worker's own, made with their phone at the checkpoint.",
+  },
+  {
+    name: "patrols.day",
+    description:
+      "Lists one site's checkpoint scans on a day: who scanned each checkpoint and when, and which were not scanned.",
+    kind: "read",
+    audience: "manager",
+    roles: PATROL_READERS,
+    input: patrolDayInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { siteId, day } = patrolDayInput.parse(input);
+      const { timeZone, today } = await loadPatrolSettings(supabase, organisationId);
+      return loadPatrolDay(supabase, organisationId, siteId, day ?? today, timeZone);
+    },
+    agent: true,
+  },
+  {
+    name: "patrols.today_summary",
+    description:
+      "Counts today's checkpoint scans per site, how many checkpoints were scanned and how many scans need a look.",
+    kind: "read",
+    audience: "manager",
+    roles: PATROL_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadPatrolSummary(supabase, organisationId),
     agent: true,
   },
   {

@@ -202,6 +202,8 @@ export async function loadTodayPunchSummary(
       .from("punches")
       .select("worker_id, kind, flags")
       .eq("organisation_id", organisationId)
+      // Clock punches only: patrol scans (slice 3.8) are counted by the patrol summary.
+      .in("kind", ["in", "out"])
       .gte("recorded_at", start.toISOString())
       .lt("recorded_at", end.toISOString())
       .order("recorded_at")

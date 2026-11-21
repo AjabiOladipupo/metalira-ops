@@ -138,6 +138,13 @@ describe("proxyDecision for the worker app (slice 1.9)", () => {
       type: "redirect",
       location: "/m/sign-in",
     });
+    // The checkpoint scan page is static too (slice 3.8): the token is in the fragment and the
+    // page asks the server who is signed in.
+    expect(proxyDecision("/m/checkpoint", "", false)).toEqual({ type: "next" });
+    expect(proxyDecision("/m/checkpoint/x", "", false)).toEqual({
+      type: "redirect",
+      location: "/m/sign-in",
+    });
   });
 
   it("sends a worker session away from the manager app and its sign-in pages", () => {

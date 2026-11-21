@@ -6,8 +6,15 @@ import type {
   SendTiming,
 } from "@/lib/offline/types";
 
+import { isCheckpointQueueKind, rememberScanOutcome } from "./checkpoint";
 import { isPunchQueueKind } from "./clock";
-import { sendOutcome, type RecordPunchResult, type UploadSelfieResult } from "./codes";
+import {
+  queueResultFor,
+  sendOutcome,
+  type RecordCheckpointScanResult,
+  type RecordPunchResult,
+  type UploadSelfieResult,
+} from "./codes";
 
 /**
  * The offline queue's sender for punches (slice 3.5). Every clock-in and clock-out goes through
@@ -18,11 +25,15 @@ import { sendOutcome, type RecordPunchResult, type UploadSelfieResult } from "./
  * Only the queue's fixed codes come back (src/lib/punches/codes.ts `queueResultFor`), never what
  * a server said. Network failures throw, which the sync engine treats as transient.
  *
+ * Patrol checkpoint scans (slice 3.8, kind `checkpoint_scan`) go through the same queue and the
+ * same owner check, to `recordCheckpointScan`.
+ *
  * The actions are injected so the mapping is tested without a server.
  */
 export interface PunchActions {
   recordPunch(input: unknown): Promise<RecordPunchResult>;
   uploadSelfie(form: FormData): Promise<UploadSelfieResult>;
+  recordCheckpointScan?(input: unknown): Promise<RecordCheckpointScanResult>;
 }
 
 export function createPunchSender(
@@ -32,6 +43,34 @@ export function createPunchSender(
 ): QueueSender {
   return {
     async send(item: AnyQueueItem, timing: SendTiming, owner: QueueOwner): Promise<SendResult> {
+      if (isCheckpointQueueKind(item.kind) && actions.recordCheckpointScan) {
+        const scan = item as Extract<AnyQueueItem, { kind: "checkpoint_scan" }>;
+        const result = await actions.recordCheckpointScan({
+          owner: { organisationId: scan.organisation_id, workerId: scan.worker_id },
+          client_event_id: scan.client_event_id,
+          payload: scan.payload,
+          device_time: Math.round(scan.device_time),
+          timing: {
+            sent_device_time: Math.round(timing.sent_device_time),
+            elapsed_since_event_ms: timing.elapsed_since_event_ms,
+          },
+        });
+        if (!result.ok) {
+          rememberScanOutcome(scan.client_event_id, { ok: false, code: result.code });
+          return queueResultFor(result.code);
+        }
+        rememberScanOutcome(scan.client_event_id, {
+          ok: true,
+          receipt: {
+            checkpointName: result.checkpointName,
+            siteName: result.siteName,
+            recordedAt: result.recordedAt,
+            geofence: result.geofence,
+            flags: result.flags,
+          },
+        });
+        return { ok: true };
+      }
       if (!isPunchQueueKind(item.kind)) {
         if (other) return other.send(item, timing, owner);
         return { ok: false, retryable: false, error: "invalid" };

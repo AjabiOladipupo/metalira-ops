@@ -20,6 +20,9 @@ export const PUNCH_ERROR_CODES = [
   "conflict",
   "invalid",
   "bad_site",
+  // Patrol scans (slice 3.8).
+  "unknown_checkpoint",
+  "not_on_shift",
 ] as const;
 
 export type PunchErrorCode = (typeof PUNCH_ERROR_CODES)[number];
@@ -68,6 +71,10 @@ export function codeFromSqlState(sqlState: string | undefined | null): PunchErro
       return "rate_limited";
     case "MLPU9":
       return "wrong_session";
+    case "MLCK1":
+      return "unknown_checkpoint";
+    case "MLCK2":
+      return "not_on_shift";
     default:
       return "failed";
   }
@@ -83,6 +90,20 @@ export type RecordPunchResult =
       selfieWanted: boolean;
       geofence: "inside" | "near" | "outside" | "unknown";
       flags: string[];
+    }
+  | { ok: false; code: PunchErrorCode };
+
+/** What the checkpoint-scan action answers (slice 3.8). Never carries the token. */
+export type RecordCheckpointScanResult =
+  | {
+      ok: true;
+      punchId: string;
+      duplicate: boolean;
+      recordedAt: string;
+      geofence: "inside" | "near" | "outside" | "unknown";
+      flags: string[];
+      checkpointName: string | null;
+      siteName: string | null;
     }
   | { ok: false; code: PunchErrorCode };
 

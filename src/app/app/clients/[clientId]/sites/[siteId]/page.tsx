@@ -158,6 +158,15 @@ async function SitePage({
           </ol>
         )}
         {canEdit ? <AddCheckpointForm siteId={site.id} /> : null}
+        {ctx.canEdit && site.checkpoints.length > 0 ? (
+          <Link
+            href={`/app/attendance/patrols?site=${site.id}`}
+            className="text-sm"
+            data-testid="patrol-history-link"
+          >
+            Patrol history: who scanned each checkpoint, by day
+          </Link>
+        ) : null}
         {site.retiredCheckpointCount > 0 ? (
           <p className="m-0 text-xs text-fg-muted">
             {plural(site.retiredCheckpointCount, "retired checkpoint", "retired checkpoints")} kept

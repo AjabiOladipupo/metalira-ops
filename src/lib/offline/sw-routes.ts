@@ -14,7 +14,7 @@
  * Pages and RSC payloads of signed-in screens carry personal data (names, shifts, payslips),
  * so they are never written to a cache. Only the offline page (static, no personal data) is.
  */
-import { WORKER_OFFLINE_PATH } from "../auth/routes";
+import { WORKER_CHECKPOINT_PATH, WORKER_OFFLINE_PATH } from "../auth/routes";
 
 export type RequestClass = "static" | "public" | "navigation" | "passthrough";
 
@@ -25,6 +25,9 @@ export function isWorkerAppPath(pathname: string): boolean {
 
 /** The offline page, precached and shown when a worker page cannot load. */
 export const OFFLINE_PATH = WORKER_OFFLINE_PATH;
+
+/** The checkpoint scan page (slice 3.8), precached and shown for /m/checkpoint offline. */
+export const CHECKPOINT_PATH = WORKER_CHECKPOINT_PATH;
 
 const PUBLIC_FILE = /^\/(icons\/worker-[\w-]+\.png|worker\.webmanifest)$/;
 

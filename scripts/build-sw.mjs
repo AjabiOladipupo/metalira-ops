@@ -3,7 +3,8 @@
  * public/sw.js and injects the precache list. Runs before `next build` and `next dev`
  * (package.json), so the file is a plain static asset: nothing is bundled on request.
  *
- * Precached: the offline page (revision = the commit) and the worker app's icons and manifest
+ * Precached: the offline page and the checkpoint scan page (slice 3.8; both static and
+ * session-free, revision = the commit) and the worker app's icons and manifest
  * (revision = content hash). Hashed /_next/static files are cached as pages use them
  * (src/lib/offline/sw-routes.ts), not all up front, so workers never download the manager app.
  *
@@ -24,6 +25,8 @@ const publicDir = path.join(root, "public");
 
 /** Must match WORKER_OFFLINE_PATH in src/lib/auth/routes.ts (checked by a unit test). */
 export const OFFLINE_URL = "/m/offline";
+/** Must match WORKER_CHECKPOINT_PATH in src/lib/auth/routes.ts (checked by a unit test). */
+export const CHECKPOINT_URL = "/m/checkpoint";
 
 function commit() {
   if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA;
@@ -40,6 +43,7 @@ export function precacheEntries() {
     .map((name) => ({ url: `/icons/${name}`, revision: md5(path.join(publicDir, "icons", name)) }));
   return [
     { url: OFFLINE_URL, revision: commit() },
+    { url: CHECKPOINT_URL, revision: commit() },
     { url: "/worker.webmanifest", revision: md5(path.join(publicDir, "worker.webmanifest")) },
     ...icons,
   ];

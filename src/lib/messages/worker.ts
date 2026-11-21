@@ -398,4 +398,53 @@ export const workerMessages = {
     homeShiftHours: (start: string, end: string) => `${start} – ${end}`,
     homeShiftWhere: (post: string, site: string) => `${post} · ${site}`,
   },
+  /** Patrol checkpoint scans (slice 3.8): the page a checkpoint's QR code opens. */
+  checkpoint: {
+    title: "Checkpoint scan",
+    checking: "Checking your sign-in",
+    locating: "Finding your location",
+    locatingHint: "This takes up to 20 seconds.",
+    noCode: "This link has no checkpoint code. Scan the code on the checkpoint again.",
+    signedOut: "Sign in to the worker app, then scan the checkpoint code again.",
+    signIn: "Sign in",
+    notWorker: "Only workers scan checkpoints. Sign in to the worker app on your own phone.",
+    failed: "We couldn't check your sign-in. Try scanning again.",
+    shiftsOff: "Patrol scans are switched off for your company. Ask your supervisor.",
+    left: "You have left this company, so you can't scan checkpoints.",
+    consentTitle: "Agree to share your location first",
+    consentLine:
+      "A scan records where you were. Agree on the Clock screen, then scan the checkpoint again.",
+    openClock: "Open Clock",
+    offlineNoOwner:
+      "No network, and no one has signed in on this phone yet. Scan again when you have network.",
+    noQueue:
+      "This phone can't save scans (private browsing or storage blocked). Use a normal browser window.",
+    locationFailedTitle: "We couldn't find your location",
+    locationDenied:
+      "Location is blocked for this app. Allow location in your phone's settings, then try again.",
+    locationTimeout:
+      "Your phone didn't find a location in 20 seconds. Try again, or send it without.",
+    tryAgain: "Try again",
+    sendWithoutLocation: "Send without location",
+    scannedAt: (time: string) => `Scanned at ${time}`,
+    where: (checkpoint: string, site: string | null) =>
+      site ? `${checkpoint} · ${site}` : checkpoint,
+    savedOffline: "Saved on phone. Will send when network returns.",
+    savedForLater: "Saved on phone. It sends the next time you open the app with network.",
+    sending: "Sending…",
+    sent: "Sent to your company.",
+    refused: {
+      unknown_checkpoint: "This code isn't a checkpoint you can scan. Tell your supervisor.",
+      not_on_shift: "You aren't on a shift at this site now, so the scan wasn't recorded.",
+      no_consent: "Agree to share your location on the Clock screen, then scan again.",
+      shifts_off: "Patrol scans are switched off for your company.",
+      left: "You have left this company, so the scan wasn't recorded.",
+      invalid: "This scan is more than 24 hours old or wasn't complete, so it wasn't recorded.",
+      other: "Your company's system didn't accept this scan. Tell your supervisor.",
+    },
+    outsideNote: "You were outside the site area. Your supervisor will check it.",
+    noLocationNote: "Sent without a location. Your supervisor will check it.",
+    nextScan: "Scan the next checkpoint with your phone's camera.",
+    backHome: "Back to home",
+  },
 } as const;
