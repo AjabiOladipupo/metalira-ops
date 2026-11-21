@@ -238,6 +238,15 @@ export function CheckpointScan() {
     [save],
   );
 
+  // A new code opened on this page (a hash-only navigation doesn't reload it) starts afresh.
+  useEffect(() => {
+    const onHashChange = () => {
+      if (parseCheckpointFragment(window.location.hash)) window.location.reload();
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   useEffect(() => {
     if (started.current) return;
     started.current = true;

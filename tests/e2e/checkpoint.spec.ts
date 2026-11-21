@@ -211,7 +211,7 @@ async function phone(browser: Browser, baseURL: string | undefined) {
 }
 
 /** Sets the PIN from the invite, then agrees to location on the clock screen. */
-async function signInAndAgree(page: Page, invite: string) {
+async function signInAndAgree(page: Page, invite: string, workerId: string) {
   await page.goto(`/m/invite/${invite}`);
   await page.getByLabel("New PIN").fill(PIN);
   await page.getByLabel("Type the PIN again").fill(PIN);
@@ -222,7 +222,21 @@ async function signInAndAgree(page: Page, invite: string) {
   await expect(page.getByTestId("clock-consent")).toBeVisible();
   const card = page.getByTestId("consent-location");
   await card.getByRole("button", { name: "I agree" }).click();
-  await expect(card).toHaveAttribute("data-agreed", "yes", { timeout: 15_000 });
+  // The clock screen replaces the consent cards once location is agreed: check the record.
+  await expect
+    .poll(
+      async () => {
+        const { count } = await adminClient()
+          .from("worker_consents")
+          .select("id", { count: "exact", head: true })
+          .eq("worker_id", workerId)
+          .eq("kind", "location")
+          .is("withdrawn_at", null);
+        return count ?? 0;
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(1);
 }
 
 async function scansOf(workerId: string) {
@@ -246,6 +260,7 @@ test.describe("checkpoint scan page", () => {
     await expect(page.getByTestId("checkpoint-blocked")).toHaveText(
       "This link has no checkpoint code. Scan the code on the checkpoint again.",
     );
+    // A new code on the open page (a hash-only navigation) is read too.
     await page.goto(`/m/checkpoint#${"a".repeat(64)}`);
     await expect(page).toHaveURL(/\/m\/checkpoint$/);
     await expect(page.getByTestId("checkpoint-blocked")).toHaveText(
@@ -264,7 +279,7 @@ test.describe("checkpoint scan page", () => {
     const { context, page } = await phone(browser, testInfo.project.use.baseURL);
     const requested: string[] = [];
     page.on("request", (request) => requested.push(request.url()));
-    await signInAndAgree(page, setup.invite);
+    await signInAndAgree(page, setup.invite, setup.workerId);
 
     // Online: the scan is recorded and the screen names the checkpoint.
     await page.goto(`/m/checkpoint#${setup.gate}`);
