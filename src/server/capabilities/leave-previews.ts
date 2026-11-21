@@ -2,7 +2,9 @@ import "server-only";
 
 import { formatDate } from "@/lib/dates";
 import { formatLeaveDays, formatLeavePay } from "@/lib/leave/entitlements";
+import { formatOpenedShifts } from "@/lib/leave/roster";
 import { ADVISER_LINE, findPreset } from "@/lib/leave/presets";
+import { formatShortDay } from "@/lib/roster";
 import {
   previewApplyPreset,
   previewCopyHolidays,
@@ -152,9 +154,11 @@ export function describeHrDecision(result: HrDecisionResult): CapabilityPreview 
       changes: [{ label: "Request", before: "With HR", after: "Declined" }],
     };
   }
+  // Slice 4.5: the shifts the approval opens, each one listed; they go back to uncovered.
+  const opened = result.openShifts;
   const shifts =
-    result.shifts > 0
-      ? ` It covers ${result.shifts} rostered ${result.shifts === 1 ? "shift" : "shifts"}${result.sites.length ? ` at ${result.sites.join(", ")}` : ""}.`
+    opened.length > 0
+      ? ` ${formatOpenedShifts(opened)}; they go back to uncovered and ops is emailed.`
       : "";
   return {
     summary: `Approves ${days(result.days)}: the balance goes from ${result.balanceBefore} to ${result.balanceAfter}.${shifts}${result.payBelowService ? " Below the service the pay needs: Phase 5 pays it as unpaid." : ""}`,
@@ -165,6 +169,11 @@ export function describeHrDecision(result: HrDecisionResult): CapabilityPreview 
         before: days(result.balanceBefore),
         after: days(result.balanceAfter),
       },
+      ...opened.map((s) => ({
+        label: `${s.postName}, ${formatShortDay(s.shiftDate)}`,
+        before: "Assigned",
+        after: `Uncovered${s.siteName ? ` at ${s.siteName}` : ""}`,
+      })),
     ],
   };
 }

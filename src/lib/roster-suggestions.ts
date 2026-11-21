@@ -3,9 +3,12 @@
  * suggestion for each card in the Uncovered tray, and the browser ranks everyone in the picker.
  *
  * The rules (shown under the tray):
- * - A worker who has left, hasn't started, is on leave (Phase 4; `onLeave` returns false until
- *   then), is already on this shift or is on an overlapping shift is not suggested: the database
- *   would refuse them anyway. The picker lists them as "can't be assigned" with the reason.
+ * - A worker who has left, hasn't started, is on approved leave that day (slice 4.5: `leave`
+ *   spans from public.roster_leave), is already on this shift or is on an overlapping shift is not
+ *   suggested: the database would refuse them anyway. The picker lists them as "can't be
+ *   assigned" with the reason ("On leave 4 to 6 Nov").
+ * - Leave still waiting for a decision that day is never a block: the worker is marked
+ *   ("Leave waiting for a decision 4 to 6 Nov") and ranks after everyone without it.
  * - Everyone else may be assigned. These are flags only, never blocks:
  *   - mapped to the site that day (worker_assignments in force) ranks first; "Relief pool" (no
  *     site mapping that day) next; "Not mapped to this site" last;
@@ -18,6 +21,7 @@
  * Names and staff IDs are the only personal data used.
  */
 
+import { leaveOn, onLeaveLabel, pendingLeaveLabel, type LeaveSpan } from "./leave/roster";
 import { dayLabel, formatHoursTotal, formatShortDay, minutesBetween, timeIn } from "./roster";
 
 /** Four hours: the margin for "within 4 h of the weekly standard". */
@@ -62,11 +66,14 @@ export interface SuggestionOptions {
   /** standard_shift_minutes × work_days_per_week. */
   weeklyStandardMinutes: number;
   timeZone: string;
-  /** Phase 4 leave. Until then nobody is on leave. */
+  /** Approved and pending leave (slice 4.5, public.roster_leave). */
+  leave?: readonly LeaveSpan[];
+  /** Extra "on leave" check beside `leave` (tests and callers without spans). */
   onLeave?: (workerId: string, date: string) => boolean;
 }
 
-export type SuggestionFlag = "not_mapped" | "relief_pool" | "near_standard" | "over_standard";
+export type SuggestionFlag =
+  "not_mapped" | "relief_pool" | "near_standard" | "over_standard" | "leave_pending";
 
 export interface Suggestion {
   workerId: string;
@@ -85,7 +92,7 @@ export interface Suggestion {
   reason: string;
 }
 
-/** Leave arrives in Phase 4; nobody is on leave until then. */
+/** No extra leave check. */
 export const noLeave = (): boolean => false;
 
 function within(date: string, from: string, to: string | null): boolean {
@@ -104,6 +111,7 @@ export function rankCandidates(
   options: SuggestionOptions,
 ): Suggestion[] {
   const onLeave = options.onLeave ?? noLeave;
+  const spans = options.leave ?? [];
   const weekEndDate = (() => {
     const d = new Date(`${slot.weekStart}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() + 6);
@@ -130,6 +138,7 @@ export function rankCandidates(
     const reliefPool = siteMappings.length === 0;
     const sameDay = mine.some((b) => b.date === slot.date);
 
+    const away = leaveOn(spans, worker.id, slot.date, "approved");
     let blocked: string | null = null;
     if (worker.ended && (worker.endDate === null || worker.endDate < slot.date)) {
       blocked = "Has left the company";
@@ -137,6 +146,8 @@ export function rankCandidates(
       blocked = `Leaves on ${formatShortDay(worker.endDate)}`;
     } else if (worker.startDate > slot.date) {
       blocked = `Starts on ${formatShortDay(worker.startDate)}`;
+    } else if (away) {
+      blocked = onLeaveLabel(away);
     } else if (onLeave(worker.id, slot.date)) {
       blocked = "On leave";
     } else {
@@ -155,6 +166,8 @@ export function rankCandidates(
     const standard = options.weeklyStandardMinutes;
     if (after > standard) flags.push("over_standard");
     else if (standard - after < NEAR_STANDARD_MINUTES) flags.push("near_standard");
+    const pending = leaveOn(spans, worker.id, slot.date, "pending");
+    if (pending) flags.push("leave_pending");
 
     const where = mapped
       ? sameDay
@@ -166,6 +179,7 @@ export function rankCandidates(
     const parts = [where, `${formatHoursTotal(weekMinutes)} this week`];
     if (flags.includes("over_standard")) parts.push("over the weekly standard with this shift");
     else if (flags.includes("near_standard")) parts.push("within 4 h of the weekly standard");
+    if (pending) parts.push(pendingLeaveLabel(pending));
 
     const suggestion: Suggestion = {
       workerId: worker.id,
@@ -181,12 +195,13 @@ export function rankCandidates(
     };
     const placeRank = mapped ? 0 : reliefPool ? 1 : 2;
     const hoursRank = flags.includes("over_standard") ? 2 : flags.includes("near_standard") ? 1 : 0;
-    return { suggestion, placeRank, hoursRank };
+    return { suggestion, placeRank, hoursRank, pendingRank: pending ? 1 : 0 };
   });
 
   ranked.sort(
     (a, b) =>
       Number(b.suggestion.eligible) - Number(a.suggestion.eligible) ||
+      a.pendingRank - b.pendingRank ||
       a.placeRank - b.placeRank ||
       a.hoursRank - b.hoursRank ||
       a.suggestion.weekMinutes - b.suggestion.weekMinutes ||

@@ -202,6 +202,7 @@ async function RosterPage({
           canEdit={canEdit}
           changedCells={status?.version != null ? status.changed : []}
           replacement={replacement}
+          onLeave={data.onLeave}
         />
       )}
     </div>
