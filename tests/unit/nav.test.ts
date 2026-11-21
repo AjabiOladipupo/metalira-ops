@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -266,6 +266,31 @@ describe("nav by role", () => {
     ).toBe("switched_off");
     // Finance still has no People list.
     expect(canAccessHref("finance", "/app/people")).toBe(false);
+  });
+
+  it("opens no People sub-page to line managers but the list and a person's page (slice 4.0b)", () => {
+    // Every page.tsx and route.ts under src/app/app/people, as an href with a sample uuid for
+    // each dynamic segment. A new sub-page that forgets its EXTRA_PAGES entry would inherit the
+    // People item's roles (line managers included) and fails here.
+    const root = join(process.cwd(), "src", "app", "app", "people");
+    const sample = "b0000000-0000-4000-8000-000000000002";
+    const files = readdirSync(root, { recursive: true, encoding: "utf8" })
+      .map((file) => file.split(/[\\/]/))
+      .filter((parts) => ["page.tsx", "route.ts"].includes(parts.at(-1) ?? ""));
+    const hrefs = files.map((parts) => {
+      const segs = parts
+        .slice(0, -1)
+        .filter((part) => !/^\(.*\)$/.test(part))
+        .map((part) => (/^\[.+\]$/.test(part) ? sample : part));
+      return ["/app/people", ...segs].join("/");
+    });
+    expect(hrefs).toContain("/app/people");
+    expect(hrefs).toContain(`/app/people/${sample}`);
+    expect(hrefs.length).toBeGreaterThan(2);
+    const open = new Set(["/app/people", `/app/people/${sample}`]);
+    for (const href of hrefs) {
+      expect(canAccessHref("line_manager", href), href).toBe(open.has(href));
+    }
   });
 
   it("lets owner, admin, hr and finance open bank-detail approvals", () => {
