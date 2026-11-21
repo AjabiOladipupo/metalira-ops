@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import { lookupCrewPageSession } from "@/server/workforce/crew-session";
+import { lookupCrewPageSession } from "@/server/workforce/crew-page-session";
 
 import { QueueOwnerSync } from "../_components/offline/queue-owner";
 

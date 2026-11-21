@@ -3,12 +3,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createServerSupabase } from "@/lib/supabase/server";
-import { getPageSession, getSession, type Session } from "@/server/identity/session";
-import {
-  lookupWorkerPageSession,
-  lookupWorkerSession,
-  type WorkerSessionLookup,
-} from "@/server/identity/worker-session";
+import { getSession, type Session } from "@/server/identity/session";
+import { lookupWorkerSession, type WorkerSessionLookup } from "@/server/identity/worker-session";
 import type { Database } from "@/types/db";
 
 /**
@@ -37,7 +33,7 @@ export type CrewSessionLookup =
   /** Signed in, but neither a worker nor a line manager in the active company. */
   | { type: "not_supervisor" };
 
-async function fromLookups(
+export async function crewSessionFrom(
   worker: WorkerSessionLookup,
   manager: () => Promise<Session | null>,
 ): Promise<CrewSessionLookup> {
@@ -84,10 +80,5 @@ async function fromLookups(
 
 /** For Server Actions: the user is verified with the Auth server. */
 export async function lookupCrewSession(): Promise<CrewSessionLookup> {
-  return fromLookups(await lookupWorkerSession(), getSession);
-}
-
-/** For rendering a page only (the token's signature checked locally). Never for a write. */
-export async function lookupCrewPageSession(): Promise<CrewSessionLookup> {
-  return fromLookups(await lookupWorkerPageSession(), getPageSession);
+  return crewSessionFrom(await lookupWorkerSession(), getSession);
 }

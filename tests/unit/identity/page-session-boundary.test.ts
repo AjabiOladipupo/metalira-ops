@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import { sourceFiles } from "../helpers/source-files";
 
 const PAGE_ONLY =
-  /\b(getPageSession|lookupWorkerPageSession|requireWorkerPageSession|getActiveCompany|getActiveCompanyLogoUrl|pendingSetupHref|requireAppAccess|peoplePageContext|getImportBatchView)\b/;
+  /\b(getPageSession|lookupWorkerPageSession|requireWorkerPageSession|getActiveCompany|getActiveCompanyLogoUrl|pendingSetupHref|requireAppAccess|peoplePageContext|getImportBatchView|lookupCrewPageSession)\b/;
 
 /** The modules that define (or wrap) the page-only lookups. Each is render only for those exports. */
 const PAGE_MODULES = new Set([
@@ -29,6 +29,7 @@ const PAGE_MODULES = new Set([
   "src/server/identity/company-data.ts",
   "src/server/people/page-context.ts",
   "src/server/people/imports/data.ts",
+  "src/server/workforce/crew-page-session.ts",
 ]);
 
 const isServerActionModule = (text: string) => /^\s*["']use server["']/m.test(text);

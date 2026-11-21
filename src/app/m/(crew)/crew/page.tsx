@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { APP_HOME_PATH, WORKER_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { loadCrewContext, type CrewContext } from "@/server/workforce/crew-data";
-import { lookupCrewPageSession } from "@/server/workforce/crew-session";
+import { lookupCrewPageSession } from "@/server/workforce/crew-page-session";
 
 import { CrewFlow } from "../../_components/crew/crew-flow";
 import { WorkerTopBar } from "../../_components/worker-top-bar";

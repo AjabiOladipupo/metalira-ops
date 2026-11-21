@@ -5,7 +5,8 @@ import { ArrowDownToLine, Camera, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { BackTarget } from "@/components/back-link";
+import { BackLink, type BackTarget } from "@/components/back-link";
+import { ThemeButton } from "@/components/theme/theme-button";
 import { queueEvent } from "@/lib/offline/active-queue";
 import type { QueueStatus } from "@/lib/offline/types";
 import { workerMessages } from "@/lib/messages/worker";
@@ -27,7 +28,6 @@ import { cn } from "@/lib/utils";
 import type { CrewSite } from "@/server/workforce/crew-data";
 
 import { useActiveQueue, useOnline } from "../offline/hooks";
-import { WorkerTopBar } from "../worker-top-bar";
 
 const copy = workerMessages.crew;
 const clockCopy = workerMessages.clock;
@@ -286,14 +286,19 @@ export function CrewFlow({
   return (
     <div className="flex flex-1 flex-col">
       <div className="px-4 pt-3 pb-1">
-        <WorkerTopBar back={back}>
-          <div className="flex min-w-0 flex-col">
+        {/* WorkerTopBar's row, without its server-rendered inbox button. */}
+        <div className="flex min-h-11 items-center gap-2">
+          <BackLink {...back} />
+          <div className="flex min-w-0 flex-1 flex-col">
             <h1 className="m-0 font-display text-xl font-bold" data-testid="crew-title">
               {mode === "in" ? copy.titleIn : copy.titleOut}
             </h1>
             <span className="truncate text-[13px] text-fg-muted">{subtitle}</span>
           </div>
-        </WorkerTopBar>
+          <span className="-mr-2 flex shrink-0 items-center">
+            <ThemeButton />
+          </span>
+        </div>
       </div>
 
       {sites.length > 1 ? (
