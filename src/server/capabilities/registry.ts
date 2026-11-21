@@ -132,6 +132,7 @@ import {
   ownChangeRequestSchema,
 } from "@/server/people/own-requests";
 import { unlockSignInSpec } from "@/server/people/sign-in-status";
+import { TEAM_READERS, loadTeamMembers, loadTeamSummary } from "@/server/people/team";
 import {
   decideStaffIdCorrectionSpec,
   requestStaffIdCorrectionSpec,
@@ -157,6 +158,8 @@ import {
 } from "@/server/workforce/attendance-board";
 import { SELFIE_READERS, selfieLinkSchema } from "@/server/workforce/punch-selfie-link";
 import { recordPunchSchema, uploadSelfieSchema } from "@/server/workforce/punches";
+import { recordCrewPunchSchema, uploadCrewPhotoSchema } from "@/server/workforce/crew";
+import { CREW_SUMMARY_READERS, loadTodayCrewSummary } from "@/server/workforce/crew-data";
 import { recordCheckpointScanSchema } from "@/server/workforce/checkpoint-scans";
 import {
   PATROL_READERS,
@@ -1054,6 +1057,42 @@ export const CAPABILITIES: readonly Capability[] = [
   },
 
   // -------------------------------------------------------------------------
+  // My team (people/team.ts, slice 4.0): a line manager's reportees, safe columns only
+  // -------------------------------------------------------------------------
+  {
+    name: "team.members",
+    description:
+      "Lists the people who report to the signed-in line manager: job, department, status, start date and mapped sites.",
+    kind: "read",
+    audience: "manager",
+    roles: TEAM_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    // Lira gets no phone numbers or email addresses: it never contacts anyone directly.
+    read: async ({ supabase, organisationId }) =>
+      (await loadTeamMembers(supabase, organisationId)).map((m) => ({
+        ...m,
+        phone: null,
+        email: null,
+      })),
+    agent: true,
+  },
+  {
+    name: "team.summary",
+    description:
+      "Counts the line manager's reportees by status, those clocked in by a supervisor and those with no site.",
+    kind: "read",
+    audience: "manager",
+    roles: TEAM_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadTeamSummary(supabase, organisationId),
+    agent: true,
+  },
+
+  // -------------------------------------------------------------------------
   // Consents and inbox (workforce/consent-actions.ts, inbox-actions.ts, slice 3.1)
   // -------------------------------------------------------------------------
   {
@@ -1144,6 +1183,48 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadTodayPunchSummary(supabase, organisationId),
+    agent: true,
+  },
+  // -------------------------------------------------------------------------
+  // Crew clock-in (workforce/crew-actions.ts, slice 3.6)
+  // -------------------------------------------------------------------------
+  {
+    name: "crew.record_punch",
+    description:
+      "Records a supervisor's crew clock-in or clock-out from the phone's queue: one punch per person, marked by supervisor.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: recordCrewPunchSchema,
+    changes: "many",
+    action: at("workforce/crew-actions", "recordCrewPunchAction"),
+    agent: false,
+    agentNote:
+      "A crew punch is made by the supervisor at the site, on their phone; the database checks the crew and the shift.",
+  },
+  {
+    name: "crew.upload_photo",
+    description: "Takes the group photo of a crew clock-in the supervisor just recorded.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: uploadCrewPhotoSchema,
+    changes: "one",
+    action: at("workforce/crew-actions", "uploadCrewPhotoAction"),
+    agent: false,
+    agentNote: "A group photo is taken on the supervisor's phone, only when everyone in it agreed.",
+  },
+  {
+    name: "attendance.crew_summary",
+    description:
+      "Counts today's crew clock-ins and clock-outs by supervisors, and how many had no group photo or were off site.",
+    kind: "read",
+    audience: "manager",
+    roles: CREW_SUMMARY_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadTodayCrewSummary(supabase, organisationId),
     agent: true,
   },
   // -------------------------------------------------------------------------

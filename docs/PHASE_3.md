@@ -120,6 +120,16 @@ As in Phase 2 (docs/LIRA.md): every new Server Action is registered in `src/serv
 
 ### 3.6 Supervisor crew clock-in (`/m`)
 - Worker-supervisors (the line manager of the crew) on shift at the site: a checklist, mark present, an optional group photo (missing is flagged); each punch `by_supervisor`. Security review.
+- As built (migration `20261120230000_crew_punches.sql`):
+  - Supervisors: a worker login whose worker record is `line_manager_worker_id` of the crew, on shift at the site (assignment window start - 2 h to end + 4 h); or a `line_manager` login for `private.my_reportee_ids()` (on shift too when linked to a worker record; a line manager with no worker record can't be rostered, so only the crew's shifts are checked). `private.my_crew_ids()` is the set helper.
+  - `crew_punch_batches` (insert-only; only the group photo path is set once and cleared once) and `punches.crew_batch_id` (null exactly when `source = 'self'`). `record_crew_punch` (definer, as the caller, `search_path ''`): company and supervisor from the session, the queue owner (company, actor = worker record or membership) only compared (`MLPU9`); each worker in the crew (`MLCR1`), not ended (`MLPU3`), on a shift at that site now (`MLCR3`); supervisor on shift (`MLCR2`); Shifts off `MLPU4`; untrusted session `42501`. All or nothing; idempotent on (company, supervisor login, `client_batch_id`); `client_event_id` stays unique per worker. 30 batches an hour per supervisor, 20 punches an hour per worker. Audited: row triggers plus `crew.clocked_in` / `crew.clocked_out`.
+  - Flags reuse 3.5's: no group photo is `no_selfie`, no supervisor location is `no_location`. The supervisor's own location is optional, needs their own location consent (`MLPU6`), and only the geofence result, distance and accuracy are kept, never the point.
+  - Group photo (rule 9): offered and accepted only when everyone in the batch agreed to photos (re-checked at attach). Same bucket and path shape as selfies, `begin_punch_selfie_upload` with a punch of the batch, `attach_crew_photo` (secret key), read by owner, admin, ops_manager and hr; `crew_photos_due` / `clear_crew_photos` in the daily sweep; `punch_photo_orphans` skips crew photos.
+  - `/m/crew` (in the worker app group; the layout opens a line manager's queue keyed by their membership and hides the worker tabs for them) with a "Clock in crew" card on worker home for supervisors. Line managers open `/m/crew` from the manager login. Queue kinds `crew_in` / `crew_out`, one item per batch.
+  - Capabilities `crew.record_punch`, `crew.upload_photo` (worker app, not for the agent) and `attendance.crew_summary` (read). `fixtures/lira/crew.md`.
+  - Line managers get a "Clock in crew" card on the manager home linking `/m/crew`. The live board does not show `no_location` as a review flag on supervisor punches (the flag stays on the punch). Patrol scans (3.8) are excluded from every crew read (`kind in ('in', 'out')`).
+  - Security review: `my_crew_context` refuses an ended supervisor (`MLPU3`) and Shifts off (`MLPU4`); a supervisor's own worker record is never in their crew (`my_crew_ids`, and `record_crew_punch` refuses it with `MLCR1`); crew mutations pass the caller's real role (`worker` or `line_manager`; `MutationSpec.roles` takes any membership role, the database decides the crew).
+  - **Deferred to Phase 4:** a manager viewer for crew group photos (signed URLs like `punchSelfieLinkAction`); the storage read policy is in place.
 
 ### 3.7 Live board `/app/attendance`
 - Tiles: On site, Late, No-show, Starting in 2 h, Clocked out; the list; By site with the last sync; Call (`tel:`); Send replacement (opens the tray). Worked out on read and polled every 30 s; no cron.
@@ -176,3 +186,62 @@ From Phases 1 and 2, closed in this phase:
 Still open for later phases (from the Phase 2 sign-off): Phase 5 bank code in `worker_bank_details_as_of`; Phase 6 pricing from posts, requirements and Work Units, WHT per line, matching net of WHT and VAT, fixed-monthly billing from go-live; the low hardening follow-ups.
 
 From 3.0: punches (3.5) and roster actions (3.2) carry `module: "shifts"` and `record_punch` refuses when Shifts is off (security review L2).
+
+## Sign-off (21 Nov 2026)
+
+All 12 Phase 3 pull requests are merged. `main` at `49bfdb5` (PR #58) passed CI: `check`, `rls` and `e2e` all green (run 44868806762). Each "done when" item was checked against the code on that commit.
+
+| # | Done when | Verdict | Evidence |
+| --- | --- | --- | --- |
+| 1 | Offline punches sync later with server-corrected times; outside-site punches arrive flagged | Met with notes | `tests/e2e/clock.spec.ts` "offline with a wrong phone clock: saved on the phone, synced with the server's time and flagged" (phone 10 minutes fast, offline, outside the site: the synced punch is within 15 s of the real tap, `clock_drift_seconds` 585–615, flags `outside` and `clock_drift`, `outside_reason` set). `tests/rls/punches.test.ts` "records an outside punch with the flag, the distance and the reason", "corrects the time from the elapsed time and flags a phone clock 10 minutes fast", "flags a punch sent more than 2 hours after it happened", "backdating over RPC is flagged delayed, and late against when it arrived". Also `tests/e2e/offline.spec.ts` "a queued item survives a reload offline and drains when the network returns". Note: the Vercel preview check is step 7 of the live-site list below; it was not run for this sign-off. |
+| 2 | A published roster emails only the affected workers and shows on their phones | Met with notes | `tests/e2e/roster-publish.spec.ts` "ops publishes the week, the worker sees the shift, and a republish tells only who changed" (version 1 tells 2 workers; the worker sees the shift on `/m` and `/m/shifts` and the message in `/m/inbox`; version 2 tells only the 1 worker taken off). `tests/rls/roster-publish.test.ts` "marks changes since publish, then republishes only the workers whose shifts changed", "gives a worker only their own published, still-assigned shifts with post and site names". `tests/unit/workforce/notify.test.ts` "adds the inbox item and emails when the caps allow", "ties a roster notice to its publication, once per worker". Note: the e2e workers have no email address, so the e2e run reports "0 by email"; the email send itself is proven by the unit tests only. |
+| 3 | Every Phase 3 table is in the isolation test; punches can't be edited or deleted by anyone | Met with notes | The 7 public tables created by migrations `20261120100000` to `20261120230000` each have a registry entry: `worker_consents`, `inbox_items` (`tests/rls/tables/worker-consents-inbox.ts`), `shifts`, `shift_assignments` (`roster.ts`), `roster_publications` (`roster_publications.ts`), `punches` (`punches.ts`), `crew_punch_batches` (`crew.ts`). Checkpoint scans are `punches` rows (kind `checkpoint`), not a table. `private.punch_selfie_uploads` is in the private schema, outside the registry's scope. `tests/rls/isolation.test.ts` "declares exactly the tables in schema public" fails on any public table without an entry. Insert-only: `tests/rls/punches.test.ts` "nobody updates, deletes or inserts directly, the database owner included" (update, delete and truncate as the owner; update and delete with the secret key; direct insert as the worker), `tests/rls/checkpoint-scans.test.ts` "nobody edits or deletes a scan, the database owner included", `tests/rls/crew.test.ts` "is insert-only for everyone, the database owner included", `tests/rls/roster-publish.test.ts` "keeps publications insert only, even for the database owner". Note: `private.punches_guard` lets exactly 2 changes through, both on the selfie columns only: the server attaching a selfie once, and the 90-day sweep deleting it once. |
+| 4 | Roster, clock-in, crew clock-in and the live board work at 390px and 1440px | Met with notes | Playwright projects `mobile-390` and `desktop-1440` (`playwright.config.ts`). Roster: `tests/e2e/roster.spec.ts` (assign and copy run in both projects; "at 390px the roster shows one day at a time" on `mobile-390`) and `tests/e2e/roster-publish.spec.ts` (manager at 1440, worker phone context at 390). Live board: `tests/e2e/attendance.spec.ts` (both tests run in both projects). Clock-in: `tests/e2e/clock.spec.ts`. Crew clock-in: `tests/e2e/crew.spec.ts`. Note: clock-in and crew clock-in skip `desktop-1440` ("The worker app is phone-first"), so they are proven at 390px only; 1440px for `/m/clock` and `/m/crew` is step 12 of the live-site list. |
+| 5 | Every Phase 3 Server Action is in the capability registry; every multi-row write has a preview | Met with notes | Phase 3 added 18 Server Actions across 9 `"use server"` modules, and each is in `src/server/capabilities/registry.ts`: `saveModules`, `saveAttendance`, `attendanceBoardAction`, `checkpointScanContextAction`, `recordCheckpointScanAction`, `acceptConsentAction`, `withdrawConsentAction`, `recordCrewPunchAction`, `uploadCrewPhotoAction`, `markInboxReadAction`, `recordPunchAction`, `uploadPunchSelfieAction`, `punchSelfieLinkAction`, `assignShiftAction`, `removeAssignmentAction`, `copyLastWeekAction`, `publishRosterAction`, `resendPublishNoticesAction`. `tests/unit/capabilities/registry.test.ts` "registers every exported Server Action" holds the line. 5 writes are marked `changes: "many"`; 2 have previews (`roster.copy_last_week`: `previewCopyWeek`; `roster.publish`: `previewPublishWeek`). Note: 3 have none, all `agent: false`: `me.mark_inbox_read` (the worker's own read marks), `crew.record_punch` (the crew screen's ticked list and "Mark N present" button is the confirm step) and `roster.resend_notices` (resends to the workers the publish preview already showed). The registry test requires a preview only when the agent may offer the write. |
+
+### Merged pull requests
+- #46 slice 3.2 roster grid
+- #47 slice 3.1 shared pieces
+- #48 CI: every test runs on `main`
+- #49 slice 3.0 business type, module switches and freelancers landing
+- #50 slice 3.4 PWA shell
+- #51 inbox link e2e fix
+- #52 slice 3.3 publish
+- #53 slice 3.5 clock-in and clock-out
+- #55 slice 3.7 live board
+- #56 slice 3.8 QR checkpoint scans
+- #57 Lira card phone fix on the live board
+- #58 slice 3.6 supervisor crew clock-in
+
+### Decisions made overnight (20–21 Nov)
+- **Selfies are kept 90 days flat**, then swept, unless the punch is under review.
+- **HR reads selfies** by signed URL, as owner, admin and ops_manager do.
+- **A `delayed` flag** marks a punch received more than 5 minutes after the time it claims.
+- **Checkpoint scans more than 24 hours old are refused.**
+- **Line managers see only their reportees** on the live board.
+- **The crew group photo is asked for only when the whole crew has agreed to photos.**
+
+### Carried to Phase 4
+- `private.punch_under_review` is a stub that returns false; slice 4.2 replaces it with the real review check, so the selfie sweep keeps photos of punches under review.
+- A crew group photo viewer for managers.
+- Replacing a past-day night shift from the live board.
+- `private.roster_affected_workers` should skip leavers (4.5).
+- `private.attendance_board` was redefined by 3.7, 3.8 and 3.6; its latest copy lives in `20261120230000_crew_punches.sql`. Start any change from that copy.
+- `tests/e2e/offline.spec.ts` flaked once in CI (PR #57). Watch it; fix it if it repeats.
+- Supabase Pro is needed before the first pilot (selfie and photo storage).
+- Vercel Hobby crons: `vercel.json` has 4 daily crons (`import-uploads`, `contract-documents`, `punch-photos`, `bank-detail-changes`). Check the Hobby plan's cron count and timing limits before Phase 4 adds another.
+
+### Check on the live site
+On ops.metaliratech.com: the manager on a laptop, a worker on a phone at `/m`.
+1. **3.0** Open `/for/freelancers` on the phone: it fits with no sideways scroll, and the landing says Metalira Ops is open to freelancers.
+2. **3.0** As owner, open Settings, Company and switch Shifts off: Roster and Live attendance leave the menu, and the worker app hides Clock and My shifts. Switch it back on.
+3. **3.1** Settings, Company, Attendance shows late after 10 minutes and no-show after 60. On the phone, the worker agrees to location and selfies, withdraws one from Me, then agrees again.
+4. **3.2** Open Roster for a site and next week: assign a suggested worker to an Uncovered shift, then copy last week after its preview.
+5. **3.3** Publish the week: the preview names the affected workers. After publishing, the worker sees the shift on `/m`, in My shifts and in the inbox. Change one shift and republish: only that worker is told.
+6. **3.4** On the phone, add the worker app to the home screen, open it, then turn on flight mode: the offline screen shows.
+7. **3.5** Clock in at the site with a selfie and clock out. Then, away from the site with flight mode on, clock in with a reason: it says "Saved on phone". Turn the network back on: it sends, and the punch shows flagged outside, at the real time.
+8. **3.5** As HR, open that clock-in's selfie: it opens. As finance, it doesn't.
+9. **3.7** Open Live attendance on the laptop: the late, on site and starting tiles match, Call opens the dialler, and ops can Send replacement. As HR, the board is read-only.
+10. **3.7** As a line manager, open the board: only their reportees show.
+11. **3.8** Print a site's checkpoint QR codes and scan one on shift from the phone: it shows under Live attendance, Patrols. Scan another with flight mode on, then reconnect: it sends.
+12. **3.6** As a worker-supervisor on the phone, open Crew: mark one person present, then clock them out. Open `/m/clock` and `/m/crew` at laptop width too: the layout holds.

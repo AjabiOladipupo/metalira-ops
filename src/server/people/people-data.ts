@@ -15,6 +15,7 @@ import type { Kobo } from "@/lib/money";
 import type { Database } from "@/types/db";
 
 import { listPayRates, koboFromText, type PayRateVersion } from "./pay-rates";
+import { loadTeamMember } from "./team";
 
 /**
  * Reads for the People screens (slice 1.5). Every query runs with the signed-in user's own
@@ -542,14 +543,6 @@ export interface WorkerProfile {
 const PROFILE_COLUMNS =
   "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, bank_code, bank_checked_name, bank_checked_at, bank_checked_source, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in" as const;
 
-/**
- * What a line manager may load about a reportee (slice 1.11): no bank, tax, pension, next of kin
- * or encrypted columns. RLS still lets a line manager select the whole row (a tracked gap, see
- * docs/PHASE_1.md 1.11), so the server never asks for more than this.
- */
-const LINE_MANAGER_COLUMNS =
-  "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, needs_pay_details, supervisor_clock_in" as const;
-
 type ProfileRow = {
   id: string;
   staff_id: string;
@@ -584,6 +577,8 @@ type ProfileRow = {
   next_of_kin_phone: string | null;
   needs_pay_details: boolean;
   supervisor_clock_in: boolean;
+  /** Set for a line manager's read (my_reportees names the line manager itself). */
+  line_manager_name?: string | null;
 };
 
 async function loadProfileRow(
@@ -602,16 +597,28 @@ async function loadProfileRow(
     if (error) throw new Error(`Could not read the employee: ${error.message}`);
     return data;
   }
-  const { data, error } = await supabase
-    .from("workers")
-    .select(LINE_MANAGER_COLUMNS)
-    .eq("organisation_id", organisationId)
-    .eq("id", workerId)
-    .maybeSingle();
-  if (error) throw new Error(`Could not read the employee: ${error.message}`);
-  if (!data) return null;
+  // A line manager reads their reportee through public.my_reportees (slice 4.0): safe columns
+  // only, and no row at all for anyone who doesn't report to them.
+  const member = await loadTeamMember(supabase, organisationId, workerId);
+  if (!member) return null;
   return {
-    ...data,
+    id: member.id,
+    staff_id: member.staffId,
+    first_name: member.firstName,
+    last_name: member.lastName,
+    phone: member.phone,
+    email: member.email,
+    job_title: member.jobTitle,
+    department_id: member.departmentId,
+    line_manager_worker_id: member.lineManagerWorkerId,
+    line_manager_membership_id: member.lineManagerMembershipId,
+    employment_type: member.employmentType,
+    start_date: member.startDate,
+    end_date: member.endDate,
+    status: member.status,
+    needs_pay_details: false,
+    supervisor_clock_in: member.supervisorClockIn,
+    line_manager_name: member.lineManagerName,
     bank_name: null,
     account_name: null,
     bank_account_last4: null,
@@ -666,7 +673,9 @@ export async function loadWorkerProfile(
       : Promise.resolve(null),
     viewer === "self"
       ? ownLineManagerName(supabase, organisationId)
-      : lineManagerLabel(supabase, organisationId, w),
+      : w.line_manager_name !== undefined
+        ? Promise.resolve(w.line_manager_name ?? (w.line_manager_membership_id ? "Manager" : null))
+        : lineManagerLabel(supabase, organisationId, w),
     loadCurrentAssignments(supabase, organisationId, today, workerId),
     loadNames(supabase, "sites", organisationId),
     loadNames(supabase, "projects", organisationId),

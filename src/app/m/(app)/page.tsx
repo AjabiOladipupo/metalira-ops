@@ -1,4 +1,4 @@
-import { Banknote, CalendarDays, ChevronRight, CircleHelp, Plane } from "lucide-react";
+import { Banknote, CalendarDays, ChevronRight, CircleHelp, Plane, Users } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -13,6 +13,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 import { loadClockContext, type ClockContext } from "@/server/workforce/clock-data";
+import { loadCrewContext } from "@/server/workforce/crew-data";
 
 import { ClockButton } from "../_components/clock/clock-button";
 import { InboxLink } from "../_components/inbox-link";
@@ -90,10 +91,18 @@ async function HomeBody() {
   const shifts = lookup.type !== "worker" || lookup.session.shiftsEnabled;
   const tiles = shifts ? TILES : TILES.filter((t) => t.href !== "/m/shifts");
   const now = new Date();
+  const supabase = shifts && lookup.type === "worker" ? await createServerSupabase() : null;
   const clock =
-    shifts && lookup.type === "worker"
-      ? await loadClockContext(await createServerSupabase(), lookup.session.organisationId, now)
+    supabase && lookup.type === "worker"
+      ? await loadClockContext(supabase, lookup.session.organisationId, now)
       : null;
+  // Worker-supervisors (the line manager of a crew) get the crew clock-in card (slice 3.6).
+  const crewSize =
+    supabase && lookup.type === "worker" && clock && !clock.left
+      ? await loadCrewContext(supabase, lookup.session.organisationId)
+          .then((c) => c.crewSize)
+          .catch(() => 0)
+      : 0;
   return (
     <>
       {shifts ? (
@@ -104,6 +113,22 @@ async function HomeBody() {
         </Suspense>
       ) : null}
       {clock && !clock.left ? <ClockButton lastPunch={clockLastPunch(clock)} /> : null}
+      {crewSize > 0 ? (
+        <Link
+          href="/m/crew"
+          data-testid="crew-card"
+          className="flex h-16 items-center gap-3 rounded-xl bg-foreground px-4 text-background no-underline hover:text-background hover:opacity-90"
+        >
+          <Users strokeWidth={1.75} className="size-6 shrink-0" aria-hidden />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="font-display text-lg font-bold">{workerMessages.crew.homeCard}</span>
+            <span className="text-[13px] opacity-80">
+              {workerMessages.crew.homeCardLine(crewSize)}
+            </span>
+          </span>
+          <ChevronRight strokeWidth={1.75} className="size-5 shrink-0" aria-hidden />
+        </Link>
+      ) : null}
 
       <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
         {tiles.map(({ href, label, Icon }) => (

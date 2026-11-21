@@ -12,6 +12,7 @@ import {
   type PatrolScan,
 } from "@/lib/patrols";
 import type { ManagerRole } from "@/lib/roles";
+import { loadVisibleWorkerNames } from "@/server/people/team";
 import type { Database } from "@/types/db";
 
 /**
@@ -99,19 +100,19 @@ function fullName(w: { first_name: string; last_name: string } | undefined): str
   return w ? `${w.first_name} ${w.last_name}`.trim() : "A worker";
 }
 
+/**
+ * Scanners' names. A line manager reads their reportees through my_reportees (slice 4.0); the
+ * other roles read public.workers.
+ */
 async function workerNames(
   supabase: Client,
   organisationId: string,
   ids: string[],
 ): Promise<Map<string, string>> {
-  if (ids.length === 0) return new Map();
-  const { data, error } = await supabase
-    .from("workers")
-    .select("id, first_name, last_name")
-    .eq("organisation_id", organisationId)
-    .in("id", ids);
-  if (error) throw new Error(`Could not read workers (${error.code})`);
-  return new Map((data ?? []).map((w) => [w.id, fullName(w)]));
+  const names = await loadVisibleWorkerNames(supabase, organisationId, ids);
+  return new Map(
+    [...names].map(([id, w]) => [id, fullName({ first_name: w.firstName, last_name: w.lastName })]),
+  );
 }
 
 /** One site's patrol day in the company's time zone. */

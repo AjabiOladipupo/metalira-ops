@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
+import { lookupCrewPageSession } from "@/server/workforce/crew-page-session";
 
 import { BottomNav } from "../_components/bottom-nav";
 import { QueueOwnerSync } from "../_components/offline/queue-owner";
@@ -11,12 +12,24 @@ import { QueueOwnerSync } from "../_components/offline/queue-owner";
  */
 async function QueueOwner() {
   const lookup = await lookupWorkerPageSession();
-  if (lookup.type !== "worker") return null;
+  if (lookup.type === "worker") {
+    return (
+      <QueueOwnerSync
+        organisationId={lookup.session.organisationId}
+        workerId={lookup.session.workerId}
+        userId={lookup.session.userId}
+      />
+    );
+  }
+  // A line manager on crew clock-in (slice 3.6): their queue is keyed by their membership.
+  if (lookup.type !== "not_worker") return null;
+  const crew = await lookupCrewPageSession();
+  if (crew.type !== "crew") return null;
   return (
     <QueueOwnerSync
-      organisationId={lookup.session.organisationId}
-      workerId={lookup.session.workerId}
-      userId={lookup.session.userId}
+      organisationId={crew.session.organisationId}
+      workerId={crew.session.actorId}
+      userId={crew.session.userId}
     />
   );
 }
@@ -24,6 +37,8 @@ async function QueueOwner() {
 /** The bottom nav without Clock when the worker's company has Shifts off (slice 3.0). */
 async function WorkerBottomNav() {
   const lookup = await lookupWorkerPageSession();
+  // A line manager opening crew clock-in has no worker tabs.
+  if (lookup.type === "not_worker") return null;
   return <BottomNav shiftsEnabled={lookup.type !== "worker" || lookup.session.shiftsEnabled} />;
 }
 

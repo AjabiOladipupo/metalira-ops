@@ -785,10 +785,13 @@ describe("who sees and changes people", () => {
     const supervisorWorker = await mustCreateWorker();
     await addMember(supervisorUser, "line_manager", supervisorWorker);
     viaWorker = await mustCreateWorker({ line_manager_worker_id: supervisorWorker });
+    // Slice 4.0: their own row from workers, their reportee through my_reportees only.
     const supervisorSees = await supervisorUser.client.from("workers").select("id");
-    expect((supervisorSees.data ?? []).map((row) => row.id).sort()).toEqual(
-      [supervisorWorker, viaWorker].sort(),
-    );
+    expect((supervisorSees.data ?? []).map((row) => row.id)).toEqual([supervisorWorker]);
+    const supervisorTeam = await supervisorUser.client.rpc("my_reportees", {
+      p_organisation_id: owner.orgId,
+    });
+    expect((supervisorTeam.data ?? []).map((row) => row.id)).toEqual([viaWorker]);
 
     ownWorker = await mustCreateWorker({ department_id: departmentId }, monthly("2025-01-06"));
     workerUser = await createTestUser("p-own-worker");
@@ -936,8 +939,11 @@ describe("who sees and changes people", () => {
 
   it("a line manager reads only their reportees, their mapping, and no pay", async () => {
     const client = people.lineManager.client;
+    // Slice 4.0: not from workers (no columns at all), only through my_reportees.
     const workers = await client.from("workers").select("id");
-    expect((workers.data ?? []).map((row) => row.id)).toEqual([reportee]);
+    expect(workers.data).toEqual([]);
+    const team = await client.rpc("my_reportees", { p_organisation_id: owner.orgId });
+    expect((team.data ?? []).map((row) => row.id)).toEqual([reportee]);
     const assignments = await client.from("worker_assignments").select("worker_id");
     expect(assignments.data).toEqual([{ worker_id: reportee }]);
     const pay = await client.from("pay_rates").select("id");
