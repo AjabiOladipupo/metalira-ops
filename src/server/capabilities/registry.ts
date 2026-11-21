@@ -137,6 +137,11 @@ import { saveAttendanceSpec, loadAttendanceSettings } from "@/server/identity/at
 import { consentKindSchema } from "@/server/workforce/consents";
 import { CONSENT_READERS, loadConsentsSummary } from "@/server/workforce/consents-data";
 import { PUNCH_SUMMARY_READERS, loadTodayPunchSummary } from "@/server/workforce/clock-data";
+import {
+  BOARD_READERS,
+  boardInputSchema,
+  loadAttendanceBoard,
+} from "@/server/workforce/attendance-board";
 import { SELFIE_READERS, selfieLinkSchema } from "@/server/workforce/punch-selfie-link";
 import { recordPunchSchema, uploadSelfieSchema } from "@/server/workforce/punches";
 import { markReadSchema } from "@/server/workforce/inbox";
@@ -1113,6 +1118,23 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadTodayPunchSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "attendance.live_board",
+    description:
+      "Shows who is on site, late, a no-show, starting in 2 hours or clocked out today, by worker and site.",
+    kind: "read",
+    audience: "manager",
+    roles: BOARD_READERS,
+    input: boardInputSchema,
+    changes: "none",
+    action: at("workforce/board-actions", "attendanceBoardAction"),
+    // Lira gets the board without phone numbers: it never dials anyone.
+    read: async ({ supabase, organisationId }) => {
+      const board = await loadAttendanceBoard(supabase, organisationId);
+      return { ...board, rows: board.rows.map((row) => ({ ...row, phone: null })) };
+    },
     agent: true,
   },
   {

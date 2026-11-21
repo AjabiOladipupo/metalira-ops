@@ -19,6 +19,7 @@ import {
   formatDayCounts,
   formatShiftHours,
   formatShortDay,
+  type ReplacementTarget,
   type RosterCell,
   type RosterWeek,
 } from "@/lib/roster";
@@ -50,6 +51,8 @@ interface RemoveTarget {
   workerName: string;
   postName: string;
   date: string;
+  /** Prefilled reason (Send replacement from the live board: "No-show"). */
+  reason?: string;
 }
 
 function shortName(name: string): string {
@@ -72,6 +75,7 @@ export function RosterBoard({
   candidates,
   canEdit,
   changedCells = [],
+  replacement = null,
 }: {
   siteId: string;
   weekStart: string;
@@ -84,12 +88,43 @@ export function RosterBoard({
   canEdit: boolean;
   /** `${postId}|${date}` for the post-days that changed since the latest publish (slice 3.3). */
   changedCells?: string[];
+  /**
+   * Send replacement from the live board (slice 3.7): opens "Remove from shift" for the late or
+   * no-show worker, then the picker for the same post-day; or the picker at once when the place
+   * is already open. Only when the day can still change.
+   */
+  replacement?: ReplacementTarget | null;
 }) {
   const changed = useMemo(() => new Set(changedCells), [changedCells]);
   const todayIndex = week.days.findIndex((d) => d.date === today);
-  const [dayIndex, setDayIndex] = useState(todayIndex >= 0 ? todayIndex : 0);
-  const [picking, setPicking] = useState<PickTarget | null>(null);
-  const [removing, setRemoving] = useState<RemoveTarget | null>(null);
+  const replaceable = replacement !== null && canEdit && replacement.date >= today;
+  const focusIndex = replaceable ? week.days.findIndex((d) => d.date === replacement.date) : -1;
+  const [dayIndex, setDayIndex] = useState(
+    focusIndex >= 0 ? focusIndex : todayIndex >= 0 ? todayIndex : 0,
+  );
+  const replacementPick: PickTarget | null = replaceable
+    ? {
+        postId: replacement.postId,
+        postName: replacement.postName,
+        date: replacement.date,
+        startsAt: replacement.startsAt,
+        endsAt: replacement.endsAt,
+      }
+    : null;
+  const [picking, setPicking] = useState<PickTarget | null>(
+    replaceable && !replacement.remove ? replacementPick : null,
+  );
+  const [removing, setRemoving] = useState<RemoveTarget | null>(
+    replaceable && replacement.remove
+      ? {
+          assignmentId: replacement.remove.assignmentId,
+          workerName: replacement.remove.workerName,
+          postName: replacement.postName,
+          date: replacement.date,
+          reason: "No-show",
+        }
+      : null,
+  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const [assignState, assignAction] = useActionState<CompanyFormState, FormData>(
@@ -107,8 +142,14 @@ export function RosterBoard({
     async (prev, formData) => {
       const result = await removeAssignmentAction(prev, formData);
       if (result?.ok) {
+        // Send replacement: once the late or no-show worker is off the shift, pick someone.
+        const next =
+          replacementPick && formData.get("assignmentId") === replacement?.remove?.assignmentId
+            ? replacementPick
+            : null;
         setRemoving(null);
         setNotice(result.message ?? "Removed");
+        if (next) setPicking(next);
       }
       return result;
     },
@@ -627,6 +668,7 @@ function RemoveSheet({
               label="Reason (optional)"
               name="reason"
               maxLength={500}
+              defaultValue={target.reason}
               hint="For example: swapped with the night team."
               error={fieldError}
             />

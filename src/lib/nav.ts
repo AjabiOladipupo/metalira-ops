@@ -80,7 +80,8 @@ export const NAV: NavGroup[] = [
         label: "Live attendance",
         module: "shifts",
         href: "/app/attendance",
-        roles: ["owner", "admin", "ops_manager", "line_manager"],
+        // Slice 3.7: the Phase 3 access table's punch readers (hr included).
+        roles: ["owner", "admin", "hr", "ops_manager", "line_manager"],
         icon: "attendance",
         description: "Clock-ins as they happen, by site.",
         empty: "No one is on shift right now.",
