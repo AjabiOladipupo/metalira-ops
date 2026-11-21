@@ -55,7 +55,7 @@ const monday = addDays(today, 8 - isoWeekday(today));
 const day = (n: number) => addDays(monday, n);
 /** Every date the tests use stays inside this calendar year (a request lies inside one year). */
 const roomInYear =
-  day(20).slice(0, 4) === today.slice(0, 4) && addDays(today, -1).slice(0, 4) === today.slice(0, 4);
+  day(27).slice(0, 4) === today.slice(0, 4) && addDays(today, -1).slice(0, 4) === today.slice(0, 4);
 
 async function addMember(orgId: string, user: TestUser, role: Role) {
   const { error } = await admin
@@ -566,5 +566,57 @@ describe("decision 13: publishing never tells a leaver", () => {
     });
     expect(again.error).toBeNull();
     expect(toPublishResult(again.data).affected.map((a) => a.workerId)).not.toContain(tobi);
+  });
+});
+
+describe("a republish doesn't tell a worker about shifts their leave opened", () => {
+  it("leaves on_leave removals out of the affected workers, other changes stay in", async () => {
+    if (!roomInYear) return;
+    const week = day(21);
+    const funmi = await addWorker("Funmi Ade");
+    const kunle = await addWorker("Kunle Bello");
+    await assigned(post.night, addDays(week, 2), funmi);
+    await assigned(post.night, addDays(week, 3), funmi);
+    const first = await ops.client.rpc("publish_roster", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: week,
+      p_dry_run: false,
+    });
+    expect(first.error).toBeNull();
+
+    const id = await askAndPassStep1(funmi, addDays(week, 2), addDays(week, 3));
+    const approved = await decideHr(id, "approved");
+    expect(approved.error).toBeNull();
+    expect((approved.data as { open_shifts: unknown[] }).open_shifts).toHaveLength(2);
+
+    // Only the leave changed: the dry run tells nobody, and the grid still marks the change.
+    const dry = await ops.client.rpc("publish_roster", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: week,
+      p_dry_run: true,
+    });
+    expect(dry.error).toBeNull();
+    expect(toPublishResult(dry.data).affected.map((a) => a.workerId)).not.toContain(funmi);
+    const status = await ops.client.rpc("roster_publication_status", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: week,
+    });
+    expect((status.data as { changed: unknown[] }).changed.length).toBeGreaterThan(0);
+
+    // Someone covers one of the opened shifts: they are told, Funmi isn't.
+    await assigned(post.night, addDays(week, 2), kunle);
+    const next = await ops.client.rpc("publish_roster", {
+      p_organisation_id: owner.orgId,
+      p_site_id: apapa,
+      p_week_start: week,
+      p_dry_run: false,
+    });
+    expect(next.error).toBeNull();
+    const affected = toPublishResult(next.data).affected.map((a) => a.workerId);
+    expect(affected).toContain(kunle);
+    expect(affected).not.toContain(funmi);
   });
 });

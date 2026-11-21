@@ -17,6 +17,7 @@
 -- 4. Decision 13 (the 3.3 low): `private.roster_affected_workers` leaves out workers whose
 --    employment ended (status ended, or an end date before the week). Publishing and "Send
 --    notices again" both read it, so neither tells a leaver, even one who left after the publish.
+--    It also leaves out removals approved leave made: the worker was told by the leave decision.
 --
 -- Locks: the guard takes the worker's leave lock shared ('leave_requests:<worker>', the key the
 -- leave functions take exclusively), so an assignment and HR's approval for the same worker take
@@ -268,8 +269,9 @@ revoke all on function private.shift_assignments_guard() from public, anon, auth
 -- 3. copy_last_week skips workers on approved leave
 -- ---------------------------------------------------------------------------
 
--- Slice 3.2's copy, unchanged except: a worker on approved leave on the target day is skipped
--- with MLRSL (checked first in plain SQL, and caught from the guard as the backstop).
+-- Slice 3.2's copy, unchanged except: the source workers' leave locks are taken shared up front,
+-- in worker order; a worker on approved leave on the target day is skipped with MLRSL (checked
+-- first in plain SQL, and caught from the guard as the backstop).
 create or replace function private.copy_last_week(
   p_organisation_id uuid,
   p_site_id uuid,
@@ -296,6 +298,7 @@ declare
   v_existing uuid;
   v_required integer;
   v_leave record;
+  v_lock_worker uuid;
 begin
   perform private.require_roster_role(p_organisation_id);
   if p_week_start is null or extract(isodow from p_week_start) <> 1 then
@@ -308,6 +311,21 @@ begin
   end if;
   -- One copy per site at a time.
   perform pg_advisory_xact_lock(hashtextextended('roster_copy:' || p_site_id::text, 0));
+
+  -- Slice 4.5: every source worker's leave lock, shared, up front and in worker order (the guard
+  -- takes the same key per insert; HR's approval takes it exclusively). Taking them all first, in
+  -- one order, keeps two copies and two approvals from waiting on each other in a cycle.
+  for v_lock_worker in
+    select distinct a.worker_id
+    from public.shift_assignments a
+    where a.organisation_id = p_organisation_id
+      and a.site_id = p_site_id
+      and a.status = 'assigned'
+      and a.shift_date between p_week_start - 7 and p_week_start - 1
+    order by a.worker_id
+  loop
+    perform pg_advisory_xact_lock_shared(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end loop;
 
   begin
     for v_source in
@@ -460,9 +478,13 @@ grant execute on function private.copy_last_week(uuid, uuid, date, boolean) to a
 -- 4. Decision 13: publishing never tells a leaver
 -- ---------------------------------------------------------------------------
 
--- Slice 3.3's list, unchanged except it leaves out workers whose employment ended: status ended,
--- or an end date before the week (the week of the snapshots' days; one site-week each). Read at
--- the time it runs, so "Send notices again" skips someone who left after the publish.
+-- Slice 3.3's list, unchanged except:
+-- * it leaves out workers whose employment ended: status ended, or an end date before the week
+--   (the week of the snapshots' days; one site-week each). Read at the time it runs, so "Send
+--   notices again" skips someone who left after the publish;
+-- * a removal approved leave made (removed_reason 'on_leave') is not a change for the worker:
+--   the leave decision already told them. The grid's "Changed since publish" marks still show it
+--   (roster_publication_status reads the diff itself).
 create or replace function private.roster_affected_workers(
   p_organisation_id uuid,
   p_old jsonb,
@@ -476,7 +498,23 @@ security definer
 set search_path = ''
 as $$
   with d as (
-    select * from private.roster_snapshot_diff(p_old, p_new)
+    select x.*
+    from private.roster_snapshot_diff(p_old, p_new) x
+    -- Slice 4.5: a shift approved leave opened isn't news to the worker (the leave decision told
+    -- them), so it is left out when their latest removal from that shift was 'on_leave'.
+    where not (
+      x.kind = 'removed'
+      and coalesce((
+        select a.removed_reason = 'on_leave'
+        from public.shift_assignments a
+        where a.organisation_id = p_organisation_id
+          and a.shift_id = x.shift_id
+          and a.worker_id = x.worker_id
+          and a.status = 'removed'
+        order by a.removed_at desc, a.id desc
+        limit 1
+      ), false)
+    )
   ),
   wk as (
     select min(x.day) - (extract(isodow from min(x.day))::integer - 1) as week_start
