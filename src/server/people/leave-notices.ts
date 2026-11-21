@@ -3,7 +3,7 @@ import "server-only";
 import { createElement } from "react";
 import { z } from "zod";
 
-import { lagosToday } from "@/lib/dates";
+import { todayIn } from "@/lib/dates";
 import { INBOX_EMAIL_CAPS } from "@/lib/inbox";
 import { formatDayCount } from "@/lib/leave/days";
 import { formatLeaveRange } from "@/lib/leave/requests";
@@ -149,7 +149,16 @@ async function supervisorWorkerId(
     .maybeSingle();
   if (record.error) throw new Error(`Could not read the line manager (${record.error.code})`);
   if (!record.data || record.data.status !== "active") return null;
-  if (record.data.end_date && record.data.end_date < lagosToday()) return null;
+  if (record.data.end_date) {
+    // The company's own calendar day, as private.org_today uses in SQL.
+    const org = await admin
+      .from("organisations")
+      .select("timezone")
+      .eq("id", organisationId)
+      .maybeSingle();
+    if (org.error) throw new Error(`Could not read the company (${org.error.code})`);
+    if (record.data.end_date < todayIn(org.data?.timezone ?? "Africa/Lagos")) return null;
+  }
   return lmWorker;
 }
 

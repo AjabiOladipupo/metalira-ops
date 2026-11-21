@@ -16,8 +16,8 @@
 --    (MLTA1), the day refreshed first under the worker's lock, a running shift refused (MLTA3),
 --    the MLTA7 changed-since-opened guard. Bulk approval, reopen and corrections stay with
 --    managers (their own role gates are unchanged).
---    refresh_timesheet_lines (slice 4.2's version): a worker login refreshes its crew's days as
---    well as its own, still 35 days at most, and at most 200 people (so a worker login never
+--    refresh_timesheet_lines (slice 4.2's version): a worker login refreshes its crew's days (while
+--    Shifts is on) as well as its own, still 35 days at most, and at most 200 people (so a worker login never
 --    takes the company-wide refresh lock).
 -- 3. Leave step 1 (slice 4.4's helpers, replaced): private.leave_has_line_manager counts a
 --    worker-supervisor (a worker login on the worker's line_manager_worker_id, still employed)
@@ -281,7 +281,11 @@ begin
           where m.organisation_id = p_organisation_id and m.user_id = v_uid
             and m.role = 'worker' and m.worker_id is not null
         )
-        or w.id in (select private.my_supervised_crew_ids())
+        -- The crew only while Shifts is on, as for the decisions (security review L3).
+        or (
+          private.org_shifts_enabled(p_organisation_id)
+          and w.id in (select private.my_supervised_crew_ids())
+        )
       )
       and (p_worker_ids is null or w.id = any (p_worker_ids));
     -- Never the company-wide lock for a worker login (private.timesheet_lock takes it past 200).

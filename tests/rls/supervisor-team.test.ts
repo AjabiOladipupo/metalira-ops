@@ -122,9 +122,15 @@ async function addWorker(
 
 /**
  * A finished 07:00 to 19:00 shift, clocked in and out on time, each on its own day inside the
- * last 35 days (a worker has one shift at a time); returns its line id.
+ * last 35 days (a worker has one shift at a time); returns its line id, or with `refresh` false
+ * its assignment id (no line built yet).
  */
-async function workedDay(workerId: string, orgId = owner.orgId, siteId = site): Promise<string> {
+async function workedDay(
+  workerId: string,
+  orgId = owner.orgId,
+  siteId = site,
+  refresh = true,
+): Promise<string> {
   dayBack += 1;
   const DAY = addDays(lagosToday(), -dayBack);
   const [contract, post, shift, assignment] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
@@ -171,6 +177,7 @@ async function workedDay(workerId: string, orgId = owner.orgId, siteId = site): 
     await db.query("rollback");
     throw error;
   }
+  if (!refresh) return assignment;
   const refreshed = await (orgId === owner.orgId ? owner : other).client.rpc(
     "refresh_timesheet_lines",
     { p_organisation_id: orgId, p_from: DAY, p_to: DAY, p_worker_ids: [workerId] },
@@ -241,6 +248,7 @@ async function raiseQuery(workerId: string, subject: string) {
   return data!;
 }
 
+let seededAssignment = "";
 let sup: Worker;
 let crew: Worker;
 let outsider: Worker;
@@ -383,6 +391,21 @@ describe("timesheet days", () => {
     expect(off.error).toBeNull();
     try {
       expect((await approve(sup.client, day)).error?.code).toBe("42501");
+      // The refresh leaves the crew alone too (security review L3): a day seeded now isn't
+      // built by the supervisor's refresh while Shifts is off.
+      const seeded = await workedDay(crew.id, owner.orgId, site, false);
+      const refreshed = await sup.client.rpc("refresh_timesheet_lines", {
+        p_organisation_id: owner.orgId,
+        p_from: addDays(lagosToday(), -34),
+        p_to: lagosToday(),
+      });
+      expect(refreshed.error).toBeNull();
+      const { rows: none } = await db.query(
+        "select 1 from public.timesheet_lines where shift_assignment_id = $1",
+        [seeded],
+      );
+      expect(none).toHaveLength(0);
+      seededAssignment = seeded;
       const listed = await sup.client.rpc("crew_timesheet_days", {
         p_organisation_id: owner.orgId,
       });
@@ -397,6 +420,18 @@ describe("timesheet days", () => {
       expect(on.error).toBeNull();
     }
     expect(await lineStatus(day)).toBe("pending");
+    // Shifts on again: the supervisor's refresh builds the crew's day.
+    const back = await sup.client.rpc("refresh_timesheet_lines", {
+      p_organisation_id: owner.orgId,
+      p_from: addDays(lagosToday(), -34),
+      p_to: lagosToday(),
+    });
+    expect(back.error).toBeNull();
+    const { rows: built } = await db.query(
+      "select 1 from public.timesheet_lines where shift_assignment_id = $1",
+      [seededAssignment],
+    );
+    expect(built).toHaveLength(1);
   });
 
   it("a supervisor refreshes their crew's days, but not 36 days or anyone else's", async () => {

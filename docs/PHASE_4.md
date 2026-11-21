@@ -263,6 +263,7 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 - **Leave step 1:** `leave_has_line_manager` counts an employed worker-supervisor as the worker's line manager and `leave_can_decide_step1` lets them decide; an ended supervisor stops counting and step 1 falls back to owner, admin or ops_manager. `decide_leave_line_manager` keeps 4.4's checks, now takes the worker's leave lock first and writes its audit row directly (`log_audit_impl` admits manager roles only). The step-1 notice goes to the supervisor's inbox (link `/m/team`).
 - **Reads (worker and line_manager logins, crew or reportees only):** `crew_timesheet_days` (undecided days, last 35 days), `crew_leave_requests` (step 1 with the type's balance, other pending days and 4.5's opened shifts) and `crew_team_size` (the home's Approvals row shows when above 0). No bank, tax, pay, phone or location.
 - **Queries:** out of scope (owner, 21 Nov 2026). Supervisors read no `staff_queries` or replies; 4.6 is unchanged.
+- **Deploy note:** requests already waiting at step 1 when this ships move to the worker-supervisor without a fresh notice; with live customers, re-notify them (none yet, 21 Nov 2026).
 
 
 ## Order and parallel work
