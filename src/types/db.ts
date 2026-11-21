@@ -1817,11 +1817,6 @@ isOneToOne: false
               "batch_id": string,"photo_path": string
             }[]
                            },
-"crew_queries":
-{ Args: { "p_organisation_id": string }; Returns: {
-              "id": string,"kind": string,"overdue": boolean,"raised_at": string,"raised_by_name": string,"reply_by": string,"subject": string,"worker_id": string,"worker_name": string
-            }[]
-                           },
 "crew_team_size":
 { Args: { "p_organisation_id": string }; Returns: number
                            },

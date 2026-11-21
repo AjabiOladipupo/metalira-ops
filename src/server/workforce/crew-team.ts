@@ -4,7 +4,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { z } from "zod";
 
 import { addDays, todayIn } from "@/lib/dates";
-import type { QueryKind } from "@/lib/queries";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { assertModuleOn, runMutation, type MutationSpec } from "@/server/identity/mutate";
 import { decideLineManagerSpec, type StepResult } from "@/server/people/leave-requests";
@@ -32,7 +31,7 @@ import { loadTimesheetSettings, refreshTimesheetRange } from "./timesheets-data"
  *   Never their own day. The same specs and notices as /app/timesheets.
  * - Leave at step 1: crew_leave_requests, then 4.4's decide_leave_line_manager, whose step-1
  *   rule now counts a worker-supervisor as their crew's line manager.
- * - Queries awaiting a reply: crew_queries, read-only (kind, subject, reply-by; never the body).
+ * - Queries are out of scope (owner, 21 Nov 2026): a supervisor reads no staff queries.
  *
  * Every read carries names, sites, dates and minutes only: no bank, tax, pay, phone or location.
  */
@@ -133,24 +132,12 @@ export interface CrewLeave {
   openShifts: CrewOpenShift[];
 }
 
-export interface CrewQuery {
-  id: string;
-  workerId: string;
-  workerName: string;
-  kind: QueryKind;
-  subject: string;
-  replyBy: string;
-  overdue: boolean;
-  raisedByName: string;
-}
-
 export interface CrewQueue {
   kind: CrewSession["kind"];
   timeZone: string;
   shiftsEnabled: boolean;
   days: CrewDay[];
   leave: CrewLeave[];
-  queries: CrewQuery[];
   /** False when the refresh on open failed; the days are what was stored. */
   refreshed: boolean;
 }
@@ -220,23 +207,6 @@ async function readLeave(supabase: Client, organisationId: string): Promise<Crew
   }));
 }
 
-async function readQueries(supabase: Client, organisationId: string): Promise<CrewQuery[]> {
-  const { data, error } = await supabase.rpc("crew_queries", {
-    p_organisation_id: organisationId,
-  });
-  if (error) throw new Error(`Could not read the team's queries (${error.code})`);
-  return (data ?? []).map((r) => ({
-    id: r.id,
-    workerId: r.worker_id,
-    workerName: str(r.worker_name) ?? "Unnamed",
-    kind: r.kind as QueryKind,
-    subject: r.subject,
-    replyBy: r.reply_by,
-    overdue: r.overdue === true,
-    raisedByName: r.raised_by_name,
-  }));
-}
-
 async function shiftsOn(supabase: Client, organisationId: string): Promise<boolean> {
   const { data } = await supabase
     .from("organisations")
@@ -248,7 +218,7 @@ async function shiftsOn(supabase: Client, organisationId: string): Promise<boole
 
 /**
  * What /m/team lists for the signed-in supervisor: the crew's days refreshed over the last 35
- * days first (so nobody waits for the 04:00 cron), then the three reads.
+ * days first (so nobody waits for the 04:00 cron), then the two reads.
  */
 export async function loadCrewQueue(session: CrewSession): Promise<CrewQueue> {
   const supabase = await createServerSupabase({ channel: "worker_app" });
@@ -274,10 +244,9 @@ export async function loadCrewQueue(session: CrewSession): Promise<CrewQueue> {
       console.error("crew_team.refresh_failed:", code);
     }
   }
-  const [days, leave, queries] = await Promise.all([
+  const [days, leave] = await Promise.all([
     shiftsEnabled ? readDays(supabase, organisationId) : Promise.resolve([]),
     readLeave(supabase, organisationId),
-    readQueries(supabase, organisationId),
   ]);
   return {
     kind: session.kind,
@@ -285,7 +254,6 @@ export async function loadCrewQueue(session: CrewSession): Promise<CrewQueue> {
     shiftsEnabled,
     days,
     leave,
-    queries,
     refreshed,
   };
 }
@@ -322,13 +290,11 @@ export interface CrewQueueSummary {
   disputed: number;
   leaveToDecide: number;
   leaveShiftsOpened: number;
-  queriesAwaiting: number;
-  queriesOverdue: number;
 }
 
 /** Counts only (Lira's compact read): no names, ids or personal data. */
 export function summariseCrewQueue(
-  queue: Pick<CrewQueue, "days" | "leave" | "queries">,
+  queue: Pick<CrewQueue, "days" | "leave">,
 ): CrewQueueSummary {
   return {
     daysToDecide: queue.days.filter((d) => !d.running).length,
@@ -336,8 +302,6 @@ export function summariseCrewQueue(
     disputed: queue.days.filter((d) => d.status === "disputed").length,
     leaveToDecide: queue.leave.length,
     leaveShiftsOpened: queue.leave.reduce((sum, l) => sum + l.openShifts.length, 0),
-    queriesAwaiting: queue.queries.length,
-    queriesOverdue: queue.queries.filter((q) => q.overdue).length,
   };
 }
 
@@ -347,10 +311,9 @@ export async function loadCrewSummary(
   organisationId: string,
 ): Promise<CrewQueueSummary> {
   const on = await shiftsOn(supabase, organisationId);
-  const [days, leave, queries] = await Promise.all([
+  const [days, leave] = await Promise.all([
     on ? readDays(supabase, organisationId) : Promise.resolve([]),
     readLeave(supabase, organisationId),
-    readQueries(supabase, organisationId),
   ]);
-  return summariseCrewQueue({ days, leave, queries });
+  return summariseCrewQueue({ days, leave });
 }

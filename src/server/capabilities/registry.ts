@@ -1404,7 +1404,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "crew_team.summary",
     description:
-      "Counts a supervisor's crew days to approve, leave requests at step 1 and queries awaiting a reply.",
+      "Counts a supervisor's crew days to approve and leave requests waiting at step 1.",
     kind: "read",
     audience: "worker",
     roles: [],

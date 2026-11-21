@@ -29,15 +29,14 @@
 --    ops_manager as for a worker with no line manager.
 -- 4. Reads for /m/team, each a definer for `worker` and `line_manager` logins only, narrowed to
 --    the caller's crew (worker-supervisor) or reportees (line manager), never the caller:
---    crew_timesheet_days (pending or disputed days the caller may decide, the last 35 days),
---    crew_leave_requests (step 1 waiting for the caller, with the balance and the shifts approval
---    would open, 4.5's private.leave_shifts_to_open) and crew_queries (queries awaiting the crew
---    member's reply: kind, subject, reply-by and who raised it; never the body or the replies).
---    Safe columns only: no bank, tax, pay, NIN, phone or location.
+--    crew_timesheet_days (pending or disputed days the caller may decide, the last 35 days) and
+--    crew_leave_requests (step 1 waiting for the caller: dates, type, reason, the balance of that
+--    type and the shifts approval would open, 4.5's private.leave_shifts_to_open), plus
+--    crew_team_size (a count, for the Approvals tile). Safe columns only: no bank, tax, pay, NIN,
+--    phone or location.
 --
--- Queries stay read-only for worker-supervisors: 4.6's raise rule (raise_staff_query) needs a
--- manager role and is unchanged, and staff_queries RLS is unchanged (the body and replies stay
--- with HR, the raiser and the line manager login).
+-- Queries are out of scope (owner, 21 Nov 2026): worker-supervisors read no staff_queries or
+-- replies, and no 4.6 policy or function changes here.
 --
 -- No new tables, so no new policies.
 
@@ -705,89 +704,7 @@ revoke all on function public.crew_leave_requests(uuid) from public, anon;
 grant execute on function public.crew_leave_requests(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 4. Queries awaiting the crew's reply (read-only)
--- ---------------------------------------------------------------------------
-
--- /m/team's queries section: the queries still awaiting a reply from the caller's crew (a
--- worker-supervisor, while still employed) or reportees (a line manager): kind, subject, reply-by,
--- whether it is overdue and who raised it, so the supervisor can remind them. Never the body or
--- the replies (an HR record: those stay with HR, the raiser and the line manager login, under
--- 4.6's staff_queries RLS). Empty while the company has People off. 42501 for every other role.
-create function private.crew_queries(p_organisation_id uuid)
-returns table (
-  id uuid,
-  worker_id uuid,
-  worker_name text,
-  kind text,
-  subject text,
-  reply_by date,
-  overdue boolean,
-  raised_by_name text,
-  raised_at timestamptz
-)
-language plpgsql
-stable
-security definer
-set search_path = ''
-as $$
-declare
-  v_today date;
-begin
-  if private.session_uid() is null or p_organisation_id is null
-    or not private.has_role(p_organisation_id, array['worker', 'line_manager']) then
-    raise exception 'Your role can''t see your team''s queries.' using errcode = '42501';
-  end if;
-  v_today := private.org_today(p_organisation_id);
-
-  return query
-    select q.id, q.worker_id,
-      nullif(btrim(concat_ws(' ', w.first_name, w.last_name)), ''),
-      q.kind, q.subject, q.reply_by, q.reply_by < v_today,
-      q.raised_by_name, q.raised_at
-    from public.staff_queries q
-    join public.workers w on w.organisation_id = q.organisation_id and w.id = q.worker_id
-    join public.organisations o on o.id = q.organisation_id
-    where q.organisation_id = p_organisation_id
-      and o.people_enabled
-      and q.status = 'awaiting_reply'
-      and q.worker_id not in (select private.my_worker_ids())
-      and (
-        q.worker_id in (select private.my_supervised_crew_ids())
-        or q.worker_id in (select private.my_reportee_ids())
-      )
-    order by q.reply_by, q.raised_at, q.id
-    limit 200;
-end;
-$$;
-
-revoke all on function private.crew_queries(uuid) from public, anon;
-grant execute on function private.crew_queries(uuid) to authenticated;
-
-create function public.crew_queries(p_organisation_id uuid)
-returns table (
-  id uuid,
-  worker_id uuid,
-  worker_name text,
-  kind text,
-  subject text,
-  reply_by date,
-  overdue boolean,
-  raised_by_name text,
-  raised_at timestamptz
-)
-language sql
-stable
-security invoker
-set search_path = ''
-as $$
-  select * from private.crew_queries(p_organisation_id)
-$$;
-
-revoke all on function public.crew_queries(uuid) from public, anon;
-grant execute on function public.crew_queries(uuid) to authenticated;
-
--- ---------------------------------------------------------------------------
--- 5. Who sees the Approvals tile
+-- 4. Who sees the Approvals tile
 -- ---------------------------------------------------------------------------
 
 -- How many people the caller supervises in this company (a worker-supervisor's crew, a line

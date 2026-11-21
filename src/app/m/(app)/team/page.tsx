@@ -7,7 +7,6 @@ import { APP_HOME_PATH, WORKER_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth
 import { formatDayCount } from "@/lib/leave/days";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { workerMessages } from "@/lib/messages/worker";
-import { QUERY_KIND_LABELS } from "@/lib/queries";
 import { formatShortDay, timeIn } from "@/lib/roster";
 import { exceptionLabels } from "@/lib/timesheets/approval";
 import { formatMinutes } from "@/lib/timesheets/minutes";
@@ -17,7 +16,6 @@ import {
   loadCrewQueue,
   type CrewDay,
   type CrewLeave,
-  type CrewQuery,
   type CrewQueue,
 } from "@/server/workforce/crew-team";
 
@@ -145,29 +143,6 @@ function LeaveCard({ request, timeZone }: { request: CrewLeave; timeZone: string
   );
 }
 
-function QueryRow({ query }: { query: CrewQuery }) {
-  return (
-    <li
-      className="flex flex-col gap-1 rounded-xl border border-line px-4 py-3"
-      data-testid="crew-query"
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="min-w-0 text-[15px] font-semibold break-words">{query.workerName}</span>
-        {query.overdue ? (
-          <Status tone="action">Overdue</Status>
-        ) : (
-          <Status tone="pending">Awaiting reply</Status>
-        )}
-      </div>
-      <span className="text-[15px] break-words">{query.subject}</span>
-      <span className="text-sm text-fg-muted">
-        Reply by {formatShortDay(query.replyBy)} · {QUERY_KIND_LABELS[query.kind] ?? "Query"} · from{" "}
-        {query.raisedByName}
-      </span>
-    </li>
-  );
-}
-
 function Sections({ queue }: { queue: CrewQueue }) {
   const count = crewApprovalCount(queue);
   return (
@@ -180,8 +155,7 @@ function Sections({ queue }: { queue: CrewQueue }) {
           {count === 0 ? "Nothing to approve" : `${count} to approve`}
         </span>
         <span className="text-[15px] text-fg-muted">
-          {plural(queue.days.length, "day")} · {plural(queue.leave.length, "leave request")} ·{" "}
-          {plural(queue.queries.length, "query", "queries")} awaiting reply
+          {plural(queue.days.length, "day")} · {plural(queue.leave.length, "leave request")}
         </span>
       </div>
 
@@ -221,21 +195,6 @@ function Sections({ queue }: { queue: CrewQueue }) {
         </p>
       </section>
 
-      <section className="flex flex-col gap-3" aria-label="Queries" data-testid="team-queries">
-        <SectionTitle count={queue.queries.length}>Queries awaiting reply</SectionTitle>
-        {queue.queries.length === 0 ? (
-          <Empty testId="team-queries-empty">No queries waiting on your team.</Empty>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-3 p-0">
-            {queue.queries.map((query) => (
-              <QueryRow key={query.id} query={query} />
-            ))}
-          </ul>
-        )}
-        <p className="m-0 text-[13px] text-fg-muted">
-          Remind them to reply on their phone. HR keeps the query and the replies.
-        </p>
-      </section>
     </div>
   );
 }
@@ -280,8 +239,7 @@ async function Back() {
 
 /**
  * My team in the worker app (slice 4.7b, the SupHome Approvals tile): a worker-supervisor's or
- * line manager's timesheet days to approve, leave at step 1 and queries awaiting the crew's
- * reply. The database decides whose rows each sees and may decide.
+ * line manager's timesheet days to approve and leave at step 1. The database decides whose rows each sees and may decide.
  */
 export default function TeamPage() {
   return (

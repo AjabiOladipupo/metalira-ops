@@ -7,8 +7,8 @@
  * - Leave step 1: the supervisor decides step 1 for their crew only (an ops manager no longer
  *   does, as for any worker with a line manager); never their own leave; an ended supervisor
  *   stops counting, and step 1 falls back to ops. crew_leave_requests shows the balance.
- * - Queries: crew_queries lists only the crew's queries awaiting a reply, without the body; the
- *   supervisor still can't read staff_queries directly or raise a query.
+ * - Queries are out of scope: the supervisor reads no staff_queries or replies and can't raise
+ *   one (4.6 is unchanged).
  * - Other roles, other companies and signed-out callers get nothing.
  *
  * Contracts, posts, shifts and assignments are seeded as the database owner with triggers off
@@ -494,20 +494,13 @@ describe("leave step 1", () => {
   });
 });
 
-describe("queries", () => {
-  it("the supervisor reads only their crew's queries awaiting a reply, without the body", async () => {
-    const mine = await raiseQuery(crew.id, "Late on Monday");
-    const notMine = await raiseQuery(outsider.id, "Absent on Tuesday");
-    const { data, error } = await sup.client.rpc("crew_queries", { p_organisation_id: owner.orgId });
-    expect(error).toBeNull();
-    const ids = data!.map((q) => q.id);
-    expect(ids).toContain(mine);
-    expect(ids).not.toContain(notMine);
-    expect(Object.keys(data![0]!)).not.toContain("body");
-
-    // Read-only: no direct read of the table and no raising.
-    const direct = await sup.client.from("staff_queries").select("id, body").eq("id", mine);
+describe("queries stay out of reach", () => {
+  it("a supervisor reads none of their crew's queries or replies and can't raise one", async () => {
+    const query = await raiseQuery(crew.id, "Late on Monday");
+    const direct = await sup.client.from("staff_queries").select("id, subject").eq("id", query);
     expect(direct.data ?? []).toEqual([]);
+    const replies = await sup.client.from("staff_query_replies").select("id").eq("query_id", query);
+    expect(replies.data ?? []).toEqual([]);
     const raised = await sup.client.rpc("raise_staff_query", {
       p_organisation_id: owner.orgId,
       p_worker_id: crew.id,
@@ -517,11 +510,6 @@ describe("queries", () => {
       p_reply_by: addDays(lagosToday(), 3),
     });
     expect(raised.error).not.toBeNull();
-
-    const leaverQueries = await leaver.client.rpc("crew_queries", {
-      p_organisation_id: owner.orgId,
-    });
-    expect(leaverQueries.data).toEqual([]);
   });
 });
 
