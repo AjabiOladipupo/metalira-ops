@@ -77,8 +77,8 @@ const serwist = new Serwist({
       // the fragment, and saves the scan in the phone's queue.
       {
         url: CHECKPOINT_PATH,
-        matcher: ({ request, url }) =>
-          request.mode === "navigate" && url.pathname === CHECKPOINT_PATH,
+        matcher: ({ request }) =>
+          request.mode === "navigate" && new URL(request.url).pathname === CHECKPOINT_PATH,
       },
       {
         url: OFFLINE_PATH,

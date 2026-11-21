@@ -415,17 +415,20 @@ export const workerMessages = {
     consentLine:
       "A scan records where you were. Agree on the Clock screen, then scan the checkpoint again.",
     openClock: "Open Clock",
-    offlineNoOwner: "No network, and no one has signed in on this phone yet. Scan again when you have network.",
+    offlineNoOwner:
+      "No network, and no one has signed in on this phone yet. Scan again when you have network.",
     noQueue:
       "This phone can't save scans (private browsing or storage blocked). Use a normal browser window.",
     locationFailedTitle: "We couldn't find your location",
     locationDenied:
       "Location is blocked for this app. Allow location in your phone's settings, then try again.",
-    locationTimeout: "Your phone didn't find a location in 20 seconds. Try again, or send it without.",
+    locationTimeout:
+      "Your phone didn't find a location in 20 seconds. Try again, or send it without.",
     tryAgain: "Try again",
     sendWithoutLocation: "Send without location",
     scannedAt: (time: string) => `Scanned at ${time}`,
-    where: (checkpoint: string, site: string | null) => (site ? `${checkpoint} · ${site}` : checkpoint),
+    where: (checkpoint: string, site: string | null) =>
+      site ? `${checkpoint} · ${site}` : checkpoint,
     savedOffline: "Saved on phone. Will send when network returns.",
     savedForLater: "Saved on phone. It sends the next time you open the app with network.",
     sending: "Sending…",

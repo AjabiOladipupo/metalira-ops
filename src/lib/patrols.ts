@@ -95,7 +95,9 @@ export function summarisePatrolDay(
     entry.scans += 1;
     scanners.set(scan.workerId, entry);
   }
-  const times = counted.map((scan) => scan.recordedAt).sort((a, b) => Date.parse(a) - Date.parse(b));
+  const times = counted
+    .map((scan) => scan.recordedAt)
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
 
   return {
     rows,
@@ -104,14 +106,18 @@ export function summarisePatrolDay(
     activeCount,
     notScanned,
     flaggedScans: counted.filter(scanNeedsReview).length,
-    scanners: [...scanners.values()].sort((a, b) => b.scans - a.scans || a.name.localeCompare(b.name)),
+    scanners: [...scanners.values()].sort(
+      (a, b) => b.scans - a.scans || a.name.localeCompare(b.name),
+    ),
     firstScanAt: times[0] ?? null,
     lastScanAt: times.at(-1) ?? null,
   };
 }
 
 /** "6 of 8 checkpoints scanned · 14 scans". */
-export function formatPatrolTotals(day: Pick<PatrolDay, "scannedCount" | "activeCount" | "totalScans">): string {
+export function formatPatrolTotals(
+  day: Pick<PatrolDay, "scannedCount" | "activeCount" | "totalScans">,
+): string {
   const scans = `${day.totalScans} ${day.totalScans === 1 ? "scan" : "scans"}`;
   if (day.activeCount === 0) return scans;
   const word = day.activeCount === 1 ? "checkpoint" : "checkpoints";

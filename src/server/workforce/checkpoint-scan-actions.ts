@@ -27,7 +27,10 @@ async function own(): Promise<OwnResult> {
       return { ok: false, code: "signed_out" };
     }
     if (error instanceof MutationError) return { ok: false, code: "not_worker" };
-    console.error("workforce.scan_session_failed:", error instanceof Error ? error.name : "unknown");
+    console.error(
+      "workforce.scan_session_failed:",
+      error instanceof Error ? error.name : "unknown",
+    );
     return { ok: false, code: "signed_out" };
   }
 }
@@ -62,7 +65,10 @@ export async function checkpointScanContextAction(): Promise<CheckpointScanConte
       locationConsent: clock.locationConsent,
     };
   } catch (error) {
-    console.error("workforce.scan_context_failed:", error instanceof Error ? error.name : "unknown");
+    console.error(
+      "workforce.scan_context_failed:",
+      error instanceof Error ? error.name : "unknown",
+    );
     return { ok: false, code: "failed" };
   }
 }

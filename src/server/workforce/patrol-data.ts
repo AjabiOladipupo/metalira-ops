@@ -193,7 +193,10 @@ export async function loadPatrolSummary(
     sites
       .filter((s) => !s.archived)
       .slice(0, 50)
-      .map(async (s) => ({ site: s, day: await loadPatrolDay(supabase, organisationId, s.id, today, timeZone) })),
+      .map(async (s) => ({
+        site: s,
+        day: await loadPatrolDay(supabase, organisationId, s.id, today, timeZone),
+      })),
   );
   return {
     day: today,

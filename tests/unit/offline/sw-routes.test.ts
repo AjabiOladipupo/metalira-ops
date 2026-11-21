@@ -110,9 +110,8 @@ describe("isIosSafari", () => {
 
 describe("service worker build", () => {
   it("precaches the offline page the proxy lets through, and the worker icons", async () => {
-    const { CHECKPOINT_URL, OFFLINE_URL, precacheEntries } = await import(
-      "../../../scripts/build-sw.mjs"
-    );
+    const { CHECKPOINT_URL, OFFLINE_URL, precacheEntries } =
+      await import("../../../scripts/build-sw.mjs");
     expect(OFFLINE_URL).toBe(WORKER_OFFLINE_PATH);
     expect(CHECKPOINT_URL).toBe(WORKER_CHECKPOINT_PATH);
     const urls = (precacheEntries() as { url: string }[]).map((e) => e.url);

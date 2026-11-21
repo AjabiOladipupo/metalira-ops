@@ -138,7 +138,8 @@ function DoneScreen({ phase }: { phase: Extract<Phase, { name: "done" }> }) {
 
   let line: string;
   if (status === "gone") line = copy.sent;
-  else if (status === "failed_permanent") line = refusalLine(outcome && !outcome.ok ? outcome.code : null);
+  else if (status === "failed_permanent")
+    line = refusalLine(outcome && !outcome.ok ? outcome.code : null);
   else if (!phase.live) line = copy.savedForLater;
   else if (!online || status === "loading") line = copy.savedOffline;
   else line = copy.sending;
@@ -154,7 +155,10 @@ function DoneScreen({ phase }: { phase: Extract<Phase, { name: "done" }> }) {
         : copy.nextScan;
 
   return (
-    <div className="flex flex-1 flex-col justify-center gap-4 px-4 pb-6" data-testid="checkpoint-done">
+    <div
+      className="flex flex-1 flex-col justify-center gap-4 px-4 pb-6"
+      data-testid="checkpoint-done"
+    >
       <span className="flex size-[72px] items-center justify-center rounded-full bg-foreground text-background">
         {refused ? (
           <MapPinOff strokeWidth={2} className="size-9" aria-hidden />

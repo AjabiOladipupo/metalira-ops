@@ -155,7 +155,11 @@ async function PatrolsPage({
         />
         <KpiTile label="Scans" value={String(patrol.totalScans)} variant="filled" />
         <KpiTile label="Not scanned" value={String(patrol.notScanned.length)} />
-        <KpiTile label="To check" value={String(patrol.flaggedScans)} note="Outside or no location" />
+        <KpiTile
+          label="To check"
+          value={String(patrol.flaggedScans)}
+          note="Outside or no location"
+        />
       </div>
 
       {patrol.scanners.length > 0 ? (
@@ -201,9 +205,7 @@ async function PatrolsPage({
                       {time(scan.recordedAt)}
                     </span>
                     <span className="min-w-0">{scan.workerName}</span>
-                    <span
-                      className={scanNeedsReview(scan) ? "font-semibold" : "text-fg-muted"}
-                    >
+                    <span className={scanNeedsReview(scan) ? "font-semibold" : "text-fg-muted"}>
                       {scanWhere(scan)}
                       {scan.flags.includes("late_sync") ? " · synced late" : ""}
                     </span>

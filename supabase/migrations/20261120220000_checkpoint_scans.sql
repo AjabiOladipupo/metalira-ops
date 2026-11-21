@@ -26,7 +26,8 @@
 --      scan's server-corrected time, 30 minutes either side (MLCK2). Offline scans are judged
 --      by when they happened, not when they arrived;
 --    * the time is corrected as for punches (private.punch_corrected_time) and flagged the same
---      way (clock_drift, late_sync, time_unverified);
+--      way (clock_drift, delayed, late_sync, time_unverified); device times outside 2020-2100
+--      are refused (MLPU5), as for punches;
 --    * the geofence is worked out here with private.site_geofence_check for the session's
 --      organisation (never from client input); distance_m is from the checkpoint's own pin when
 --      it has one, else from the site's centre;
@@ -160,7 +161,11 @@ begin
       using errcode = 'MLPU1';
   end if;
 
-  if p_client_event_id is null or p_device_time is null then
+  if p_client_event_id is null or p_device_time is null
+    or p_device_time not between '2020-01-01 00:00:00+00' and '2100-01-01 00:00:00+00'
+    or (p_sent_device_time is not null
+      and p_sent_device_time not between '2020-01-01 00:00:00+00' and '2100-01-01 00:00:00+00')
+    or (p_elapsed_ms is not null and abs(p_elapsed_ms) > 1000000000000) then
     raise exception 'This scan is incomplete.' using errcode = 'MLPU5';
   end if;
 
@@ -454,7 +459,11 @@ begin
   end if;
 
   if p_client_event_id is null or p_kind is null or p_kind not in ('in', 'out')
-    or p_device_time is null then
+    or p_device_time is null
+    or p_device_time not between '2020-01-01 00:00:00+00' and '2100-01-01 00:00:00+00'
+    or (p_sent_device_time is not null
+      and p_sent_device_time not between '2020-01-01 00:00:00+00' and '2100-01-01 00:00:00+00')
+    or (p_elapsed_ms is not null and abs(p_elapsed_ms) > 1000000000000) then
     raise exception 'This punch is incomplete.' using errcode = 'MLPU5';
   end if;
 
