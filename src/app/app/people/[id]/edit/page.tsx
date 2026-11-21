@@ -4,6 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { koboToMajorString } from "@/lib/money";
 import { encodeLineManager } from "@/lib/people";
+import { formatWorkDays } from "@/lib/leave/entitlements";
+import { loadCalendar } from "@/server/people/leave-setup-data";
 import { loadWorkerFormOptions, loadWorkerProfile } from "@/server/people/people-data";
 import { peoplePageContext } from "@/server/people/page-context";
 
@@ -18,9 +20,10 @@ async function EditWorker({ params }: { params: PageProps<"/app/people/[id]/edit
   const { id } = await params;
   if (!UUID.test(id)) notFound();
   const ctx = await peoplePageContext();
-  const [worker, options] = await Promise.all([
+  const [worker, options, calendar] = await Promise.all([
     loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today),
     loadWorkerFormOptions(ctx.supabase, ctx.organisationId, id),
+    loadCalendar(ctx.supabase, ctx.organisationId),
   ]);
   if (!worker) notFound();
   // Someone who has left is read-only; their record stays as it was.
@@ -38,6 +41,7 @@ async function EditWorker({ params }: { params: PageProps<"/app/people/[id]/edit
         mode="update"
         options={options}
         today={ctx.today}
+        companyWeekLabel={formatWorkDays(calendar.workDays)}
         worker={{
           id: worker.id,
           staffId: worker.staffId,
@@ -64,6 +68,7 @@ async function EditWorker({ params }: { params: PageProps<"/app/people/[id]/edit
           nextOfKinName: worker.nextOfKinName,
           nextOfKinPhone: worker.nextOfKinPhone,
           supervisorClockIn: worker.supervisorClockIn,
+          usualWorkDays: worker.usualWorkDays,
         }}
       />
     </>

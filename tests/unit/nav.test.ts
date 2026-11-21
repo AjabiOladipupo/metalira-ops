@@ -313,6 +313,22 @@ describe("nav by role", () => {
     expect(canAccessHref("ops_manager", "/app/people")).toBe(true);
   });
 
+  it("opens leave balances to owner, admin, hr and line managers only; requests follow Leave (slice 4.4)", () => {
+    const request = "/app/leave/b0000000-0000-4000-8000-000000000002";
+    for (const role of ["owner", "admin", "hr", "line_manager"] as const) {
+      expect(canAccessHref(role, "/app/leave/balances"), role).toBe(true);
+      expect(canAccessHref(role, request), role).toBe(true);
+    }
+    // Ops managers see requests' dates and type for the roster, never balances.
+    expect(canAccessHref("ops_manager", "/app/leave")).toBe(true);
+    expect(canAccessHref("ops_manager", request)).toBe(true);
+    expect(canAccessHref("ops_manager", "/app/leave/balances")).toBe(false);
+    for (const role of ["finance", "worker", "client_approver"] as const) {
+      expect(canAccessHref(role, "/app/leave/balances"), role).toBe(false);
+      expect(canAccessHref(role, request), role).toBe(false);
+    }
+  });
+
   it("refuses paths that sit under no nav item", () => {
     expect(canAccessHref("owner", "/app/secret-admin")).toBe(false);
     expect(canAccessHref("owner", "/design-system")).toBe(false);

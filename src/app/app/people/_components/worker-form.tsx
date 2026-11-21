@@ -15,6 +15,7 @@ import type { Option } from "@/server/people/people-data";
 
 import { fieldValue } from "../../_company/form-footer";
 import { PayAmountFields } from "./pay-amount-fields";
+import { WorkWeekField } from "./work-week-field";
 
 const EMPLOYMENT_OPTIONS = Object.entries(EMPLOYMENT_TYPE_LABELS).map(([value, label]) => ({
   value,
@@ -49,6 +50,8 @@ export interface WorkerFormValues {
   nextOfKinName: string | null;
   nextOfKinPhone: string | null;
   supervisorClockIn: boolean;
+  /** ISO weekdays, or null for the company's week (slice 4.4). */
+  usualWorkDays?: number[] | null;
 }
 
 function Fieldset({
@@ -108,11 +111,14 @@ export function WorkerForm({
   options,
   worker,
   today,
+  companyWeekLabel,
 }: {
   mode: "create" | "update";
   options: { departments: Option[]; lineManagers: Option[] };
   worker?: WorkerFormValues;
   today: string;
+  /** "Mon to Fri": the company's working week (slice 4.4). */
+  companyWeekLabel?: string;
 }) {
   const [state, action] = useActionState(
     mode === "create" ? createWorkerAction : updateWorkerAction,
@@ -257,6 +263,13 @@ export function WorkerForm({
             error={errors?.startDate}
           />
         </div>
+        {mode === "update" && worker ? (
+          <WorkWeekField
+            saved={worker.usualWorkDays ?? null}
+            companyLabel={companyWeekLabel ?? "Mon to Fri"}
+            error={errors?.usualWorkDays}
+          />
+        ) : null}
       </Fieldset>
 
       {mode === "create" ? (

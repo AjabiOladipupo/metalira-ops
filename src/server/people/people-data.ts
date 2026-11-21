@@ -533,6 +533,8 @@ export interface WorkerProfile {
   nextOfKinPhone: string | null;
   needsPayDetails: boolean;
   supervisorClockIn: boolean;
+  /** The worker's usual working days (ISO 1 to 7), or null for the company's week (slice 4.1). */
+  usualWorkDays: number[] | null;
   siteNames: string[];
   projectNames: string[];
   mapped: boolean;
@@ -541,7 +543,7 @@ export interface WorkerProfile {
 }
 
 const PROFILE_COLUMNS =
-  "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, bank_code, bank_checked_name, bank_checked_at, bank_checked_source, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in" as const;
+  "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, bank_code, bank_checked_name, bank_checked_at, bank_checked_source, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in, usual_work_days" as const;
 
 type ProfileRow = {
   id: string;
@@ -577,6 +579,7 @@ type ProfileRow = {
   next_of_kin_phone: string | null;
   needs_pay_details: boolean;
   supervisor_clock_in: boolean;
+  usual_work_days: number[] | null;
   /** Set for a line manager's read (my_reportees names the line manager itself). */
   line_manager_name?: string | null;
 };
@@ -618,6 +621,7 @@ async function loadProfileRow(
     status: member.status,
     needs_pay_details: false,
     supervisor_clock_in: member.supervisorClockIn,
+    usual_work_days: member.usualWorkDays,
     line_manager_name: member.lineManagerName,
     bank_name: null,
     account_name: null,
@@ -730,6 +734,7 @@ export async function loadWorkerProfile(
     nextOfKinPhone: w.next_of_kin_phone,
     needsPayDetails: w.needs_pay_details,
     supervisorClockIn: w.supervisor_clock_in,
+    usualWorkDays: w.usual_work_days,
     siteNames: siteIds.map((id) => sites.get(id) ?? "Site").sort(),
     projectNames: unique(assignments.map((a) => a.project_id))
       .map((id) => projects.get(id) ?? "Project")

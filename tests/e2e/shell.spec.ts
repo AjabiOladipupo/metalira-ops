@@ -23,6 +23,8 @@ const BUILT_EMPTY: Record<string, string> = {
   // Slice 4.3: the timesheet board; nobody has worked a shift in a new company.
   "/app/timesheets":
     "No one has worked a shift in this period yet. Days appear here once shifts start.",
+  // Slice 4.4: the Leave board; a new company has no requests.
+  "/app/leave": "No leave requests yet. Workers ask from Leave in the worker app.",
 };
 
 /** Built pages whose heading is a number, as on their prototype. */

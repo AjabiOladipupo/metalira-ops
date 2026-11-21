@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { after } from "next/server";
+import { Suspense } from "react";
 
 import { BackLink } from "@/components/back-link";
 import { DataTable, type Column } from "@/components/data-table";
@@ -39,7 +40,7 @@ import { loadChangeRequests, type ChangeRequestView } from "@/server/people/chan
 import type { PayRateVersion } from "@/server/people/pay-rates";
 import { loadWorkerProfile, type WorkerProfile } from "@/server/people/people-data";
 import { HR_FILE_READERS, loadWorkerQueries, type QueryView } from "@/server/people/queries";
-import { peoplePageContext } from "@/server/people/page-context";
+import { peoplePageContext, type PeoplePageContext } from "@/server/people/page-context";
 import { canSeePii } from "@/server/people/pii-access";
 import {
   NEW_PIN_ROLES,
@@ -60,6 +61,7 @@ import { ChangeRequestCard } from "../_components/change-request-card";
 import { DetailList, NotSet, Section } from "../_components/display";
 import { EndEmploymentForm } from "../_components/end-employment-form";
 import { HrFileQueries } from "../_components/hr-file";
+import { HrFileLeave } from "../_components/hr-file-leave";
 import { PayChangeForm } from "../_components/pay-change-form";
 import { RevealValue } from "../_components/reveal-value";
 import { SignInPanel } from "../_components/sign-in-panel";
@@ -321,6 +323,8 @@ function Profile({
           today={today}
           viewerUserId={ctx.userId}
           self={staffIdViewer.ownWorkerIds.includes(worker.id)}
+          supabase={ctx.supabase}
+          organisationId={ctx.organisationId}
         />
       ) : null}
 
@@ -564,8 +568,8 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
 }
 
 /**
- * The HR file (slice 4.6, owner decision 10): queries with their replies now; leave history and
- * balance arrive with slice 4.4 and timesheet exception counts with slices 4.2 and 4.3, in the
+ * The HR file (slice 4.6, owner decision 10): queries with their replies, leave history and
+ * balance (slice 4.4), and timesheet exception counts with slices 4.2 and 4.3, in the
  * placeholders below. A section of the person page, not a sub-route, so line managers keep
  * exactly the two People routes they may open (tests/unit/nav.test.ts).
  */
@@ -575,7 +579,11 @@ function HrFileSection({
   today,
   viewerUserId,
   self,
+  supabase,
+  organisationId,
 }: {
+  supabase: PeoplePageContext["supabase"];
+  organisationId: string;
   worker: WorkerProfile;
   queries: QueryView[];
   today: string;
@@ -605,12 +613,14 @@ function HrFileSection({
         replyBy={{ ...range, default: addDays(today, DEFAULT_REPLY_DAYS) }}
       />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-3">
-        <p
-          data-testid="hr-file-leave-placeholder"
-          className="m-0 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-fg-muted"
-        >
-          Leave history and balance: coming soon.
-        </p>
+        <Suspense fallback={<span aria-hidden className="block h-24 rounded-xl bg-surface" />}>
+          <HrFileLeave
+            supabase={supabase}
+            organisationId={organisationId}
+            workerId={worker.id}
+            today={today}
+          />
+        </Suspense>
         <p
           data-testid="hr-file-timesheet-placeholder"
           className="m-0 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-fg-muted"

@@ -381,6 +381,24 @@ function notHere(message: string) {
   return z.preprocess(blankToUndefined, z.undefined(message)).optional();
 }
 
+/** "1,2,3,4,5" to ISO weekdays, "company" (or blank sent on purpose) to null, missing to undefined. */
+const usualWorkDaysField = z
+  .string()
+  .max(40)
+  .optional()
+  .transform((v, ctx) => {
+    if (v === undefined) return undefined;
+    if (v.trim() === "" || v === "company") return null;
+    const days = [...new Set(v.split(",").map((d) => Number.parseInt(d.trim(), 10)))].sort(
+      (a, b) => a - b,
+    );
+    if (days.length === 0 || days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) {
+      ctx.addIssue({ code: "custom", message: "Choose at least one working day" });
+      return z.NEVER;
+    }
+    return days;
+  });
+
 /**
  * Editable worker fields. Bank details are not here: changing them needs a second approver
  * (slice 1.7, CLAUDE.md rule 10). Nor is the staff ID: it is fixed once saved, so it can never
@@ -412,6 +430,9 @@ export const updateWorkerSchema = z
     nextOfKinName: clearable(text("Next of kin name")),
     nextOfKinPhone: clearable(note("Next of kin phone")),
     supervisorClockIn: formBoolean.optional(),
+    // Slice 4.4: the worker's usual days ("1,2,3,4,5"), or "company" for the company's week.
+    // Leave counts working days on them beyond the last rostered day.
+    usualWorkDays: usualWorkDaysField,
     // Refused rather than silently dropped, so a form that offers them finds out at once.
     staffId: notHere(STAFF_ID_FIXED_MESSAGE),
     bankName: notHere(BANK_CHANGE_MESSAGE),

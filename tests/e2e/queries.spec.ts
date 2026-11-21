@@ -79,7 +79,7 @@ test("a line manager raises a lateness query, the worker replies on the phone, b
   await page.goto(`/app/people/${workerId}`);
   const hrFile = page.getByRole("region", { name: "HR file" });
   await expect(hrFile.getByTestId("hr-queries-empty")).toBeVisible({ timeout: 15_000 });
-  await expect(hrFile.getByTestId("hr-file-leave-placeholder")).toBeVisible();
+  await expect(hrFile.getByTestId("hr-file-leave")).toBeVisible();
   const replyBy = addDays(lagosToday(), 3);
   const form = page.getByRole("form", { name: /New query for Musa/ });
   await form.getByLabel("Type").selectOption("lateness");
