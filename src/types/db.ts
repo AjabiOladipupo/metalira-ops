@@ -1241,6 +1241,38 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"timesheet_decisions": {
+                  Row: {
+                    "actor_id": string,"created_at": string,"decision": string,"early_minutes": number,"exceptions": (string)[],"id": string,"late_minutes": number,"line_id": string,"needs_review": boolean,"organisation_id": string,"ot_minutes": number,"reason": string | null,"scheduled_minutes": number,"seq": number,"worked_minutes": number,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "actor_id"?: string,"created_at"?: string,"decision": string,"early_minutes": number,"exceptions"?: (string)[],"id"?: string,"late_minutes": number,"line_id": string,"needs_review"?: boolean,"organisation_id": string,"ot_minutes": number,"reason"?: string | null,"scheduled_minutes": number,"seq"?: never,"worked_minutes": number,"worker_id": string
+                  }
+                  Update: {
+                    "actor_id"?: string,"created_at"?: string,"decision"?: string,"early_minutes"?: number,"exceptions"?: (string)[],"id"?: string,"late_minutes"?: number,"line_id"?: string,"needs_review"?: boolean,"organisation_id"?: string,"ot_minutes"?: number,"reason"?: string | null,"scheduled_minutes"?: number,"seq"?: never,"worked_minutes"?: number,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "timesheet_decisions_line_fkey"
+      columns: ["organisation_id","line_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "timesheet_lines"
+      referencedColumns: ["organisation_id","id","worker_id"]
+    },{
+      foreignKeyName: "timesheet_decisions_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "timesheet_decisions_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"timesheet_lines": {
                   Row: {
                     "created_at": string,"decided_at": string | null,"early_minutes": number,"exceptions": (string)[],"id": string,"in_punch_id": string | null,"late_minutes": number,"needs_review": boolean,"no_shift_punch_id": string | null,"organisation_id": string,"ot_minutes": number,"out_punch_id": string | null,"post_id": string | null,"scheduled_minutes": number,"shift_assignment_id": string | null,"shift_id": string | null,"site_id": string | null,"status": string,"timesheet_id": string,"updated_at": string,"work_date": string,"work_unit_id": string | null,"worked_minutes": number,"worker_id": string
@@ -1308,6 +1340,12 @@ isOneToOne: false
       referencedRelation: "timesheets"
       referencedColumns: ["organisation_id","id","worker_id"]
     },{
+      foreignKeyName: "timesheet_lines_work_unit_fkey"
+      columns: ["organisation_id","work_unit_id"]
+isOneToOne: false
+      referencedRelation: "work_units"
+      referencedColumns: ["organisation_id","id"]
+    },{
       foreignKeyName: "timesheet_lines_worker_fkey"
       columns: ["organisation_id","worker_id"]
 isOneToOne: false
@@ -1335,6 +1373,74 @@ isOneToOne: false
       referencedColumns: ["id"]
     },{
       foreignKeyName: "timesheets_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"work_units": {
+                  Row: {
+                    "approved_decision_id": string,"billable": boolean,"cancelled_at": string | null,"cancelled_by_decision_id": string | null,"contract_id": string,"contract_type": string,"created_at": string,"id": string,"kind": string,"organisation_id": string,"ot_minutes": number,"post_id": string,"project_id": string | null,"quantity_minutes": number,"shift_id": string,"site_id": string,"status": string,"timesheet_line_id": string,"unit": string,"work_date": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "approved_decision_id": string,"billable": boolean,"cancelled_at"?: string | null,"cancelled_by_decision_id"?: string | null,"contract_id": string,"contract_type": string,"created_at"?: string,"id"?: string,"kind"?: string,"organisation_id": string,"ot_minutes"?: number,"post_id": string,"project_id"?: string | null,"quantity_minutes": number,"shift_id": string,"site_id": string,"status"?: string,"timesheet_line_id": string,"unit": string,"work_date": string,"worker_id": string
+                  }
+                  Update: {
+                    "approved_decision_id"?: string,"billable"?: boolean,"cancelled_at"?: string | null,"cancelled_by_decision_id"?: string | null,"contract_id"?: string,"contract_type"?: string,"created_at"?: string,"id"?: string,"kind"?: string,"organisation_id"?: string,"ot_minutes"?: number,"post_id"?: string,"project_id"?: string | null,"quantity_minutes"?: number,"shift_id"?: string,"site_id"?: string,"status"?: string,"timesheet_line_id"?: string,"unit"?: string,"work_date"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "work_units_approved_decision_fkey"
+      columns: ["organisation_id","approved_decision_id","timesheet_line_id"]
+isOneToOne: false
+      referencedRelation: "timesheet_decisions"
+      referencedColumns: ["organisation_id","id","line_id"]
+    },{
+      foreignKeyName: "work_units_cancelled_decision_fkey"
+      columns: ["organisation_id","cancelled_by_decision_id","timesheet_line_id"]
+isOneToOne: false
+      referencedRelation: "timesheet_decisions"
+      referencedColumns: ["organisation_id","id","line_id"]
+    },{
+      foreignKeyName: "work_units_contract_fkey"
+      columns: ["organisation_id","contract_id"]
+isOneToOne: false
+      referencedRelation: "contracts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "work_units_line_fkey"
+      columns: ["organisation_id","timesheet_line_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "timesheet_lines"
+      referencedColumns: ["organisation_id","id","worker_id"]
+    },{
+      foreignKeyName: "work_units_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "work_units_post_fkey"
+      columns: ["organisation_id","post_id","contract_id","site_id"]
+isOneToOne: false
+      referencedRelation: "posts"
+      referencedColumns: ["organisation_id","id","contract_id","site_id"]
+    },{
+      foreignKeyName: "work_units_project_fkey"
+      columns: ["organisation_id","project_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "work_units_shift_fkey"
+      columns: ["organisation_id","shift_id"]
+isOneToOne: false
+      referencedRelation: "shifts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "work_units_worker_fkey"
       columns: ["organisation_id","worker_id"]
 isOneToOne: false
       referencedRelation: "workers"
@@ -1580,6 +1686,12 @@ isOneToOne: false
 "apply_leave_preset":
 { Args: { "p_dry_run"?: boolean,"p_from"?: string,"p_organisation_id": string,"p_preset": string }; Returns: Json
                            },
+"approve_clean_timesheet_lines":
+{ Args: { "p_dry_run"?: boolean,"p_line_ids": (string)[],"p_organisation_id": string }; Returns: Json
+                           },
+"approve_timesheet_line":
+{ Args: { "p_line_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
+                           },
 "assign_worker_to_shift":
 { Args: { "p_organisation_id": string,"p_post_id": string,"p_shift_date": string,"p_worker_id": string }; Returns: Json
                            },
@@ -1716,6 +1828,9 @@ isOneToOne: false
               "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
             }[]
                            },
+"dispute_timesheet_line":
+{ Args: { "p_line_id": string,"p_reason": string }; Returns: Json
+                           },
 "email_link_allowed":
 { Args: { "p_keys": (string)[] }; Returns: boolean
                            },
@@ -1792,6 +1907,11 @@ isOneToOne: false
               "department_id": string,"department_name": string,"email": string,"employment_type": Database["public"]['Enums']["employment_type"],"end_date": string,"first_name": string,"id": string,"job_title": string,"last_name": string,"line_manager_membership_id": string,"line_manager_name": string,"line_manager_worker_id": string,"phone": string,"site_ids": (string)[],"site_names": (string)[],"staff_id": string,"start_date": string,"status": Database["public"]['Enums']["worker_status"],"supervisor_clock_in": boolean,"usual_work_days": (number)[]
             }[]
                            },
+"my_timesheet_days":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
+              "can_dispute": boolean,"early_minutes": number,"ends_at": string,"exceptions": (string)[],"in_recorded_at": string,"last_correction_reason": string,"last_decision": string,"last_decision_reason": string,"late_minutes": number,"line_id": string,"ot_minutes": number,"out_recorded_at": string,"post_name": string,"scheduled_minutes": number,"site_name": string,"starts_at": string,"status": string,"work_date": string,"worked_minutes": number
+            }[]
+                           },
 "org_bank_account_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
@@ -1801,6 +1921,9 @@ isOneToOne: false
 { Args: { "p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
+                           },
+"preview_timesheet_correction":
+{ Args: { "p_corrected_at"?: string,"p_kind": string,"p_line_id": string,"p_minutes"?: number,"p_organisation_id": string,"p_ot_minutes"?: number,"p_punch_id"?: string,"p_reason": string }; Returns: Json
                            },
 "publish_roster":
 { Args: { "p_dry_run"?: boolean,"p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
@@ -1839,6 +1962,9 @@ isOneToOne: false
 "reject_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string }; Returns: undefined
                            },
+"reject_timesheet_line":
+{ Args: { "p_line_id": string,"p_organisation_id": string,"p_reason": string }; Returns: Json
+                           },
 "remove_assignment":
 { Args: { "p_assignment_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
                            },
@@ -1852,6 +1978,9 @@ isOneToOne: false
                            },
 "remove_public_holiday":
 { Args: { "p_holiday_id": string,"p_organisation_id": string }; Returns: undefined
+                           },
+"reopen_timesheet_line":
+{ Args: { "p_line_id": string,"p_organisation_id": string,"p_reason": string }; Returns: Json
                            },
 "reply_to_staff_query":
 { Args: { "p_body": string,"p_organisation_id": string,"p_query_id": string }; Returns: Json
@@ -1937,6 +2066,11 @@ isOneToOne: false
                            },
 "timesheet_cron_organisations":
 { Args: { "p_after"?: string,"p_limit"?: number }; Returns: string[]
+                           },
+"timesheet_review_days":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
+              "billable": boolean,"can_decide": boolean,"can_reopen": boolean,"clean": boolean,"contract_type": string,"corrections": number,"early_minutes": number,"ends_at": string,"exceptions": (string)[],"in_accuracy_m": number,"in_device_time": string,"in_distance_m": number,"in_drift_seconds": number,"in_geofence": string,"in_has_selfie": boolean,"in_punch_id": string,"in_received_at": string,"in_recorded_at": string,"in_source": string,"in_time_source": string,"last_correction_reason": string,"last_decision": string,"last_decision_at": string,"last_decision_reason": string,"late_minutes": number,"line_id": string,"needs_review": boolean,"ot_minutes": number,"out_accuracy_m": number,"out_device_time": string,"out_distance_m": number,"out_drift_seconds": number,"out_geofence": string,"out_has_selfie": boolean,"out_punch_id": string,"out_received_at": string,"out_recorded_at": string,"out_source": string,"out_time_source": string,"post_name": string,"post_unit": string,"running": boolean,"scheduled_minutes": number,"shift_assignment_id": string,"site_id": string,"site_name": string,"staff_id": string,"starts_at": string,"status": string,"work_date": string,"work_unit_id": string,"worked_minutes": number,"worker_id": string,"worker_name": string
+            }[]
                            },
 "unlock_worker_sign_in":
 { Args: { "p_organisation_id": string,"p_worker_id": string }; Returns: string

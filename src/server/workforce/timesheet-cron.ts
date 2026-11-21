@@ -28,7 +28,17 @@ export interface TimesheetCronResult {
   deleted: number;
   /** Workers whose refresh failed and were skipped (inside companies that otherwise ran). */
   failedWorkers: number;
+  /** The distinct SQLSTATE codes of the failures (codes only; slice 4.3, must-do 7). */
+  failedCodes: string[];
   complete: boolean;
+}
+
+/** A SQLSTATE: five letters or digits, nothing else ever reaches a log. */
+const SQLSTATE = /^[0-9A-Z]{5}$/;
+
+/** Whether the run should show as failed on the cron dashboard (the route answers 500). */
+export function cronFailed(result: TimesheetCronResult): boolean {
+  return result.failed > 0 || result.failedWorkers > 0 || !result.complete;
 }
 
 export async function refreshAllTimesheets(
@@ -43,7 +53,14 @@ export async function refreshAllTimesheets(
     updated: 0,
     deleted: 0,
     failedWorkers: 0,
+    failedCodes: [],
     complete: true,
+  };
+  const addCode = (code: unknown) => {
+    const c = String(code ?? "");
+    if (SQLSTATE.test(c) && !result.failedCodes.includes(c) && result.failedCodes.length < 20) {
+      result.failedCodes.push(c);
+    }
   };
   let after: string | undefined;
   for (;;) {
@@ -64,6 +81,7 @@ export async function refreshAllTimesheets(
       if (refreshError) {
         // One company's failure never stops the others; the code only, never the company.
         result.failed += 1;
+        addCode(refreshError.code);
         console.error("timesheets.cron_company_failed:", refreshError.code);
         continue;
       }
@@ -75,8 +93,14 @@ export async function refreshAllTimesheets(
       const failed = Number(c.failed ?? 0);
       if (failed > 0) {
         result.failedWorkers += failed;
-        // A count only, never the company or the workers.
-        console.error("timesheets.cron_workers_failed:", failed);
+        const codes = Array.isArray(c.failed_codes) ? c.failed_codes : [];
+        for (const code of codes) addCode(code);
+        // A count and SQLSTATE codes only, never the company or the workers.
+        console.error(
+          "timesheets.cron_workers_failed:",
+          failed,
+          codes.filter((x) => SQLSTATE.test(String(x))).join(","),
+        );
       }
     }
     if (ids.length < PAGE) break;

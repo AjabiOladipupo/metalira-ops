@@ -1,7 +1,8 @@
 /**
  * Slice 4.2: the daily timesheet refresh. The route opens only for Vercel Cron's bearer secret;
  * the runner pages through companies, refreshes each in its own call, carries on past one
- * company's failure and stops before the time limit.
+ * company's failure and stops before the time limit. Slice 4.3 (must-do 7): failed workers come
+ * back with their SQLSTATE codes only, and a run with failures or cut short answers 500.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +13,8 @@ const run = vi.hoisted(() =>
     inserted: 5,
     updated: 1,
     deleted: 0,
+    failedWorkers: 0,
+    failedCodes: [] as string[],
     complete: true,
   })),
 );
@@ -45,6 +48,43 @@ describe("GET /api/cron/timesheets", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ companies: 2, inserted: 5 });
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 500 with counts and codes only when workers failed or the run stopped early", async () => {
+    vi.stubEnv("CRON_SECRET", SECRET);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    run.mockResolvedValueOnce({
+      companies: 2,
+      failed: 0,
+      inserted: 5,
+      updated: 1,
+      deleted: 0,
+      failedWorkers: 2,
+      failedCodes: ["23514"],
+      complete: true,
+    });
+    const failed = await call(`Bearer ${SECRET}`);
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toMatchObject({ failedWorkers: 2, failedCodes: ["23514"] });
+    expect(error).toHaveBeenCalledWith(
+      "timesheets.cron_incomplete:",
+      "failed=0",
+      "workers=2",
+      "complete=true",
+      "codes=23514",
+    );
+    run.mockResolvedValueOnce({
+      companies: 1,
+      failed: 0,
+      inserted: 0,
+      updated: 0,
+      deleted: 0,
+      failedWorkers: 0,
+      failedCodes: [],
+      complete: false,
+    });
+    expect((await call(`Bearer ${SECRET}`)).status).toBe(500);
+    error.mockRestore();
   });
 
   it("answers an empty 404 to anyone else, and with no secret configured", async () => {
@@ -96,6 +136,7 @@ describe("refreshAllTimesheets", () => {
       updated: 120,
       deleted: 0,
       failedWorkers: 0,
+      failedCodes: [],
       complete: true,
     });
     expect(calls.filter((c) => c.name === "timesheet_cron_organisations")).toHaveLength(3);
@@ -110,6 +151,33 @@ describe("refreshAllTimesheets", () => {
     expect(result).toMatchObject({ companies: 2, failed: 1, complete: true });
     expect(error).toHaveBeenCalledWith("timesheets.cron_company_failed:", "XX000");
     expect(JSON.stringify(error.mock.calls)).not.toContain(orgs[1]!);
+    error.mockRestore();
+  });
+
+  it("collects the distinct SQLSTATE codes of failed workers and drops anything else", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rpc = async (name: string) => {
+      if (name === "timesheet_cron_organisations") {
+        return { data: ["00000000-0000-0000-0000-000000000001"], error: null };
+      }
+      return {
+        data: {
+          inserted: 0,
+          updated: 0,
+          deleted: 0,
+          failed: 3,
+          failed_codes: ["23514", "23514", "P0001", "Musa Bello 08031234567"],
+        },
+        error: null,
+      };
+    };
+    const result = await refreshAllTimesheets({ rpc } as never);
+    expect(result.failedWorkers).toBe(3);
+    expect(result.failedCodes).toEqual(["23514", "P0001"]);
+    const logged = JSON.stringify(error.mock.calls);
+    expect(logged).toContain("23514,P0001");
+    expect(logged).not.toContain("Musa");
+    expect(logged).not.toContain("0803");
     error.mockRestore();
   });
 

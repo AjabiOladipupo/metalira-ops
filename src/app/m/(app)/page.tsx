@@ -1,4 +1,12 @@
-import { Banknote, CalendarDays, ChevronRight, CircleHelp, Plane, Users } from "lucide-react";
+import {
+  Banknote,
+  CalendarDays,
+  ChevronRight,
+  CircleHelp,
+  Clock,
+  Plane,
+  Users,
+} from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -29,6 +37,8 @@ const copy = workerMessages.home;
 
 const TILES = [
   { href: "/m/shifts", label: copy.tiles.shifts, Icon: CalendarDays },
+  // Slice 4.3: the worker's days this pay period, with "This is wrong".
+  { href: "/m/hours", label: "My hours", Icon: Clock },
   { href: "/m/leave", label: copy.tiles.leave, Icon: Plane },
   { href: "/m/payslips", label: copy.tiles.payslips, Icon: Banknote },
   { href: "/m/help", label: copy.tiles.help, Icon: CircleHelp },
@@ -91,7 +101,9 @@ async function Header() {
 async function HomeBody() {
   const lookup = await lookupWorkerPageSession();
   const shifts = lookup.type !== "worker" || lookup.session.shiftsEnabled;
-  const tiles = shifts ? TILES : TILES.filter((t) => t.href !== "/m/shifts");
+  const tiles = shifts
+    ? TILES
+    : TILES.filter((t) => t.href !== "/m/shifts" && t.href !== "/m/hours");
   const now = new Date();
   const supabase = shifts && lookup.type === "worker" ? await createServerSupabase() : null;
   const clock =

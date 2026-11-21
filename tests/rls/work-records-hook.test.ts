@@ -37,6 +37,10 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "disciplinary and HR queries (slice 4.6): an HR record about the worker, kept by worker id, not staff ID; nothing worked or paid",
   timesheet_corrections:
     "corrections to a timesheet line (slice 4.2); each hangs off a line, which is the work record and is never deleted while a correction points at it",
+  timesheet_decisions:
+    "decisions on a timesheet line (slice 4.3); each hangs off a line, which is the work record and is never deleted once a decision points at it",
+  work_units:
+    "billable units made from approved timesheet lines (slice 4.3); each hangs off a line, which is the work record and is never deleted once decided",
   timesheets:
     "the pay-period container of a worker's timesheet lines (slice 4.2); the lines are the work records",
   worker_assignments: "mapping to clients, sites and projects",
