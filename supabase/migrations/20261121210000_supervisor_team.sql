@@ -22,9 +22,10 @@
 -- 3. Leave step 1 (slice 4.4's helpers, replaced): private.leave_has_line_manager counts a
 --    worker-supervisor (a worker login on the worker's line_manager_worker_id, still employed)
 --    as the worker's line manager, so step 1 is theirs; private.leave_can_decide_step1 lets them
---    decide it. decide_leave_line_manager itself is unchanged: nobody decides their own leave
---    (MLLQ6), step 1 before HR (MLLQ4), the request row locked for update, the days counted
---    again. An ended supervisor stops counting, and step 1 falls back to an owner, admin or
+--    decide it. decide_leave_line_manager keeps every 4.4 check (nobody decides their own leave,
+--    MLLQ6; step 1 before HR, MLLQ4; the request row locked for update; the days counted again),
+--    now takes the worker's leave lock first like the other leave decisions, and writes its audit
+--    row directly (log_audit_impl admits manager roles only). An ended supervisor stops counting, and step 1 falls back to an owner, admin or
 --    ops_manager as for a worker with no line manager.
 -- 4. Reads for /m/team, each a definer for `worker` and `line_manager` logins only, narrowed to
 --    the caller's crew (worker-supervisor) or reportees (line manager), never the caller:
@@ -475,6 +476,126 @@ as $$
 $$;
 
 revoke all on function private.leave_can_decide_step1(uuid, uuid) from public, anon, authenticated;
+
+-- 4.4's step 1 (from 20261121180000), unchanged except: the worker's leave lock is taken first,
+-- like the other leave decisions, and the audit row is written directly, because
+-- private.log_audit_impl admits manager roles only and a worker-supervisor now decides step 1.
+-- The checks are 4.4's: nobody decides their own leave (MLLQ6), only the step-1 decider
+-- (private.leave_can_decide_step1, extended above), only while waiting for step 1 (MLLQ4), and
+-- the days counted again on approval.
+create or replace function private.decide_leave_line_manager(
+  p_organisation_id uuid,
+  p_request_id uuid,
+  p_decision text,
+  p_note text default null,
+  p_certificate_seen boolean default false
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_request public.leave_requests%rowtype;
+  v_type public.leave_types%rowtype;
+  v_note text := private.leave_clean_text(p_note, 500);
+  v_days integer;
+  v_status text;
+  v_lock_worker uuid;
+begin
+  if private.session_uid() is null or p_organisation_id is null then
+    raise exception 'Sign in to decide leave.' using errcode = '42501';
+  end if;
+  if p_decision is null or p_decision not in ('approved', 'declined') then
+    raise exception 'Approve or decline.' using errcode = '22023';
+  end if;
+  if p_note is not null and btrim(p_note) <> '' and v_note is null then
+    raise exception 'Keep the note to 500 characters of plain text, with no web addresses or long numbers.'
+      using errcode = '22023';
+  end if;
+  if p_decision = 'declined' and v_note is null then
+    raise exception 'Say why, so the worker knows.' using errcode = '22023';
+  end if;
+
+  -- The worker's leave lock first (as decide_leave_hr, request_leave and adjust_leave_balance
+  -- take it), so a step-1 decision and a cancellation or a second decision can't interleave.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end if;
+
+  select r.* into v_request
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id
+  for update;
+  if v_request.id is null then
+    raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_request.worker_id in (select private.my_worker_ids()) then
+    raise exception 'You can''t decide your own leave.' using errcode = 'MLLQ6';
+  end if;
+  if not private.leave_can_decide_step1(p_organisation_id, v_request.worker_id) then
+    raise exception 'Only the worker''s line manager decides this step.' using errcode = '42501';
+  end if;
+  if v_request.status <> 'pending_line_manager' then
+    raise exception 'This request isn''t waiting for the line manager.' using errcode = 'MLLQ4';
+  end if;
+
+  select t.* into v_type from public.leave_types t where t.id = v_request.leave_type_id;
+  v_days := v_request.days;
+  if p_decision = 'approved' then
+    select c.days into v_days
+    from private.leave_count_days(
+      p_organisation_id, v_request.worker_id, v_type.counting, v_request.start_date,
+      v_request.end_date
+    ) c;
+    if coalesce(v_days, 0) = 0 then
+      raise exception 'Those dates no longer have working days for the worker. Decline it instead.'
+        using errcode = 'MLLQ7';
+    end if;
+    v_status := 'pending_hr';
+  else
+    v_status := 'declined';
+  end if;
+
+  insert into public.leave_decisions (
+    organisation_id, request_id, worker_id, step, decision, note, certificate_seen, days, actor
+  )
+  values (
+    p_organisation_id, v_request.id, v_request.worker_id, 'line_manager', p_decision, v_note,
+    coalesce(p_certificate_seen, false) and v_type.needs_certificate, v_days, private.session_uid()
+  );
+
+  update public.leave_requests r
+  set status = v_status,
+      days = v_days,
+      certificate_seen = r.certificate_seen
+        or (coalesce(p_certificate_seen, false) and v_type.needs_certificate),
+      decided_at = case when v_status = 'declined' then now() else r.decided_at end
+  where r.id = v_request.id;
+
+  -- Written directly: log_audit_impl admits manager roles only, and a worker-supervisor (role
+  -- worker) decides step 1 too. The caller was checked above.
+  insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after, reason)
+  values (
+    p_organisation_id, private.session_uid(), 'leave.decided_line_manager', 'leave_requests',
+    v_request.id,
+    jsonb_build_object('status', v_request.status, 'days', v_request.days),
+    jsonb_build_object('status', v_status, 'days', v_days, 'decision', p_decision),
+    v_note
+  );
+
+  return jsonb_build_object(
+    'id', v_request.id, 'status', v_status, 'days', v_days, 'worker_id', v_request.worker_id
+  );
+end;
+$$;
+
+revoke all on function private.decide_leave_line_manager(uuid, uuid, text, text, boolean) from public, anon;
+grant execute on function private.decide_leave_line_manager(uuid, uuid, text, text, boolean) to authenticated;
 
 -- /m/team's leave section: requests waiting at step 1 that the caller decides (a worker-supervisor
 -- their crew's, a line manager their reportees'), with the type, dates, days and reason, the
