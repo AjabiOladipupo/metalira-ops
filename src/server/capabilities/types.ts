@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import type { ManagerRole } from "@/lib/roles";
+import { isManagerRole, type ManagerRole } from "@/lib/roles";
 import type { MutationContext, MutationSpec } from "@/server/identity/mutate";
 
 /**
@@ -86,5 +86,6 @@ type SpecLike<S extends z.ZodType> = Pick<MutationSpec<S, unknown>, "schema" | "
 export function fromSpec<S extends z.ZodType>(
   spec: SpecLike<S>,
 ): { input: S; roles: readonly ManagerRole[] } {
-  return { input: spec.schema, roles: spec.roles };
+  // Manager specs list manager roles only; anything else is never a manager capability's role.
+  return { input: spec.schema, roles: spec.roles.filter(isManagerRole) };
 }

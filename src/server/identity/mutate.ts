@@ -6,7 +6,7 @@ import type { z } from "zod";
 import type { SendableAuditChannel } from "@/lib/audit-channel";
 import { moduleName, type ModuleId } from "@/lib/modules";
 import { createServerSupabase } from "@/lib/supabase/server";
-import type { ManagerRole } from "@/lib/roles";
+import type { Role } from "@/lib/roles";
 import type { Database } from "@/types/db";
 
 import { logAuditEvent, type AuditEvent } from "./audit";
@@ -46,14 +46,18 @@ export interface MutationContext {
   supabase: SupabaseClient<Database>;
   userId: string;
   organisationId: string;
-  role: ManagerRole;
+  /**
+   * The caller's role in the organisation. A manager's for `mutate()`; the worker app's crew
+   * clock-in (slice 3.6) passes `worker` for a worker-supervisor.
+   */
+  role: Role;
 }
 
 export interface MutationSpec<S extends z.ZodType, R> {
   /** Validates the raw input (usually form fields). */
   schema: S;
   /** Roles in the active organisation that may make this change. */
-  roles: readonly ManagerRole[];
+  roles: readonly Role[];
   /**
    * Audit channel for the rows this change writes (src/lib/audit-channel.ts). Leave out for
    * the manager app (`web`); the people import commit sets `import`.
