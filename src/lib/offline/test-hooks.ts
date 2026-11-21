@@ -1,6 +1,6 @@
 import { getActiveQueue, queueEvent } from "./active-queue";
 import { countPending, countUnsent } from "./queue";
-import { setQueueSender } from "./senders";
+import { getQueueSender, setQueueSender } from "./senders";
 import type { QueueSender } from "./types";
 
 /**
@@ -31,7 +31,14 @@ declare global {
 }
 
 export function installTestHooks(): void {
-  setQueueSender(testSender);
+  // The test ping goes through the test sender; punches keep the real one (slice 3.5).
+  const real = getQueueSender();
+  setQueueSender({
+    send(item, timing, owner) {
+      if (item.kind === "test_ping" || !real) return testSender.send(item, timing, owner);
+      return real.send(item, timing, owner);
+    },
+  });
   window.__metaliraQueue = {
     async queuePing(note) {
       const item = await queueEvent({ kind: "test_ping", payload: { note } });

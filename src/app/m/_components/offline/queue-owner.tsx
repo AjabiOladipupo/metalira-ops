@@ -3,9 +3,18 @@
 import { useEffect } from "react";
 
 import { activateQueue, deactivateQueue } from "@/lib/offline/active-queue";
+import { setQueueSender } from "@/lib/offline/senders";
 import { requestPersistentStorage } from "@/lib/offline/storage";
 import type { QueueOwner } from "@/lib/offline/types";
+import { createPunchSender } from "@/lib/punches/sender";
 import { createBrowserSupabase } from "@/lib/supabase/client";
+import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
+
+/** Punches reach the server through these Server Actions (slice 3.5). */
+const punchSender = createPunchSender({
+  recordPunch: recordPunchAction,
+  uploadSelfie: uploadPunchSelfieAction,
+});
 
 /**
  * Test hooks only in the Playwright build (playwright.config.ts), and never in a Vercel build
@@ -43,6 +52,7 @@ export function QueueOwnerSync({
 }: QueueOwner & { userId: string }) {
   useEffect(() => {
     let cancelled = false;
+    setQueueSender(punchSender);
     if (TEST_HOOKS) {
       void import("@/lib/offline/test-hooks").then(({ installTestHooks }) => {
         if (!cancelled) installTestHooks();

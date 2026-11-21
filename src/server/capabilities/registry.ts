@@ -136,6 +136,9 @@ import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites
 import { saveAttendanceSpec, loadAttendanceSettings } from "@/server/identity/attendance-settings";
 import { consentKindSchema } from "@/server/workforce/consents";
 import { CONSENT_READERS, loadConsentsSummary } from "@/server/workforce/consents-data";
+import { PUNCH_SUMMARY_READERS, loadTodayPunchSummary } from "@/server/workforce/clock-data";
+import { SELFIE_READERS, selfieLinkSchema } from "@/server/workforce/punch-selfie-link";
+import { recordPunchSchema, uploadSelfieSchema } from "@/server/workforce/punches";
 import { markReadSchema } from "@/server/workforce/inbox";
 import {
   addCheckpointSpec,
@@ -1058,6 +1061,59 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("workforce/inbox-actions", "markInboxReadAction"),
     agent: false,
     agentNote: "Worker app only.",
+  },
+  // -------------------------------------------------------------------------
+  // Clock in and out (workforce/punch-actions.ts, slice 3.5)
+  // -------------------------------------------------------------------------
+  {
+    name: "me.record_punch",
+    description:
+      "Records a worker's clock-in or clock-out from the phone's queue: server-corrected time, site check and flags.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: recordPunchSchema,
+    changes: "one",
+    action: at("workforce/punch-actions", "recordPunchAction"),
+    agent: false,
+    agentNote: "A punch is the worker's own, made on their phone at the site.",
+  },
+  {
+    name: "me.upload_punch_selfie",
+    description: "Takes the selfie of a clock-in the worker just recorded.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: uploadSelfieSchema,
+    changes: "one",
+    action: at("workforce/punch-actions", "uploadPunchSelfieAction"),
+    agent: false,
+    agentNote: "A selfie is the worker's own, taken on their phone.",
+  },
+  {
+    name: "punches.selfie_link",
+    description: "Opens a clock-in selfie for 60 seconds, for a manager who may see it.",
+    kind: "read",
+    audience: "manager",
+    roles: SELFIE_READERS,
+    input: selfieLinkSchema,
+    changes: "none",
+    action: at("workforce/punch-actions", "punchSelfieLinkAction"),
+    agent: false,
+    agentNote: PERSONAL,
+  },
+  {
+    name: "attendance.today_summary",
+    description:
+      "Counts today's clock-ins and clock-outs, and how many carry each flag (outside, late, no selfie and so on).",
+    kind: "read",
+    audience: "manager",
+    roles: PUNCH_SUMMARY_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadTodayPunchSummary(supabase, organisationId),
+    agent: true,
   },
   {
     name: "me.published_shifts",

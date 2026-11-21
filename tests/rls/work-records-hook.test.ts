@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgClient } from "./helpers/supabase";
 
 /** Tables that record work or pay under the worker's staff ID: checked by the hook. */
-const WORK_RECORD_TABLES: readonly string[] = [];
+const WORK_RECORD_TABLES: readonly string[] = ["punches"];
 
 /** Tables with a worker_id that are not work records, and why. */
 const NOT_WORK_RECORDS: Record<string, string> = {

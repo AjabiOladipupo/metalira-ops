@@ -9,9 +9,12 @@ import { ThemeButton } from "@/components/theme/theme-button";
 import { APP_HOME_PATH, WORKER_SIGN_IN_PATH } from "@/lib/auth/routes";
 import { workerMessages } from "@/lib/messages/worker";
 import { initials } from "@/lib/people";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
+import { loadClockContext, type ClockContext } from "@/server/workforce/clock-data";
 
+import { ClockButton } from "../_components/clock/clock-button";
 import { InboxLink } from "../_components/inbox-link";
 import { InstallCard } from "../_components/offline/install-card";
 import { WorkerSignOutForm } from "../_components/offline/sign-out-form";
@@ -86,6 +89,11 @@ async function HomeBody() {
   const lookup = await lookupWorkerPageSession();
   const shifts = lookup.type !== "worker" || lookup.session.shiftsEnabled;
   const tiles = shifts ? TILES : TILES.filter((t) => t.href !== "/m/shifts");
+  const now = new Date();
+  const clock =
+    shifts && lookup.type === "worker"
+      ? await loadClockContext(await createServerSupabase(), lookup.session.organisationId, now)
+      : null;
   return (
     <>
       {shifts ? (
@@ -95,6 +103,7 @@ async function HomeBody() {
           <ShiftTodayCard />
         </Suspense>
       ) : null}
+      {clock && !clock.left ? <ClockButton lastPunch={clockLastPunch(clock)} /> : null}
 
       <nav aria-label={copy.shortcuts} className="grid grid-cols-2 gap-3 pt-2">
         {tiles.map(({ href, label, Icon }) => (
@@ -113,6 +122,17 @@ async function HomeBody() {
       </nav>
     </>
   );
+}
+
+/** The server's last punch for the round Clock in / Clock out button (slice 3.5). */
+function clockLastPunch(clock: ClockContext) {
+  return clock.lastPunch
+    ? {
+        kind: clock.lastPunch.kind,
+        recordedAt: clock.lastPunch.recordedAt,
+        open: clock.lastPunch.open,
+      }
+    : null;
 }
 
 function HomeBodySkeleton() {
