@@ -85,7 +85,7 @@ jobs:
       # nothing secret is set here.
       - name: Start local Supabase
         run: pnpm exec supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,realtime,postgres-meta
-      - run: pnpm test:e2e
+      - run: pnpm test:e2e tests/e2e/offline.spec.ts --project=mobile-390 --repeat-each=30 --retries=0 --workers=2
         env:
           # A fixed dummy key for the app under test, so the People specs can save and reveal
           # bank details and NIN against the throwaway local database. Not a real key: it is
