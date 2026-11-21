@@ -482,6 +482,30 @@ describe("SyncEngine", () => {
     expect(await engine.sync("manual")).toMatchObject({ sent: 1 });
   });
 
+  it("uses the sender registered while it checked the session, not the one before", async () => {
+    const clock = fakeClock();
+    const db = queueDb(owner());
+    await enqueue(db, { kind: "test_ping", payload: { note: "a" } }, clock);
+    const { env } = fakeEnv();
+    const before = recordingSender([ok]);
+    const after = recordingSender([ok]);
+    let current = before.sender;
+    let signIn!: (value: boolean) => void;
+    const engine = new SyncEngine({
+      db,
+      getSender: () => current,
+      isOwnerSignedIn: () => new Promise<boolean>((resolve) => (signIn = resolve)),
+      env,
+      drain: opts(clock),
+    });
+    const run = engine.sync("manual");
+    current = after.sender;
+    signIn(true);
+    expect(await run).toMatchObject({ sent: 1 });
+    expect(before.sent).toHaveLength(0);
+    expect(after.sent).toHaveLength(1);
+  });
+
   it("does nothing after it is stopped", async () => {
     const db = queueDb(owner());
     await enqueue(db, { kind: "test_ping", payload: { note: "a" } });
