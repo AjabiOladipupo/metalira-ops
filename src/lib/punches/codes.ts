@@ -20,6 +20,10 @@ export const PUNCH_ERROR_CODES = [
   "conflict",
   "invalid",
   "bad_site",
+  // Crew clock-in (slice 3.6).
+  "not_your_crew",
+  "not_on_shift",
+  "not_rostered",
 ] as const;
 
 export type PunchErrorCode = (typeof PUNCH_ERROR_CODES)[number];
@@ -64,6 +68,12 @@ export function codeFromSqlState(sqlState: string | undefined | null): PunchErro
       return "rate_limited";
     case "MLPU9":
       return "wrong_session";
+    case "MLCR1":
+      return "not_your_crew";
+    case "MLCR2":
+      return "not_on_shift";
+    case "MLCR3":
+      return "not_rostered";
     default:
       return "failed";
   }
@@ -79,6 +89,20 @@ export type RecordPunchResult =
       selfieWanted: boolean;
       geofence: "inside" | "near" | "outside" | "unknown";
       flags: string[];
+    }
+  | { ok: false; code: PunchErrorCode };
+
+/** What the crew punch action answers (slice 3.6). Never carries server text or names. */
+export type RecordCrewPunchResult =
+  | {
+      ok: true;
+      batchId: string;
+      duplicate: boolean;
+      /** How many punches the batch holds. */
+      count: number;
+      /** The server wants the group photo (everyone agreed to photos, none uploaded yet). */
+      photoWanted: boolean;
+      geofence: "inside" | "near" | "outside" | "unknown";
     }
   | { ok: false; code: PunchErrorCode };
 
