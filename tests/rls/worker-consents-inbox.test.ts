@@ -711,6 +711,8 @@ describe("an untrusted password session reads no consents, inbox items or report
     const nothing = { workers: 0, assignments: 0, consents: 0, inbox: 0 };
     expect(await reads(hr.client, reportee)).toEqual(nothing);
     expect(await reads(lm.client, reportee)).toEqual(nothing);
+    const lmTeam = await lm.client.rpc("my_reportees", { p_organisation_id: owner.orgId });
+    expect(lmTeam.data).toEqual([]);
     expect(await reads(own.client, reportee)).toEqual(nothing);
     const refused = await own.client.rpc("accept_worker_consent", {
       p_organisation_id: owner.orgId,
@@ -729,13 +731,16 @@ describe("an untrusted password session reads no consents, inbox items or report
       consents: 1,
       inbox: 1,
     });
-    // A line manager sees their reportee and its assignments, never consents or the inbox.
+    // A line manager sees their reportee (through my_reportees since slice 4.0, never the
+    // workers row) and its assignments, never consents or the inbox.
     expect(await reads(lm.client, reportee)).toEqual({
-      workers: 1,
+      workers: 0,
       assignments: 1,
       consents: 0,
       inbox: 0,
     });
+    const trustedTeam = await lm.client.rpc("my_reportees", { p_organisation_id: owner.orgId });
+    expect((trustedTeam.data ?? []).map((row) => row.id)).toEqual([reportee]);
     expect(await reads(own.client, reportee)).toEqual({
       workers: 1,
       assignments: 1,
