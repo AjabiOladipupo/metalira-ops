@@ -273,8 +273,8 @@ comment on table public.leave_entitlements is
 
 -- BEFORE INSERT/UPDATE/DELETE (rule 3):
 -- * a type's first version may start on any date; a later one starts tomorrow or later;
--- * only effective_to ever changes, never on a version that has ended, and a version in force
---   closes today at the earliest;
+-- * only effective_to ever changes, never on a version that has ended; a version in force only
+--   closes earlier (never later or open-ended again), today at the earliest;
 -- * only a version not yet in force may be deleted (a scheduled change being replaced).
 create function private.leave_entitlements_guard()
 returns trigger
@@ -319,9 +319,17 @@ begin
     if old.effective_to is not null and old.effective_to < v_today then
       raise exception 'This version has ended and can''t change.' using errcode = 'MLLV2';
     end if;
-    if old.effective_from <= v_today and new.effective_to is not null
-      and new.effective_to < v_today then
-      raise exception 'A version in force closes today at the earliest.' using errcode = 'MLLV2';
+    -- A version in force only closes earlier, never later or open-ended again, and today at
+    -- the earliest.
+    if old.effective_from <= v_today then
+      if new.effective_to is null
+        or (old.effective_to is not null and new.effective_to > old.effective_to) then
+        raise exception 'A version in force can only close earlier. Add a new version instead.'
+          using errcode = 'MLLV2';
+      end if;
+      if new.effective_to < v_today then
+        raise exception 'A version in force closes today at the earliest.' using errcode = 'MLLV2';
+      end if;
     end if;
   end if;
   return new;
@@ -984,7 +992,8 @@ revoke all on function private.leave_type_code(uuid, text) from public, anon, au
 -- Creates a type (p_leave_type_id null), with its first entitlement version from 1 January this
 -- year, or changes an existing type's details (name, counting, paid, certificate, minimum
 -- service, active or retired). The days of an existing type change only through
--- add_leave_entitlement_version; the entitlement arguments are ignored on an edit. Owner, admin
+-- add_leave_entitlement_version; the entitlement arguments are ignored on an edit, except that
+-- turning paid on or off also adds a version from tomorrow with the matching pay. Owner, admin
 -- and hr. Returns the type's id.
 create function private.save_leave_type(
   p_organisation_id uuid,
@@ -1009,6 +1018,9 @@ declare
   v_name text := private.leave_clean_name(p_name, 60);
   v_id uuid;
   v_pay integer;
+  v_type public.leave_types%rowtype;
+  v_now public.leave_entitlements%rowtype;
+  v_tomorrow date;
 begin
   perform private.require_leave_setup_role(p_organisation_id);
   if v_name is null then
@@ -1056,6 +1068,43 @@ begin
     return v_id;
   end if;
 
+  select t.* into v_type
+  from public.leave_types t
+  where t.id = p_leave_type_id and t.organisation_id = p_organisation_id
+  for update;
+  if v_type.id is null then
+    raise exception 'That leave type wasn''t found.' using errcode = 'P0002';
+  end if;
+
+  -- Paid or unpaid changes the pay too, in the same transaction, so the flag and the pay never
+  -- disagree from tomorrow on: a new version from tomorrow with the same days, cap and service,
+  -- paying 0% when it becomes unpaid, or the last paid percentage (else 100) when it becomes
+  -- paid. Today stays as it was (rule 3).
+  if v_type.paid is distinct from p_paid then
+    v_tomorrow := private.org_today(p_organisation_id) + 1;
+    select e.* into v_now
+    from public.leave_entitlements e
+    where e.leave_type_id = v_type.id and e.effective_from < v_tomorrow
+    order by e.effective_from desc
+    limit 1;
+    if v_now.id is not null then
+      if p_paid then
+        select e.pay_percent into v_pay
+        from public.leave_entitlements e
+        where e.leave_type_id = v_type.id and e.pay_percent > 0
+        order by e.effective_from desc
+        limit 1;
+        v_pay := coalesce(v_pay, 100);
+      else
+        v_pay := 0;
+      end if;
+      perform private.leave_entitlement_write(
+        p_organisation_id, v_type.id, v_tomorrow, v_now.days_per_year,
+        v_now.carry_over_cap_days, v_pay, v_now.pay_min_service_months, false
+      );
+    end if;
+  end if;
+
   update public.leave_types t
   set name = v_name,
       counting = p_counting,
@@ -1063,11 +1112,8 @@ begin
       needs_certificate = p_needs_certificate,
       min_service_months = p_min_service_months,
       status = p_status
-  where t.id = p_leave_type_id and t.organisation_id = p_organisation_id
+  where t.id = v_type.id
   returning t.id into v_id;
-  if v_id is null then
-    raise exception 'That leave type wasn''t found.' using errcode = 'P0002';
-  end if;
   return v_id;
 end;
 $$;

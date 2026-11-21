@@ -126,7 +126,12 @@ function DetailsFields({
         />
       </div>
       <div className={GRID}>
-        <Checkbox name="paid" label="Paid" defaultChecked={checked("paid", saved.paid)} />
+        <Checkbox
+          name="paid"
+          label="Paid"
+          hint="On an existing type, a change also sets its pay from tomorrow"
+          defaultChecked={checked("paid", saved.paid)}
+        />
         <Checkbox
           name="needsCertificate"
           label="Needs a certificate"

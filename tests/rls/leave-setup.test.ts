@@ -281,6 +281,30 @@ describe("entitlement versions", () => {
     ).rejects.toMatchObject({ code: "MLLV2" });
   });
 
+  it("never extends or reopens a version in force, even for the database owner", async () => {
+    // Annual's version in force was closed today by the change from tomorrow above.
+    const [inForce] = await versions(await typeId("annual"));
+    expect(inForce!.effective_to).toBe(today);
+    for (const to of [null, addDays(today, 1), `${year + 3}-12-31`]) {
+      await expect(
+        db.query("update public.leave_entitlements set effective_to = $2 where id = $1", [
+          inForce!.id,
+          to,
+        ]),
+      ).rejects.toMatchObject({ code: "MLLV2" });
+    }
+    // An open-ended version in force can't be reopened once closed, nor closed before today.
+    const [sick] = await versions(await typeId("sick"));
+    expect(sick!.effective_to).toBeNull();
+    await expect(
+      db.query("update public.leave_entitlements set effective_to = $2 where id = $1", [
+        sick!.id,
+        addDays(today, -1),
+      ]),
+    ).rejects.toMatchObject({ code: "MLLV2" });
+    expect((await versions(await typeId("annual")))[0]!.effective_to).toBe(today);
+  });
+
   it("refuses overlapping versions", async () => {
     const sick = await typeId("sick");
     await expect(
@@ -332,6 +356,71 @@ describe("entitlement versions", () => {
     await expect(db.query("delete from public.leave_types where id = $1", [id])).rejects.toMatchObject(
       { code: "MLLV3" },
     );
+  });
+});
+
+describe("paid and pay percent", () => {
+  async function saveCompassionate(paid: boolean) {
+    const { error } = await hr.client.rpc("save_leave_type", {
+      p_organisation_id: owner.orgId,
+      p_leave_type_id: await typeId("compassionate"),
+      p_name: "Compassionate",
+      p_counting: "working_days",
+      p_paid: paid,
+      p_needs_certificate: false,
+      p_min_service_months: 0,
+      p_status: "active",
+    });
+    expect(error).toBeNull();
+  }
+
+  /** The paid flag and the pay of the version in force from tomorrow on. */
+  async function flagAndPay() {
+    const id = await typeId("compassionate");
+    const type = await admin.from("leave_types").select("paid").eq("id", id).single();
+    const rows = await versions(id);
+    const fromTomorrow = rows.find(
+      (r) => r.effective_from <= tomorrow && (r.effective_to === null || r.effective_to >= tomorrow),
+    );
+    return { paid: type.data!.paid, pay: fromTomorrow!.pay_percent, latest: rows.at(-1)! };
+  }
+
+  it("changes the pay with the paid flag, so they never disagree", async () => {
+    await saveCompassionate(false);
+    let now = await flagAndPay();
+    expect(now).toMatchObject({ paid: false, pay: 0 });
+    expect(now.latest).toMatchObject({ effective_from: tomorrow, effective_to: null, days_per_year: 3 });
+
+    await saveCompassionate(true);
+    now = await flagAndPay();
+    expect(now).toMatchObject({ paid: true, pay: 100 });
+
+    // Every type: an unpaid type pays 0 and a paid one more than 0 from tomorrow on.
+    const types = await admin
+      .from("leave_types")
+      .select("id, paid")
+      .eq("organisation_id", owner.orgId)
+      .eq("status", "active");
+    for (const t of types.data!) {
+      const rows = await versions(t.id);
+      const v = rows.find(
+        (r) => r.effective_from <= tomorrow && (r.effective_to === null || r.effective_to >= tomorrow),
+      );
+      expect(v!.pay_percent > 0, t.id).toBe(t.paid);
+    }
+  });
+
+  it("refuses pay on an unpaid type", async () => {
+    await saveCompassionate(false);
+    const { error } = await hr.client.rpc("add_leave_entitlement_version", {
+      p_organisation_id: owner.orgId,
+      p_leave_type_id: await typeId("compassionate"),
+      p_from: nextJanuary,
+      p_days_per_year: 3,
+      p_pay_percent: 100,
+    });
+    expect(error?.code).toBe("22023");
+    await saveCompassionate(true);
   });
 });
 

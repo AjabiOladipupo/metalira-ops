@@ -33,6 +33,7 @@ test("apply preset B, set annual leave to 18 days, and see the adviser line on b
   const owner = await createOwner("leave-owner", `Kola Guarding ${uniqueSuffix()}`);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await signInViaUi(page, owner.email, owner.password);
+  await expect(page).toHaveURL(/\/app(\/|$)/, { timeout: 15_000 });
 
   await page.goto("/app/settings/leave");
   await expect(page.getByRole("heading", { level: 1, name: "Leave" })).toBeVisible();
@@ -78,6 +79,7 @@ test("HR adds a public holiday and sets the working week", async ({ page }) => {
   await addMembership(owner.orgId, hr.userId, "hr");
   await page.setViewportSize({ width: 390, height: 900 });
   await signInViaUi(page, hr.email, hr.password);
+  await expect(page).toHaveURL(/\/app(\/|$)/, { timeout: 15_000 });
 
   await page.goto("/app/settings/holidays");
   await expect(page.getByRole("heading", { level: 1, name: "Holidays" })).toBeVisible();
