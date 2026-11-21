@@ -545,7 +545,8 @@ export interface WorkerProfile {
 const PROFILE_COLUMNS =
   "id, staff_id, first_name, last_name, phone, email, job_title, department_id, line_manager_worker_id, line_manager_membership_id, employment_type, start_date, end_date, status, bank_name, account_name, bank_account_last4, bank_code, bank_checked_name, bank_checked_at, bank_checked_source, nin_enc, tin, tax_state, pfa_name, rsa_pin_enc, rsa_pin_last4, nhf_opt_in, annual_rent_declared_kobo::text, next_of_kin_name, next_of_kin_phone, needs_pay_details, supervisor_clock_in, usual_work_days" as const;
 
-type ProfileRow = {
+/** The columns every reader of a profile gets, a line manager included (slice 4.0). */
+type SafeProfileRow = {
   id: string;
   staff_id: string;
   first_name: string;
@@ -560,6 +561,12 @@ type ProfileRow = {
   start_date: string;
   end_date: string | null;
   status: WorkerProfile["status"];
+  supervisor_clock_in: boolean;
+  usual_work_days: number[] | null;
+};
+
+/** Bank, tax, pension, rent, next of kin and pay flags: never read for a line manager. */
+type SensitiveProfileColumns = {
   bank_name: string | null;
   account_name: string | null;
   bank_account_last4: string | null;
@@ -578,18 +585,23 @@ type ProfileRow = {
   next_of_kin_name: string | null;
   next_of_kin_phone: string | null;
   needs_pay_details: boolean;
-  supervisor_clock_in: boolean;
-  usual_work_days: number[] | null;
-  /** Set for a line manager's read (my_reportees names the line manager itself). */
-  line_manager_name?: string | null;
 };
+
+/**
+ * A profile as read: the full row (`public.workers`, for the roles that read it), or a line
+ * manager's narrow one from public.my_reportees (slice 4.0) with no sensitive columns at all and
+ * the line manager's name as that read gives it.
+ */
+type ProfileRead =
+  | { kind: "full"; row: SafeProfileRow & SensitiveProfileColumns }
+  | { kind: "team"; row: SafeProfileRow; lineManagerName: string | null };
 
 async function loadProfileRow(
   supabase: Client,
   organisationId: string,
   workerId: string,
   limited: boolean,
-): Promise<ProfileRow | null> {
+): Promise<ProfileRead | null> {
   if (!limited) {
     const { data, error } = await supabase
       .from("workers")
@@ -598,48 +610,33 @@ async function loadProfileRow(
       .eq("id", workerId)
       .maybeSingle();
     if (error) throw new Error(`Could not read the employee: ${error.message}`);
-    return data;
+    return data ? { kind: "full", row: data } : null;
   }
   // A line manager reads their reportee through public.my_reportees (slice 4.0): safe columns
   // only, and no row at all for anyone who doesn't report to them.
   const member = await loadTeamMember(supabase, organisationId, workerId);
   if (!member) return null;
   return {
-    id: member.id,
-    staff_id: member.staffId,
-    first_name: member.firstName,
-    last_name: member.lastName,
-    phone: member.phone,
-    email: member.email,
-    job_title: member.jobTitle,
-    department_id: member.departmentId,
-    line_manager_worker_id: member.lineManagerWorkerId,
-    line_manager_membership_id: member.lineManagerMembershipId,
-    employment_type: member.employmentType,
-    start_date: member.startDate,
-    end_date: member.endDate,
-    status: member.status,
-    needs_pay_details: false,
-    supervisor_clock_in: member.supervisorClockIn,
-    usual_work_days: member.usualWorkDays,
-    line_manager_name: member.lineManagerName,
-    bank_name: null,
-    account_name: null,
-    bank_account_last4: null,
-    bank_code: null,
-    bank_checked_name: null,
-    bank_checked_at: null,
-    bank_checked_source: null,
-    nin_enc: null,
-    tin: null,
-    tax_state: null,
-    pfa_name: null,
-    rsa_pin_enc: null,
-    rsa_pin_last4: null,
-    nhf_opt_in: false,
-    annual_rent_declared_kobo: null,
-    next_of_kin_name: null,
-    next_of_kin_phone: null,
+    kind: "team",
+    lineManagerName: member.lineManagerName,
+    row: {
+      id: member.id,
+      staff_id: member.staffId,
+      first_name: member.firstName,
+      last_name: member.lastName,
+      phone: member.phone,
+      email: member.email,
+      job_title: member.jobTitle,
+      department_id: member.departmentId,
+      line_manager_worker_id: member.lineManagerWorkerId,
+      line_manager_membership_id: member.lineManagerMembershipId,
+      employment_type: member.employmentType,
+      start_date: member.startDate,
+      end_date: member.endDate,
+      status: member.status,
+      supervisor_clock_in: member.supervisorClockIn,
+      usual_work_days: member.usualWorkDays,
+    },
   };
 }
 
@@ -662,8 +659,10 @@ export async function loadWorkerProfile(
   { viewer = "manager" }: WorkerProfileOptions = {},
 ): Promise<WorkerProfile | null> {
   const limited = viewer === "line_manager";
-  const w = await loadProfileRow(supabase, organisationId, workerId, limited);
-  if (!w) return null;
+  const read = await loadProfileRow(supabase, organisationId, workerId, limited);
+  if (!read) return null;
+  const w = read.row;
+  const x = read.kind === "full" ? read.row : null;
 
   const [department, lineManagerName, assignments, sites, projects, payRates] = await Promise.all([
     w.department_id
@@ -677,8 +676,8 @@ export async function loadWorkerProfile(
       : Promise.resolve(null),
     viewer === "self"
       ? ownLineManagerName(supabase, organisationId)
-      : w.line_manager_name !== undefined
-        ? Promise.resolve(w.line_manager_name ?? (w.line_manager_membership_id ? "Manager" : null))
+      : read.kind === "team"
+        ? Promise.resolve(read.lineManagerName ?? (w.line_manager_membership_id ? "Manager" : null))
         : lineManagerLabel(supabase, organisationId, w),
     loadCurrentAssignments(supabase, organisationId, today, workerId),
     loadNames(supabase, "sites", organisationId),
@@ -710,29 +709,29 @@ export async function loadWorkerProfile(
     startDate: w.start_date,
     endDate: w.end_date,
     status: w.status,
-    bankName: w.bank_name,
-    accountName: w.account_name,
-    bankAccountLast4: w.bank_account_last4,
-    bankCode: w.bank_code,
+    bankName: x?.bank_name ?? null,
+    accountName: x?.account_name ?? null,
+    bankAccountLast4: x?.bank_account_last4 ?? null,
+    bankCode: x?.bank_code ?? null,
     bankCheck:
-      w.bank_checked_name && w.bank_checked_at
+      x?.bank_checked_name && x.bank_checked_at
         ? {
-            accountName: w.bank_checked_name,
-            at: w.bank_checked_at,
-            test: w.bank_checked_source !== "bank",
+            accountName: x.bank_checked_name,
+            at: x.bank_checked_at,
+            test: x.bank_checked_source !== "bank",
           }
         : null,
-    ninOnFile: w.nin_enc !== null,
-    tin: w.tin,
-    taxState: w.tax_state,
-    pfaName: w.pfa_name,
-    rsaPinOnFile: w.rsa_pin_enc !== null,
-    rsaPinLast4: w.rsa_pin_last4,
-    nhfOptIn: w.nhf_opt_in,
-    annualRentDeclared: koboFromText(w.annual_rent_declared_kobo),
-    nextOfKinName: w.next_of_kin_name,
-    nextOfKinPhone: w.next_of_kin_phone,
-    needsPayDetails: w.needs_pay_details,
+    ninOnFile: x ? x.nin_enc !== null : false,
+    tin: x?.tin ?? null,
+    taxState: x?.tax_state ?? null,
+    pfaName: x?.pfa_name ?? null,
+    rsaPinOnFile: x ? x.rsa_pin_enc !== null : false,
+    rsaPinLast4: x?.rsa_pin_last4 ?? null,
+    nhfOptIn: x?.nhf_opt_in ?? false,
+    annualRentDeclared: koboFromText(x?.annual_rent_declared_kobo ?? null),
+    nextOfKinName: x?.next_of_kin_name ?? null,
+    nextOfKinPhone: x?.next_of_kin_phone ?? null,
+    needsPayDetails: x?.needs_pay_details ?? false,
     supervisorClockIn: w.supervisor_clock_in,
     usualWorkDays: w.usual_work_days,
     siteNames: siteIds.map((id) => sites.get(id) ?? "Site").sort(),

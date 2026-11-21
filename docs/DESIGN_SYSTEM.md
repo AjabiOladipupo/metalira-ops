@@ -81,7 +81,7 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 | Name | Screen | Phase | Size |
 | --- | --- | --- | --- |
 | welcome | Sign-up, beside the form (xl and up; hidden on phones so the form stays above the fold) | 1 | 240 |
-| import-people | Empty People list | 1 | 160 |
+| import-people | Empty People list; also My team with no reportees (the `team-empty` slot, 4.7: this scene fits) | 1 | 160 |
 | no-approvals | Empty bank-detail approvals | 1 | 160 |
 | clock-in | Worker app home, today's shift card with no shift | 1 | 96 |
 | worker-profile | Worker app Me, no requests yet | 1 | 96 |

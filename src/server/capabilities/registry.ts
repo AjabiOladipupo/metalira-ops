@@ -149,6 +149,8 @@ import {
 } from "@/server/people/own-requests";
 import { unlockSignInSpec } from "@/server/people/sign-in-status";
 import { TEAM_READERS, loadTeamMembers, loadTeamSummary } from "@/server/people/team";
+import { loadMyTeamSummary } from "@/server/people/team-board";
+import { teamAssignShiftSpec, teamRemoveAssignmentSpec } from "@/server/people/team-roster";
 import {
   HR_FILE_READERS,
   closeQuerySpec,
@@ -1140,6 +1142,44 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadTeamSummary(supabase, organisationId),
+    agent: true,
+  },
+  // My team (people/team-actions.ts, slice 4.7): assign within the crew, and the page's counts.
+  {
+    name: "team.assign_shift",
+    description:
+      "Assigns one of the line manager's reportees to an open shift at their team's site.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(teamAssignShiftSpec),
+    changes: "one",
+    action: at("people/team-actions", "assignTeamShiftAction"),
+    agent: false,
+    agentNote: "Changes a person's roster: the line manager picks the shift.",
+  },
+  {
+    name: "team.remove_shift",
+    description:
+      "Takes one of the line manager's reportees off a shift at their team's site that hasn't started.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(teamRemoveAssignmentSpec),
+    changes: "one",
+    action: at("people/team-actions", "removeTeamShiftAction"),
+    agent: false,
+    agentNote: "Changes a person's roster: the line manager decides.",
+  },
+  {
+    name: "team.board_summary",
+    description:
+      "Counts My team today: on site, late, no-show, on leave, hours, leave and days to decide, queries and open shifts.",
+    kind: "read",
+    audience: "manager",
+    roles: TEAM_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadMyTeamSummary(supabase, organisationId),
     agent: true,
   },
 
