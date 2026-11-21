@@ -9,7 +9,14 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
 import { addDays, todayIn } from "@/lib/dates";
-import { formatCoverage, formatWeekOf, mondayOf, parseWeekParam, weekEnd } from "@/lib/roster";
+import {
+  formatCoverage,
+  formatWeekOf,
+  mondayOf,
+  parseWeekParam,
+  replacementTarget,
+  weekEnd,
+} from "@/lib/roster";
 import { formatPublicationStatus, type PublicationStatus } from "@/lib/roster-publish";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getPageSession } from "@/server/identity/session";
@@ -32,6 +39,9 @@ export const metadata: Metadata = { title: "Roster" };
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function rosterHref(siteId: string, week: string): string {
   return `/app/roster?site=${siteId}&week=${week}`;
@@ -84,6 +94,18 @@ async function RosterPage({
   const upToDate = status !== null && status.version !== null && status.changed.length === 0;
   const tray = trayCards(week, site.id, candidates, settings, today);
   const thisWeek = mondayOf(today);
+  // Send replacement from the live board (slice 3.7): ?post=&date=&replace=.
+  const focusPost = first(query.post);
+  const focusDate = first(query.date);
+  const focusReplace = first(query.replace);
+  const replacement =
+    canEdit && focusPost && UUID.test(focusPost) && focusDate && ISO_DATE.test(focusDate)
+      ? replacementTarget(week, {
+          postId: focusPost,
+          date: focusDate,
+          assignmentId: focusReplace && UUID.test(focusReplace) ? focusReplace : null,
+        })
+      : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -179,6 +201,7 @@ async function RosterPage({
           candidates={candidates}
           canEdit={canEdit}
           changedCells={status?.version != null ? status.changed : []}
+          replacement={replacement}
         />
       )}
     </div>
