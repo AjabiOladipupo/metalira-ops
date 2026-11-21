@@ -6,17 +6,26 @@ import { activateQueue, deactivateQueue } from "@/lib/offline/active-queue";
 import { setQueueSender } from "@/lib/offline/senders";
 import { requestPersistentStorage } from "@/lib/offline/storage";
 import type { QueueOwner } from "@/lib/offline/types";
+import { createCrewSender } from "@/lib/punches/crew-sender";
 import { createPunchSender } from "@/lib/punches/sender";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 import { recordCheckpointScanAction } from "@/server/workforce/checkpoint-scan-actions";
+import { recordCrewPunchAction, uploadCrewPhotoAction } from "@/server/workforce/crew-actions";
 import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
 
-/** Punches (slice 3.5) and patrol scans (slice 3.8) reach the server through these actions. */
-const punchSender = createPunchSender({
-  recordPunch: recordPunchAction,
-  uploadSelfie: uploadPunchSelfieAction,
-  recordCheckpointScan: recordCheckpointScanAction,
-});
+/**
+ * Punches (slice 3.5), patrol scans (slice 3.8) and crew punches (slice 3.6) reach the server
+ * through these Server Actions: the crew sender takes `crew_in` / `crew_out` and hands every
+ * other kind on to the punch sender.
+ */
+const punchSender = createCrewSender(
+  { recordCrewPunch: recordCrewPunchAction, uploadCrewPhoto: uploadCrewPhotoAction },
+  createPunchSender({
+    recordPunch: recordPunchAction,
+    uploadSelfie: uploadPunchSelfieAction,
+    recordCheckpointScan: recordCheckpointScanAction,
+  }),
+);
 
 /**
  * Test hooks only in the Playwright build (playwright.config.ts), and never in a Vercel build

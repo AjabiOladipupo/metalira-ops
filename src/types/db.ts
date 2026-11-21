@@ -245,6 +245,38 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"crew_punch_batches": {
+                  Row: {
+                    "accuracy_m": number | null,"client_batch_id": string,"created_at": string,"device_time": string,"distance_m": number | null,"geofence_result": string,"id": string,"kind": string,"organisation_id": string,"payload_hash": string,"photo_deleted_at": string | null,"photo_expected": boolean,"photo_path": string | null,"photo_uploaded_at": string | null,"received_at": string,"recorded_at": string,"recorded_by_user": string,"site_id": string,"supervisor_worker_id": string | null,"time_source": string,"worker_count": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "accuracy_m"?: number | null,"client_batch_id": string,"created_at"?: string,"device_time": string,"distance_m"?: number | null,"geofence_result": string,"id"?: string,"kind": string,"organisation_id": string,"payload_hash": string,"photo_deleted_at"?: string | null,"photo_expected"?: boolean,"photo_path"?: string | null,"photo_uploaded_at"?: string | null,"received_at"?: string,"recorded_at": string,"recorded_by_user": string,"site_id": string,"supervisor_worker_id"?: string | null,"time_source": string,"worker_count": number
+                  }
+                  Update: {
+                    "accuracy_m"?: number | null,"client_batch_id"?: string,"created_at"?: string,"device_time"?: string,"distance_m"?: number | null,"geofence_result"?: string,"id"?: string,"kind"?: string,"organisation_id"?: string,"payload_hash"?: string,"photo_deleted_at"?: string | null,"photo_expected"?: boolean,"photo_path"?: string | null,"photo_uploaded_at"?: string | null,"received_at"?: string,"recorded_at"?: string,"recorded_by_user"?: string,"site_id"?: string,"supervisor_worker_id"?: string | null,"time_source"?: string,"worker_count"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "crew_punch_batches_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "crew_punch_batches_site_fkey"
+      columns: ["organisation_id","site_id"]
+isOneToOne: false
+      referencedRelation: "sites"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "crew_punch_batches_supervisor_fkey"
+      columns: ["organisation_id","supervisor_worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"departments": {
                   Row: {
                     "created_at": string,"created_by": string | null,"head_worker_id": string | null,"id": string,"name": string,"organisation_id": string,"updated_at": string
@@ -599,14 +631,14 @@ isOneToOne: false
                   ]
                 },"punches": {
                   Row: {
-                    "accuracy_m": number | null,"checkpoint_id": string | null,"client_event_id": string,"clock_drift_seconds": number,"created_at": string,"device_time": string,"distance_m": number | null,"flags": (string)[],"geofence_result": string,"id": string,"kind": string,"location": unknown,"organisation_id": string,"outside_note": string | null,"outside_reason": string | null,"payload_hash": string,"received_at": string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at": string | null,"selfie_expected": boolean,"selfie_path": string | null,"selfie_uploaded_at": string | null,"shift_assignment_id": string | null,"shift_id": string | null,"site_id": string | null,"source": string,"time_source": string,"worker_id": string
+                    "accuracy_m": number | null,"checkpoint_id": string | null,"client_event_id": string,"clock_drift_seconds": number,"created_at": string,"crew_batch_id": string | null,"device_time": string,"distance_m": number | null,"flags": (string)[],"geofence_result": string,"id": string,"kind": string,"location": unknown,"organisation_id": string,"outside_note": string | null,"outside_reason": string | null,"payload_hash": string,"received_at": string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at": string | null,"selfie_expected": boolean,"selfie_path": string | null,"selfie_uploaded_at": string | null,"shift_assignment_id": string | null,"shift_id": string | null,"site_id": string | null,"source": string,"time_source": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "accuracy_m"?: number | null,"checkpoint_id"?: string | null,"client_event_id": string,"clock_drift_seconds": number,"created_at"?: string,"device_time": string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result": string,"id"?: string,"kind": string,"location"?: unknown,"organisation_id": string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash": string,"received_at"?: string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source": string,"worker_id": string
+                    "accuracy_m"?: number | null,"checkpoint_id"?: string | null,"client_event_id": string,"clock_drift_seconds": number,"created_at"?: string,"crew_batch_id"?: string | null,"device_time": string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result": string,"id"?: string,"kind": string,"location"?: unknown,"organisation_id": string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash": string,"received_at"?: string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source": string,"worker_id": string
                   }
                   Update: {
-                    "accuracy_m"?: number | null,"checkpoint_id"?: string | null,"client_event_id"?: string,"clock_drift_seconds"?: number,"created_at"?: string,"device_time"?: string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result"?: string,"id"?: string,"kind"?: string,"location"?: unknown,"organisation_id"?: string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash"?: string,"received_at"?: string,"recorded_at"?: string,"recorded_by_user"?: string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source"?: string,"worker_id"?: string
+                    "accuracy_m"?: number | null,"checkpoint_id"?: string | null,"client_event_id"?: string,"clock_drift_seconds"?: number,"created_at"?: string,"crew_batch_id"?: string | null,"device_time"?: string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result"?: string,"id"?: string,"kind"?: string,"location"?: unknown,"organisation_id"?: string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash"?: string,"received_at"?: string,"recorded_at"?: string,"recorded_by_user"?: string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -620,6 +652,12 @@ isOneToOne: false
       columns: ["organisation_id","checkpoint_id"]
 isOneToOne: false
       referencedRelation: "site_checkpoints"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "punches_crew_batch_fkey"
+      columns: ["organisation_id","crew_batch_id"]
+isOneToOne: false
+      referencedRelation: "crew_punch_batches"
       referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "punches_organisation_id_fkey"
@@ -1120,6 +1158,9 @@ isOneToOne: false
 "assign_worker_to_shift":
 { Args: { "p_organisation_id": string,"p_post_id": string,"p_shift_date": string,"p_worker_id": string }; Returns: Json
                            },
+"attach_crew_photo":
+{ Args: { "p_actor": string,"p_batch_id": string,"p_path": string }; Returns: undefined
+                           },
 "attach_punch_selfie":
 { Args: { "p_actor": string,"p_path": string,"p_punch_id": string }; Returns: undefined
                            },
@@ -1159,6 +1200,9 @@ isOneToOne: false
                            },
 "claim_inbox_email":
 { Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
+                           },
+"clear_crew_photos":
+{ Args: { "p_batch_ids": (string)[] }; Returns: number
                            },
 "clear_punch_selfies":
 { Args: { "p_punch_ids": (string)[] }; Returns: number
@@ -1209,6 +1253,11 @@ isOneToOne: false
               "invite_expires_at": string,"invite_id": string,"invite_worker_id": string,"token": string
             }[]
                            },
+"crew_photos_due":
+{ Args: { "p_limit"?: number }; Returns: {
+              "batch_id": string,"photo_path": string
+            }[]
+                           },
 "decide_org_bank_account":
 { Args: { "p_decision": string,"p_id": string,"p_note"?: string,"p_organisation_id": string }; Returns: {
               "applies_after": string,"bank_account_last4": string,"id": string,"status": Database["public"]['Enums']["org_bank_account_status"]
@@ -1251,6 +1300,9 @@ isOneToOne: false
 { Args: { "p_checkpoint_id": string,"p_direction": string,"p_organisation_id": string }; Returns: number
                            },
 "my_clock_context":
+{ Args: { "p_organisation_id": string }; Returns: Json
+                           },
+"my_crew_context":
 { Args: { "p_organisation_id": string }; Returns: Json
                            },
 "my_line_manager":
@@ -1296,6 +1348,9 @@ isOneToOne: false
                            },
 "record_checkpoint_scan":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_latitude": number,"p_longitude": number,"p_queued_offline"?: boolean,"p_sent_device_time": string,"p_token": string }; Returns: Json
+                           },
+"record_crew_punch":
+{ Args: { "p_accuracy_m": number,"p_client_batch_id": string,"p_client_event_ids": (string)[],"p_device_time": string,"p_elapsed_ms": number,"p_expected_actor_id": string,"p_expected_organisation_id": string,"p_has_photo": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_sent_device_time": string,"p_site_id": string,"p_worker_ids": (string)[] }; Returns: Json
                            },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json
