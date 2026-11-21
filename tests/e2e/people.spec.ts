@@ -215,11 +215,16 @@ test("HR adds an employee and changes pay; other roles see masked, read-only vie
   await expect(opsPage).toHaveURL(/\/no-access$/, { timeout: 15_000 });
   await opsPage.context().close();
 
-  // --- line manager (the worker's own): no edit form, no People list ----------------------
+  // --- line manager (the worker's own): no edit form; the People list shows only their
+  // reportees, with no Add or Import (slice 4.0b) -----------------------------------------
   const lmPage = await signedInPage(browser, lm);
   await lmPage.goto(`/app/people/${workerId}/edit`);
   await expect(lmPage).toHaveURL(/\/no-access$/, { timeout: 15_000 });
   await lmPage.goto("/app/people");
-  await expect(lmPage).toHaveURL(/\/no-access$/, { timeout: 15_000 });
+  await expect(lmPage.getByRole("link", { name: new RegExp(name) })).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(lmPage.getByRole("link", { name: "Add employee" })).toHaveCount(0);
+  await expect(lmPage.getByRole("link", { name: "Import" })).toHaveCount(0);
   await lmPage.context().close();
 });

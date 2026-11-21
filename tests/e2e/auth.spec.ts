@@ -145,7 +145,7 @@ test("asking for a link for an unknown email looks the same as a known one", asy
   await expect(page).toHaveURL(/\/check-email\?sent=link$/);
 });
 
-test("a line manager sees five nav items and cannot open payroll by URL", async ({
+test("a line manager sees six nav items and cannot open payroll by URL", async ({
   page,
   isMobile,
 }, testInfo) => {
@@ -160,6 +160,7 @@ test("a line manager sees five nav items and cannot open payroll by URL", async 
     "Home",
     "Live attendance",
     "Timesheets",
+    "People",
     "My team",
     "Leave",
   ]);

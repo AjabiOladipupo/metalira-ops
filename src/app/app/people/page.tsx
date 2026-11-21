@@ -30,6 +30,7 @@ import {
   type PeopleRow,
 } from "@/server/people/people-data";
 import { peoplePageContext } from "@/server/people/page-context";
+import { loadTeamMembers } from "@/server/people/team";
 
 import { RouteGate } from "../_shell/slots";
 import { BankApprovalsLink } from "./_components/bank-approvals-link";
@@ -38,6 +39,7 @@ import { NotSet, plural } from "./_components/display";
 import { MappingPanel, type MappingWorker } from "./_components/mapping-panel";
 import { PeopleActions } from "./_components/people-actions";
 import { PeopleSearch } from "./_components/people-search";
+import { TeamPeopleList } from "./_components/team-people-list";
 
 export const metadata: Metadata = { title: "People" };
 
@@ -171,6 +173,12 @@ async function PeopleList({
   const sizeInLinks = linkPageSize(urlSize, size) ?? undefined;
   const requestedPage = parsePage(firstParam(params.page));
   const ctx = await peoplePageContext();
+  // Slice 4.0b: a line manager sees only their reportees, from public.my_reportees (safe
+  // columns only). They no longer read public.workers, so the directory below would be empty.
+  if (ctx.role === "line_manager") {
+    const members = await loadTeamMembers(ctx.supabase, ctx.organisationId);
+    return <TeamPeopleList members={members} query={query} requestedPage={requestedPage} />;
+  }
   const [directory, pendingBankChanges] = await Promise.all([
     loadPeopleDirectory(ctx.supabase, ctx.organisationId, ctx.today, {
       query,
