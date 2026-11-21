@@ -107,6 +107,13 @@ export function fromTimesheetDbError(error: PostgrestError): never {
   if (error.code === "P0002") {
     throw new MutationError("invalid", `${error.message} Reload the page.`);
   }
+  if (error.code === "23514") {
+    // A value outside its range check (security review M1): never the database's own message.
+    throw new MutationError(
+      "invalid",
+      "Those times would make a day longer than 24 hours. Check the clock-in and clock-out.",
+    );
+  }
   if (/^MLTS[1-4]$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }

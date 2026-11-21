@@ -95,6 +95,7 @@ describe("refreshAllTimesheets", () => {
       inserted: 240,
       updated: 120,
       deleted: 0,
+      failedWorkers: 0,
       complete: true,
     });
     expect(calls.filter((c) => c.name === "timesheet_cron_organisations")).toHaveLength(3);

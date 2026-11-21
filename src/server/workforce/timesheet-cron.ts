@@ -7,9 +7,10 @@ import type { Database } from "@/types/db";
 
 /**
  * The daily timesheet refresh (slice 4.2), by Vercel Cron at 04:00 (/api/cron/timesheets).
- * For each company with Shifts on (or a clock punch in the last 3 days), rebuilds yesterday's and
- * the day before's pending lines on the company's own clock, one company per database call so
- * each transaction stays small, in pages of 50 companies. Stops before the route's time limit
+ * For each company with Shifts on (or a clock punch in the last 3 days), rebuilds the last 7 days'
+ * pending lines on the company's own clock (a missed run catches up), one company per database
+ * call, in pages of 50 companies. Inside a company the database works in batches of 50 workers
+ * and skips (and counts) a worker whose refresh fails, so one bad row never blocks the company. Stops before the route's time limit
  * and says how far it got; the next run, or any screen open, covers the rest. Logs counts only.
  */
 
@@ -25,6 +26,8 @@ export interface TimesheetCronResult {
   inserted: number;
   updated: number;
   deleted: number;
+  /** Workers whose refresh failed and were skipped (inside companies that otherwise ran). */
+  failedWorkers: number;
   complete: boolean;
 }
 
@@ -39,6 +42,7 @@ export async function refreshAllTimesheets(
     inserted: 0,
     updated: 0,
     deleted: 0,
+    failedWorkers: 0,
     complete: true,
   };
   let after: string | undefined;
@@ -68,6 +72,12 @@ export async function refreshAllTimesheets(
       result.inserted += Number(c.inserted ?? 0);
       result.updated += Number(c.updated ?? 0);
       result.deleted += Number(c.deleted ?? 0);
+      const failed = Number(c.failed ?? 0);
+      if (failed > 0) {
+        result.failedWorkers += failed;
+        // A count only, never the company or the workers.
+        console.error("timesheets.cron_workers_failed:", failed);
+      }
     }
     if (ids.length < PAGE) break;
     after = ids[ids.length - 1];

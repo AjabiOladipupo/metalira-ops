@@ -41,15 +41,18 @@
 --      copied like any flag; only delayed, late_sync and time_unverified set needs_review.
 --    * a worker on approved leave that day gets no line (private.timesheet_on_leave: false until
 --      slice 4.4 adds leave; 4.4 MUST replace it).
---    Callers: owner, admin, hr and ops_manager for any worker of the company; a line manager for
---    their reportees (and themselves); a worker for themselves; the secret key for the daily cron
---    (`refresh_timesheets_recent`, yesterday and the day before, per company).
--- 5. private.punch_under_review (slice 3.5 placeholder) now reads the lines (decision 12): a punch
---    is under review while any line using it is pending or disputed, or while no line uses it
---    yet; once every line using it is approved or rejected it is not, and the 90-day selfie sweep
---    may delete its selfie. A line uses a punch when it is the line's clock-in, clock-out or
---    no-shift clock-in, when the punch belongs to the line's shift assignment, or when one of
---    the line's corrections voids it.
+--    * every minute count is clamped to 0..1440 (a day is at most 24 hours).
+--    * a decided (approved or rejected) line is frozen; when a clock punch for its shift arrives
+--      after the decision it only gains `late_punch_after_decision` (4.3 reopens it to count it).
+--    Callers: owner, admin, hr and ops_manager for any worker of the company (62 days at most); a
+--    line manager for their reportees (and themselves); a worker for themselves (35 days at
+--    most); the secret key for the daily cron (`refresh_timesheets_recent`: the last 7 days, per
+--    company, in batches of 50 workers; a failing worker is skipped and counted). Worker-scoped
+--    refreshes lock per worker (private.timesheet_lock), company-wide ones lock the company.
+-- 5. private.punch_under_review (slice 3.5 placeholder) now reads the lines (decision 12); see
+--    its comment in section 7 for the four cases. In short: a punch a line uses follows that
+--    line (kept while pending or disputed); a punch no line uses is kept while its shift's line
+--    is open, when it arrived after that line was decided, or while it is under 90 days old.
 -- 6. private.worker_has_work_records (slice 1.11 hook) checks timesheet_lines instead of failing
 --    closed on the table's existence. Lines reference workers by a composite foreign key, so an
 --    insert takes a key-share lock on the worker row and can't race a staff ID approval.
@@ -77,7 +80,8 @@ as $$
   select array[
     'no_shift', 'late', 'early_out', 'overtime', 'no_clock_out', 'no_show', 'shift_removed',
     'outside', 'near', 'no_location', 'no_selfie', 'clock_drift', 'double_in', 'out_without_in',
-    'delayed', 'late_sync', 'time_unverified', 'supervisor', 'corrected'
+    'delayed', 'late_sync', 'time_unverified', 'supervisor', 'corrected',
+    'late_punch_after_decision'
   ]
 $$;
 
@@ -237,11 +241,13 @@ begin
     end if;
   end if;
 
-  scheduled_minutes := v_sched;
-  worked_minutes := greatest(v_worked, 0);
-  late_minutes := v_late;
-  early_minutes := v_early;
-  ot_minutes := greatest(v_ot, 0);
+  -- A day is at most 24 hours: every minute count is clamped to 0..1440 (security review M1), so
+  -- no correction or punch pairing can make a line break its range checks.
+  scheduled_minutes := least(v_sched, 1440);
+  worked_minutes := least(greatest(v_worked, 0), 1440);
+  late_minutes := least(v_late, 1440);
+  early_minutes := least(v_early, 1440);
+  ot_minutes := least(greatest(v_ot, 0), 1440);
   select coalesce(array_agg(n.name order by n.ord), '{}'::text[]) into exceptions
   from unnest(private.timesheet_exception_names()) with ordinality as n (name, ord)
   where n.name = any (v_hits)
@@ -337,6 +343,10 @@ create table public.timesheet_lines (
     constraint timesheet_lines_status_value check (status in ('pending', 'approved', 'rejected', 'disputed')),
   -- Filled by slice 4.3's approval.
   work_unit_id uuid,
+  -- When the line last became approved or rejected (set by the guard; null while pending or
+  -- disputed). A clock punch received after it is a late punch (exception
+  -- late_punch_after_decision) and keeps its selfie until the day is reopened.
+  decided_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint timesheet_lines_organisation_id_id_key unique (organisation_id, id),
@@ -448,7 +458,7 @@ language plpgsql
 set search_path = ''
 as $$
 declare
-  v_decided constant text[] := array['status', 'work_unit_id', 'updated_at'];
+  v_decided constant text[] := array['status', 'work_unit_id', 'updated_at', 'decided_at', 'exceptions'];
 begin
   if tg_op = 'INSERT' then
     if new.status <> 'pending' or new.work_unit_id is not null then
@@ -456,6 +466,7 @@ begin
     end if;
     new.created_at := now();
     new.updated_at := now();
+    new.decided_at := null;
     return new;
   end if;
   if tg_op = 'DELETE' then
@@ -471,9 +482,29 @@ begin
       old.no_shift_punch_id, old.created_at) then
     raise exception 'A timesheet day''s worker, date and shift never change.' using errcode = 'MLTS0';
   end if;
-  if old.status in ('approved', 'rejected')
-    and (to_jsonb(new) - v_decided) is distinct from (to_jsonb(old) - v_decided) then
-    raise exception 'An approved or rejected day never changes. Reopen it first.' using errcode = 'MLTS0';
+  if old.status in ('approved', 'rejected') then
+    -- A decided day changes only its status and Work Unit (slice 4.3's functions), and may gain
+    -- the late_punch_after_decision flag (the refresh, while it stays decided); nothing else.
+    if (to_jsonb(new) - v_decided) is distinct from (to_jsonb(old) - v_decided)
+      or (
+        new.exceptions is distinct from old.exceptions
+        and not (
+          new.status = old.status
+          and new.exceptions @> old.exceptions
+          and new.exceptions <@ (old.exceptions || 'late_punch_after_decision'::text)
+        )
+      ) then
+      raise exception 'An approved or rejected day never changes. Reopen it first.' using errcode = 'MLTS0';
+    end if;
+  end if;
+  if new.status in ('approved', 'rejected') then
+    if old.status is distinct from new.status then
+      new.decided_at := now();
+    else
+      new.decided_at := old.decided_at;
+    end if;
+  else
+    new.decided_at := null;
   end if;
   new.updated_at := now();
   return new;
@@ -579,6 +610,37 @@ grant select on table public.timesheet_corrections to authenticated;
 -- 5. The refresh
 -- ---------------------------------------------------------------------------
 
+-- The refresh's locks (security review L3). A company-wide refresh (p_worker_ids null, or more
+-- than 200 workers) holds the company lock exclusively. A worker-scoped one holds it shared, plus
+-- one lock per worker in id order, so refreshes of different workers never wait for each other
+-- (a worker looping their own refresh can't hold up the company) while two refreshes of the same
+-- worker, or a company-wide one, queue.
+create function private.timesheet_lock(p_organisation_id uuid, p_worker_ids uuid[])
+returns void
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  v_worker uuid;
+begin
+  if p_worker_ids is null or cardinality(p_worker_ids) > 200 then
+    perform pg_advisory_xact_lock(hashtextextended('timesheets:' || p_organisation_id::text, 0));
+    return;
+  end if;
+  perform pg_advisory_xact_lock_shared(hashtextextended('timesheets:' || p_organisation_id::text, 0));
+  for v_worker in
+    select distinct u.w from unnest(p_worker_ids) as u (w) where u.w is not null order by u.w
+  loop
+    perform pg_advisory_xact_lock(
+      hashtextextended('timesheets:' || p_organisation_id::text || ':' || v_worker::text, 0)
+    );
+  end loop;
+end;
+$$;
+
+revoke all on function private.timesheet_lock(uuid, uuid[]) from public, anon, authenticated;
+
 -- Rebuilds the lines of `p_organisation_id` with work dates from `p_from` to `p_to`, for
 -- `p_worker_ids` (null: every worker). No role check: only the definers below call it, after
 -- theirs. Returns {inserted, updated, deleted}.
@@ -605,6 +667,7 @@ declare
   v_inserted integer := 0;
   v_updated integer := 0;
   v_deleted integer := 0;
+  v_flagged integer := 0;
 begin
   if p_organisation_id is null or p_from is null or p_to is null or p_to < p_from then
     raise exception 'Choose a valid range of days.' using errcode = '22023';
@@ -622,8 +685,7 @@ begin
     raise exception 'That company wasn''t found.' using errcode = 'P0002';
   end if;
 
-  -- One refresh at a time per company: lines, timesheets and corrections see each other.
-  perform pg_advisory_xact_lock(hashtextextended('timesheets:' || p_organisation_id::text, 0));
+  perform private.timesheet_lock(p_organisation_id, p_worker_ids);
 
   v_from_ts := p_from::timestamp at time zone v_zone;
   v_to_ts := (p_to + 1)::timestamp at time zone v_zone;
@@ -829,6 +891,30 @@ begin
   where c.line_id is null;
   get diagnostics v_inserted = row_count;
 
+  -- A clock punch received after its shift's line was decided (security review L2). The decided
+  -- line is frozen, so it only gains the flag late_punch_after_decision for slice 4.3's screen
+  -- (reopen the day to count the punch); the punch keeps its selfie meanwhile
+  -- (private.punch_under_review, case 3).
+  update public.timesheet_lines l
+  set exceptions = l.exceptions || 'late_punch_after_decision'::text
+  where l.organisation_id = p_organisation_id
+    and l.work_date between p_from and p_to
+    and (p_worker_ids is null or l.worker_id = any (p_worker_ids))
+    and l.status in ('approved', 'rejected')
+    and l.shift_assignment_id is not null
+    and not ('late_punch_after_decision' = any (l.exceptions))
+    and exists (
+      select 1 from public.punches p
+      where p.organisation_id = p_organisation_id
+        and p.shift_assignment_id = l.shift_assignment_id
+        and p.kind in ('in', 'out')
+        and p.id is distinct from l.in_punch_id
+        and p.id is distinct from l.out_punch_id
+        and p.received_at > l.decided_at
+    );
+  get diagnostics v_flagged = row_count;
+  v_updated := v_updated + v_flagged;
+
   -- Pending lines whose shift no longer counts. A line a correction points at stays (slice 4.3:
   -- a line with decisions must stay too; add that table here when it lands).
   delete from public.timesheet_lines l
@@ -912,6 +998,10 @@ begin
       and m.role = 'worker'
       and m.worker_id is not null
       and (p_worker_ids is null or m.worker_id = any (p_worker_ids));
+    -- A worker refreshes at most 35 days of their own (security review L3).
+    if p_to - p_from > 35 then
+      raise exception 'Choose a range of 35 days or fewer.' using errcode = '22023';
+    end if;
     if not exists (
       select 1 from public.memberships m
       where m.organisation_id = p_organisation_id and m.user_id = v_uid and m.role = 'worker'
@@ -978,8 +1068,11 @@ begin
 end;
 $$;
 
--- Secret key only (the daily cron): refreshes yesterday and the day before on the company's
--- clock, for every worker.
+-- Secret key only (the daily cron): refreshes the last 7 days on the company's clock, so a missed
+-- run catches up (security review L1), in batches of 50 workers, each in its own subtransaction.
+-- A batch that fails is retried worker by worker, and a worker that still fails is counted and
+-- skipped, so one bad row never blocks the company (security review M1).
+-- Returns {inserted, updated, deleted, workers, failed}.
 create function private.refresh_timesheets_recent(p_organisation_id uuid)
 returns jsonb
 language plpgsql
@@ -989,13 +1082,69 @@ set search_path = ''
 as $$
 declare
   v_today date;
+  v_from date;
+  v_to date;
+  v_zone text;
+  v_workers uuid[];
+  v_batch uuid[];
+  v_worker uuid;
+  v_result jsonb;
+  v_inserted integer := 0;
+  v_updated integer := 0;
+  v_deleted integer := 0;
+  v_failed integer := 0;
+  v_i integer := 1;
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Only the server runs the timesheet refresh.' using errcode = '42501';
   end if;
   perform set_config('metalira.audit_channel', 'system', true);
   v_today := private.org_today(p_organisation_id);
-  return private.timesheet_refresh(p_organisation_id, v_today - 2, v_today - 1, null);
+  v_from := v_today - 7;
+  v_to := v_today - 1;
+  select coalesce(o.timezone, 'Africa/Lagos') into v_zone
+  from public.organisations o where o.id = p_organisation_id;
+
+  select coalesce(array_agg(x.worker_id order by x.worker_id), '{}'::uuid[]) into v_workers
+  from (
+    select sa.worker_id from public.shift_assignments sa
+    where sa.organisation_id = p_organisation_id and sa.shift_date between v_from and v_to
+    union
+    select p.worker_id from public.punches p
+    where p.organisation_id = p_organisation_id and p.kind in ('in', 'out')
+      and p.recorded_at >= v_from::timestamp at time zone v_zone
+      and p.recorded_at < (v_to + 1)::timestamp at time zone v_zone
+    union
+    select l.worker_id from public.timesheet_lines l
+    where l.organisation_id = p_organisation_id and l.work_date between v_from and v_to
+  ) x;
+
+  while v_i <= cardinality(v_workers) loop
+    v_batch := v_workers[v_i:v_i + 49];
+    begin
+      v_result := private.timesheet_refresh(p_organisation_id, v_from, v_to, v_batch);
+      v_inserted := v_inserted + (v_result ->> 'inserted')::integer;
+      v_updated := v_updated + (v_result ->> 'updated')::integer;
+      v_deleted := v_deleted + (v_result ->> 'deleted')::integer;
+    exception when others then
+      foreach v_worker in array v_batch loop
+        begin
+          v_result := private.timesheet_refresh(p_organisation_id, v_from, v_to, array[v_worker]);
+          v_inserted := v_inserted + (v_result ->> 'inserted')::integer;
+          v_updated := v_updated + (v_result ->> 'updated')::integer;
+          v_deleted := v_deleted + (v_result ->> 'deleted')::integer;
+        exception when others then
+          v_failed := v_failed + 1;
+        end;
+      end loop;
+    end;
+    v_i := v_i + 50;
+  end loop;
+
+  return jsonb_build_object(
+    'inserted', v_inserted, 'updated', v_updated, 'deleted', v_deleted,
+    'workers', cardinality(v_workers), 'failed', v_failed
+  );
 end;
 $$;
 
@@ -1067,16 +1216,18 @@ begin
     raise exception 'Your role can''t correct timesheets.' using errcode = '42501';
   end if;
 
-  -- Same lock as the refresh, so a correction and a refresh of the same company queue.
-  perform pg_advisory_xact_lock(hashtextextended('timesheets:' || p_organisation_id::text, 0));
-
+  select l.* into v_line
+  from public.timesheet_lines l
+  where l.organisation_id = p_organisation_id and l.id = p_line_id;
+  if not found then
+    raise exception 'That timesheet day wasn''t found.' using errcode = 'P0002';
+  end if;
+  -- The refresh's lock for this worker, so a correction and a refresh of the same worker queue.
+  perform private.timesheet_lock(p_organisation_id, array[v_line.worker_id]);
   select l.* into v_line
   from public.timesheet_lines l
   where l.organisation_id = p_organisation_id and l.id = p_line_id
   for update;
-  if not found then
-    raise exception 'That timesheet day wasn''t found.' using errcode = 'P0002';
-  end if;
   if v_line.worker_id in (select private.my_worker_ids()) then
     raise exception 'You can''t correct your own timesheet.' using errcode = 'MLTS1';
   end if;
@@ -1099,7 +1250,9 @@ begin
       from public.shift_assignments a
       where a.organisation_id = p_organisation_id and a.id = v_line.shift_assignment_id;
     else
-      select p.recorded_at - interval '12 hours', p.recorded_at + interval '36 hours'
+      -- A no-shift day spans at most 24 hours (security review M1): 4 hours before the clock-in
+      -- that made it to 20 hours after it (its clock-out pairing window).
+      select p.recorded_at - interval '4 hours', p.recorded_at + interval '20 hours'
       into v_from, v_to
       from public.punches p
       where p.organisation_id = p_organisation_id and p.id = v_line.no_shift_punch_id;
@@ -1107,7 +1260,8 @@ begin
     if p_corrected_at is null or p_corrected_at > now()
       or p_corrected_at < v_from or p_corrected_at > v_to
       or p_minutes is not null or p_ot_minutes is not null or p_punch_id is not null then
-      raise exception 'Give a time on the day of this shift, not in the future.' using errcode = 'MLTS3';
+      raise exception 'Give a time on the day of this shift (within 24 hours for a day with no shift), not in the future.'
+        using errcode = 'MLTS3';
     end if;
   elsif p_kind = 'set_minutes' then
     if p_minutes is null or p_minutes not between 0 and 1440
@@ -1192,9 +1346,21 @@ grant execute on function public.add_timesheet_correction(
 -- 7. Selfie retention: timesheet review replaces the placeholder (owner decision 12)
 -- ---------------------------------------------------------------------------
 
--- Under review while any line using the punch is pending or disputed, or no line uses it yet;
--- not once every line using it is approved or rejected. Only the secret-key sweep functions
--- (punch_selfies_due, clear_punch_selfies, crew_photos_due, clear_crew_photos) call it.
+-- Is the punch under review, so its selfie is kept past 90 days (decision 12)? Only the
+-- secret-key sweep functions (punch_selfies_due, clear_punch_selfies, crew_photos_due,
+-- clear_crew_photos) call it.
+-- 1. A line uses the punch (its clock-in, clock-out or no-shift clock-in, or one of the line's
+--    corrections sets it aside): under review while any such line is pending or disputed; not
+--    once every one is approved or rejected.
+-- 2. No line uses it, but its shift's line is pending or disputed: under review (the refresh
+--    hasn't picked it, or it is a second clock-in the reviewer may still want).
+-- 3. No line uses it and it was received after its shift's line was decided (a late punch,
+--    security review L2): under review, so nothing is swept unseen; the line carries
+--    late_punch_after_decision until slice 4.3 reopens it.
+-- 4. Otherwise no line uses it: under review only while under 90 days old (security review L1),
+--    so a punch no line ever takes (a company that switched Shifts off, a leave day) doesn't
+--    keep its selfie forever. The daily cron refreshes the last 7 days, so a punch that should
+--    have a line has one long before 90 days.
 create or replace function private.punch_under_review(p_organisation_id uuid, p_punch_id uuid)
 returns boolean
 language sql
@@ -1203,7 +1369,7 @@ security definer
 set search_path = ''
 as $$
   with p as (
-    select pu.id, pu.shift_assignment_id
+    select pu.id, pu.shift_assignment_id, pu.kind, pu.received_at, pu.created_at
     from public.punches pu
     where pu.organisation_id = p_organisation_id and pu.id = p_punch_id
   ),
@@ -1214,17 +1380,27 @@ as $$
     where l.organisation_id = p_organisation_id
     union all
     select l.status
-    from public.timesheet_lines l
-    join p on p.shift_assignment_id is not null and l.shift_assignment_id = p.shift_assignment_id
-    where l.organisation_id = p_organisation_id
-    union all
-    select l.status
     from public.timesheet_corrections c
     join public.timesheet_lines l on l.id = c.line_id
     where c.organisation_id = p_organisation_id and c.punch_id = p_punch_id
+  ),
+  shift_line as (
+    select l.status, l.decided_at
+    from public.timesheet_lines l
+    join p on p.shift_assignment_id is not null and l.shift_assignment_id = p.shift_assignment_id
+    where l.organisation_id = p_organisation_id
   )
-  select not exists (select 1 from uses)
-    or exists (select 1 from uses u where u.status in ('pending', 'disputed'))
+  select case
+    when exists (select 1 from uses) then
+      exists (select 1 from uses u where u.status in ('pending', 'disputed'))
+    when exists (select 1 from shift_line sl where sl.status in ('pending', 'disputed')) then true
+    when exists (
+      select 1 from shift_line sl, p
+      where sl.status in ('approved', 'rejected') and p.kind in ('in', 'out')
+        and p.received_at > sl.decided_at
+    ) then true
+    else coalesce((select p.created_at > now() - interval '90 days' from p), true)
+  end
 $$;
 
 revoke all on function private.punch_under_review(uuid, uuid) from public, anon, authenticated;

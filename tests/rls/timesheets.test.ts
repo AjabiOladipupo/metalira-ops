@@ -168,7 +168,13 @@ async function punch(
   assignmentId: string | null,
   kind: "in" | "out" | "checkpoint",
   when: number,
-  options: { flags?: string[]; orgId?: string; siteId?: string; id?: string } = {},
+  options: {
+    flags?: string[];
+    orgId?: string;
+    siteId?: string;
+    id?: string;
+    receivedAt?: number;
+  } = {},
 ): Promise<string> {
   const orgId = options.orgId ?? owner.orgId;
   const id = options.id ?? randomUUID();
@@ -185,7 +191,7 @@ async function punch(
     `insert into public.punches (id, organisation_id, worker_id, kind, recorded_by_user, client_event_id,
        shift_assignment_id, site_id, device_time, received_at, recorded_at, time_source,
        clock_drift_seconds, geofence_result, flags, payload_hash, checkpoint_id)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $9, 'elapsed', 0, 'inside', $10,
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $12, $9, 'elapsed', 0, 'inside', $10,
        md5(gen_random_uuid()::text), $11)`,
     [
       id,
@@ -199,6 +205,7 @@ async function punch(
       new Date(when),
       options.flags ?? [],
       checkpoint,
+      new Date(options.receivedAt ?? when),
     ],
   );
   return id;
@@ -624,6 +631,34 @@ describe("corrections", () => {
     expect(notMine.error?.code).toBe("MLTS3");
   });
 
+  it("a no-shift day can't be corrected to span more than 24 hours (security review M1)", async () => {
+    const w = await addWorker();
+    const p = await punch(w, null, "in", at(DAY, "08:00"), { flags: ["no_shift"] });
+    await punch(w, null, "out", at(DAY, "23:00"), { flags: ["no_shift"] });
+    expect((await refresh(owner.client)).error).toBeNull();
+    const { rows } = await db.query<Line>(
+      "select * from public.timesheet_lines where no_shift_punch_id = $1",
+      [p],
+    );
+    const lineId = rows[0]!.id;
+    const early = await correct(staff.ops.client, lineId, {
+      kind: "set_clock_in",
+      correctedAt: new Date(at(DAY, "08:00") - 12 * 3_600_000).toISOString(),
+      reason: "Started the night before",
+    });
+    expect(early.error?.code).toBe("MLTS3");
+    const ok = await correct(staff.ops.client, lineId, {
+      kind: "set_clock_in",
+      correctedAt: new Date(at(DAY, "08:00") - 3 * 3_600_000).toISOString(),
+      reason: "Arrived at 05:00",
+    });
+    expect(ok.error).toBeNull();
+    const after = await db.query<Line>("select * from public.timesheet_lines where id = $1", [
+      lineId,
+    ]);
+    expect(after.rows[0]!.worked_minutes).toBe(1080);
+  });
+
   it("void_punch sets a clock-in aside and the next one counts", async () => {
     const w = await addWorker();
     const asg = await rostered(w, DAY, at(DAY, "07:00"), at(DAY, "19:00"));
@@ -685,6 +720,12 @@ describe("refresh scope", () => {
     expect(cross.error?.code).toBe("42501");
   });
 
+  it("a worker refreshes at most 35 days", async () => {
+    const wide = await refresh(staff.worker.client, addDays(DAY, -36), DAY);
+    expect(wide.error?.code).toBe("22023");
+    expect((await refresh(staff.worker.client, addDays(DAY, -35), DAY)).error).toBeNull();
+  });
+
   it("a line manager refreshes only reportees, a worker only themselves", async () => {
     const w = await addWorker();
     const asg = await rostered(w, DAY, at(DAY, "07:00"), at(DAY, "19:00"));
@@ -709,6 +750,38 @@ describe("refresh scope", () => {
     expect(orgs.error).toBeNull();
     const recent = await admin.rpc("refresh_timesheets_recent", { p_organisation_id: owner.orgId });
     expect(recent.error).toBeNull();
+    expect(recent.data).toMatchObject({ failed: 0 });
+  });
+
+  it("the cron skips a worker whose refresh fails and refreshes the rest (security review M1)", async () => {
+    const yesterday = addDays(lagosToday(), -1);
+    const bad = await addWorker();
+    const good = await addWorker();
+    const badAsg = await rostered(bad, yesterday, at(yesterday, "07:00"), at(yesterday, "19:00"));
+    const goodAsg = await rostered(good, yesterday, at(yesterday, "07:00"), at(yesterday, "19:00"));
+    // A row the database refuses for one worker only, standing in for any bad data.
+    await db.query(`create function public.ts_test_refuse() returns trigger language plpgsql as $f$
+      begin
+        if new.worker_id = '${bad}'::uuid then raise exception 'refused for the test'; end if;
+        return new;
+      end $f$`);
+    await db.query(
+      "create trigger ts_test_refuse before insert on public.timesheet_lines for each row execute function public.ts_test_refuse()",
+    );
+    try {
+      const res = await admin.rpc("refresh_timesheets_recent", { p_organisation_id: owner.orgId });
+      expect(res.error).toBeNull();
+      expect((res.data as { failed: number }).failed).toBe(1);
+    } finally {
+      await db.query("drop trigger ts_test_refuse on public.timesheet_lines");
+      await db.query("drop function public.ts_test_refuse()");
+    }
+    expect((await lineFor(goodAsg)).exceptions).toEqual(["no_show"]);
+    const none = await db.query(
+      "select 1 from public.timesheet_lines where shift_assignment_id = $1",
+      [badAsg],
+    );
+    expect(none.rows).toEqual([]);
   });
 });
 
@@ -730,18 +803,62 @@ describe("punch_under_review follows the lines (decision 12)", () => {
     expect((await refresh(owner.client)).error).toBeNull();
     const l = await lineFor(asg);
     expect(await underReview(p)).toBe(true);
-    for (const [status, expected] of [
-      ["disputed", true],
-      ["approved", false],
-    ] as const) {
-      await db.query("update public.timesheet_lines set status = $2 where id = $1", [l.id, status]);
-      expect(await underReview(p), status).toBe(expected);
-      // A punch of the same shift that the line didn't pick follows the line too.
-      expect(await underReview(second), status).toBe(expected);
-    }
+    // A second clock-in the line didn't pick is kept while the shift's line is open.
+    expect(await underReview(second)).toBe(true);
+    await db.query("update public.timesheet_lines set status = 'disputed' where id = $1", [l.id]);
+    expect(await underReview(p)).toBe(true);
+    expect(await underReview(second)).toBe(true);
+    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    expect(await underReview(p)).toBe(false);
+    // Once decided, a punch the line doesn't point at follows the 90-day age rule only (it
+    // arrived before the decision): kept now, swept once old (security review L2).
+    expect(await underReview(second)).toBe(true);
     await db.query("update public.timesheet_lines set status = 'pending' where id = $1", [l.id]);
     await db.query("update public.timesheet_lines set status = 'rejected' where id = $1", [l.id]);
     expect(await underReview(p)).toBe(false);
+  });
+
+  it("a punch no line ever uses is kept under 90 days only (security review L1)", async () => {
+    const w = await addWorker();
+    const old = new Date(Date.now() - 100 * 86_400_000);
+    const stale = randomUUID();
+    await db.query(
+      `insert into public.punches (id, organisation_id, worker_id, kind, recorded_by_user, client_event_id,
+         site_id, device_time, received_at, recorded_at, time_source, clock_drift_seconds,
+         geofence_result, flags, payload_hash, created_at)
+       values ($1, $2, $3, 'out', $4, $5, $6, $7, $7, $7, 'elapsed', 0, 'inside', '{}', md5('stale'), $7)`,
+      [stale, owner.orgId, w, randomUUID(), randomUUID(), site, old],
+    );
+    expect(await underReview(stale)).toBe(false);
+    const fresh = await punch(w, null, "out", at(DAY, "16:00"));
+    expect(await underReview(fresh)).toBe(true);
+  });
+
+  it("a punch arriving after its day was decided is kept and flags the line (security review L2)", async () => {
+    const w = await addWorker();
+    const asg = await rostered(w, DAY, at(DAY, "07:00"), at(DAY, "19:00"));
+    await punch(w, asg, "in", at(DAY, "07:00"));
+    expect((await refresh(owner.client)).error).toBeNull();
+    const l = await lineFor(asg);
+    await db.query("update public.timesheet_lines set status = 'approved' where id = $1", [l.id]);
+    const decided = await lineFor(asg);
+    expect(decided.decided_at).not.toBeNull();
+    // The clock-out syncs after the approval.
+    const late = await punch(w, asg, "out", at(DAY, "19:00"), { receivedAt: Date.now() });
+    expect(await underReview(late)).toBe(true);
+    expect((await refresh(owner.client)).error).toBeNull();
+    const flagged = await lineFor(asg);
+    expect(flagged).toMatchObject({
+      status: "approved",
+      worked_minutes: decided.worked_minutes,
+      out_punch_id: null,
+      exceptions: [...decided.exceptions, "late_punch_after_decision"],
+    });
+    expect(await underReview(late)).toBe(true);
+    // The flag is the only change a decided day accepts.
+    await expect(
+      db.query("update public.timesheet_lines set exceptions = '{}' where id = $1", [l.id]),
+    ).rejects.toMatchObject({ code: "MLTS0" });
   });
 
   it("a voided punch follows the line that set it aside", async () => {
@@ -765,7 +882,7 @@ describe("punch_under_review follows the lines (decision 12)", () => {
     expect(await underReview(p)).toBe(false);
   });
 
-  it("the 90-day selfie sweep keeps a pending day's selfie and offers a decided day's", async () => {
+  it("the 90-day selfie sweep keeps a pending day's selfie and offers a decided or unused one", async () => {
     const old = new Date(Date.now() - 100 * 86_400_000);
     const day = lagosToday(old);
     const ym = old.toISOString().slice(0, 7);
@@ -797,7 +914,9 @@ describe("punch_under_review follows the lines (decision 12)", () => {
       expect(res.error).toBeNull();
       return (res.data ?? []).some((d) => d.punch_id === id);
     };
-    expect(await due()).toBe(false);
+    // No line has ever used it and it is past 90 days (the cron covers 7 days, so a punch that
+    // should have a line has one long before): not kept (security review L1).
+    expect(await due()).toBe(true);
     expect((await refresh(owner.client, day, day)).error).toBeNull();
     const l = await lineFor(asg);
     expect(await due()).toBe(false);
@@ -870,6 +989,14 @@ describe("the SQL rules match src/lib/timesheets", () => {
         shiftRemoved: true,
       },
       { ...base, inFlags: ["time_unverified"], graceMinutes: 0 },
+      // Clamped to a 24-hour day (security review M1).
+      {
+        ...base,
+        startsAt: null,
+        endsAt: null,
+        inAt: at("2026-11-10", "07:00"),
+        outAt: at("2026-11-11", "13:00"),
+      },
     ];
     const ts = (v: number | null) => (v === null ? null : new Date(v));
     for (const c of cases) {

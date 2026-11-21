@@ -192,6 +192,20 @@ describe("no-shift clock-ins", () => {
     });
   });
 
+  it("never count more than a 24-hour day (security review M1)", () => {
+    const m = day({
+      ...LONE,
+      inAt: lagos("2026-11-10T07:00:00"),
+      outAt: lagos("2026-11-11T13:00:00"),
+    });
+    expect(m.workedMinutes).toBe(1440);
+    const shift = day({
+      inAt: lagos("2026-11-10T07:00:00"),
+      outAt: lagos("2026-11-12T07:00:00"),
+    });
+    expect(shift.otMinutes).toBe(1440);
+  });
+
   it("with no clock-out: 0, and no_clock_out once 20 hours have passed", () => {
     const early = day({
       ...LONE,

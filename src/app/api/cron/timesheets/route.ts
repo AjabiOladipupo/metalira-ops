@@ -1,8 +1,8 @@
 import { isCronRequest } from "@/server/people/imports/sweep";
 import { runTimesheetCron } from "@/server/workforce/timesheet-cron";
 
-// Daily Vercel Cron job (vercel.json, 04:00): rebuilds yesterday's and the day before's timesheet
-// days from punches for every company with Shifts on. Vercel sends
+// Daily Vercel Cron job (vercel.json, 04:00 Lagos): rebuilds the last 7 days' timesheet days from
+// punches for every company with Shifts on. Vercel sends
 // `Authorization: Bearer <CRON_SECRET>`; without a configured secret, or with the wrong one,
 // every request gets an empty 404, so the route is not revealed.
 

@@ -2161,7 +2161,9 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(addCorrectionSpec),
     changes: "one",
     action: at("workforce/timesheet-actions", "addTimesheetCorrectionAction"),
-    agent: true,
+    agent: false,
+    agentNote:
+      "Changes the hours a person is paid for: kept to people until slice 4.3 adds a preview (current against new minutes).",
   },
 ];
 

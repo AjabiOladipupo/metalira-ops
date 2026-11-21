@@ -132,6 +132,34 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 
 **Accept:** a 07:00 to 19:00 shift clocked in at 07:08 and out at 19:20 shows 720 worked minutes and 20 overtime minutes; clocked in at 07:25 it shows 695 minutes, flagged late; with no clock-out it shows 0 until a correction with a reason sets one.
 
+**As built (4.2, PR #62).** What later slices need to know:
+- **Lines:** a line is made once its shift has started. A removed or cancelled assignment gets a line only when it has punches, flagged `shift_removed`. Times are truncated to the whole minute. Overtime counts only after the shift end. Every count is clamped to 0..1440.
+- **No-shift days:** a no-shift clock-in pairs with the next clock-out within 20 hours. A no-shift correction must fall within 4 hours before to 20 hours after the clock-in (MLTS3), so the day spans 24 hours at most.
+- **Corrections:**
+  - `set_minutes` replaces worked and overtime minutes and clears the minute-rule exceptions.
+  - Every correction adds `corrected`.
+  - `void_punch` names only the line's current clock-in or clock-out.
+  - The latest correction of each kind applies.
+- **Refresh:** disputed lines are rebuilt like pending ones and keep their status. A pending line with no corrections is deleted when its shift no longer counts.
+- **Decided lines:** `decided_at` is set by the guard when a line becomes approved or rejected, and cleared when it goes back to pending or disputed. A decided line is frozen except for status, `work_unit_id` and gaining `late_punch_after_decision`.
+- **Locks:** company-wide refreshes take the company advisory lock exclusively. Worker-scoped refreshes (up to 200 workers) take it shared, plus one lock per worker. A worker's own refresh is capped at 35 days; managers can refresh up to 62.
+- **Cron:** `/api/cron/timesheets` (04:00 Lagos) refreshes the last 7 days in batches of 50 workers. A worker whose refresh fails is skipped and counted.
+- **Selfie retention:** `private.punch_under_review` keeps a selfie in these cases:
+  - while a line pointing at the punch is pending or disputed;
+  - while the punch's shift line is open;
+  - when the punch arrived after its shift line was decided;
+  - otherwise only while the punch is under 90 days old.
+- **For 4.3:**
+  - Add `timesheet_decisions` to the "no decisions" check in the refresh's delete of stale pending lines. Otherwise the refresh fails on the new foreign key.
+  - Decide which exceptions are informational for "Approve N clean". A supervisor punch's `no_location`, `no_selfie` and `supervisor` are copied onto the line, so crew days are never clean if clean means "no exceptions" (3.7's board drops `no_location` for supervisor punches).
+  - Show `late_punch_after_decision` and offer Reopen. The late punch keeps its selfie until the day is reopened and decided again.
+  - Add a preview (current against new minutes) to `timesheets.correct`, then consider `agent: true`.
+  - Call `refreshTimesheetRange` when the screen opens.
+- **For 4.4:**
+  - Replace `private.timesheet_on_leave` (a placeholder that returns false), so a worker on approved leave gets no line.
+  - Add the leave tables to `private.worker_has_work_records` if they are work records.
+  - Punches on a leave day get no line, so their selfies fall under the 90-day age rule.
+
 ### 4.3 Timesheet approval and Work Units (after 4.2)
 - Migration `20261121130000_timesheet_approval.sql`.
 - `timesheet_decisions` (insert-only): line, decision (approved, rejected, disputed, reopened), reason (required for rejected, disputed and reopened), actor, snapshot of the minutes decided. The line's status follows its latest decision, set only by the functions.

@@ -28,6 +28,7 @@ export const TIMESHEET_EXCEPTIONS = [
   "time_unverified",
   "supervisor",
   "corrected",
+  "late_punch_after_decision",
 ] as const;
 
 export type TimesheetException = (typeof TIMESHEET_EXCEPTIONS)[number];
@@ -80,6 +81,7 @@ export const TIMESHEET_EXCEPTION_LABELS: Record<TimesheetException, string> = {
   time_unverified: "Time not checked",
   supervisor: "Clocked in by supervisor",
   corrected: "Corrected",
+  late_punch_after_decision: "Punch arrived after the decision",
 };
 
 export interface LineInput {
@@ -180,6 +182,8 @@ export function computeLine(input: LineInput): LineMinutes {
     }
   }
 
+  // A day is at most 24 hours: every count is clamped to 0..1440 (security review M1).
+  const day = (n: number) => Math.min(Math.max(n, 0), 1440);
   const flags = new Set<string>([...input.inFlags, ...input.outFlags]);
   const exceptions = TIMESHEET_EXCEPTIONS.filter(
     (name) =>
@@ -190,11 +194,11 @@ export function computeLine(input: LineInput): LineMinutes {
       (name === "shift_removed" && input.shiftRemoved),
   );
   return {
-    scheduledMinutes: scheduled,
-    workedMinutes: Math.max(worked, 0),
-    lateMinutes: late,
-    earlyMinutes: early,
-    otMinutes: Math.max(ot, 0),
+    scheduledMinutes: day(scheduled),
+    workedMinutes: day(worked),
+    lateMinutes: day(late),
+    earlyMinutes: day(early),
+    otMinutes: day(ot),
     exceptions,
     needsReview: REVIEW_PUNCH_FLAGS.some((flag) => flags.has(flag)),
   };
