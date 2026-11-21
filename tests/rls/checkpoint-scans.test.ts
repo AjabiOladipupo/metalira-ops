@@ -237,6 +237,7 @@ interface ScanArgs {
   point?: { lat: number; lng: number } | null;
   deviceTime?: Date;
   elapsedMs?: number;
+  offline?: boolean;
 }
 
 function scan(w: Worker, args: ScanArgs = {}) {
@@ -253,6 +254,7 @@ function scan(w: Worker, args: ScanArgs = {}) {
     p_latitude: (point?.lat ?? null) as number,
     p_longitude: (point?.lng ?? null) as number,
     p_accuracy_m: 10,
+    p_queued_offline: args.offline ?? false,
   });
 }
 
@@ -403,6 +405,26 @@ describe("record_checkpoint_scan: a scan on shift", () => {
     expect(none.flags).toContain("no_location");
   });
 
+  it("flags a scan the phone saved with no live session, and one sent hours late", async () => {
+    const w = await addWorker();
+    await onShift(w);
+    const offline = await scanned(w, { offline: true });
+    expect(offline.flags).toContain("queued_offline");
+    expect(await scanned(w).then((r) => r.flags)).not.toContain("queued_offline");
+    // The phone says it happened 3 hours ago: recorded, flagged, never clean.
+    const late = await scan(w, {
+      deviceTime: new Date(Date.now() - 3 * 3_600_000),
+      elapsedMs: 3 * 3_600_000,
+    });
+    if (late.error) {
+      // Before 03:30 Lagos the shift (from 00:00) didn't hold that time.
+      expect(late.error.code).toBe("MLCK2");
+    } else {
+      const flags = (late.data as unknown as Scanned).flags;
+      expect(flags).toEqual(expect.arrayContaining(["delayed", "late_sync"]));
+    }
+  });
+
   it("never stores the token: not on the punch, not in its audit row", async () => {
     const w = await addWorker();
     await onShift(w);
@@ -460,12 +482,12 @@ describe("record_checkpoint_scan: the token stays inside the company", () => {
     const elsewhere = await addWorker();
     await onShift(elsewhere);
     expect((await scan(elsewhere, { token: farGate.token })).error?.code).toBe("MLCK2");
-    // A scan long after the shift (the phone says yesterday) isn't on it either.
-    const late = await scan(elsewhere, {
+    // A scan more than 24 hours old is refused outright (review L1), even on shift.
+    const old = await scan(elsewhere, {
       deviceTime: new Date(Date.now() - 30 * 3_600_000),
       elapsedMs: 30 * 3_600_000,
     });
-    expect(late.error?.code).toBe("MLCK2");
+    expect(old.error?.code).toBe("MLPU5");
     expect(await countFor(free.id)).toBe(0);
     expect(await countFor(elsewhere.id)).toBe(0);
   });
@@ -664,6 +686,15 @@ describe("scans are punches: insert-only, and apart from clock-in and clock-out"
     const context = await w.client.rpc("my_clock_context", { p_organisation_id: owner.orgId });
     expect(context.error).toBeNull();
     expect((context.data as { last_punch: { kind: string } }).last_punch.kind).toBe("in");
+    // The live board (3.7) still reads the worker as on site, not as a "checkpoint" punch.
+    const board = await staff.ops.client.rpc("attendance_board", {
+      p_organisation_id: owner.orgId,
+    });
+    expect(board.error).toBeNull();
+    const mine = (board.data as { worker_id: string; last_punch_kind: string | null }[]).find(
+      (r) => r.worker_id === w.id,
+    );
+    expect(mine?.last_punch_kind).toBe("in");
     const out = await clock("out", 0);
     expect(out.error).toBeNull();
     expect((out.data as { flags: string[] }).flags).not.toContain("out_without_in");

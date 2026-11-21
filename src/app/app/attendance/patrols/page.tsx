@@ -10,7 +10,13 @@ import { StatusDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
 import { addDays, formatDate } from "@/lib/dates";
-import { formatPatrolTotals, parseDayParam, scanNeedsReview, type PatrolScan } from "@/lib/patrols";
+import {
+  formatPatrolTotals,
+  parseDayParam,
+  scanMarkers,
+  scanNeedsReview,
+  type PatrolScan,
+} from "@/lib/patrols";
 import { formatDistance } from "@/lib/punches/clock";
 import { timeIn } from "@/lib/roster";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -158,7 +164,7 @@ async function PatrolsPage({
         <KpiTile
           label="To check"
           value={String(patrol.flaggedScans)}
-          note="Outside or no location"
+          note="Away, late or unverified"
         />
       </div>
 
@@ -207,8 +213,16 @@ async function PatrolsPage({
                     <span className="min-w-0">{scan.workerName}</span>
                     <span className={scanNeedsReview(scan) ? "font-semibold" : "text-fg-muted"}>
                       {scanWhere(scan)}
-                      {scan.flags.includes("late_sync") ? " · synced late" : ""}
                     </span>
+                    {scanMarkers(scan.flags).map((marker) => (
+                      <span
+                        key={marker}
+                        className="rounded-full border border-foreground px-2 text-xs font-semibold"
+                        data-testid="patrol-marker"
+                      >
+                        {marker}
+                      </span>
+                    ))}
                   </li>
                 ))}
               </ul>

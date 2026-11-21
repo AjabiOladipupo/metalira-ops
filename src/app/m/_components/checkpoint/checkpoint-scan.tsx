@@ -215,6 +215,7 @@ export function CheckpointScan() {
         latitude: fix?.lat ?? null,
         longitude: fix?.lng ?? null,
         accuracy_m: fix?.accuracy ?? null,
+        queued_offline: scanOwner.userId === null,
       });
       setPhase({
         name: "done",

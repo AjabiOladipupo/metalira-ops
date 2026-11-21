@@ -79,6 +79,19 @@ describe("the scan page route", () => {
 });
 
 describe("the queued scan", () => {
+  it("marks a scan saved without a live session, and defaults to a live one", () => {
+    const parsed = checkpointScanPayloadSchema.parse({
+      token: TOKEN,
+      latitude: null,
+      longitude: null,
+      accuracy_m: null,
+    });
+    expect(parsed.queued_offline).toBe(false);
+    expect(
+      checkpointScanPayloadSchema.parse({ ...parsed, queued_offline: true }).queued_offline,
+    ).toBe(true);
+  });
+
   it("holds the token and the location, nothing else", () => {
     const ok = checkpointScanPayloadSchema.safeParse({
       token: TOKEN,
@@ -139,7 +152,13 @@ function scanItem(): AnyQueueItem {
     organisation_id: ORG,
     worker_id: WORKER,
     kind: "checkpoint_scan",
-    payload: { token: TOKEN, latitude: 6.45, longitude: 3.36, accuracy_m: 12 },
+    payload: {
+      token: TOKEN,
+      latitude: 6.45,
+      longitude: 3.36,
+      accuracy_m: 12,
+      queued_offline: false,
+    },
     device_time: 1_800_000_000_000 - 4000,
     device_elapsed: { monotonic_ms: 1, time_origin_ms: 1, wall_ms: 1 },
     attempts: 0,
@@ -173,7 +192,13 @@ describe("the sender for scans", () => {
     expect(recordCheckpointScan).toHaveBeenCalledWith({
       owner,
       client_event_id: EVENT,
-      payload: { token: TOKEN, latitude: 6.45, longitude: 3.36, accuracy_m: 12 },
+      payload: {
+        token: TOKEN,
+        latitude: 6.45,
+        longitude: 3.36,
+        accuracy_m: 12,
+        queued_offline: false,
+      },
       device_time: 1_800_000_000_000 - 4000,
       timing,
     });

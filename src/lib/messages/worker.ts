@@ -439,6 +439,7 @@ export const workerMessages = {
       no_consent: "Agree to share your location on the Clock screen, then scan again.",
       shifts_off: "Patrol scans are switched off for your company.",
       left: "You have left this company, so the scan wasn't recorded.",
+      invalid: "This scan is more than 24 hours old or wasn't complete, so it wasn't recorded.",
       other: "Your company's system didn't accept this scan. Tell your supervisor.",
     },
     outsideNote: "You were outside the site area. Your supervisor will check it.",

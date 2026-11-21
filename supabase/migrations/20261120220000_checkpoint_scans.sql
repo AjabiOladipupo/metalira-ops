@@ -33,9 +33,13 @@
 --      it has one, else from the site's centre;
 --    * idempotent per worker on client_event_id (the same scan again returns its row; a
 --      different event under the same id is MLPU2; another worker's id is theirs alone);
---    * at most 120 scans an hour per worker (MLPU8).
+--    * at most 120 scans an hour per worker (MLPU8);
+--    * a scan more than 24 hours old (by its corrected time) is refused (MLPU5);
+--    * a scan the phone saved with no live session (offline, under the last signed-in worker)
+--      carries `queued_offline` (p_queued_offline), so the history marks it for review.
 --    The answer carries the checkpoint's and site's names for the done screen, never the token.
--- 3. record_punch and my_clock_context look only at clock-ins and clock-outs: a scan is not the
+-- 3. record_punch, my_clock_context and attendance_board (3.7) look only at clock-ins and
+--    clock-outs: a scan is not the
 --    "punch before" a clock-out, does not count toward the 20 clock punches an hour, and is never
 --    the worker's last punch on the clock screen. (Slices 3.6 and 3.7: if you replace either
 --    function, keep the `p.kind in ('in', 'out')` filters.)
@@ -95,6 +99,31 @@ as $$ select interval '30 minutes' $$;
 
 revoke all on function private.checkpoint_scan_slack() from public, anon, authenticated;
 
+-- The oldest scan the server records: 24 hours (clock punches: private.punch_max_elapsed, 7 days).
+create function private.checkpoint_scan_max_age()
+returns interval
+language sql
+immutable
+set search_path = ''
+as $$ select interval '24 hours' $$;
+
+revoke all on function private.checkpoint_scan_max_age() from public, anon, authenticated;
+
+-- Every flag a punch can carry: the 3.5 list plus `queued_offline`, a checkpoint scan the phone
+-- saved with no live session (static QR codes can be scanned offline; security review L2).
+create or replace function private.punch_flag_names()
+returns text[]
+language sql
+immutable
+set search_path = ''
+as $$
+  select array[
+    'outside', 'near', 'no_location', 'no_shift', 'late', 'early_out', 'no_selfie',
+    'clock_drift', 'delayed', 'late_sync', 'time_unverified', 'double_in', 'out_without_in',
+    'queued_offline'
+  ]
+$$;
+
 create function private.record_checkpoint_scan(
   p_expected_organisation_id uuid,
   p_expected_worker_id uuid,
@@ -105,7 +134,8 @@ create function private.record_checkpoint_scan(
   p_elapsed_ms bigint,
   p_latitude double precision,
   p_longitude double precision,
-  p_accuracy_m double precision
+  p_accuracy_m double precision,
+  p_queued_offline boolean default false
 )
 returns jsonb
 language plpgsql
@@ -180,7 +210,8 @@ begin
     encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex'),
     coalesce(round(p_latitude::numeric, 6)::text, '-'),
     coalesce(round(p_longitude::numeric, 6)::text, '-'),
-    coalesce(round(p_accuracy_m::numeric)::text, '-')
+    coalesce(round(p_accuracy_m::numeric)::text, '-'),
+    coalesce(p_queued_offline, false)::text
   ));
 
   -- Idempotency: the same scan sent again gets the row it made.
@@ -241,6 +272,15 @@ begin
     raise exception 'Too many scans in the last hour. Try again later.' using errcode = 'MLPU8';
   end if;
 
+  -- Time. A scan more than 24 hours old is refused (a patrol scan is only worth having fresh;
+  -- clock punches allow 7 days). Checked before the token, so it says nothing about the code.
+  select t.recorded_at, t.time_source into v_recorded, v_time_source
+  from private.punch_corrected_time(p_device_time, p_sent_device_time, p_elapsed_ms, v_received) t;
+  if v_recorded < v_received - private.checkpoint_scan_max_age() then
+    raise exception 'This scan is more than 24 hours old.' using errcode = 'MLPU5';
+  end if;
+  v_drift := round(extract(epoch from (p_device_time - v_recorded)))::integer;
+
   -- The checkpoint: active, in the session's organisation only. One refusal for every miss.
   if p_token is not null and p_token ~ '^[0-9a-f]{64}$' then
     select c.* into v_checkpoint
@@ -252,11 +292,6 @@ begin
   if v_checkpoint.id is null then
     raise exception 'This code isn''t a checkpoint you can scan.' using errcode = 'MLCK1';
   end if;
-
-  -- Time.
-  select t.recorded_at, t.time_source into v_recorded, v_time_source
-  from private.punch_corrected_time(p_device_time, p_sent_device_time, p_elapsed_ms, v_received) t;
-  v_drift := round(extract(epoch from (p_device_time - v_recorded)))::integer;
 
   -- The shift at the checkpoint's site that holds the scan, a published one (slice 3.3) first.
   select a.id, a.shift_id, a.starts_at, a.ends_at
@@ -305,6 +340,10 @@ begin
     'checkpoint', v_result, v_has_point, false, v_asg_start, v_asg_end, 0,
     v_recorded, v_received, v_drift, v_time_source, null, null
   );
+  -- Saved on the phone with no live session (the last signed-in worker, offline): reviewed.
+  if coalesce(p_queued_offline, false) then
+    v_flags := array_append(v_flags, 'queued_offline'::text);
+  end if;
 
   insert into public.punches (
     organisation_id, worker_id, kind, source, recorded_by_user, client_event_id,
@@ -337,11 +376,11 @@ $$;
 
 revoke all on function private.record_checkpoint_scan(
   uuid, uuid, uuid, text, timestamptz, timestamptz, bigint, double precision, double precision,
-  double precision
+  double precision, boolean
 ) from public, anon;
 grant execute on function private.record_checkpoint_scan(
   uuid, uuid, uuid, text, timestamptz, timestamptz, bigint, double precision, double precision,
-  double precision
+  double precision, boolean
 ) to authenticated;
 
 create function public.record_checkpoint_scan(
@@ -354,7 +393,8 @@ create function public.record_checkpoint_scan(
   p_elapsed_ms bigint,
   p_latitude double precision,
   p_longitude double precision,
-  p_accuracy_m double precision
+  p_accuracy_m double precision,
+  p_queued_offline boolean default false
 )
 returns jsonb
 language sql
@@ -364,17 +404,18 @@ set search_path = ''
 as $$
   select private.record_checkpoint_scan(
     p_expected_organisation_id, p_expected_worker_id, p_client_event_id, p_token, p_device_time,
-    p_sent_device_time, p_elapsed_ms, p_latitude, p_longitude, p_accuracy_m
+    p_sent_device_time, p_elapsed_ms, p_latitude, p_longitude, p_accuracy_m,
+    coalesce(p_queued_offline, false)
   )
 $$;
 
 revoke all on function public.record_checkpoint_scan(
   uuid, uuid, uuid, text, timestamptz, timestamptz, bigint, double precision, double precision,
-  double precision
+  double precision, boolean
 ) from public, anon;
 grant execute on function public.record_checkpoint_scan(
   uuid, uuid, uuid, text, timestamptz, timestamptz, bigint, double precision, double precision,
-  double precision
+  double precision, boolean
 ) to authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -749,5 +790,166 @@ begin
     ), '[]'::jsonb)
   ) into v_result;
   return v_result;
+end;
+$$;
+
+-- attendance_board (slice 3.7): a shift's punches are its clock-ins and clock-outs; scans carry the
+-- shift too, but never decide on site, clocked out or the flags. Only the filter is new.
+create or replace function private.attendance_board(p_organisation_id uuid)
+returns table (
+  assignment_id uuid,
+  shift_date date,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  site_id uuid,
+  site_name text,
+  post_id uuid,
+  post_name text,
+  worker_id uuid,
+  worker_name text,
+  staff_id text,
+  phone text,
+  phone_last4 text,
+  published boolean,
+  first_in_at timestamptz,
+  last_punch_kind text,
+  last_punch_at timestamptz,
+  punch_flags text[],
+  by_supervisor boolean,
+  status text,
+  late_minutes integer,
+  site_last_sync_at timestamptz,
+  site_late_syncs integer,
+  board_at timestamptz,
+  late_grace_minutes integer,
+  no_show_after_minutes integer,
+  time_zone text
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_now timestamptz := now();
+  v_all boolean;
+  v_crew boolean;
+  v_phone boolean;
+  v_zone text;
+  v_grace integer;
+  v_no_show integer;
+  v_enabled boolean;
+  v_day_start timestamptz;
+begin
+  if private.session_uid() is null or p_organisation_id is null then
+    raise exception 'Your role can''t see live attendance.' using errcode = '42501';
+  end if;
+  v_all := private.has_role(p_organisation_id, array['owner', 'admin', 'hr', 'ops_manager']);
+  v_crew := not v_all and private.has_role(p_organisation_id, array['line_manager']);
+  if not (v_all or v_crew) then
+    raise exception 'Your role can''t see live attendance.' using errcode = '42501';
+  end if;
+  -- workers_select: these roles read the phone on the people record; a line manager reads their
+  -- reportees', and a line manager's rows are only their reportees.
+  v_phone := v_crew or private.has_role(
+    p_organisation_id, array['owner', 'admin', 'hr', 'finance', 'ops_manager']
+  );
+
+  select coalesce(o.timezone, 'Africa/Lagos'), o.late_grace_minutes, o.no_show_after_minutes,
+    o.shifts_enabled
+  into v_zone, v_grace, v_no_show, v_enabled
+  from public.organisations o
+  where o.id = p_organisation_id;
+  if not coalesce(v_enabled, false) then
+    return;
+  end if;
+  -- Midnight today on the company's clock.
+  v_day_start := ((v_now at time zone v_zone)::date)::timestamp at time zone v_zone;
+
+  return query
+  with a as (
+    select sa.id, sa.shift_date, sa.starts_at, sa.ends_at, sa.site_id, sa.worker_id, s.post_id
+    from public.shift_assignments sa
+    join public.shifts s on s.organisation_id = sa.organisation_id and s.id = sa.shift_id
+    where sa.organisation_id = p_organisation_id
+      and sa.status = 'assigned'
+      and s.status = 'open'
+      -- A shift is at most 24 hours long, so this bounds the index range on starts_at.
+      and sa.starts_at >= v_day_start - interval '24 hours'
+      and sa.starts_at <= v_now + interval '2 hours'
+      and sa.ends_at > v_day_start
+      and (v_all or sa.worker_id in (select private.my_reportee_ids()))
+  ),
+  p as (
+    select pu.shift_assignment_id as assignment_id,
+      min(pu.recorded_at) filter (where pu.kind = 'in') as first_in_at,
+      (array_agg(pu.kind order by pu.recorded_at desc, pu.created_at desc))[1] as last_kind,
+      max(pu.recorded_at) as last_at,
+      coalesce(array_agg(distinct f.flag) filter (where f.flag is not null), '{}'::text[]) as flags,
+      bool_or(pu.source = 'supervisor') as by_supervisor
+    from public.punches pu
+    left join lateral unnest(pu.flags) as f (flag) on true
+    where pu.organisation_id = p_organisation_id
+      and pu.shift_assignment_id in (select a.id from a)
+      and pu.kind in ('in', 'out')
+    group by pu.shift_assignment_id
+  ),
+  sy as (
+    select pu.site_id,
+      max(pu.received_at) as last_sync_at,
+      (count(*) filter (where 'late_sync' = any (pu.flags) and pu.received_at >= v_day_start))::integer
+        as late_syncs
+    from public.punches pu
+    where pu.organisation_id = p_organisation_id
+      and pu.recorded_at >= v_day_start - interval '24 hours'
+      and pu.site_id in (select a.site_id from a)
+      and (v_all or pu.worker_id in (select private.my_reportee_ids()))
+    group by pu.site_id
+  ),
+  b as (
+    select a.*, p.first_in_at, p.last_kind, p.last_at, p.flags, p.by_supervisor,
+      private.attendance_status(v_now, a.starts_at, a.ends_at, v_grace, v_no_show, p.last_kind)
+        as status
+    from a
+    left join p on p.assignment_id = a.id
+  )
+  select r.id, r.shift_date, r.starts_at, r.ends_at, r.site_id, si.name, r.post_id, po.name,
+    r.worker_id, btrim(w.first_name || ' ' || w.last_name), w.staff_id,
+    case when v_phone then w.phone end,
+    case when w.phone is not null then right(w.phone, 4) end,
+    coalesce(pub.published, false),
+    r.first_in_at, r.last_kind, r.last_at, coalesce(r.flags, '{}'::text[]),
+    coalesce(r.by_supervisor, false),
+    r.status,
+    case
+      when r.status in ('late', 'no_show') and r.first_in_at is null and v_now > r.starts_at then
+        floor(extract(epoch from (least(v_now, r.ends_at) - r.starts_at)) / 60)::integer
+      when r.first_in_at is not null
+        and r.first_in_at > r.starts_at + make_interval(mins => v_grace) then
+        floor(extract(epoch from (r.first_in_at - r.starts_at)) / 60)::integer
+    end,
+    sy.last_sync_at, coalesce(sy.late_syncs, 0),
+    v_now, v_grace, v_no_show, v_zone
+  from b r
+  join public.workers w on w.organisation_id = p_organisation_id and w.id = r.worker_id
+  join public.sites si on si.organisation_id = p_organisation_id and si.id = r.site_id
+  join public.posts po on po.organisation_id = p_organisation_id and po.id = r.post_id
+  left join sy on sy.site_id = r.site_id
+  left join lateral (
+    select rp.snapshot @> jsonb_build_array(jsonb_build_object('a', r.id::text)) as published
+    from public.roster_publications rp
+    where rp.organisation_id = p_organisation_id
+      and rp.site_id = r.site_id
+      and rp.week_start = r.shift_date - (extract(isodow from r.shift_date)::integer - 1)
+    order by rp.version desc
+    limit 1
+  ) pub on true
+  where w.end_date is null or w.end_date >= r.shift_date
+  order by
+    case r.status
+      when 'no_show' then 1 when 'late' then 2 when 'starting' then 3 when 'on_site' then 4
+      else 5
+    end,
+    r.starts_at, si.name, po.name, btrim(w.first_name || ' ' || w.last_name), r.id;
 end;
 $$;

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { pageAccess } from "@/lib/nav";
 import {
   dayBoundsIn,
   formatPatrolTotals,
   parseDayParam,
+  scanMarkers,
   scanNeedsReview,
   summarisePatrolDay,
   type PatrolCheckpoint,
@@ -85,7 +87,19 @@ describe("summarisePatrolDay", () => {
     );
     expect(day.flaggedScans).toBe(2);
     expect(scanNeedsReview({ flags: ["near"] })).toBe(true);
-    expect(scanNeedsReview({ flags: ["clock_drift"] })).toBe(false);
+    expect(scanNeedsReview({ flags: ["late_sync"] })).toBe(false);
+  });
+
+  it("treats a backdated or offline scan as needing a look, with a marker (review L1, L2)", () => {
+    for (const flag of ["delayed", "time_unverified", "clock_drift", "queued_offline"]) {
+      expect(scanNeedsReview({ flags: [flag] }), flag).toBe(true);
+    }
+    expect(scanMarkers(["delayed", "late_sync"])).toEqual(["Sent late"]);
+    expect(scanMarkers(["time_unverified", "queued_offline"])).toEqual([
+      "Time not verified",
+      "Saved offline without sign-in",
+    ]);
+    expect(scanMarkers(["outside"])).toEqual([]);
   });
 
   it("ignores scans of checkpoints it wasn't given, and handles an empty day", () => {
@@ -121,5 +135,25 @@ describe("dayBoundsIn", () => {
     const { start, end } = dayBoundsIn("2027-01-15", "Africa/Lagos");
     expect(start.toISOString()).toBe("2027-01-14T23:00:00.000Z");
     expect(end.toISOString()).toBe("2027-01-15T23:00:00.000Z");
+  });
+});
+
+describe("who opens the patrol history (review M1)", () => {
+  const path = "/app/attendance/patrols";
+
+  it("follows Live attendance: punch readers in, finance out", () => {
+    for (const role of ["owner", "admin", "hr", "ops_manager", "line_manager"] as const) {
+      expect(pageAccess(role, path), role).toBe("allow");
+    }
+    expect(pageAccess("finance", path)).toBe("forbidden");
+  });
+
+  it("is switched off with Shifts", () => {
+    expect(pageAccess("owner", path, { shifts: false, people: true, payroll: true })).toBe(
+      "switched_off",
+    );
+    expect(pageAccess("finance", path, { shifts: false, people: true, payroll: true })).toBe(
+      "forbidden",
+    );
   });
 });

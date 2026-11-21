@@ -16,7 +16,7 @@ import type { Database } from "@/types/db";
 
 /**
  * Reads for the patrol history (slice 3.8), all with the manager's own session, so RLS decides
- * what they see: owner, admin, ops_manager and hr read every scan in the company, a line manager
+ * what they see: owner, admin, hr and ops_manager read every scan in the company, a line manager
  * their reportees' scans only. Scans are punches of kind `checkpoint`; the point is never read.
  *
  * - `loadPatrolSites`: the sites that have checkpoints, for the site picker.
@@ -27,10 +27,11 @@ import type { Database } from "@/types/db";
 
 type Client = SupabaseClient<Database>;
 
-/** Who opens the patrol history (the Live attendance page's roles). */
+/** Who opens the patrol history: the Live attendance page's roles, hr included (punch readers). */
 export const PATROL_READERS: readonly ManagerRole[] = [
   "owner",
   "admin",
+  "hr",
   "ops_manager",
   "line_manager",
 ];

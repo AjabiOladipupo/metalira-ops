@@ -40,7 +40,7 @@ export interface PatrolDay {
   activeCount: number;
   /** Active checkpoints with no scan that day, in round order. */
   notScanned: PatrolCheckpoint[];
-  /** Scans flagged outside or near the site, or with no location. */
+  /** Scans that need a look (scanNeedsReview). */
   flaggedScans: number;
   /** Everyone who scanned, by name, with their count, most first. */
   scanners: { workerId: string; name: string; scans: number }[];
@@ -48,9 +48,36 @@ export interface PatrolDay {
   lastScanAt: string | null;
 }
 
-const REVIEW_FLAGS = new Set(["outside", "near", "no_location"]);
+/**
+ * Flags that make a scan worth a look: away from the site, no location, a time that rests on the
+ * phone's word (sent late, not verified, wrong phone clock), or saved with no live session.
+ */
+const REVIEW_FLAGS = new Set([
+  "outside",
+  "near",
+  "no_location",
+  "delayed",
+  "time_unverified",
+  "clock_drift",
+  "queued_offline",
+]);
 
-/** Whether a scan needs a look: away from the site or without a location. */
+/** Short markers shown beside a scan, in this order. */
+const SCAN_MARKERS: readonly [flags: readonly string[], label: string][] = [
+  [["delayed", "late_sync"], "Sent late"],
+  [["time_unverified"], "Time not verified"],
+  [["clock_drift"], "Phone clock wrong"],
+  [["queued_offline"], "Saved offline without sign-in"],
+];
+
+/** The markers for a scan's flags ("Sent late", "Time not verified"...). */
+export function scanMarkers(flags: readonly string[]): string[] {
+  return SCAN_MARKERS.filter(([wanted]) => wanted.some((f) => flags.includes(f))).map(
+    ([, label]) => label,
+  );
+}
+
+/** Whether a scan needs a look (see REVIEW_FLAGS). */
 export function scanNeedsReview(scan: Pick<PatrolScan, "flags">): boolean {
   return scan.flags.some((flag) => REVIEW_FLAGS.has(flag));
 }

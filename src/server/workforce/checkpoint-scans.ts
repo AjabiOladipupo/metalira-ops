@@ -83,6 +83,7 @@ export async function runRecordCheckpointScan(
     p_latitude: data.payload.latitude as number,
     p_longitude: data.payload.longitude as number,
     p_accuracy_m: data.payload.accuracy_m as number,
+    p_queued_offline: data.payload.queued_offline,
   });
   if (error) {
     const code = codeFromSqlState(error.code);

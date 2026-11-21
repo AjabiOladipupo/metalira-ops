@@ -37,6 +37,11 @@ export const checkpointScanPayloadSchema = z.object({
   latitude: z.number().min(-90).max(90).nullable(),
   longitude: z.number().min(-180).max(180).nullable(),
   accuracy_m: z.number().min(0).max(1_000_000).nullable(),
+  /**
+   * Saved with no live session: offline, under the phone's last signed-in worker. The server
+   * flags the scan `queued_offline` for review (slice 3.8 review L2).
+   */
+  queued_offline: z.boolean().default(false),
 });
 
 export type CheckpointScanPayload = z.output<typeof checkpointScanPayloadSchema>;
