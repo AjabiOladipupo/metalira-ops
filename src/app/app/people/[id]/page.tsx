@@ -13,6 +13,7 @@ import { WorkerAvatar } from "@/components/worker-avatar";
 import { matchPersonName } from "@/lib/bank-name-match";
 import { bankFromName } from "@/lib/banks";
 import { addDays, firstOfNextMonth, formatDate, formatDateTime } from "@/lib/dates";
+import { DEFAULT_REPLY_DAYS, replyByRange, summariseQueries } from "@/lib/queries";
 import { maskAccount, maskRsaPin, ninStatus } from "@/lib/mask";
 import { formatNaira, koboToMajorString, type Kobo } from "@/lib/money";
 import {
@@ -37,6 +38,7 @@ import {
 import { loadChangeRequests, type ChangeRequestView } from "@/server/people/change-requests";
 import type { PayRateVersion } from "@/server/people/pay-rates";
 import { loadWorkerProfile, type WorkerProfile } from "@/server/people/people-data";
+import { HR_FILE_READERS, loadWorkerQueries, type QueryView } from "@/server/people/queries";
 import { peoplePageContext } from "@/server/people/page-context";
 import { canSeePii } from "@/server/people/pii-access";
 import {
@@ -57,6 +59,7 @@ import { CancelPayButton } from "../_components/cancel-pay-button";
 import { ChangeRequestCard } from "../_components/change-request-card";
 import { DetailList, NotSet, Section } from "../_components/display";
 import { EndEmploymentForm } from "../_components/end-employment-form";
+import { HrFileQueries } from "../_components/hr-file";
 import { PayChangeForm } from "../_components/pay-change-form";
 import { RevealValue } from "../_components/reveal-value";
 import { SignInPanel } from "../_components/sign-in-panel";
@@ -172,6 +175,7 @@ function Profile({
   credential,
   corrections,
   staffIdViewer,
+  queries,
 }: {
   worker: WorkerProfile;
   ctx: Awaited<ReturnType<typeof peoplePageContext>>;
@@ -185,6 +189,8 @@ function Profile({
   /** Staff ID corrections for this worker, newest first (owner, admin and hr only). */
   corrections: StaffIdCorrectionView[];
   staffIdViewer: StaffIdViewer;
+  /** The HR file's queries, or null for roles that don't see the HR file. */
+  queries: QueryView[] | null;
 }) {
   const { today, canEdit, role } = ctx;
   const active = worker.status === "active";
@@ -306,6 +312,16 @@ function Profile({
             now={new Date()}
           />
         </Section>
+      ) : null}
+
+      {queries ? (
+        <HrFileSection
+          worker={worker}
+          queries={queries}
+          today={today}
+          viewerUserId={ctx.userId}
+          self={staffIdViewer.ownWorkerIds.includes(worker.id)}
+        />
       ) : null}
 
       {limited ? null : (
@@ -523,6 +539,11 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
       ? loadStaffIdCorrections(ctx.supabase, ctx.organisationId, { workerId: id, limit: 10 })
       : Promise.resolve([]),
   ]);
+  // The HR file (slice 4.6): RLS gives a line manager only their current reportees' queries
+  // and the ones they raised.
+  const queries = has(HR_FILE_READERS, ctx.role)
+    ? await loadWorkerQueries(ctx.supabase, ctx.organisationId, id)
+    : null;
   return (
     <Profile
       worker={worker}
@@ -537,7 +558,67 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
         canDecide: isStaffIdCorrector(ctx.role),
         ownWorkerIds: viewer.ownWorkerIds,
       }}
+      queries={queries}
     />
+  );
+}
+
+/**
+ * The HR file (slice 4.6, owner decision 10): queries with their replies now; leave history and
+ * balance arrive with slice 4.4 and timesheet exception counts with slices 4.2 and 4.3, in the
+ * placeholders below. A section of the person page, not a sub-route, so line managers keep
+ * exactly the two People routes they may open (tests/unit/nav.test.ts).
+ */
+function HrFileSection({
+  worker,
+  queries,
+  today,
+  viewerUserId,
+  self,
+}: {
+  worker: WorkerProfile;
+  queries: QueryView[];
+  today: string;
+  viewerUserId: string;
+  /** The viewer's own worker record: no raising or closing queries about yourself. */
+  self: boolean;
+}) {
+  const counts = summariseQueries(queries, today);
+  const range = replyByRange(today);
+  const parts = [`${counts.total} ${counts.total === 1 ? "query" : "queries"}`];
+  if (counts.open > 0) parts.push(`${counts.open} open`);
+  if (counts.overdue > 0) parts.push(`${counts.overdue} overdue`);
+  return (
+    <Section
+      id="hr-file"
+      title="HR file"
+      description={`${parts.join(" · ")}. Kept for the record: queries are never deleted, only closed or withdrawn.`}
+    >
+      <HrFileQueries
+        queries={queries}
+        today={today}
+        viewerUserId={viewerUserId}
+        canRaise={!self && worker.status === "active"}
+        canAct={!self}
+        workerId={worker.id}
+        workerName={worker.name}
+        replyBy={{ ...range, default: addDays(today, DEFAULT_REPLY_DAYS) }}
+      />
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] gap-3">
+        <p
+          data-testid="hr-file-leave-placeholder"
+          className="m-0 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-fg-muted"
+        >
+          Leave history and balance: coming soon.
+        </p>
+        <p
+          data-testid="hr-file-timesheet-placeholder"
+          className="m-0 rounded-xl border border-dashed border-line px-4 py-3 text-sm text-fg-muted"
+        >
+          Timesheet exceptions by period: coming soon.
+        </p>
+      </div>
+    </Section>
   );
 }
 

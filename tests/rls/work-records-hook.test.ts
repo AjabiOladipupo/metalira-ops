@@ -27,6 +27,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
   shift_assignments:
     "the roster (slice 3.2): planned shifts, not work done; punches (3.5) are the work records",
   staff_id_corrections: "the corrections themselves",
+  staff_queries:
+    "disciplinary and HR queries (slice 4.6): an HR record about the worker, kept by worker id, not staff ID; nothing worked or paid",
   timesheet_corrections:
     "corrections to a timesheet line (slice 4.2); each hangs off a line, which is the work record and is never deleted while a correction points at it",
   timesheets:

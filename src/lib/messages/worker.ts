@@ -502,4 +502,32 @@ export const workerMessages = {
     nextScan: "Scan the next checkpoint with your phone's camera.",
     backHome: "Back to home",
   },
+  /** Queries from the line manager or HR (slice 4.6), per the WkProfile and WkHome boards. */
+  queries: {
+    title: "Queries",
+    empty: "No queries. When your line manager sends you a query, it shows here.",
+    /** The card's first line: the date to reply by, before anything else. */
+    replyBy: (date: string) => `Reply by ${date}`,
+    overdue: (date: string) => `Reply was due ${date}`,
+    from: (name: string, date: string) => `From ${name} · ${date}`,
+    replied: "Replied",
+    closed: (date: string) => `Closed on ${date}`,
+    withdrawn: (date: string) => `Withdrawn on ${date}`,
+    outcome: "Outcome",
+    you: "You",
+    replies: "Replies",
+    yourReply: "Your reply",
+    replyHint: "Stick to facts: dates, times and what happened. No phone or account numbers.",
+    addReply: "Add to your reply",
+    send: "Send reply",
+    sending: "Sending…",
+    note: "Your reply goes to your line manager and on your HR file.",
+    /** The home banner: "1 query from Kola Adebayo · reply by 2 Nov". */
+    homeBanner: (count: number, from: string, date: string) =>
+      count === 1
+        ? `1 query from ${from} · reply by ${date}`
+        : `${count} queries to reply to · first by ${date}`,
+    meLink: (count: number) => (count === 1 ? "1 query open" : `${count} queries open`),
+    meLinkHint: "Read and reply in Queries.",
+  },
 } as const;
