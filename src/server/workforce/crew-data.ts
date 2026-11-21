@@ -86,6 +86,18 @@ export async function loadCrewContext(
   const { data, error } = await supabase.rpc("my_crew_context", {
     p_organisation_id: organisationId,
   });
+  // An ended supervisor (MLPU3) and a company with Shifts off (MLPU4) get no crew data at all.
+  if (error?.code === "MLPU3" || error?.code === "MLPU4") {
+    return {
+      actorKind: "worker",
+      actorId: "",
+      left: error.code === "MLPU3",
+      shiftsEnabled: error.code !== "MLPU4",
+      locationConsent: false,
+      crewSize: 0,
+      sites: [],
+    };
+  }
   if (error) throw new Error(`Could not load the crew (${error.code})`);
   const ctx = contextSchema.parse(data);
   return {

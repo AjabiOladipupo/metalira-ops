@@ -36,6 +36,10 @@
 --    no_selfie ("no photo"), as when the supervisor takes none.
 --    punch_photo_orphans is replaced so a crew photo is never swept as an orphan.
 --
+-- Patrol scans (slice 3.8, kind 'checkpoint') are never the punch before a crew punch, never
+-- count toward the hourly limit and never a crew member's last punch: every punch read here keeps
+-- the `p.kind in ('in', 'out')` filter.
+--
 -- Refusals (SQLSTATE), mapped to fixed codes in src/lib/punches/codes.ts:
 --   42501 untrusted or no session                  MLPU2 same id, different punch
 --   MLPU3 the supervisor or a worker has left      MLPU4 Shifts is off
@@ -66,8 +70,11 @@ as $$
   where m.user_id = (select private.session_uid())
     and m.role = 'worker'
     and m.worker_id is not null
+    and w.id <> m.worker_id
   union
+  -- Never the caller's own worker record: nobody clocks themselves in as their own supervisor.
   select r.id from private.my_reportee_ids() as r (id)
+  where r.id not in (select x.id from private.my_worker_ids() as x (id))
 $$;
 
 revoke all on function private.my_crew_ids() from public, anon;
@@ -412,6 +419,10 @@ begin
     raise exception 'That site isn''t one of your company''s.' using errcode = 'MLPU7';
   end if;
 
+  -- A supervisor never clocks themselves in through their own crew punch.
+  if v_sup_worker is not null and v_sup_worker = any (p_worker_ids) then
+    raise exception 'You can only clock in people in your crew.' using errcode = 'MLCR1';
+  end if;
   -- Everyone in the batch is in the caller's crew, in this company.
   if (
     select count(*) from public.workers w
@@ -435,6 +446,7 @@ begin
   ) >= 30 or exists (
     select 1 from public.punches p
     where p.worker_id = any (p_worker_ids) and p.received_at > v_received - interval '1 hour'
+      and p.kind in ('in', 'out')
     group by p.worker_id
     having count(*) >= 20
   ) then
@@ -511,6 +523,7 @@ begin
     select p.* into v_prev
     from public.punches p
     where p.worker_id = v_worker and p.organisation_id = v_org and p.recorded_at <= v_recorded
+      and p.kind in ('in', 'out')
     order by p.recorded_at desc, p.created_at desc
     limit 1;
 
@@ -651,7 +664,8 @@ grant execute on function public.record_crew_punch(
 -- the supervisor's own shift there and the crew members on a shift there now (name, staff ID,
 -- shift, last punch, whether they agreed to photos). A worker-supervisor's sites are the ones
 -- they are on shift at; a line manager with no worker record sees the sites their crew are on
--- shift at. A login that is neither a worker nor a line manager is refused (MLCR1).
+-- shift at. A login that is neither a worker nor a line manager is refused (MLCR1), an ended
+-- supervisor MLPU3, and anyone while Shifts is off MLPU4.
 create function private.my_crew_context(p_organisation_id uuid)
 returns jsonb
 language plpgsql
@@ -680,6 +694,13 @@ begin
   if v_sup_worker is not null then
     select w.status into v_status from public.workers w
     where w.organisation_id = p_organisation_id and w.id = v_sup_worker;
+  end if;
+  -- An ended supervisor sees no crew, and nobody does with Shifts off (security review M1).
+  if v_status = 'ended' then
+    raise exception 'You have left this company, so you can''t clock in a crew.' using errcode = 'MLPU3';
+  end if;
+  if not private.org_shifts_enabled(p_organisation_id) then
+    raise exception 'Clock-in is switched off for your company.' using errcode = 'MLPU4';
   end if;
 
   select coalesce(array_agg(w.id), '{}') into v_crew
@@ -724,6 +745,7 @@ begin
     where p.organisation_id = p_organisation_id
       and p.worker_id = any (v_crew)
       and p.recorded_at > now() - interval '20 hours'
+      and p.kind in ('in', 'out')
     order by p.worker_id, p.recorded_at desc, p.created_at desc
   )
   select jsonb_build_object(
@@ -1015,3 +1037,171 @@ revoke all on function public.clear_crew_photos(uuid[]) from public, anon, authe
 grant execute on function public.attach_crew_photo(uuid, uuid, text) to service_role;
 grant execute on function public.crew_photos_due(integer) to service_role;
 grant execute on function public.clear_crew_photos(uuid[]) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 8. Live board (slice 3.7, as 3.8 left it): no_location is not a review flag on supervisor
+--    punches. Only the flags aggregate changes.
+-- ---------------------------------------------------------------------------
+
+create or replace function private.attendance_board(p_organisation_id uuid)
+returns table (
+  assignment_id uuid,
+  shift_date date,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  site_id uuid,
+  site_name text,
+  post_id uuid,
+  post_name text,
+  worker_id uuid,
+  worker_name text,
+  staff_id text,
+  phone text,
+  phone_last4 text,
+  published boolean,
+  first_in_at timestamptz,
+  last_punch_kind text,
+  last_punch_at timestamptz,
+  punch_flags text[],
+  by_supervisor boolean,
+  status text,
+  late_minutes integer,
+  site_last_sync_at timestamptz,
+  site_late_syncs integer,
+  board_at timestamptz,
+  late_grace_minutes integer,
+  no_show_after_minutes integer,
+  time_zone text
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_now timestamptz := now();
+  v_all boolean;
+  v_crew boolean;
+  v_phone boolean;
+  v_zone text;
+  v_grace integer;
+  v_no_show integer;
+  v_enabled boolean;
+  v_day_start timestamptz;
+begin
+  if private.session_uid() is null or p_organisation_id is null then
+    raise exception 'Your role can''t see live attendance.' using errcode = '42501';
+  end if;
+  v_all := private.has_role(p_organisation_id, array['owner', 'admin', 'hr', 'ops_manager']);
+  v_crew := not v_all and private.has_role(p_organisation_id, array['line_manager']);
+  if not (v_all or v_crew) then
+    raise exception 'Your role can''t see live attendance.' using errcode = '42501';
+  end if;
+  -- workers_select: these roles read the phone on the people record; a line manager reads their
+  -- reportees', and a line manager's rows are only their reportees.
+  v_phone := v_crew or private.has_role(
+    p_organisation_id, array['owner', 'admin', 'hr', 'finance', 'ops_manager']
+  );
+
+  select coalesce(o.timezone, 'Africa/Lagos'), o.late_grace_minutes, o.no_show_after_minutes,
+    o.shifts_enabled
+  into v_zone, v_grace, v_no_show, v_enabled
+  from public.organisations o
+  where o.id = p_organisation_id;
+  if not coalesce(v_enabled, false) then
+    return;
+  end if;
+  -- Midnight today on the company's clock.
+  v_day_start := ((v_now at time zone v_zone)::date)::timestamp at time zone v_zone;
+
+  return query
+  with a as (
+    select sa.id, sa.shift_date, sa.starts_at, sa.ends_at, sa.site_id, sa.worker_id, s.post_id
+    from public.shift_assignments sa
+    join public.shifts s on s.organisation_id = sa.organisation_id and s.id = sa.shift_id
+    where sa.organisation_id = p_organisation_id
+      and sa.status = 'assigned'
+      and s.status = 'open'
+      -- A shift is at most 24 hours long, so this bounds the index range on starts_at.
+      and sa.starts_at >= v_day_start - interval '24 hours'
+      and sa.starts_at <= v_now + interval '2 hours'
+      and sa.ends_at > v_day_start
+      and (v_all or sa.worker_id in (select private.my_reportee_ids()))
+  ),
+  p as (
+    select pu.shift_assignment_id as assignment_id,
+      min(pu.recorded_at) filter (where pu.kind = 'in') as first_in_at,
+      (array_agg(pu.kind order by pu.recorded_at desc, pu.created_at desc))[1] as last_kind,
+      max(pu.recorded_at) as last_at,
+      -- A supervisor punch (slice 3.6) is made on the supervisor's phone, so its no_location is
+      -- expected, not a review flag; the flag stays on the punch.
+      coalesce(array_agg(distinct f.flag) filter (
+        where f.flag is not null and not (pu.source = 'supervisor' and f.flag = 'no_location')
+      ), '{}'::text[]) as flags,
+      bool_or(pu.source = 'supervisor') as by_supervisor
+    from public.punches pu
+    left join lateral unnest(pu.flags) as f (flag) on true
+    where pu.organisation_id = p_organisation_id
+      and pu.shift_assignment_id in (select a.id from a)
+      and pu.kind in ('in', 'out')
+    group by pu.shift_assignment_id
+  ),
+  sy as (
+    select pu.site_id,
+      max(pu.received_at) as last_sync_at,
+      (count(*) filter (where 'late_sync' = any (pu.flags) and pu.received_at >= v_day_start))::integer
+        as late_syncs
+    from public.punches pu
+    where pu.organisation_id = p_organisation_id
+      and pu.recorded_at >= v_day_start - interval '24 hours'
+      and pu.site_id in (select a.site_id from a)
+      and (v_all or pu.worker_id in (select private.my_reportee_ids()))
+    group by pu.site_id
+  ),
+  b as (
+    select a.*, p.first_in_at, p.last_kind, p.last_at, p.flags, p.by_supervisor,
+      private.attendance_status(v_now, a.starts_at, a.ends_at, v_grace, v_no_show, p.last_kind)
+        as status
+    from a
+    left join p on p.assignment_id = a.id
+  )
+  select r.id, r.shift_date, r.starts_at, r.ends_at, r.site_id, si.name, r.post_id, po.name,
+    r.worker_id, btrim(w.first_name || ' ' || w.last_name), w.staff_id,
+    case when v_phone then w.phone end,
+    case when w.phone is not null then right(w.phone, 4) end,
+    coalesce(pub.published, false),
+    r.first_in_at, r.last_kind, r.last_at, coalesce(r.flags, '{}'::text[]),
+    coalesce(r.by_supervisor, false),
+    r.status,
+    case
+      when r.status in ('late', 'no_show') and r.first_in_at is null and v_now > r.starts_at then
+        floor(extract(epoch from (least(v_now, r.ends_at) - r.starts_at)) / 60)::integer
+      when r.first_in_at is not null
+        and r.first_in_at > r.starts_at + make_interval(mins => v_grace) then
+        floor(extract(epoch from (r.first_in_at - r.starts_at)) / 60)::integer
+    end,
+    sy.last_sync_at, coalesce(sy.late_syncs, 0),
+    v_now, v_grace, v_no_show, v_zone
+  from b r
+  join public.workers w on w.organisation_id = p_organisation_id and w.id = r.worker_id
+  join public.sites si on si.organisation_id = p_organisation_id and si.id = r.site_id
+  join public.posts po on po.organisation_id = p_organisation_id and po.id = r.post_id
+  left join sy on sy.site_id = r.site_id
+  left join lateral (
+    select rp.snapshot @> jsonb_build_array(jsonb_build_object('a', r.id::text)) as published
+    from public.roster_publications rp
+    where rp.organisation_id = p_organisation_id
+      and rp.site_id = r.site_id
+      and rp.week_start = r.shift_date - (extract(isodow from r.shift_date)::integer - 1)
+    order by rp.version desc
+    limit 1
+  ) pub on true
+  where w.end_date is null or w.end_date >= r.shift_date
+  order by
+    case r.status
+      when 'no_show' then 1 when 'late' then 2 when 'starting' then 3 when 'on_site' then 4
+      else 5
+    end,
+    r.starts_at, si.name, po.name, btrim(w.first_name || ' ' || w.last_name), r.id;
+end;
+$$;

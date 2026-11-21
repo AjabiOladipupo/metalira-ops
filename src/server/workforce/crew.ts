@@ -85,17 +85,19 @@ const recordedSchema = z.object({
 });
 
 /**
- * The change itself. `roles` is the line manager's: a worker-supervisor is the line manager of
- * their crew (workers.line_manager_worker_id), and record_crew_punch decides whom each caller
- * supervises. The database writes the punches' and the batch's audit rows and the named
- * `crew.clocked_in` / `crew.clocked_out` event in the same transaction, so there is no `event`.
+ * The change itself. Both kinds of supervisor make it: a worker-supervisor (role `worker`, the
+ * line manager of their crew through workers.line_manager_worker_id) and a `line_manager` login.
+ * The role only says who may try: the database (record_crew_punch, private.my_crew_ids) decides
+ * whom each caller supervises. The database writes the punches' and the batch's audit rows and
+ * the named `crew.clocked_in` / `crew.clocked_out` event in the same transaction, so there is no
+ * `event`.
  */
 export const recordCrewPunchSpec: MutationSpec<
   typeof recordCrewPunchSchema,
   RecordCrewPunchResult
 > = {
   schema: recordCrewPunchSchema,
-  roles: ["line_manager"],
+  roles: ["worker", "line_manager"],
   channel: "worker_app",
   module: "shifts",
   async run({ supabase, data }) {
@@ -162,7 +164,7 @@ export async function runRecordCrewPunch(
         supabase: session.supabase,
         userId: session.userId,
         organisationId: session.organisationId,
-        role: "line_manager",
+        role: session.kind,
       },
       recordCrewPunchSpec,
       input,

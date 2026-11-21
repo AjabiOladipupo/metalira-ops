@@ -9,18 +9,21 @@ import type { QueueOwner } from "@/lib/offline/types";
 import { createCrewSender } from "@/lib/punches/crew-sender";
 import { createPunchSender } from "@/lib/punches/sender";
 import { createBrowserSupabase } from "@/lib/supabase/client";
+import { recordCheckpointScanAction } from "@/server/workforce/checkpoint-scan-actions";
 import { recordCrewPunchAction, uploadCrewPhotoAction } from "@/server/workforce/crew-actions";
 import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
 
 /**
- * Punches (slice 3.5) and crew punches (slice 3.6) reach the server through these Server
- * Actions: the crew sender takes `crew_in` / `crew_out` and hands every other kind on.
+ * Punches (slice 3.5), patrol scans (slice 3.8) and crew punches (slice 3.6) reach the server
+ * through these Server Actions: the crew sender takes `crew_in` / `crew_out` and hands every
+ * other kind on to the punch sender.
  */
 const punchSender = createCrewSender(
   { recordCrewPunch: recordCrewPunchAction, uploadCrewPhoto: uploadCrewPhotoAction },
   createPunchSender({
     recordPunch: recordPunchAction,
     uploadSelfie: uploadPunchSelfieAction,
+    recordCheckpointScan: recordCheckpointScanAction,
   }),
 );
 

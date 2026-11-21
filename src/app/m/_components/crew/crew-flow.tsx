@@ -431,6 +431,9 @@ export function CrewFlow({
                 <Camera strokeWidth={1.75} className="size-5" aria-hidden />
                 {photo ? copy.retakePhoto : copy.takePhoto}
               </button>
+              <p className="m-0 text-[13px] text-fg-muted" data-testid="crew-photo-hint">
+                {copy.photoHint}
+              </p>
             </>
           )
         ) : null}

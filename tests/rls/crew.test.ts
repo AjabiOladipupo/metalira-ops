@@ -443,6 +443,27 @@ describe("record_crew_punch: a worker-supervisor clocks in their crew", () => {
   });
 });
 
+describe("the live board", () => {
+  it("doesn't show no_location as a flag on supervisor punches; the punch keeps it", async () => {
+    const { supervisor, crew } = await crewOf(1);
+    const id = crew[0]!.id;
+    expect(
+      (await crewPunch(supervisor.client, { actor: supervisor.id, workers: [id] })).error,
+    ).toBeNull();
+    expect((await punchesOf([id]))[0]!.flags).toContain("no_location");
+    const { data, error } = await owner.client.rpc("attendance_board", {
+      p_organisation_id: owner.orgId,
+    });
+    expect(error).toBeNull();
+    const row = (
+      data as { worker_id: string; punch_flags: string[]; by_supervisor: boolean }[]
+    ).find((r) => r.worker_id === id);
+    expect(row?.by_supervisor).toBe(true);
+    expect(row?.punch_flags).not.toContain("no_location");
+    expect(row?.punch_flags).toContain("no_selfie");
+  });
+});
+
 describe("record_crew_punch: a line manager login", () => {
   it("clocks in their reportees on shift at the site, with no shift of their own", async () => {
     const reportee = await addWorker({
@@ -504,6 +525,19 @@ describe("record_crew_punch: only the supervisor's own crew", () => {
     });
     expect(error?.code).toBe("MLCR1");
     expect(await punchesOf([crew[0]!.id, stranger.id])).toEqual([]);
+  });
+
+  it("refuses the supervisor clocking themselves in (security review L2)", async () => {
+    const { supervisor, crew } = await crewOf(1);
+    const { error } = await crewPunch(supervisor.client, {
+      actor: supervisor.id,
+      workers: [crew[0]!.id, supervisor.id],
+    });
+    expect(error?.code).toBe("MLCR1");
+    expect(await punchesOf([crew[0]!.id, supervisor.id])).toEqual([]);
+    const ctx = await supervisor.client.rpc("my_crew_context", { p_organisation_id: owner.orgId });
+    const sites = (ctx.data as { sites: { crew: { worker_id: string }[] }[] }).sites;
+    expect(sites.flatMap((x) => x.crew.map((c) => c.worker_id))).not.toContain(supervisor.id);
   });
 
   it("refuses a worker who supervises nobody", async () => {
@@ -587,6 +621,35 @@ describe("record_crew_punch: switches and leavers", () => {
       ]);
     }
     expect(await punchesOf([crew[0]!.id])).toEqual([]);
+  });
+
+  it("my_crew_context refuses with Shifts off (security review M1)", async () => {
+    const { supervisor } = await crewOf(1);
+    await db.query("update public.organisations set shifts_enabled = false where id = $1", [
+      owner.orgId,
+    ]);
+    try {
+      const ctx = await supervisor.client.rpc("my_crew_context", {
+        p_organisation_id: owner.orgId,
+      });
+      expect(ctx.error?.code).toBe("MLPU4");
+      expect(ctx.data).toBeNull();
+    } finally {
+      await db.query("update public.organisations set shifts_enabled = true where id = $1", [
+        owner.orgId,
+      ]);
+    }
+  });
+
+  it("my_crew_context gives an ended supervisor nothing (security review M1)", async () => {
+    const { supervisor } = await crewOf(1);
+    await db.query(
+      "update public.workers set status = 'ended', end_date = current_date - 1 where id = $1",
+      [supervisor.id],
+    );
+    const ctx = await supervisor.client.rpc("my_crew_context", { p_organisation_id: owner.orgId });
+    expect(ctx.error?.code).toBe("MLPU3");
+    expect(ctx.data).toBeNull();
   });
 
   it("refuses an ended worker and an ended supervisor", async () => {

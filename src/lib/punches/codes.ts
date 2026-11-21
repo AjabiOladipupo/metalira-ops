@@ -24,6 +24,8 @@ export const PUNCH_ERROR_CODES = [
   "not_your_crew",
   "not_on_shift",
   "not_rostered",
+  // Patrol scans (slice 3.8).
+  "unknown_checkpoint",
 ] as const;
 
 export type PunchErrorCode = (typeof PUNCH_ERROR_CODES)[number];
@@ -78,6 +80,10 @@ export function codeFromSqlState(sqlState: string | undefined | null): PunchErro
       return "not_on_shift";
     case "MLCR3":
       return "not_rostered";
+    case "MLCK1":
+      return "unknown_checkpoint";
+    case "MLCK2":
+      return "not_on_shift";
     default:
       return "failed";
   }
@@ -107,6 +113,20 @@ export type RecordCrewPunchResult =
       /** The server wants the group photo (everyone agreed to photos, none uploaded yet). */
       photoWanted: boolean;
       geofence: "inside" | "near" | "outside" | "unknown";
+    }
+  | { ok: false; code: PunchErrorCode };
+
+/** What the checkpoint-scan action answers (slice 3.8). Never carries the token. */
+export type RecordCheckpointScanResult =
+  | {
+      ok: true;
+      punchId: string;
+      duplicate: boolean;
+      recordedAt: string;
+      geofence: "inside" | "near" | "outside" | "unknown";
+      flags: string[];
+      checkpointName: string | null;
+      siteName: string | null;
     }
   | { ok: false; code: PunchErrorCode };
 

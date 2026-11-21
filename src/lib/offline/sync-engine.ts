@@ -145,6 +145,9 @@ async function drainLocked(
         attempts,
         last_error: error,
         failed_at: at,
+        // A refused patrol scan keeps no checkpoint token on the phone (slice 3.8 review L2):
+        // it is never sent again, and a printed code is a shared secret.
+        ...(item.kind === "checkpoint_scan" ? { payload: { ...item.payload, token: "" } } : {}),
       });
       report.refused += 1;
       continue;
