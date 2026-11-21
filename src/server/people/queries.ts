@@ -136,6 +136,25 @@ export async function loadWorkerQueries(
   return sortQueries(((data ?? []) as QueryRow[]).map(toView));
 }
 
+/**
+ * The queries a line manager may read about their team (My team, slice 4.7): RLS returns their
+ * current reportees' queries and the ones they raised. Open first, then the rest.
+ */
+export async function loadTeamQueries(
+  supabase: Client,
+  organisationId: string,
+  limit = 100,
+): Promise<QueryView[]> {
+  const { data, error } = await supabase
+    .from("staff_queries")
+    .select(QUERY_COLUMNS)
+    .eq("organisation_id", organisationId)
+    .order("raised_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`Could not read queries (${error.code})`);
+  return sortQueries(((data ?? []) as QueryRow[]).map(toView));
+}
+
 /** The signed-in worker's own queries (worker app). */
 export async function loadMyQueries(
   ctx: Pick<OwnContext, "supabase" | "organisationId" | "workerId">,

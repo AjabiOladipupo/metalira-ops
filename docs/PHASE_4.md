@@ -86,17 +86,17 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 | Timesheets, lines, corrections, decisions | owner, admin, hr, ops_manager; line_manager (their reportees); the worker their own | line_manager (reportees, never themselves), ops_manager, admin, owner; the worker disputes their own |
 | Work Units | owner, admin, finance, ops_manager | the approval function only |
 | Queries and replies | owner, admin, hr; the line manager who raised it and the worker's current line manager; the worker their own | line_manager (reportees), hr, admin, owner raise and close; the worker replies |
-| Reportee details (My team) | the line manager, through `team_members` (no bank, tax, NIN, RSA or pay columns) | none |
+| Reportee details (People list, person page, My team) | the line manager, through `public.my_reportees` (no bank, tax, NIN, RSA or pay columns) | none |
 
 ## Slices (one pull request each)
 
 ### 4.0 Close the line-manager column gap (independent, first)
 - Migration `20261121100000_line_manager_worker_columns.sql`.
 - Drop the two line-manager branches from `workers_select` (owners, admin, hr, finance, ops_manager and the worker's own row stay). Line managers stop reading `public.workers` directly.
-- `public.team_members(org)`: a definer read for the caller's reportees (the same rule as `private.my_line_manager_keys`) returning safe columns only: id, staff_id, first and last name, phone, email, job title, department, employment type, status, start and end dates, line manager, `usual_work_days`, supervisor clock-in, and mapped sites. Never the `_enc`, `_last4`, bank name, account name, TIN, tax state, PFA, NHF or rent columns.
-- Find every place a line manager reads `workers` today (People list and person page as line_manager, roster names, live board, crew clock-in, punches joins, `roster_assignment_details`) and move it to `team_members` or an existing definer read. Definer functions that already join `workers` stay as they are.
+- `public.my_reportees(org)` (planned as `team_members`; that name was already Settings > Team's read from 1.12): a definer read for the caller's reportees (the same rule as `private.my_line_manager_keys`) returning safe columns only: id, staff_id, first and last name, phone, email, job title, department, employment type, status, start and end dates, line manager, `usual_work_days`, supervisor clock-in, and mapped sites. Never the `_enc`, `_last4`, bank name, account name, TIN, tax state, PFA, NHF or rent columns.
+- Find every place a line manager reads `workers` today (People list and person page as line_manager, roster names, live board, crew clock-in, punches joins, `roster_assignment_details`) and move it to `my_reportees` or an existing definer read. Definer functions that already join `workers` stay as they are.
 - `src/server/people/team.ts` `loadTeamMembers` with a summary (counts by status, no personal numbers).
-- Tests: RLS (a line manager selecting `bank_account_last4`, `nin_enc`, `tin`, `rsa_pin_last4` from `workers` gets no rows; `team_members` returns only reportees and only the safe columns; a line manager of another company gets nothing; an untrusted session gets nothing), a column snapshot test that fails if a sensitive column is added to `team_members`, Playwright: a line manager's People and Roster pages still show names.
+- Tests: RLS (a line manager selecting `bank_account_last4`, `nin_enc`, `tin`, `rsa_pin_last4` from `workers` gets no rows; `my_reportees` returns only reportees and only the safe columns; a line manager of another company gets nothing; an untrusted session gets nothing), a column snapshot test that fails if a sensitive column is added to `my_reportees`, Playwright: a line manager's People and Roster pages still show names.
 - **security-reviewer.**
 
 **Accept:** a line manager calling the Data API for `workers?select=bank_account_last4` gets nothing, and their pages look the same as before.
@@ -211,7 +211,7 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 
 **As built (slice 4.5):**
 - **Which shifts open:** the worker's assigned shifts dated inside the request whose start is still ahead (`private.leave_shifts_to_open`): a past day, or a shift today that has started, is left alone. They are removed in the approval's transaction (removed_reason `on_leave`, removed_by the approver), audited per row and as `roster.opened_by_leave`. The dry run's `open_shifts` lists them; the preview says "Opens 3 shifts: Gate A · Day, 4 to 6 Nov".
-- **Refusing leave days:** the check lives in `shift_assignments_guard` (MLRSL, "On approved leave 4 to 6 Nov."), so `assign_worker_to_shift`, `copy_last_week`, the secret key and 4.7's line-manager assign all refuse it without replacing `assign_worker_to_shift` (4.7's migration, 170000, runs before 190000 and replaces that function; a later replace here would undo it). If 4.7 or later replaces the guard, it must keep the leave check. `copy_last_week` lists those as skipped (code MLRSL).
+- **Refusing leave days:** the check lives in `shift_assignments_guard` (MLRSL, "On approved leave 4 to 6 Nov."), so `assign_worker_to_shift`, `copy_last_week`, the secret key and 4.7's line-manager assign all refuse it without replacing `assign_worker_to_shift` (4.7's migration, 20261121200000, runs after 190000 and replaces that function from its 3.2 version, which 4.5 never changed, so nothing of 4.5 is undone). If 4.7 or later replaces the guard, it must keep the leave check. `copy_last_week` lists those as skipped (code MLRSL).
 - **Locks:** the guard takes the worker's leave lock (`leave_requests:<worker>`) shared; the leave functions take it exclusively. No site locks, so no cycle with publish.
 - **Cancelling approved leave** gives the days back but doesn't put the worker back on the opened shifts (others may have filled them).
 - **Roster reads:** `roster_leave(org, from, to)` (worker ids, dates, approved or pending; owner, admin, ops_manager) for the suggestions, and `roster_leave_removals(org, site, from, to)` for the "On leave" chips (only while the leave stands). Line managers and other roles get neither; the database still refuses their assignments onto leave.
@@ -240,15 +240,23 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 - Worker app: `/m/queries`, a banner on Home ("1 query from Kola Adebayo · reply by Mon 2 Nov") and a link from Me's Queries tab. Replies are online only (no offline queue for replies yet).
 
 ### 4.7 My team (after 4.0, 4.3, 4.4 and 4.6)
-- Migration `20261121170000_line_manager_assign.sql`.
+- Migration `20261121200000_line_manager_assign.sql` (170000 was planned; 170000 to 190000 were taken first).
 - Line managers assign within their crews (deferred from Phase 3's role table): `assign_worker_to_shift` and `remove_assignment` accept a line_manager when the worker is their reportee and the shift's site is one of `private.line_manager_site_ids`; publishing stays with ops_manager, admin and owner.
-- `/app/team` per the Team board: "9 people report to you"; Reportees (today from punches: on site, late, no-show, off; hours this week from timesheet lines; annual leave left from the ledger; next shift; Assign shift; Query), Leave requests (step 1 with balance and the shifts it opens), Queries (raised, replies, New query with reply-by). Reads only through `team_members` (4.0).
+- `/app/team` per the Team board: "9 people report to you"; Reportees (today from punches: on site, late, no-show, off; hours this week from timesheet lines; annual leave left from the ledger; next shift; Assign shift; Query), Leave requests (step 1 with balance and the shifts it opens), Queries (raised, replies, New query with reply-by). Reportee details only through `my_reportees` (4.0).
 - `/m/team` for worker-supervisors (line managers who use the worker app; the SupHome Approvals tile): timesheet days to approve, leave requests at step 1, queries awaiting reply. The same functions as the manager app.
 - Summary read for the team (counts only) and `fixtures/lira/team.md`.
 - Tests: RLS (line manager assigns only reportees at their sites; can't publish), Playwright: a line manager assigns an open shift, approves a leave request and raises a query from `/app/team` at 390px and 1440px.
 - **security-reviewer.**
 
 **Accept:** a line manager sees only their reportees, assigns one to an open shift at their site, and approves step 1 of a leave request, all from My team.
+
+**As built (slice 4.7):**
+- **Line-manager pages:** a line manager opens Home, Live attendance, Timesheets, People (the list and a person's page, their reportees only; 4.0b), My team and Leave. Everything about a reportee comes from `public.my_reportees` or a definer read; a line manager never selects `public.workers`.
+- **Assign and remove:** `assign_worker_to_shift` and `remove_assignment` accept a line_manager for their own reportees (never their own record) at `private.line_manager_site_ids` (`private.roster_may_assign`; refusal 42501 "You can assign only people who report to you, at your team's sites."). The guard is unchanged, so 4.5's approved-leave check (MLRSL) and leave lock apply to them too. `publish_roster`, `copy_last_week` and "Send notices again" stay with owner, admin and ops_manager.
+- **Reads (line managers only, 42501 otherwise):** `team_shifts` (reportees' assigned shifts with names, 62 days at most), `team_open_shifts` (post-days at the team's sites still needing people from today, 31 days at most, counts only) and `team_leave_open_shifts` (4.5's `private.leave_shifts_to_open` for each step-1 request the caller decides; shown with 4.5's `formatOpenedShifts`).
+- **`/app/team`:** nav roles owner, admin and line_manager (hr and ops_manager dropped: they have no reportees). Today comes from `attendance_board`; hours this week from timesheet lines (refreshed on open); annual leave left from `leave_balances` (type code `annual`); leave decisions, queries and New query reuse the 4.4 and 4.6 actions and components. Counts only in `team.board_summary`.
+- **`/m/team`** (worker-supervisors and line managers in the worker app, owner decision 2 of 21 Nov 2026) moved to slice 4.7b.
+
 
 ## Order and parallel work
 
