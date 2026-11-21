@@ -62,6 +62,9 @@ export function fromLeaveRequestError(error: PostgrestError): never {
       throw new MutationError("invalid", error.message);
     case "23P01":
       throw new MutationError("invalid", "You already asked for leave on some of these days.");
+    case "40P01":
+    case "40001":
+      throw new MutationError("invalid", "Someone else changed this at the same time. Try again.");
     case "MLCN1":
       throw new MutationError("forbidden", "Only the worker can do this, signed in to the worker app.");
     case "MLCN2":

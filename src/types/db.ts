@@ -2016,6 +2016,16 @@ isOneToOne: false
               "assigned_at": string,"assigned_by": string,"id": string,"removed_at": string,"removed_by": string,"removed_reason": string
             }[]
                            },
+"roster_leave":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
+              "end_date": string,"start_date": string,"status": string,"worker_id": string
+            }[]
+                           },
+"roster_leave_removals":
+{ Args: { "p_from": string,"p_organisation_id": string,"p_site_id": string,"p_to": string }; Returns: {
+              "assignment_id": string,"post_id": string,"shift_date": string,"worker_id": string
+            }[]
+                           },
 "roster_notice_targets":
 { Args: { "p_organisation_id": string,"p_site_id": string,"p_week_start": string }; Returns: Json
                            },

@@ -6,6 +6,7 @@ import { addDays } from "@/lib/dates";
 import type { LeaveCalendar } from "@/lib/leave/days";
 import type { LeaveCounting } from "@/lib/leave/presets";
 import { isLeaveStatus, type LeaveStatus } from "@/lib/leave/requests";
+import { toOpenedShifts, type OpenedShift } from "@/lib/leave/roster";
 import type { Database, Json } from "@/types/db";
 
 import { currentVersion, loadLeaveSetup, type LeaveTypeRow } from "./leave-setup-data";
@@ -450,6 +451,8 @@ export interface HrDecisionResult {
   shifts: number;
   sites: string[];
   payBelowService: boolean;
+  /** Slice 4.5: the shifts the approval opens (dry run) or opened. Empty on a decline. */
+  openShifts: OpenedShift[];
 }
 
 export function toHrDecisionResult(value: Json | null): HrDecisionResult {
@@ -465,6 +468,7 @@ export function toHrDecisionResult(value: Json | null): HrDecisionResult {
     shifts: Number(o.shifts ?? 0),
     sites: Array.isArray(o.site_names) ? (o.site_names as string[]) : [],
     payBelowService: o.pay_below_service === true,
+    openShifts: toOpenedShifts(o.open_shifts),
   };
 }
 
