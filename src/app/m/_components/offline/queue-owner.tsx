@@ -63,22 +63,36 @@ export function QueueOwnerSync({
 }: QueueOwner & { userId: string }) {
   useEffect(() => {
     let cancelled = false;
-    setQueueSender(punchSender);
+    let activated = false;
+
+    const start = (installTestHooks?: () => void) => {
+      if (cancelled) return;
+      setQueueSender(punchSender);
+      // Test builds: wrap the sender before the engine's first drain. Installed after it, the
+      // "start" drain (already holding the plain punch sender while it checks the session)
+      // could pick up the test ping and the punch sender would refuse it as `invalid`, so it
+      // never counted as saved on the phone (the flaky tests/e2e/offline.spec.ts).
+      installTestHooks?.();
+      try {
+        activateQueue({ organisationId, workerId }, { isOwnerSignedIn: sessionIs(userId) });
+      } catch {
+        // IndexedDB unavailable (some private modes): the app works online without the queue.
+        return;
+      }
+      activated = true;
+      void requestPersistentStorage();
+    };
+
     if (TEST_HOOKS) {
-      void import("@/lib/offline/test-hooks").then(({ installTestHooks }) => {
-        if (!cancelled) installTestHooks();
-      });
+      void import("@/lib/offline/test-hooks").then(({ installTestHooks }) =>
+        start(installTestHooks),
+      );
+    } else {
+      start();
     }
-    try {
-      activateQueue({ organisationId, workerId }, { isOwnerSignedIn: sessionIs(userId) });
-    } catch {
-      // IndexedDB unavailable (some private modes): the app works online without the queue.
-      return;
-    }
-    void requestPersistentStorage();
     return () => {
       cancelled = true;
-      deactivateQueue();
+      if (activated) deactivateQueue();
     };
   }, [organisationId, workerId, userId]);
   return null;

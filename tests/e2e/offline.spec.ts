@@ -111,6 +111,8 @@ test.describe("offline queue", () => {
     await page.getByRole("button", { name: "Set PIN and sign in" }).click();
     await expect(page).toHaveURL(/\/m$/, { timeout: 15_000 });
     await waitForWorker(page);
+    // Set only once the test sender wraps the punch sender and the queue is open (queue-owner.tsx),
+    // so no drain can hand the ping to the punch sender, which refuses it as `invalid`.
     await page.waitForFunction(() => window.__metaliraQueue !== undefined);
 
     // Offline: the punch is saved on the phone and counted in the banner.
