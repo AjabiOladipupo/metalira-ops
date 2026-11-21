@@ -321,7 +321,9 @@ export default function MePage() {
       </Suspense>
       <MeTabs
         queries={
-          <Suspense fallback={<span aria-hidden className="block h-16 w-full rounded bg-surface" />}>
+          <Suspense
+            fallback={<span aria-hidden className="block h-16 w-full rounded bg-surface" />}
+          >
             <QueriesPanel />
           </Suspense>
         }

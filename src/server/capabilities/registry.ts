@@ -1143,7 +1143,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "queries.withdraw",
-    description: "Withdraws a query the signed-in manager raised, with a reason kept on the HR file.",
+    description:
+      "Withdraws a query the signed-in manager raised, with a reason kept on the HR file.",
     kind: "write",
     audience: "manager",
     ...fromSpec(withdrawQuerySpec),

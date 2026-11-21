@@ -46,7 +46,11 @@ export function ReplyForm({ queryId, again }: { queryId: string; again: boolean 
         </p>
       </div>
       <FormAlert message={error} />
-      <SubmitButton size="lg" pendingLabel={copy.sending} className="h-14 font-display text-lg font-bold">
+      <SubmitButton
+        size="lg"
+        pendingLabel={copy.sending}
+        className="h-14 font-display text-lg font-bold"
+      >
         {copy.send}
       </SubmitButton>
       <p className="m-0 text-[13px] text-fg-muted">{copy.note}</p>

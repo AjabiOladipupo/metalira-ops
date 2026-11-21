@@ -116,7 +116,11 @@ export async function closeQueryAction(
     return refusal(error, fields);
   }
   if (result.subject) {
-    await tell(result.organisationId, result.workerId, queryClosedNotice({ subject: result.subject }));
+    await tell(
+      result.organisationId,
+      result.workerId,
+      queryClosedNotice({ subject: result.subject }),
+    );
   }
   refreshWorker(result.workerId);
   return { ok: true, status: 200, message: "Query closed. The outcome stays on the HR file." };
@@ -153,7 +157,10 @@ export async function replyToQueryAction(
       }
     }
     const cause = error instanceof MutationError ? error.cause : error;
-    console.error("people.query_reply_failed:", cause instanceof Error ? cause.name : "unknown error");
+    console.error(
+      "people.query_reply_failed:",
+      cause instanceof Error ? cause.name : "unknown error",
+    );
     return { ok: false, message: "Your reply wasn't sent. Try again in a minute." };
   }
   revalidatePath("/m/queries");

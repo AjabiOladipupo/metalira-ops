@@ -183,6 +183,15 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 
 **Accept:** a line manager raises a lateness query with a reply-by date, the worker replies on the phone, and both show on the HR file.
 
+**As built (slice 4.6):**
+- The HR file is a section of `/app/people/[id]` (id `hr-file`), not a sub-route, so line managers keep exactly `/app/people` and `/app/people/[id]` (the 4.0b nav test is unchanged). Owner, admin, hr and line managers see it; RLS narrows line managers to their current reportees' queries and the ones they raised. Ops managers and finance don't see it.
+- Leave history and balance (4.4) and timesheet exception counts (4.2, 4.3) are placeholders on the HR file ("coming soon", test ids `hr-file-leave-placeholder` and `hr-file-timesheet-placeholder`); those slices replace them.
+- Statuses: awaiting_reply, replied (the worker's first reply), closed (owner, admin, hr, the current line manager or the raiser, with an outcome note), withdrawn (the raiser only, with a reason). A manager's follow-up is a reply row and doesn't change the status. Up to 30 replies a query. The worker may reply more than once while it is open. Reply-by is today to 60 days ahead.
+- The raiser keeps reading their query while they still hold a manager role (owner, admin, hr or line_manager) in the company, even after the worker moves to another line manager; a former line manager who didn't raise it reads nothing.
+- Text rule: plain text, line breaks only in the body, no `<`/`>` or control characters, no web addresses (`://`, `www.` or a word ending in a common domain such as `.com` or `.ng`), no run of 10 or more digits with only spaces or hyphens between them (the inbox rule, so dates and times stay allowed). The worker's notices never carry the query text, only the subject and the date.
+- `staff_queries` is declared in `NOT_WORK_RECORDS` (an HR record kept by worker id, not staff ID); `private.worker_has_work_records` is unchanged here because 4.2 replaces it.
+- Worker app: `/m/queries`, a banner on Home ("1 query from Kola Adebayo · reply by Mon 2 Nov") and a link from Me's Queries tab. Replies are online only (no offline queue for replies yet).
+
 ### 4.7 My team (after 4.0, 4.3, 4.4 and 4.6)
 - Migration `20261121170000_line_manager_assign.sql`.
 - Line managers assign within their crews (deferred from Phase 3's role table): `assign_worker_to_shift` and `remove_assignment` accept a line_manager when the worker is their reportee and the shift's site is one of `private.line_manager_site_ids`; publishing stays with ops_manager, admin and owner.

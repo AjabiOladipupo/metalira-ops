@@ -246,7 +246,11 @@ describe("the accept line", () => {
 
     const sent = await reply(musaClient, queryId);
     expect(sent.error).toBeNull();
-    expect(sent.data).toMatchObject({ query_id: queryId, worker_id: W.musa, author_role: "worker" });
+    expect(sent.data).toMatchObject({
+      query_id: queryId,
+      worker_id: W.musa,
+      author_role: "worker",
+    });
 
     for (const reader of [owner, staff.hr, staff.lm]) {
       const { data } = await reader.client
@@ -320,9 +324,7 @@ describe("who reads which query", () => {
     for (const reader of [staff.ops, staff.finance, staff.otherLm, other]) {
       const ids = await visibleQueryIds(reader.client);
       expect(ids.filter((id) => [lmQuery, hrQuery, adaQuery].includes(id))).toEqual([]);
-      expect(
-        (await visibleReplyIds(reader.client)).filter((id) => id === adaQuery),
-      ).toEqual([]);
+      expect((await visibleReplyIds(reader.client)).filter((id) => id === adaQuery)).toEqual([]);
     }
   });
 
@@ -351,9 +353,7 @@ describe("who reads which query", () => {
     const former = await visibleQueryIds(staff.lm.client);
     expect(former).toContain(byLm);
     expect(former).not.toContain(byHr);
-    expect(await visibleQueryIds(staff.lm2.client)).toEqual(
-      expect.arrayContaining([byLm, byHr]),
-    );
+    expect(await visibleQueryIds(staff.lm2.client)).toEqual(expect.arrayContaining([byLm, byHr]));
     // Nor can the former line manager reply to or close the one they didn't raise.
     expect((await reply(staff.lm.client, byHr, "Follow-up")).error?.code).toBe("P0002");
 
@@ -440,7 +440,9 @@ describe("raising", () => {
       { body: "x".repeat(2001) },
       { kind: "theft" },
     ]) {
-      expect((await raise(staff.hr.client, input)).error?.code, JSON.stringify(input)).toBe("MLQY1");
+      expect((await raise(staff.hr.client, input)).error?.code, JSON.stringify(input)).toBe(
+        "MLQY1",
+      );
     }
     expect(
       (await raise(staff.hr.client, { body: "Absent on 21/11/2026 08:00.\nSecond line." })).error,
@@ -471,7 +473,9 @@ describe("replies, closing and withdrawing", () => {
       .eq("id", queryId)
       .single();
     expect(data?.status).toBe("awaiting_reply");
-    expect(data?.staff_query_replies).toEqual([{ author_role: "manager", author_name: "Halima Hr" }]);
+    expect(data?.staff_query_replies).toEqual([
+      { author_role: "manager", author_name: "Halima Hr" },
+    ]);
   });
 
   it("closes with an outcome; a closed query takes no replies and can't be withdrawn", async () => {
@@ -584,7 +588,10 @@ describe("insert-only replies, never-deleted queries", () => {
   });
 
   it("the secret key can't change or delete a reply or a query", async () => {
-    const update = await admin.from("staff_query_replies").update({ body: "Edited." }).eq("id", replyId);
+    const update = await admin
+      .from("staff_query_replies")
+      .update({ body: "Edited." })
+      .eq("id", replyId);
     expect(update.error?.code).toBe(PERMISSION_DENIED);
     const del = await admin.from("staff_query_replies").delete().eq("id", replyId);
     expect(del.error?.code).toBe(PERMISSION_DENIED);
@@ -600,9 +607,9 @@ describe("insert-only replies, never-deleted queries", () => {
         replyId,
       ]),
     ).toBe("MLQY0");
-    expect(await ownerError("delete from public.staff_query_replies where id = $1", [replyId])).toBe(
-      "MLQY0",
-    );
+    expect(
+      await ownerError("delete from public.staff_query_replies where id = $1", [replyId]),
+    ).toBe("MLQY0");
     expect(await ownerError("truncate public.staff_query_replies")).toBe("MLQY0");
     expect(
       await ownerError("update public.staff_queries set subject = 'Edited subject' where id = $1", [
@@ -621,7 +628,9 @@ describe("insert-only replies, never-deleted queries", () => {
     ).toBe("MLQY0");
     // Closing without who and a note.
     expect(
-      await ownerError("update public.staff_queries set status = 'closed' where id = $1", [queryId]),
+      await ownerError("update public.staff_queries set status = 'closed' where id = $1", [
+        queryId,
+      ]),
     ).not.toBeNull();
     const { rows } = await db.query<{ n: string }>(
       "select count(*) as n from public.staff_query_replies where id = $1 and body = 'The BRT was stopped at Mile 2.'",
@@ -673,7 +682,9 @@ describe("daily reminders", () => {
       throw error;
     }
 
-    expect((await staff.hr.client.rpc("claim_staff_query_reminders", { p_limit: 10 })).error).not.toBeNull();
+    expect(
+      (await staff.hr.client.rpc("claim_staff_query_reminders", { p_limit: 10 })).error,
+    ).not.toBeNull();
     const first = await admin.rpc("claim_staff_query_reminders", { p_limit: 500 });
     expect(first.error).toBeNull();
     const ids = (first.data ?? []).map((r) => r.query_id);
@@ -691,9 +702,10 @@ describe("daily reminders", () => {
     expect((again.data ?? []).map((r) => r.query_id)).not.toContain(queryId);
     // The stamp is set once and never moves.
     expect(
-      await ownerError("update public.staff_queries set reminded_at = now() + interval '1 day' where id = $1", [
-        queryId,
-      ]),
+      await ownerError(
+        "update public.staff_queries set reminded_at = now() + interval '1 day' where id = $1",
+        [queryId],
+      ),
     ).toBe("MLQY0");
   });
 });

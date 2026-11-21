@@ -38,7 +38,9 @@ function QueryCard({ query, today }: { query: QueryView; today: string }) {
       {/* The reply-by date first (docs/PHASE_4.md 4.6). */}
       {open ? (
         <span className="text-[15px] font-semibold" data-testid="my-query-reply-by">
-          {overdue ? copy.overdue(formatShortDay(query.replyBy)) : copy.replyBy(formatShortDay(query.replyBy))}
+          {overdue
+            ? copy.overdue(formatShortDay(query.replyBy))
+            : copy.replyBy(formatShortDay(query.replyBy))}
         </span>
       ) : null}
       <span className="type-label text-fg-muted">
@@ -52,7 +54,10 @@ function QueryCard({ query, today }: { query: QueryView; today: string }) {
       <p className="m-0 text-[15px] leading-normal break-words whitespace-pre-line">{query.body}</p>
 
       {query.replies.length > 0 ? (
-        <section aria-label={copy.replies} className="flex flex-col gap-2 border-t border-line pt-3">
+        <section
+          aria-label={copy.replies}
+          className="flex flex-col gap-2 border-t border-line pt-3"
+        >
           {query.replies.map((reply) => (
             <div key={reply.id} className="flex flex-col gap-0.5" data-testid="my-query-reply">
               <span className="text-xs text-fg-muted">

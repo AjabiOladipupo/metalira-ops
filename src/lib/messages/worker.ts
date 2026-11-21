@@ -524,7 +524,9 @@ export const workerMessages = {
     note: "Your reply goes to your line manager and on your HR file.",
     /** The home banner: "1 query from Kola Adebayo · reply by 2 Nov". */
     homeBanner: (count: number, from: string, date: string) =>
-      count === 1 ? `1 query from ${from} · reply by ${date}` : `${count} queries to reply to · first by ${date}`,
+      count === 1
+        ? `1 query from ${from} · reply by ${date}`
+        : `${count} queries to reply to · first by ${date}`,
     meLink: (count: number) => (count === 1 ? "1 query open" : `${count} queries open`),
     meLinkHint: "Read and reply in Queries.",
   },

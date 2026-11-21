@@ -94,11 +94,7 @@ const PROBLEM_MESSAGES: Record<Exclude<QueryTextProblem, "length">, string> = {
 };
 
 /** A Zod string for query text: normalised, then checked against the rule. */
-export function queryText(
-  label: string,
-  limits: { min: number; max: number },
-  multiline: boolean,
-) {
+export function queryText(label: string, limits: { min: number; max: number }, multiline: boolean) {
   return z
     .string(`Write the ${label}`)
     .transform(normaliseQueryText)

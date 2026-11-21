@@ -174,7 +174,11 @@ async function QueryBanner() {
       data-testid="home-query-banner"
       className="flex items-center justify-between gap-2 rounded-xl border-[1.5px] border-foreground px-3.5 py-3 text-[15px] font-semibold text-foreground no-underline hover:bg-surface hover:text-foreground"
     >
-      {workerMessages.queries.homeBanner(waiting.length, first.raisedByName, formatShortDay(first.replyBy))}
+      {workerMessages.queries.homeBanner(
+        waiting.length,
+        first.raisedByName,
+        formatShortDay(first.replyBy),
+      )}
       <ChevronRight strokeWidth={1.75} className="size-[18px] shrink-0" aria-hidden />
     </Link>
   );
