@@ -60,7 +60,10 @@ describe("GET /api/cron/timesheets", () => {
   });
 });
 
-type Rpc = (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code: string } | null }>;
+type Rpc = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<{ data: unknown; error: { code: string } | null }>;
 
 function fakeAdmin(orgs: string[], failing: Set<string> = new Set()) {
   const calls: { name: string; args: Record<string, unknown> }[] = [];

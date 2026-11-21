@@ -2122,7 +2122,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "timesheets.summary",
     description:
-      "Counts the timesheet days in a pay period (20th to 19th): pending, approved, flagged, needing review, no clock-out, no-show, and minutes worked and overtime.",
+      "Counts a pay period's timesheet days: pending, approved, flagged, no clock-out, no-show, minutes worked and overtime.",
     kind: "read",
     audience: "manager",
     roles: TIMESHEET_READERS,
@@ -2138,7 +2138,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "timesheets.days",
     description:
-      "Lists the timesheet days between two dates with their minutes, exceptions and status (a line manager sees only their reportees).",
+      "Lists the timesheet days between two dates with their minutes, exceptions and status.",
     kind: "read",
     audience: "manager",
     roles: TIMESHEET_READERS,
@@ -2155,7 +2155,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "timesheets.correct",
     description:
-      "Corrects one timesheet day with a reason: sets the clock-in or clock-out, the minutes, or sets a punch aside. Never on your own day; the punches never change.",
+      "Corrects one timesheet day with a reason (clock-in, clock-out, minutes or a punch set aside); never your own day.",
     kind: "write",
     audience: "manager",
     ...fromSpec(addCorrectionSpec),

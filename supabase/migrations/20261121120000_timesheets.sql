@@ -836,7 +836,10 @@ begin
     and l.work_date between p_from and p_to
     and (p_worker_ids is null or l.worker_id = any (p_worker_ids))
     and l.status = 'pending'
-    and not exists (select 1 from pg_temp.timesheet_calc c where c.line_id = l.id)
+    and not exists (
+      select 1 from pg_temp.timesheet_calc c
+      where c.assignment_id = l.shift_assignment_id or c.no_shift_punch_id = l.no_shift_punch_id
+    )
     and not exists (select 1 from public.timesheet_corrections x where x.line_id = l.id);
   get diagnostics v_deleted = row_count;
 

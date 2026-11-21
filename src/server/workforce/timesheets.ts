@@ -32,7 +32,12 @@ export const TIMESHEET_CORRECTORS: readonly ManagerRole[] = [
   "line_manager",
 ];
 
-export const CORRECTION_KINDS = ["set_clock_in", "set_clock_out", "set_minutes", "void_punch"] as const;
+export const CORRECTION_KINDS = [
+  "set_clock_in",
+  "set_clock_out",
+  "set_minutes",
+  "void_punch",
+] as const;
 export type CorrectionKind = (typeof CORRECTION_KINDS)[number];
 
 const blank = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);

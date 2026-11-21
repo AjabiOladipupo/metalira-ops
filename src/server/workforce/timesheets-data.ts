@@ -199,8 +199,9 @@ export function summariseLines(
     disputed: lines.filter((l) => l.status === "disputed").length,
     flagged: lines.filter((l) => open(l) && l.exceptions.length > 0).length,
     needsReview: lines.filter((l) => open(l) && l.needsReview).length,
-    clean: lines.filter((l) => l.status === "pending" && l.exceptions.length === 0 && !l.needsReview)
-      .length,
+    clean: lines.filter(
+      (l) => l.status === "pending" && l.exceptions.length === 0 && !l.needsReview,
+    ).length,
     noClockOut: lines.filter((l) => open(l) && has(l, "no_clock_out")).length,
     noShow: lines.filter((l) => open(l) && has(l, "no_show")).length,
     late: lines.filter((l) => has(l, "late")).length,
