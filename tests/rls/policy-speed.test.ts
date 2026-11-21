@@ -94,6 +94,25 @@ describe("policies run the session checks once per statement", () => {
     expect(offenders, "Use private.role_org_ids and the set helpers (see this file)").toEqual([]);
   });
 
+  it("scans only the caller's own companies in set helpers that read a business table", async () => {
+    // Slice 4.6 (security review L1): private.my_staff_query_ids() reads staff_queries; it must
+    // narrow to private.user_org_ids() before its role and reportee checks, and the replies
+    // policy leads with the same narrowing.
+    const { rows } = await db.query<{ src: string }>(
+      "select prosrc as src from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'private' and p.proname = 'my_staff_query_ids'",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.src).toMatch(
+      /where\s+q\.organisation_id\s+in\s+\(select private\.user_org_ids\(\)\)\s+and/,
+    );
+    const policy = await db.query<{ qual: string }>(
+      "select qual from pg_policies where schemaname = 'public' and tablename = 'staff_query_replies' and policyname = 'staff_query_replies_select'",
+    );
+    expect(policy.rows[0]!.qual).toMatch(
+      /^\(\(organisation_id IN \( SELECT private\.user_org_ids\(\)/,
+    );
+  });
+
   it("allows column arguments only to immutable, non-definer helpers", async () => {
     const { rows } = await db.query<{ name: string; volatile: string; definer: boolean }>(
       `select p.proname as name, p.provolatile as volatile, p.prosecdef as definer
