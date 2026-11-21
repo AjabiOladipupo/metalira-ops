@@ -291,8 +291,7 @@ export class SyncEngine {
 
   private async run(reason: SyncReason): Promise<DrainReport> {
     if (this.stopped) return empty("stopped");
-    const sender = this.options.getSender();
-    if (!sender) return empty("no_sender");
+    if (!this.options.getSender()) return empty("no_sender");
     if (!this.env.isOnline()) return empty("offline");
     if (this.options.isOwnerSignedIn) {
       let signedIn = false;
@@ -303,6 +302,10 @@ export class SyncEngine {
       }
       if (!signedIn || this.stopped) return empty("wrong_session");
     }
+    // Read again after the session check: a sender registered while it ran is the one to use,
+    // not the one this run saw before waiting.
+    const sender = this.options.getSender();
+    if (!sender) return empty("no_sender");
     return drainQueue(this.options.db, sender, {
       ...this.options.drain,
       force: FORCED.has(reason),
