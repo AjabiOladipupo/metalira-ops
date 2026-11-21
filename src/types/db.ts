@@ -1807,9 +1807,22 @@ isOneToOne: false
               "invite_expires_at": string,"invite_id": string,"invite_worker_id": string,"token": string
             }[]
                            },
+"crew_leave_requests":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "balance": number,"counting": string,"created_at": string,"days": number,"end_date": string,"id": string,"leave_type_name": string,"needs_certificate": boolean,"open_shifts": Json,"other_pending": number,"reason": string,"staff_id": string,"start_date": string,"worker_id": string,"worker_name": string
+            }[]
+                           },
 "crew_photos_due":
 { Args: { "p_limit"?: number }; Returns: {
               "batch_id": string,"photo_path": string
+            }[]
+                           },
+"crew_team_size":
+{ Args: { "p_organisation_id": string }; Returns: number
+                           },
+"crew_timesheet_days":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "dispute_reason": string,"early_minutes": number,"ends_at": string,"exceptions": (string)[],"late_minutes": number,"line_id": string,"needs_review": boolean,"ot_minutes": number,"post_name": string,"running": boolean,"scheduled_minutes": number,"site_name": string,"staff_id": string,"starts_at": string,"status": string,"work_date": string,"worked_minutes": number,"worker_id": string,"worker_name": string
             }[]
                            },
 "decide_leave_hr":

@@ -257,6 +257,14 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 - **`/app/team`:** nav roles owner, admin and line_manager (hr and ops_manager dropped: they have no reportees). Today comes from `attendance_board`; hours this week from timesheet lines (refreshed on open); annual leave left from `leave_balances` (type code `annual`); leave decisions, queries and New query reuse the 4.4 and 4.6 actions and components. Counts only in `team.board_summary`.
 - **`/m/team`** (worker-supervisors and line managers in the worker app, owner decision 2 of 21 Nov 2026) moved to slice 4.7b.
 
+**As built (slice 4.7b, `/m/team`):** migration `20261121210000_supervisor_team.sql`.
+- **Crew:** `private.my_supervised_crew_ids()`, the workers whose `line_manager_worker_id` is the caller's own worker record (role `worker`), while that record is active and its end date hasn't passed; never the caller. 3.6's `my_crew_ids` is unchanged.
+- **Timesheet days:** `timesheet_can_decide` admits a worker-supervisor for their crew while Shifts is on; `approve_timesheet_line` and `reject_timesheet_line` admit `worker` to the role gate. Every 4.3 rule stays (own day MLTA1, refresh under the worker lock, running MLTA3, changed-since-opened MLTA7). `refresh_timesheet_lines` lets a worker login refresh its crew as well as itself (35 days, 200 people at most, so never the company-wide lock). Bulk approve, reopen and corrections stay with managers.
+- **Leave step 1:** `leave_has_line_manager` counts an employed worker-supervisor as the worker's line manager and `leave_can_decide_step1` lets them decide; an ended supervisor stops counting and step 1 falls back to owner, admin or ops_manager. `decide_leave_line_manager` keeps 4.4's checks, now takes the worker's leave lock first and writes its audit row directly (`log_audit_impl` admits manager roles only). The step-1 notice goes to the supervisor's inbox (link `/m/team`).
+- **Reads (worker and line_manager logins, crew or reportees only):** `crew_timesheet_days` (undecided days, last 35 days), `crew_leave_requests` (step 1 with the type's balance, other pending days and 4.5's opened shifts) and `crew_team_size` (the home's Approvals row shows when above 0). No bank, tax, pay, phone or location.
+- **Queries:** out of scope (owner, 21 Nov 2026). Supervisors read no `staff_queries` or replies; 4.6 is unchanged.
+- **Deploy note:** requests already waiting at step 1 when this ships move to the worker-supervisor without a fresh notice; with live customers, re-notify them (none yet, 21 Nov 2026).
+
 
 ## Order and parallel work
 

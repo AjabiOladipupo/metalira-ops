@@ -129,6 +129,7 @@ import {
 } from "@/server/people/leave-requests";
 import {
   cancelOwnLeaveSchema,
+  decideLeaveSchema,
   leaveBalancesSchema,
   leaveListSchema,
   requestLeaveSchema,
@@ -187,6 +188,7 @@ import { SELFIE_READERS, selfieLinkSchema } from "@/server/workforce/punch-selfi
 import { recordPunchSchema, uploadSelfieSchema } from "@/server/workforce/punches";
 import { recordCrewPunchSchema, uploadCrewPhotoSchema } from "@/server/workforce/crew";
 import { CREW_SUMMARY_READERS, loadTodayCrewSummary } from "@/server/workforce/crew-data";
+import { loadCrewSummary } from "@/server/workforce/crew-team";
 import { recordCheckpointScanSchema } from "@/server/workforce/checkpoint-scans";
 import {
   PATROL_READERS,
@@ -228,8 +230,10 @@ import {
 import { TIMESHEET_READERS, addCorrectionSpec } from "@/server/workforce/timesheets";
 import {
   approveCleanSpec,
+  approveLineSchema,
   approveLineSpec,
   disputeLineSchema,
+  rejectLineSchema,
   rejectLineSpec,
   reopenLineSpec,
 } from "@/server/workforce/timesheet-approval";
@@ -1393,6 +1397,62 @@ export const CAPABILITIES: readonly Capability[] = [
     action: null,
     read: ({ supabase, organisationId }) => loadTodayCrewSummary(supabase, organisationId),
     agent: true,
+  },
+  // -------------------------------------------------------------------------
+  // My team in the worker app (workforce/crew-team-actions.ts, slice 4.7b)
+  // -------------------------------------------------------------------------
+  {
+    name: "crew_team.summary",
+    description:
+      "Counts a supervisor's crew days to approve and leave requests waiting at step 1.",
+    kind: "read",
+    audience: "worker",
+    roles: [],
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadCrewSummary(supabase, organisationId),
+    agent: false,
+    agentNote: "Worker-app reads are for the supervisor on their phone; the agent serves managers.",
+  },
+  {
+    name: "crew_team.approve_day",
+    description:
+      "Lets a worker-supervisor approve one of their crew's timesheet days from the worker app. Never their own day.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: approveLineSchema,
+    changes: "many",
+    action: at("workforce/crew-team-actions", "approveCrewDayAction"),
+    agent: false,
+    agentNote: APPROVE_TIMESHEET,
+  },
+  {
+    name: "crew_team.reject_day",
+    description:
+      "Lets a worker-supervisor reject one of their crew's timesheet days with a reason; the worker is told.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: rejectLineSchema,
+    changes: "one",
+    action: at("workforce/crew-team-actions", "rejectCrewDayAction"),
+    agent: false,
+    agentNote: APPROVE_TIMESHEET,
+  },
+  {
+    name: "crew_team.decide_leave",
+    description:
+      "Lets a worker-supervisor approve or decline step 1 of a crew member's leave from the worker app; HR decides next.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: decideLeaveSchema,
+    changes: "many",
+    action: at("workforce/crew-team-actions", "decideCrewLeaveAction"),
+    agent: false,
+    agentNote: "Deciding a person's leave is a manager's decision, made on the screen.",
   },
   // -------------------------------------------------------------------------
   // Patrol checkpoint scans (workforce/checkpoint-scan-actions.ts, slice 3.8)
