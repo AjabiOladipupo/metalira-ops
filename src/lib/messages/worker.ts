@@ -398,4 +398,58 @@ export const workerMessages = {
     homeShiftHours: (start: string, end: string) => `${start} – ${end}`,
     homeShiftWhere: (post: string, site: string) => `${post} · ${site}`,
   },
+  /** Crew clock-in by a supervisor (slice 3.6, SupCrew board). */
+  crew: {
+    homeCard: "Clock in crew",
+    homeCardLine: (count: number) =>
+      count === 1 ? "1 person in your crew" : `${count} people in your crew`,
+    titleIn: "Clock in crew",
+    titleOut: "Clock out crew",
+    modes: "Clock in or out",
+    modeIn: "Clock in",
+    modeOut: "Clock out",
+    /** "Floor crew · 07:00–19:00 · Apapa Warehouse 3". */
+    subtitle: (post: string, hours: string, site: string) => `${post} · ${hours} · ${site}`,
+    sitePicker: "Site",
+    presentCount: (count: number, total: number) => `${count} of ${total} present`,
+    outCount: (count: number, total: number) => `${count} of ${total} to clock out`,
+    selectAll: "Select all",
+    clearAll: "Clear all",
+    markPresent: (name: string) => `Mark ${name} present`,
+    markOut: (name: string) => `Mark ${name} clocked out`,
+    noPhone: "No phone",
+    clockedInAt: (time: string) => `Clocked in ${time}`,
+    clockedOutAt: (time: string) => `Clocked out ${time}`,
+    notIn: "Not clocked in",
+    shiftHours: (hours: string) => `Shift ${hours}`,
+    takePhoto: "Take group photo",
+    retakePhoto: "Group photo taken",
+    photoNoConsent: (count: number) =>
+      count === 1
+        ? "No group photo: 1 person here hasn't agreed to photos."
+        : `No group photo: ${count} people here haven't agreed to photos.`,
+    photoFailed: "That photo couldn't be used. Try again, or send without one.",
+    submitIn: (count: number) => (count === 1 ? "Mark 1 present" : `Mark ${count} present`),
+    submitOut: (count: number) =>
+      count === 1 ? "Mark 1 clocked out" : `Mark ${count} clocked out`,
+    doneIn: (count: number, time: string) =>
+      count === 1 ? `1 clocked in at ${time}` : `${count} clocked in at ${time}`,
+    doneOut: (count: number, time: string) =>
+      count === 1 ? `1 clocked out at ${time}` : `${count} clocked out at ${time}`,
+    bySupervisor: "Each punch is marked by supervisor",
+    yourLocation: (distance: string) => `Your location: ${distance} from site`,
+    noLocation: "Your location was not shared",
+    photoAttached: "Group photo attached",
+    noPhoto: "No group photo, so these punches are flagged for review",
+    notMarked: (names: string) => `Not marked: ${names}`,
+    wholeCrew: "Whole crew marked",
+    back: "Back to crew",
+    empty: "No one in your crew is on shift at this site now.",
+    notOnShift:
+      "You aren't on shift at a site now. Crew clock-in opens during your shift, from 2 hours before it starts.",
+    notSupervisor:
+      "You don't have a crew. Crew clock-in is for supervisors and line managers. Ask HR if this is wrong.",
+    shiftsOff: "Clock-in is switched off for your company.",
+    left: "You have left this company, so you can't clock in a crew.",
+  },
 } as const;

@@ -79,7 +79,10 @@ export interface CrewContext {
   sites: CrewSite[];
 }
 
-export async function loadCrewContext(supabase: Client, organisationId: string): Promise<CrewContext> {
+export async function loadCrewContext(
+  supabase: Client,
+  organisationId: string,
+): Promise<CrewContext> {
   const { data, error } = await supabase.rpc("my_crew_context", {
     p_organisation_id: organisationId,
   });
@@ -125,15 +128,6 @@ export async function loadCrewContext(supabase: Client, organisationId: string):
       })),
     })),
   };
-}
-
-/** Whether the signed-in worker supervises anyone (the home card). Never throws. */
-export async function hasCrew(supabase: Client, organisationId: string): Promise<boolean> {
-  try {
-    return (await loadCrewContext(supabase, organisationId)).crewSize > 0;
-  } catch {
-    return false;
-  }
 }
 
 export const CREW_SUMMARY_READERS: readonly ManagerRole[] = ["owner", "admin", "ops_manager", "hr"];

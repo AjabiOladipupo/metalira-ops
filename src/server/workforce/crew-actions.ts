@@ -11,7 +11,8 @@ import { lookupCrewSession, type CrewSession } from "./crew-session";
  * queue's owner. Answers are fixed codes only.
  */
 
-type Session = { ok: true; session: CrewSession } | { ok: false; code: "signed_out" | "not_your_crew" };
+type Session =
+  { ok: true; session: CrewSession } | { ok: false; code: "signed_out" | "not_your_crew" };
 
 async function crew(): Promise<Session> {
   try {
@@ -20,7 +21,10 @@ async function crew(): Promise<Session> {
     if (lookup.type === "signed_out") return { ok: false, code: "signed_out" };
     return { ok: false, code: "not_your_crew" };
   } catch (error) {
-    console.error("workforce.crew_session_failed:", error instanceof Error ? error.name : "unknown");
+    console.error(
+      "workforce.crew_session_failed:",
+      error instanceof Error ? error.name : "unknown",
+    );
     return { ok: false, code: "signed_out" };
   }
 }

@@ -319,7 +319,10 @@ describe("record_crew_punch: a worker-supervisor clocks in their crew", () => {
   it("records one supervisor punch per person, with the batch, the actor and the audit", async () => {
     const { supervisor, crew } = await crewOf(2);
     const ids = crew.map((w) => w.id);
-    const { data, error } = await crewPunch(supervisor.client, { actor: supervisor.id, workers: ids });
+    const { data, error } = await crewPunch(supervisor.client, {
+      actor: supervisor.id,
+      workers: ids,
+    });
     expect(error).toBeNull();
     const result = data as unknown as Recorded;
     expect(result).toMatchObject({ duplicate: false, count: 2, photo_wanted: false });
@@ -389,13 +392,17 @@ describe("record_crew_punch: a worker-supervisor clocks in their crew", () => {
     });
     expect(error?.code).toBe("MLPU6");
     // Without the location it is recorded: consent is never needed to clock in a crew.
-    expect((await crewPunch(supervisor.client, { actor: supervisor.id, workers: [w.id] })).error).toBeNull();
+    expect(
+      (await crewPunch(supervisor.client, { actor: supervisor.id, workers: [w.id] })).error,
+    ).toBeNull();
   });
 
   it("clocks out a crew later, against their clock-in's shift", async () => {
     const { supervisor, crew } = await crewOf(1);
     const ids = [crew[0]!.id];
-    expect((await crewPunch(supervisor.client, { actor: supervisor.id, workers: ids })).error).toBeNull();
+    expect(
+      (await crewPunch(supervisor.client, { actor: supervisor.id, workers: ids })).error,
+    ).toBeNull();
     const { data, error } = await crewPunch(supervisor.client, {
       actor: supervisor.id,
       kind: "out",
@@ -438,7 +445,9 @@ describe("record_crew_punch: a worker-supervisor clocks in their crew", () => {
 
 describe("record_crew_punch: a line manager login", () => {
   it("clocks in their reportees on shift at the site, with no shift of their own", async () => {
-    const reportee = await addWorker({ fields: { line_manager_membership_id: lineManagerMembership } });
+    const reportee = await addWorker({
+      fields: { line_manager_membership_id: lineManagerMembership },
+    });
     await assign(reportee.id);
     const { error } = await crewPunch(staff.lineManager.client, {
       actor: lineManagerMembership,
@@ -452,7 +461,11 @@ describe("record_crew_punch: a line manager login", () => {
       p_organisation_id: owner.orgId,
     });
     expect(ctx.error).toBeNull();
-    const value = ctx.data as { actor_kind: string; actor_id: string; sites: { id: string; crew: { worker_id: string; last_kind: string }[] }[] };
+    const value = ctx.data as {
+      actor_kind: string;
+      actor_id: string;
+      sites: { id: string; crew: { worker_id: string; last_kind: string }[] }[];
+    };
     expect(value).toMatchObject({ actor_kind: "line_manager", actor_id: lineManagerMembership });
     const here = value.sites.find((s) => s.id === site);
     expect(here?.crew.find((c) => c.worker_id === reportee.id)?.last_kind).toBe("in");
@@ -543,9 +556,9 @@ describe("record_crew_punch: only the supervisor's own crew", () => {
     const offShift = await addWorker();
     const w = await addWorker({ fields: { line_manager_worker_id: offShift.id } });
     await assign(w.id);
-    expect((await crewPunch(offShift.client, { actor: offShift.id, workers: [w.id] })).error?.code).toBe(
-      "MLCR2",
-    );
+    expect(
+      (await crewPunch(offShift.client, { actor: offShift.id, workers: [w.id] })).error?.code,
+    ).toBe("MLCR2");
 
     const { supervisor } = await crewOf(0);
     const unrostered = await addWorker({ fields: { line_manager_worker_id: supervisor.id } });
@@ -620,8 +633,13 @@ describe("record_crew_punch: idempotency", () => {
     expect(await punchesOf(crew.map((w) => w.id))).toHaveLength(2);
     // A different batch under the same id is refused.
     expect(
-      (await crewPunch(supervisor.client, { ...args, workers: [crew[0]!.id], events: [args.events![0]!] }))
-        .error?.code,
+      (
+        await crewPunch(supervisor.client, {
+          ...args,
+          workers: [crew[0]!.id],
+          events: [args.events![0]!],
+        })
+      ).error?.code,
     ).toBe("MLPU2");
   });
 
@@ -657,16 +675,19 @@ describe("record_crew_punch: idempotency", () => {
     expect(
       (await crewPunch(supervisor.client, { actor: supervisor.id, workers: [id, id] })).error?.code,
     ).toBe("MLPU5");
-    expect((await crewPunch(supervisor.client, { actor: supervisor.id, workers: [] })).error?.code).toBe(
-      "MLPU5",
-    );
+    expect(
+      (await crewPunch(supervisor.client, { actor: supervisor.id, workers: [] })).error?.code,
+    ).toBe("MLPU5");
   });
 });
 
 describe("crew_punch_batches", () => {
   it("is insert-only for everyone, the database owner included", async () => {
     const { supervisor, crew } = await crewOf(1);
-    const { data } = await crewPunch(supervisor.client, { actor: supervisor.id, workers: [crew[0]!.id] });
+    const { data } = await crewPunch(supervisor.client, {
+      actor: supervisor.id,
+      workers: [crew[0]!.id],
+    });
     const batch = (data as unknown as Recorded).batch_id;
     await expect(
       db.query("update public.crew_punch_batches set kind = 'out' where id = $1", [batch]),
@@ -685,7 +706,10 @@ describe("crew_punch_batches", () => {
 
   it("is read by owner, ops, hr and the supervisor who sent it; not by finance or a crew member", async () => {
     const { supervisor, crew } = await crewOf(1);
-    const { data } = await crewPunch(supervisor.client, { actor: supervisor.id, workers: [crew[0]!.id] });
+    const { data } = await crewPunch(supervisor.client, {
+      actor: supervisor.id,
+      workers: [crew[0]!.id],
+    });
     const batch = (data as unknown as Recorded).batch_id;
     const sees = async (client: Client) =>
       ((await client.from("crew_punch_batches").select("id").eq("id", batch)).data ?? []).length;
@@ -698,7 +722,9 @@ describe("crew_punch_batches", () => {
     expect(await sees(other.client)).toBe(0);
     // The crew member still reads their own punch.
     const own = await crew[0]!.client.from("punches").select("id, source, crew_batch_id");
-    expect(own.data).toEqual([expect.objectContaining({ source: "supervisor", crew_batch_id: batch })]);
+    expect(own.data).toEqual([
+      expect.objectContaining({ source: "supervisor", crew_batch_id: batch }),
+    ]);
   });
 
   it("only the server attaches a group photo", async () => {
@@ -739,7 +765,9 @@ describe("crew_punch_batches", () => {
 describe("my_crew_context", () => {
   it("lists the crew on shift at the supervisor's site, with consent and last punch", async () => {
     const { supervisor, crew } = await crewOf(2, ["location"]);
-    expect((await crewPunch(supervisor.client, { actor: supervisor.id, workers: [crew[0]!.id] })).error).toBeNull();
+    expect(
+      (await crewPunch(supervisor.client, { actor: supervisor.id, workers: [crew[0]!.id] })).error,
+    ).toBeNull();
     const { data, error } = await supervisor.client.rpc("my_crew_context", {
       p_organisation_id: owner.orgId,
     });
@@ -749,9 +777,18 @@ describe("my_crew_context", () => {
       actor_id: string;
       crew_size: number;
       location_consent: boolean;
-      sites: { id: string; shift: unknown; crew: { worker_id: string; selfie_consent: boolean; last_kind: string | null }[] }[];
+      sites: {
+        id: string;
+        shift: unknown;
+        crew: { worker_id: string; selfie_consent: boolean; last_kind: string | null }[];
+      }[];
     };
-    expect(ctx).toMatchObject({ actor_kind: "worker", actor_id: supervisor.id, crew_size: 2, location_consent: true });
+    expect(ctx).toMatchObject({
+      actor_kind: "worker",
+      actor_id: supervisor.id,
+      crew_size: 2,
+      location_consent: true,
+    });
     expect(ctx.sites).toHaveLength(1);
     expect(ctx.sites[0]!.shift).not.toBeNull();
     const byId = new Map(ctx.sites[0]!.crew.map((c) => [c.worker_id, c]));

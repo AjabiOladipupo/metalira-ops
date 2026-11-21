@@ -139,6 +139,8 @@ import { CONSENT_READERS, loadConsentsSummary } from "@/server/workforce/consent
 import { PUNCH_SUMMARY_READERS, loadTodayPunchSummary } from "@/server/workforce/clock-data";
 import { SELFIE_READERS, selfieLinkSchema } from "@/server/workforce/punch-selfie-link";
 import { recordPunchSchema, uploadSelfieSchema } from "@/server/workforce/punches";
+import { recordCrewPunchSchema, uploadCrewPhotoSchema } from "@/server/workforce/crew";
+import { CREW_SUMMARY_READERS, loadTodayCrewSummary } from "@/server/workforce/crew-data";
 import { markReadSchema } from "@/server/workforce/inbox";
 import {
   addCheckpointSpec,
@@ -1113,6 +1115,48 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadTodayPunchSummary(supabase, organisationId),
+    agent: true,
+  },
+  // -------------------------------------------------------------------------
+  // Crew clock-in (workforce/crew-actions.ts, slice 3.6)
+  // -------------------------------------------------------------------------
+  {
+    name: "crew.record_punch",
+    description:
+      "Records a supervisor's crew clock-in or clock-out from the phone's queue: one punch per person, marked by supervisor.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: recordCrewPunchSchema,
+    changes: "many",
+    action: at("workforce/crew-actions", "recordCrewPunchAction"),
+    agent: false,
+    agentNote:
+      "A crew punch is made by the supervisor at the site, on their phone; the database checks the crew and the shift.",
+  },
+  {
+    name: "crew.upload_photo",
+    description: "Takes the group photo of a crew clock-in the supervisor just recorded.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: uploadCrewPhotoSchema,
+    changes: "one",
+    action: at("workforce/crew-actions", "uploadCrewPhotoAction"),
+    agent: false,
+    agentNote: "A group photo is taken on the supervisor's phone, only when everyone in it agreed.",
+  },
+  {
+    name: "attendance.crew_summary",
+    description:
+      "Counts today's crew clock-ins and clock-outs by supervisors, and how many had no group photo or were off site.",
+    kind: "read",
+    audience: "manager",
+    roles: CREW_SUMMARY_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadTodayCrewSummary(supabase, organisationId),
     agent: true,
   },
   {
