@@ -223,7 +223,8 @@ test("a worker says a day is wrong from /m/hours", async ({ browser }, testInfo)
   await day.getByTestId("dispute-open").click();
   await day.getByLabel("What is wrong with this day?").fill("I stayed until 19:30 to hand over");
   await day.getByRole("button", { name: "Send to my manager" }).click();
-  await expect(page.getByTestId("dispute-sent")).toBeVisible();
+  // The day goes back to the manager; the form gives way to "With your manager".
+  await expect(page.getByTestId("my-day")).toHaveAttribute("data-status", "disputed");
   await page.goto(`/m/hours?period=${DAY}`);
   await expect(page.getByTestId("my-day")).toHaveAttribute("data-status", "disputed");
   await expect(page.getByTestId("my-day")).toContainText("You said: I stayed until 19:30");

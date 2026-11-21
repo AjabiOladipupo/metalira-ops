@@ -405,7 +405,6 @@ function Detail({
               This shift hasn&apos;t finished. Approve it once it ends.
             </p>
           ) : null}
-          <ResultLine state={approveState} />
           {panel === "adjust" ? <AdjustForm day={day} zone={zone} /> : null}
           {panel === "reject" ? (
             <ReasonForm
@@ -427,6 +426,9 @@ function Detail({
             : "You can read timesheets but not decide them."}
         </p>
       ) : null}
+
+      {/* Outside the decide block: the day is decided once this shows. */}
+      <ResultLine state={approveState} />
 
       {reopen ? (
         <div className="flex flex-col gap-3">
