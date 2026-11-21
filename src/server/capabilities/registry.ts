@@ -198,6 +198,14 @@ import {
   loadRosterSummary,
   loadRosterWeek,
 } from "@/server/workforce/roster-data";
+import { TIMESHEET_READERS, addCorrectionSpec } from "@/server/workforce/timesheets";
+import {
+  loadTimesheetLines,
+  loadTimesheetSummary,
+  summariseLines,
+  timesheetRangeInput,
+  timesheetSummaryInput,
+} from "@/server/workforce/timesheets-data";
 import { rankCandidates } from "@/lib/roster-suggestions";
 import { mondayOf } from "@/lib/roster";
 
@@ -2239,6 +2247,56 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/leave-setup-actions", "applyPresetAction"),
     preview: previewPreset,
     agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Timesheets (workforce/timesheet-actions.ts, slice 4.2)
+  // -------------------------------------------------------------------------
+  {
+    name: "timesheets.summary",
+    description:
+      "Counts a pay period's timesheet days: pending, approved, flagged, no clock-out, no-show, minutes worked and overtime.",
+    kind: "read",
+    audience: "manager",
+    roles: TIMESHEET_READERS,
+    input: timesheetSummaryInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { date } = timesheetSummaryInput.parse(input ?? {});
+      return loadTimesheetSummary(supabase, organisationId, date);
+    },
+    agent: true,
+  },
+  {
+    name: "timesheets.days",
+    description:
+      "Lists the timesheet days between two dates with their minutes, exceptions and status.",
+    kind: "read",
+    audience: "manager",
+    roles: TIMESHEET_READERS,
+    input: timesheetRangeInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { from, to } = timesheetRangeInput.parse(input);
+      const lines = await loadTimesheetLines(supabase, organisationId, from, to, 2000);
+      return { summary: summariseLines(lines, { start: from, end: to }), days: lines };
+    },
+    agent: true,
+  },
+  {
+    name: "timesheets.correct",
+    description:
+      "Corrects one timesheet day with a reason (clock-in, clock-out, minutes or a punch set aside); never your own day.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(addCorrectionSpec),
+    changes: "one",
+    action: at("workforce/timesheet-actions", "addTimesheetCorrectionAction"),
+    agent: false,
+    agentNote:
+      "Changes the hours a person is paid for: kept to people until slice 4.3 adds a preview (current against new minutes).",
   },
 ];
 
