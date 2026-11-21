@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { Status, type StatusTone } from "@/components/status";
-import { formatDate } from "@/lib/dates";
+import Link from "next/link";
+
+import { addDays, formatDate } from "@/lib/dates";
 import { workerMessages } from "@/lib/messages/worker";
 import { formatHoursTotal, formatShortDay, timeIn } from "@/lib/roster";
 import { createServerSupabase } from "@/lib/supabase/server";
@@ -71,7 +73,12 @@ function DayCard({ day, timeZone }: { day: MyDay; timeZone: string }) {
   );
 }
 
-async function Hours() {
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function Hours({ searchParams }: { searchParams: PageProps<"/m/hours">["searchParams"] }) {
+  const query = await searchParams;
+  const raw = typeof query.period === "string" ? query.period : undefined;
+  const period = raw && ISO_DATE.test(raw) ? raw : undefined;
   const session = await requireWorkerPageSession();
   if (!session.shiftsEnabled) {
     return (
@@ -81,7 +88,8 @@ async function Hours() {
     );
   }
   const supabase = await createServerSupabase();
-  const hours = await loadMyHours(supabase, session.organisationId);
+  const hours = await loadMyHours(supabase, session.organisationId, period);
+  const earlier = addDays(hours.period.start, -1);
   const total = hours.days.reduce((sum, d) => sum + d.workedMinutes + d.otMinutes, 0);
   const approved = hours.days.filter((d) => d.status === "approved").length;
   return (
@@ -114,6 +122,13 @@ async function Hours() {
           ))}
         </ul>
       )}
+      <Link
+        href={`/m/hours?period=${earlier}`}
+        className="text-[15px] font-medium"
+        data-testid="hours-earlier"
+      >
+        Earlier period
+      </Link>
       <p className="m-0 text-[13px] text-fg-muted">
         Times come from the server, not your phone. If a day is wrong, tap &quot;This is wrong&quot;
         and say why; your manager decides.
@@ -126,7 +141,11 @@ async function Hours() {
  * The worker's days this pay period (slice 4.3): minutes, status and "This is wrong", which
  * sends the day back to the approver with the worker's reason.
  */
-export default function HoursPage() {
+export default function HoursPage({
+  searchParams,
+}: {
+  searchParams: PageProps<"/m/hours">["searchParams"];
+}) {
   return (
     <main className="flex flex-1 flex-col">
       <div className="px-4 pt-3 pb-1">
@@ -136,7 +155,7 @@ export default function HoursPage() {
       </div>
       <div className="px-4 pt-2 pb-4">
         <Suspense fallback={<span aria-hidden className="block h-64 w-full rounded bg-surface" />}>
-          <Hours />
+          <Hours searchParams={searchParams} />
         </Suspense>
       </div>
     </main>

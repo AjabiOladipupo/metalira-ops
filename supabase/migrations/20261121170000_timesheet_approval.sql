@@ -302,11 +302,16 @@ begin
     raise exception 'A Work Unit never changes, except to be cancelled once by reopening its day.'
       using errcode = 'MLTA0';
   end if;
+  -- The cancelling decision is the line's latest one (security review L3).
   select d.decision into v_kind
   from public.timesheet_decisions d
   where d.organisation_id = new.organisation_id
     and d.id = new.cancelled_by_decision_id
-    and d.line_id = new.timesheet_line_id;
+    and d.line_id = new.timesheet_line_id
+    and d.seq = (
+      select max(x.seq) from public.timesheet_decisions x
+      where x.organisation_id = new.organisation_id and x.line_id = new.timesheet_line_id
+    );
   if v_kind is null or v_kind not in ('reopened', 'disputed') then
     raise exception 'Only reopening its day cancels a Work Unit.' using errcode = 'MLTA0';
   end if;
@@ -314,6 +319,81 @@ begin
   return new;
 end;
 $$;
+
+-- timesheet_lines (slice 4.2's guard), replaced (security review L4): a line's status changes
+-- only together with a decision row that says so. Whenever the status changes, the line's latest
+-- decision must match it (approved, rejected, disputed; reopened for pending), so nobody, the
+-- database owner included, approves or rejects a day without a decision on record. Everything
+-- else is as 4.2 built it.
+create or replace function private.timesheet_lines_guard()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_decided constant text[] := array['status', 'work_unit_id', 'updated_at', 'decided_at', 'exceptions'];
+  v_latest text;
+begin
+  if tg_op = 'INSERT' then
+    if new.status <> 'pending' or new.work_unit_id is not null then
+      raise exception 'A new timesheet day starts pending.' using errcode = 'MLTS0';
+    end if;
+    new.created_at := now();
+    new.updated_at := now();
+    new.decided_at := null;
+    return new;
+  end if;
+  if tg_op = 'DELETE' then
+    if old.status <> 'pending' then
+      raise exception 'A decided or disputed timesheet day is never deleted.' using errcode = 'MLTS0';
+    end if;
+    return old;
+  end if;
+  if (new.id, new.organisation_id, new.worker_id, new.work_date, new.shift_assignment_id,
+      new.no_shift_punch_id, new.created_at)
+    is distinct from
+     (old.id, old.organisation_id, old.worker_id, old.work_date, old.shift_assignment_id,
+      old.no_shift_punch_id, old.created_at) then
+    raise exception 'A timesheet day''s worker, date and shift never change.' using errcode = 'MLTS0';
+  end if;
+  if old.status in ('approved', 'rejected') then
+    if (to_jsonb(new) - v_decided) is distinct from (to_jsonb(old) - v_decided)
+      or (
+        new.exceptions is distinct from old.exceptions
+        and not (
+          new.status = old.status
+          and new.exceptions @> old.exceptions
+          and new.exceptions <@ (old.exceptions || 'late_punch_after_decision'::text)
+        )
+      ) then
+      raise exception 'An approved or rejected day never changes. Reopen it first.' using errcode = 'MLTS0';
+    end if;
+  end if;
+  if new.status is distinct from old.status then
+    select d.decision into v_latest
+    from public.timesheet_decisions d
+    where d.organisation_id = new.organisation_id and d.line_id = new.id
+    order by d.seq desc
+    limit 1;
+    if v_latest is distinct from (case new.status when 'pending' then 'reopened' else new.status end) then
+      raise exception 'A timesheet day''s status follows its latest decision.' using errcode = 'MLTS0';
+    end if;
+  end if;
+  if new.status in ('approved', 'rejected') then
+    if old.status is distinct from new.status then
+      new.decided_at := now();
+    else
+      new.decided_at := old.decided_at;
+    end if;
+  else
+    new.decided_at := null;
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function private.timesheet_lines_guard() from public, anon, authenticated;
 
 create function private.timesheet_approval_no_truncate()
 returns trigger
@@ -1195,6 +1275,9 @@ begin
   if v_line.status not in ('pending', 'disputed') then
     raise exception 'This day is already decided.' using errcode = 'MLTA2';
   end if;
+  if private.timesheet_line_running(p_organisation_id, v_line.id) then
+    raise exception 'This shift hasn''t finished yet. Decide it once it ends.' using errcode = 'MLTA3';
+  end if;
   v_decision := private.timesheet_record_decision(v_line, 'rejected', v_reason, v_uid);
   update public.timesheet_lines
   set status = 'rejected', work_unit_id = null
@@ -1253,10 +1336,13 @@ begin
   end if;
   v_all_reader := private.has_role(p_organisation_id, array['owner', 'admin', 'ops_manager']);
 
+  -- Only the days the caller may decide are locked and refreshed (security review L1), so a line
+  -- manager can't refresh or lock other people's days by listing them.
   select coalesce(array_agg(distinct l.worker_id), '{}'::uuid[]), min(l.work_date), max(l.work_date)
   into v_workers, v_from, v_to
   from public.timesheet_lines l
-  where l.organisation_id = p_organisation_id and l.id = any (v_ids);
+  where l.organisation_id = p_organisation_id and l.id = any (v_ids)
+    and private.timesheet_can_decide(p_organisation_id, l.worker_id);
   if v_to - v_from > 62 then
     raise exception 'Choose days within 62 days of each other.' using errcode = '22023';
   end if;
@@ -1509,10 +1595,19 @@ begin
   exception when sqlstate 'MLTAP' then
     null;
   end;
-  -- add_timesheet_correction checked the caller; read the day as it stands.
+  -- add_timesheet_correction checked the caller. Refresh the day (as the correction does) so
+  -- "current" and "next" are worked out the same way, then read it.
   select l.* into v_before
   from public.timesheet_lines l
   where l.organisation_id = p_organisation_id and l.id = p_line_id;
+  if v_before.status in ('pending', 'disputed') then
+    perform private.timesheet_refresh(
+      p_organisation_id, v_before.work_date, v_before.work_date, array[v_before.worker_id]
+    );
+    select l.* into v_before
+    from public.timesheet_lines l
+    where l.organisation_id = p_organisation_id and l.id = p_line_id;
+  end if;
   return jsonb_build_object(
     'line_id', p_line_id,
     'current', jsonb_build_object(

@@ -27,6 +27,12 @@ import { loadTimesheetSettings, refreshTimesheetRange } from "./timesheets-data"
 
 type Client = SupabaseClient<Database>;
 
+/** A SQLSTATE from refreshTimesheetRange's error, else the error's name: never its message. */
+function errorCode(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown";
+  return /\(([0-9A-Z]{5})\)/.exec(error.message)?.[1] ?? error.name;
+}
+
 export const periodInput = z.object({
   /** Any day in the pay period wanted; today when left out. */
   period: z.iso.date("Choose a period").optional(),
@@ -174,10 +180,7 @@ export async function loadTimesheetReview(
       await refreshTimesheetRange(supabase, organisationId, period.start, to);
     } catch (error) {
       refreshed = false;
-      console.error(
-        "timesheets.refresh_on_open_failed:",
-        error instanceof Error ? error.message.replace(/[^A-Za-z0-9 ()._-]/g, "") : "unknown",
-      );
+      console.error("timesheets.refresh_on_open_failed:", errorCode(error));
     }
   }
   const { data, error } = await supabase.rpc("timesheet_review_days", {
@@ -312,10 +315,7 @@ export async function loadMyHours(
   if (period.start <= today) {
     const to = period.end < today ? period.end : today;
     await refreshTimesheetRange(supabase, organisationId, period.start, to).catch((error) => {
-      console.error(
-        "timesheets.my_refresh_failed:",
-        error instanceof Error ? error.message.replace(/[^A-Za-z0-9 ()._-]/g, "") : "unknown",
-      );
+      console.error("timesheets.my_refresh_failed:", errorCode(error));
     });
   }
   const { data, error } = await supabase.rpc("my_timesheet_days", {

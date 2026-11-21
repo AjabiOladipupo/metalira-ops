@@ -143,7 +143,8 @@ test("approve clean days, adjust a missing clock-out, and see billable Work Unit
   const { owner } = await seed();
   await signInViaUi(page, owner.email, owner.password);
   await expect(page).toHaveURL(/\/app$/, { timeout: 15_000 });
-  await page.goto("/app/timesheets");
+  // The days are three days ago, which can fall in the previous pay period.
+  await page.goto(`/app/timesheets?period=${DAY}`);
 
   // Opening the page builds the days from the punches.
   await expect(page.getByTestId("timesheets-headline")).toHaveText("3 timesheets to decide");
@@ -158,7 +159,7 @@ test("approve clean days, adjust a missing clock-out, and see billable Work Unit
   await expect(preview).toContainText("Approves 2 days.");
   await page.getByTestId("confirm-clean").click();
   await expect(page.getByTestId("clean-result")).toHaveText("2 days approved");
-  await expect(page.getByTestId("timesheets-headline")).toHaveText("1 timesheets to decide");
+  await expect(page.getByTestId("timesheets-headline")).toHaveText("1 timesheet to decide");
 
   // Adjust Ngozi's missing clock-out: preview first, then save.
   await page.getByTestId("timesheet-row").filter({ hasText: "Ngozi Eze" }).click();
@@ -214,6 +215,8 @@ test("a worker says a day is wrong from /m/hours", async ({ browser }, testInfo)
 
   await page.getByRole("link", { name: "My hours" }).click();
   await expect(page).toHaveURL(/\/m\/hours$/);
+  // The day is three days ago, which can fall in the previous pay period.
+  await page.goto(`/m/hours?period=${DAY}`);
   const day = page.getByTestId("my-day");
   await expect(day).toHaveCount(1);
   await expect(day.getByTestId("my-day-minutes")).toHaveText("12 h");
@@ -221,7 +224,7 @@ test("a worker says a day is wrong from /m/hours", async ({ browser }, testInfo)
   await day.getByLabel("What is wrong with this day?").fill("I stayed until 19:30 to hand over");
   await day.getByRole("button", { name: "Send to my manager" }).click();
   await expect(page.getByTestId("dispute-sent")).toBeVisible();
-  await page.reload();
+  await page.goto(`/m/hours?period=${DAY}`);
   await expect(page.getByTestId("my-day")).toHaveAttribute("data-status", "disputed");
   await expect(page.getByTestId("my-day")).toContainText("You said: I stayed until 19:30");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

@@ -675,6 +675,13 @@ describe("insert-only records", () => {
       });
       expect(i.error?.code).toBe("42501");
     }
+    // Nobody, the database owner included, moves a line's status without a matching decision.
+    const pending = await cleanDay();
+    await expect(
+      db.query("update public.timesheet_lines set status = 'approved' where id = $1", [
+        pending.line.id,
+      ]),
+    ).rejects.toMatchObject({ code: "MLTS0" });
     // A decided line can't be edited directly either.
     await expect(
       db.query("update public.timesheet_lines set worked_minutes = 1 where id = $1", [d.line.id]),

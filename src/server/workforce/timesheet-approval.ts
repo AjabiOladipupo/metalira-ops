@@ -84,10 +84,27 @@ export const approveCleanSchema = z.object({
   ),
 });
 
+/** The 42501 refusals the timesheet functions raise themselves (migrations 4.2 and 4.3). */
+const OWN_FORBIDDEN = new Set([
+  "Sign in to decide timesheets.",
+  "Your role can't decide timesheets.",
+  "You can decide only the timesheets of people who report to you.",
+  "Sign in to reopen a timesheet.",
+  "Your role can't reopen timesheets.",
+  "Sign in to send this.",
+  "Sign in to correct a timesheet.",
+  "Your role can't correct timesheets.",
+  "You can correct only the timesheets of people who report to you.",
+]);
+
 /** Database refusals in plain English (fixed codes; never the database's own text otherwise). */
 export function fromApprovalDbError(error: PostgrestError): never {
   if (error.code === "42501") {
-    throw new MutationError("forbidden", error.message || "Your role can't decide timesheets.");
+    // Our own refusal texts only; anything else (a grant error) gets the fixed message.
+    throw new MutationError(
+      "forbidden",
+      OWN_FORBIDDEN.has(error.message) ? error.message : "Your role can't decide timesheets.",
+    );
   }
   if (error.code === "P0002") {
     const message = error.message || "That day wasn't found.";

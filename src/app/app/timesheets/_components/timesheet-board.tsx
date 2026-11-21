@@ -148,12 +148,13 @@ export function TimesheetBoard({
     }
   };
 
+  const open = canCorrect ? toDecide : openForAll;
   const headline =
     days.length === 0
       ? "No timesheet days yet"
-      : (canCorrect ? toDecide : openForAll) === 0
+      : open === 0
         ? "All timesheets decided"
-        : `${canCorrect ? toDecide : openForAll} timesheets to decide`;
+        : `${open} ${open === 1 ? "timesheet" : "timesheets"} to decide`;
 
   return (
     <div className="flex flex-col gap-6">
