@@ -8,12 +8,14 @@ import { requestPersistentStorage } from "@/lib/offline/storage";
 import type { QueueOwner } from "@/lib/offline/types";
 import { createPunchSender } from "@/lib/punches/sender";
 import { createBrowserSupabase } from "@/lib/supabase/client";
+import { recordCheckpointScanAction } from "@/server/workforce/checkpoint-scan-actions";
 import { recordPunchAction, uploadPunchSelfieAction } from "@/server/workforce/punch-actions";
 
-/** Punches reach the server through these Server Actions (slice 3.5). */
+/** Punches (slice 3.5) and patrol scans (slice 3.8) reach the server through these actions. */
 const punchSender = createPunchSender({
   recordPunch: recordPunchAction,
   uploadSelfie: uploadPunchSelfieAction,
+  recordCheckpointScan: recordCheckpointScanAction,
 });
 
 /**

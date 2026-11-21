@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { WORKER_OFFLINE_PATH } from "@/lib/auth/routes";
+import { WORKER_CHECKPOINT_PATH, WORKER_OFFLINE_PATH } from "@/lib/auth/routes";
 import { isIosSafari } from "@/lib/offline/install";
 import { classifyRequest, isWorkerAppPath, staticAssetsIn } from "@/lib/offline/sw-routes";
 
@@ -110,13 +110,20 @@ describe("isIosSafari", () => {
 
 describe("service worker build", () => {
   it("precaches the offline page the proxy lets through, and the worker icons", async () => {
-    const { OFFLINE_URL, precacheEntries } = await import("../../../scripts/build-sw.mjs");
+    const { CHECKPOINT_URL, OFFLINE_URL, precacheEntries } = await import(
+      "../../../scripts/build-sw.mjs"
+    );
     expect(OFFLINE_URL).toBe(WORKER_OFFLINE_PATH);
+    expect(CHECKPOINT_URL).toBe(WORKER_CHECKPOINT_PATH);
     const urls = (precacheEntries() as { url: string }[]).map((e) => e.url);
     expect(urls).toContain("/m/offline");
+    // Slice 3.8: the static checkpoint scan page, so a patrol scan works with no network.
+    expect(urls).toContain("/m/checkpoint");
     expect(urls).toContain("/worker.webmanifest");
     expect(urls).toContain("/icons/worker-192.png");
-    expect(urls.every((u) => u === "/m/offline" || !u.startsWith("/m"))).toBe(true);
+    expect(
+      urls.every((u) => u === "/m/offline" || u === "/m/checkpoint" || !u.startsWith("/m")),
+    ).toBe(true);
   });
 });
 

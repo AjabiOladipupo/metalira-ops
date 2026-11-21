@@ -599,14 +599,14 @@ isOneToOne: false
                   ]
                 },"punches": {
                   Row: {
-                    "accuracy_m": number | null,"client_event_id": string,"clock_drift_seconds": number,"created_at": string,"device_time": string,"distance_m": number | null,"flags": (string)[],"geofence_result": string,"id": string,"kind": string,"location": unknown,"organisation_id": string,"outside_note": string | null,"outside_reason": string | null,"payload_hash": string,"received_at": string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at": string | null,"selfie_expected": boolean,"selfie_path": string | null,"selfie_uploaded_at": string | null,"shift_assignment_id": string | null,"shift_id": string | null,"site_id": string | null,"source": string,"time_source": string,"worker_id": string
+                    "accuracy_m": number | null,"checkpoint_id": string | null,"client_event_id": string,"clock_drift_seconds": number,"created_at": string,"device_time": string,"distance_m": number | null,"flags": (string)[],"geofence_result": string,"id": string,"kind": string,"location": unknown,"organisation_id": string,"outside_note": string | null,"outside_reason": string | null,"payload_hash": string,"received_at": string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at": string | null,"selfie_expected": boolean,"selfie_path": string | null,"selfie_uploaded_at": string | null,"shift_assignment_id": string | null,"shift_id": string | null,"site_id": string | null,"source": string,"time_source": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "accuracy_m"?: number | null,"client_event_id": string,"clock_drift_seconds": number,"created_at"?: string,"device_time": string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result": string,"id"?: string,"kind": string,"location"?: unknown,"organisation_id": string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash": string,"received_at"?: string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source": string,"worker_id": string
+                    "accuracy_m"?: number | null,"checkpoint_id"?: string | null,"client_event_id": string,"clock_drift_seconds": number,"created_at"?: string,"device_time": string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result": string,"id"?: string,"kind": string,"location"?: unknown,"organisation_id": string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash": string,"received_at"?: string,"recorded_at": string,"recorded_by_user": string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source": string,"worker_id": string
                   }
                   Update: {
-                    "accuracy_m"?: number | null,"client_event_id"?: string,"clock_drift_seconds"?: number,"created_at"?: string,"device_time"?: string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result"?: string,"id"?: string,"kind"?: string,"location"?: unknown,"organisation_id"?: string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash"?: string,"received_at"?: string,"recorded_at"?: string,"recorded_by_user"?: string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source"?: string,"worker_id"?: string
+                    "accuracy_m"?: number | null,"checkpoint_id"?: string | null,"client_event_id"?: string,"clock_drift_seconds"?: number,"created_at"?: string,"device_time"?: string,"distance_m"?: number | null,"flags"?: (string)[],"geofence_result"?: string,"id"?: string,"kind"?: string,"location"?: unknown,"organisation_id"?: string,"outside_note"?: string | null,"outside_reason"?: string | null,"payload_hash"?: string,"received_at"?: string,"recorded_at"?: string,"recorded_by_user"?: string,"selfie_deleted_at"?: string | null,"selfie_expected"?: boolean,"selfie_path"?: string | null,"selfie_uploaded_at"?: string | null,"shift_assignment_id"?: string | null,"shift_id"?: string | null,"site_id"?: string | null,"source"?: string,"time_source"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -614,6 +614,12 @@ isOneToOne: false
       columns: ["organisation_id","shift_assignment_id"]
 isOneToOne: false
       referencedRelation: "shift_assignments"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "punches_checkpoint_fkey"
+      columns: ["organisation_id","checkpoint_id"]
+isOneToOne: false
+      referencedRelation: "site_checkpoints"
       referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "punches_organisation_id_fkey"
@@ -1274,6 +1280,9 @@ isOneToOne: false
 { Args: { "p_limit"?: number }; Returns: {
               "punch_id": string,"selfie_path": string
             }[]
+                           },
+"record_checkpoint_scan":
+{ Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_latitude": number,"p_longitude": number,"p_sent_device_time": string,"p_token": string }; Returns: Json
                            },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json

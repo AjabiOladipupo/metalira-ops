@@ -17,7 +17,12 @@ import type { PrecacheEntry, RouteMatchCallbackOptions, SerwistGlobalConfig } fr
 import { CacheFirst, ExpirationPlugin, NetworkOnly, Serwist, StaleWhileRevalidate } from "serwist";
 
 import { BACKGROUND_SYNC_TAG, DRAIN_MESSAGE } from "../lib/offline/sync-constants";
-import { classifyRequest, OFFLINE_PATH, staticAssetsIn } from "../lib/offline/sw-routes";
+import {
+  CHECKPOINT_PATH,
+  classifyRequest,
+  OFFLINE_PATH,
+  staticAssetsIn,
+} from "../lib/offline/sw-routes";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -67,6 +72,14 @@ const serwist = new Serwist({
   ],
   fallbacks: {
     entries: [
+      // Slice 3.8: a checkpoint's QR code opens /m/checkpoint#<token>. With no network the
+      // precached scan page (static, no personal data) loads instead of the offline page, keeps
+      // the fragment, and saves the scan in the phone's queue.
+      {
+        url: CHECKPOINT_PATH,
+        matcher: ({ request, url }) =>
+          request.mode === "navigate" && url.pathname === CHECKPOINT_PATH,
+      },
       {
         url: OFFLINE_PATH,
         matcher: ({ request }) => request.mode === "navigate",
@@ -76,15 +89,17 @@ const serwist = new Serwist({
 });
 
 /**
- * Warms the static cache with the offline page's own scripts and styles, so it renders fully
+ * Warms the static cache with the offline and checkpoint pages' scripts and styles, so they render fully
  * (unsent count, buttons) the first time the phone is offline. Best effort: install never
  * fails because of it.
  */
 async function warmOfflinePage(): Promise<void> {
   try {
-    const response = await fetch(OFFLINE_PATH, { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) return;
-    const assets = staticAssetsIn(await response.text());
+    const assets: string[] = [];
+    for (const page of [OFFLINE_PATH, CHECKPOINT_PATH]) {
+      const response = await fetch(page, { credentials: "same-origin", cache: "no-store" });
+      if (response.ok) assets.push(...staticAssetsIn(await response.text()));
+    }
     const cache = await caches.open(STATIC_CACHE);
     await Promise.all(
       assets.map(async (asset) => {
