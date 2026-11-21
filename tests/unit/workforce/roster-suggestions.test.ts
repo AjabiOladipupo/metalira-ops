@@ -1,7 +1,7 @@
 /**
  * Slice 3.2: who could cover an uncovered shift (src/lib/roster-suggestions.ts). Mapped to the
  * site first, then the relief pool, then people mapped elsewhere; leavers, people who haven't
- * started, people on leave (Phase 4 hook) and double-booked people are never suggested; hours
+ * started, people on approved leave (slice 4.5) and double-booked people are never suggested; hours
  * against the weekly standard are flags, never blocks.
  */
 import { describe, expect, it } from "vitest";
@@ -199,6 +199,40 @@ describe("rankCandidates", () => {
       "Grace Ani": "On leave",
       "Ibrahim Sule": "Double-booked: Warehouse floor · Day Sat 28 Nov 07:00–19:00",
     });
+  });
+
+  it("skips approved leave by its dates and marks leave waiting for a decision (slice 4.5)", () => {
+    const ranked = rankCandidates(
+      slot,
+      [
+        worker("away", "Grace", "Ani"),
+        worker("asked", "Musa", "Ibrahim"),
+        worker("free", "Yusuf", "Bello"),
+        worker("after", "Ada", "Obi"),
+      ],
+      [],
+      {
+        ...options,
+        leave: [
+          { workerId: "away", startDate: "2026-11-27", endDate: "2026-11-29", status: "approved" },
+          { workerId: "asked", startDate: "2026-11-28", endDate: "2026-11-28", status: "pending" },
+          // Approved leave that ends the day before doesn't block.
+          { workerId: "after", startDate: "2026-11-20", endDate: "2026-11-27", status: "approved" },
+        ],
+      },
+    );
+    const byName = Object.fromEntries(ranked.map((s) => [s.name, s]));
+    expect(byName["Grace Ani"]!.eligible).toBe(false);
+    expect(byName["Grace Ani"]!.blocked).toBe("On leave 27 to 29 Nov");
+    expect(byName["Musa Ibrahim"]!.eligible).toBe(true);
+    expect(byName["Musa Ibrahim"]!.flags).toContain("leave_pending");
+    expect(byName["Musa Ibrahim"]!.reason).toContain("Leave waiting for a decision 28 Nov");
+    // Pending leave ranks after everyone free without it.
+    expect(ranked.map((s) => s.name).slice(0, 3)).toEqual([
+      "Ada Obi",
+      "Yusuf Bello",
+      "Musa Ibrahim",
+    ]);
   });
 
   it("catches an overnight shift the day before running into this one", () => {

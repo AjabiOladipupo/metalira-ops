@@ -27,7 +27,7 @@ import { matchesSearch, rankCandidates, type Suggestion } from "@/lib/roster-sug
 import { cn } from "@/lib/utils";
 import type { CompanyFormState } from "@/server/identity/company-form-state";
 import { assignShiftAction, removeAssignmentAction } from "@/server/workforce/roster-actions";
-import type { RosterCandidates, TrayCard } from "@/server/workforce/roster-data";
+import type { OnLeaveChip, RosterCandidates, TrayCard } from "@/server/workforce/roster-data";
 
 /**
  * The roster grid (slice 3.2), as on the Roster board: a row per post, a column per day with
@@ -36,6 +36,10 @@ import type { RosterCandidates, TrayCard } from "@/server/workforce/roster-data"
  * day at a time with a day switcher. Clicking an Uncovered chip opens the picker (suggestions
  * first, then search); clicking a name opens "Remove from shift". The database checks every
  * assignment again. No money: cost and billable wait for Phase 4 and 7.
+ *
+ * Slice 4.5: a worker approved leave took off a post-day shows there as an "On leave" chip
+ * (muted, never clickable) beside the Uncovered place it left; suggestions skip approved leave
+ * and mark leave waiting for a decision.
  */
 
 interface PickTarget {
@@ -76,6 +80,7 @@ export function RosterBoard({
   canEdit,
   changedCells = [],
   replacement = null,
+  onLeave = {},
 }: {
   siteId: string;
   weekStart: string;
@@ -94,6 +99,8 @@ export function RosterBoard({
    * is already open. Only when the day can still change.
    */
   replacement?: ReplacementTarget | null;
+  /** `${postId}|${date}` -> workers approved leave took off that post-day (slice 4.5). */
+  onLeave?: Record<string, OnLeaveChip[]>;
 }) {
   const changed = useMemo(() => new Set(changedCells), [changedCells]);
   const todayIndex = week.days.findIndex((d) => d.date === today);
@@ -168,7 +175,8 @@ export function RosterBoard({
 
   const renderCell = (cell: RosterCell, post: { postId: string; name: string }) => {
     const canChange = editable(cell.date);
-    if (cell.required === null && cell.assigned.length === 0) {
+    const away = onLeave[`${post.postId}|${cell.date}`] ?? [];
+    if (cell.required === null && cell.assigned.length === 0 && away.length === 0) {
       return <span className="block px-1 text-[13px] text-fg-muted">Not staffed</span>;
     }
     return (
@@ -224,6 +232,17 @@ export function RosterBoard({
             </div>
           );
         })}
+        {away.map((w) => (
+          <span
+            key={`leave-${w.assignmentId}`}
+            className={cn(CHIP, "justify-between gap-2 border border-line text-fg-muted")}
+            title={w.staffId ? `${w.workerName} · ${w.staffId} · on approved leave` : undefined}
+            data-testid="on-leave-chip"
+          >
+            <span className="truncate line-through decoration-1">{shortName(w.workerName)}</span>
+            <span className="shrink-0 text-[11px] font-semibold text-foreground">On leave</span>
+          </span>
+        ))}
         {Array.from({ length: cell.open }, (_, i) =>
           canChange && cell.startsAt && cell.endsAt ? (
             <button
@@ -487,9 +506,9 @@ export function RosterBoard({
             <FormAlert message={assignState.formError} />
           ) : null}
           <p className="m-0 text-[13px] text-fg-muted">
-            Suggestions skip anyone who has left, is on leave or is double-booked. People mapped to
-            the site come first, then those furthest under the weekly standard hours; anyone within
-            4 hours of it is noted.
+            Suggestions skip anyone who has left, is on approved leave or is double-booked. People
+            mapped to the site come first, then those furthest under the weekly standard hours;
+            anyone within 4 hours of it, or with leave waiting for a decision, is noted.
           </p>
         </section>
       </div>
@@ -546,6 +565,7 @@ function AssignSheet({
         ? rankCandidates({ ...target, siteId, weekStart }, candidates.workers, candidates.booked, {
             weeklyStandardMinutes,
             timeZone,
+            leave: candidates.leave,
           })
         : [],
     [target, siteId, weekStart, candidates, weeklyStandardMinutes, timeZone],

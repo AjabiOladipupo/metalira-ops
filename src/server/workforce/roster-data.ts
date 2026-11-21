@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { addDays } from "@/lib/dates";
+import type { LeaveSpan } from "@/lib/leave/roster";
 import {
   buildRosterWeek,
   mondayOf,
@@ -198,9 +199,76 @@ async function loadPostNames(
   return out;
 }
 
+/** A worker approved leave took off a post-day (slice 4.5), for the grid's "On leave" chip. */
+export interface OnLeaveChip {
+  assignmentId: string;
+  workerId: string;
+  workerName: string;
+  staffId: string;
+}
+
 export interface RosterWeekData {
   week: RosterWeek;
   required: RequiredShift[];
+  /** `${postId}|${date}` -> the workers approved leave took off that post-day. */
+  onLeave: Record<string, OnLeaveChip[]>;
+}
+
+/**
+ * The assignments at a site that approved leave opened, while the leave stands
+ * (public.roster_leave_removals: owner, admin, ops_manager). Other roles get none.
+ */
+async function loadLeaveRemovals(
+  supabase: Client,
+  organisationId: string,
+  siteId: string,
+  from: string,
+  to: string,
+): Promise<{ assignmentId: string; postId: string; date: string; workerId: string }[]> {
+  const { data, error } = await supabase.rpc("roster_leave_removals", {
+    p_organisation_id: organisationId,
+    p_site_id: siteId,
+    p_from: from,
+    p_to: to,
+  });
+  if (error) {
+    if (error.code === "42501") return [];
+    throw new Error(`Could not read leave on the roster: ${error.message}`);
+  }
+  return (data ?? []).map((r) => ({
+    assignmentId: r.assignment_id,
+    postId: r.post_id,
+    date: r.shift_date,
+    workerId: r.worker_id,
+  }));
+}
+
+/**
+ * Approved and pending leave overlapping two days (public.roster_leave: owner, admin,
+ * ops_manager; worker ids and dates only). Other roles get none: their suggestions don't skip
+ * leave, and the database refuses an assignment onto approved leave anyway.
+ */
+export async function loadRosterLeave(
+  supabase: Client,
+  organisationId: string,
+  from: string,
+  to: string,
+): Promise<LeaveSpan[]> {
+  const { data, error } = await supabase.rpc("roster_leave", {
+    p_organisation_id: organisationId,
+    p_from: from,
+    p_to: to,
+  });
+  if (error) {
+    if (error.code === "42501") return [];
+    throw new Error(`Could not read leave: ${error.message}`);
+  }
+  return (data ?? []).map((r) => ({
+    workerId: r.worker_id,
+    startDate: r.start_date,
+    endDate: r.end_date,
+    status: r.status === "approved" ? "approved" : "pending",
+  }));
 }
 
 /** The grid for one site and week: `required_shifts` plus who is assigned. */
@@ -217,11 +285,13 @@ export async function loadRosterWeek(
     return {
       week: buildRosterWeek({ weekStart: start, required: [], assignments: [], timeZone }),
       required: [],
+      onLeave: {},
     };
   }
-  const [requiredAll, rows] = await Promise.all([
+  const [requiredAll, rows, removals] = await Promise.all([
     loadRequiredShifts(supabase, organisationId, start, end),
     loadAssignments(supabase, organisationId, start, end, siteId),
+    loadLeaveRemovals(supabase, organisationId, siteId, start, end),
   ]);
   const required: RequiredShift[] = requiredAll
     .filter((r) => r.siteId === siteId)
@@ -239,13 +309,14 @@ export async function loadRosterWeek(
     ...new Set(rows.map((r) => r.shift_id)),
   ]);
   const workerIds = [...new Set(rows.map((r) => r.worker_id))];
+  const nameIds = [...new Set([...workerIds, ...removals.map((r) => r.workerId)])];
   const [workers, mappings] = await Promise.all([
-    workerIds.length
+    nameIds.length
       ? supabase
           .from("workers")
           .select("id, staff_id, first_name, last_name")
           .eq("organisation_id", organisationId)
-          .in("id", workerIds)
+          .in("id", nameIds)
       : Promise.resolve({ data: [], error: null }),
     workerIds.length
       ? supabase
@@ -290,21 +361,40 @@ export async function loadRosterWeek(
     };
   });
 
+  const onLeave: Record<string, OnLeaveChip[]> = {};
+  for (const r of removals) {
+    const key = `${r.postId}|${r.date}`;
+    const w = workerById.get(r.workerId);
+    const list = onLeave[key] ?? [];
+    if (list.some((c) => c.workerId === r.workerId)) continue;
+    list.push({
+      assignmentId: r.assignmentId,
+      workerId: r.workerId,
+      workerName: w ? `${w.first_name} ${w.last_name}` : "Employee",
+      staffId: w?.staff_id ?? "",
+    });
+    onLeave[key] = list;
+  }
+
   return {
     week: buildRosterWeek({ weekStart: start, required, assignments, postNames, timeZone }),
     required,
+    onLeave,
   };
 }
 
 export interface RosterCandidates {
   workers: CandidateWorker[];
   booked: BookedShift[];
+  /** Approved and pending leave in the week (slice 4.5), for skipping and marking. */
+  leave: LeaveSpan[];
 }
 
 /**
  * Everyone who could be rostered in the week (employed on some day of it), with their site
  * mappings, and every assignment they have from the day before the week to the day after (any
- * site), for overlaps and the week's hours. Names and staff IDs only.
+ * site), for overlaps and the week's hours, and the leave in the week (slice 4.5). Names and
+ * staff IDs only.
  */
 export async function loadRosterCandidates(
   supabase: Client,
@@ -313,7 +403,7 @@ export async function loadRosterCandidates(
 ): Promise<RosterCandidates> {
   const start = mondayOf(weekStart);
   const end = weekEnd(start);
-  const [workers, mappings, rows] = await Promise.all([
+  const [workers, mappings, rows, leave] = await Promise.all([
     allPages(
       (from, to) =>
         supabase
@@ -340,6 +430,7 @@ export async function loadRosterCandidates(
       "mappings",
     ),
     loadAssignments(supabase, organisationId, addDays(start, -1), addDays(end, 1)),
+    loadRosterLeave(supabase, organisationId, start, end),
   ]);
 
   const shiftPosts = await loadShiftPosts(supabase, organisationId, [
@@ -380,6 +471,7 @@ export async function loadRosterCandidates(
       startsAt: r.starts_at,
       endsAt: r.ends_at,
     })),
+    leave,
   };
 }
 
@@ -421,6 +513,7 @@ export function trayCards(
         {
           weeklyStandardMinutes: settings.weeklyStandardMinutes,
           timeZone: settings.timeZone,
+          leave: candidates.leave,
         },
       ),
     }));

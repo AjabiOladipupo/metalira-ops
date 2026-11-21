@@ -10,6 +10,7 @@ import { MutationError, mutate } from "@/server/identity/mutate";
 import { formFields } from "@/server/identity/schemas";
 import { getSession } from "@/server/identity/session";
 
+import { notifyOpsOfOpenedShifts } from "./leave-cover-notice";
 import { notifyLeaveDeciders, notifyWorkerOfLeave } from "./leave-notices";
 import { adjustLeaveSpec, cancelLeaveSpec, decideHrSpec, decideLineManagerSpec } from "./leave-requests";
 
@@ -107,19 +108,23 @@ export async function decideLeaveHrAction(
     const id = result.id;
     const approved = result.status === "approved";
     const balanceAfter = result.balanceAfter;
-    after(() =>
-      notifyWorkerOfLeave(organisationId, id, approved ? "hr_approved" : "hr_declined", {
+    const opened = result.openShifts.length;
+    after(async () => {
+      await notifyWorkerOfLeave(organisationId, id, approved ? "hr_approved" : "hr_declined", {
         balanceAfter,
-      }),
-    );
+      });
+      // Slice 4.5 (decision 8): ops is told about the shifts the approval opened.
+      if (approved && opened > 0) await notifyOpsOfOpenedShifts(organisationId, id);
+    });
   }
   refresh(result.id);
+  if (result.openShifts.length > 0) revalidatePath("/app/roster");
   return {
     ok: true,
     status: 200,
     message:
       result.status === "approved"
-        ? `Approved · ${result.days} ${result.days === 1 ? "day" : "days"} off the balance, ${result.balanceAfter} left`
+        ? `Approved · ${result.days} ${result.days === 1 ? "day" : "days"} off the balance, ${result.balanceAfter} left${result.openShifts.length > 0 ? ` · ${result.openShifts.length} ${result.openShifts.length === 1 ? "shift" : "shifts"} back to uncovered` : ""}`
         : "Declined · the worker is told",
   };
 }

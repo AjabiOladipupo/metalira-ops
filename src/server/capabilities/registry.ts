@@ -2127,7 +2127,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "roster.suggestions",
     description:
-      "Ranks who could cover one post on one day: mapped to the site, free then and under the weekly standard hours first.",
+      "Ranks who could cover one post on a day: mapped and under the weekly hours first; skips approved leave, marks pending.",
     kind: "read",
     audience: "manager",
     roles: ROSTER_EDITORS,
@@ -2154,7 +2154,11 @@ export const CAPABILITIES: readonly Capability[] = [
         },
         candidates.workers,
         candidates.booked,
-        { weeklyStandardMinutes: settings.weeklyStandardMinutes, timeZone: settings.timeZone },
+        {
+          weeklyStandardMinutes: settings.weeklyStandardMinutes,
+          timeZone: settings.timeZone,
+          leave: candidates.leave,
+        },
       );
       return { required: true, suggestions: ranked.filter((s) => s.eligible).slice(0, 10) };
     },
@@ -2163,7 +2167,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "roster.assign",
     description:
-      "Assigns one employee to a post on a day; refused for leavers, closed posts, archived sites, full or overlapping shifts.",
+      "Assigns one employee to a post on a day; refused for leavers, approved leave, closed posts, full or overlapping shifts.",
     kind: "write",
     audience: "manager",
     ...fromSpec(assignShiftSpec),
@@ -2496,7 +2500,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "leave.decide_hr",
     description:
-      "Step 2: HR approves a leave request, taking the days off the balance, or declines it with a note.",
+      "Step 2: HR approves leave (days off the balance, the worker's shifts in the range opened) or declines it with a note.",
     kind: "write",
     audience: "manager",
     ...fromSpec(decideHrSpec),

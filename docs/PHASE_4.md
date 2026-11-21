@@ -188,7 +188,7 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 **Accept:** a worker asks for leave on the phone, sees the working days counted, and the balance drops only after HR's approval.
 
 ### 4.5 Approved leave opens shifts (after 4.4)
-- Migration `20261121150000_leave_roster.sql`.
+- Migration `20261121190000_leave_roster.sql` (150000 was planned; 160000 to 180000 were taken first).
 - Final approval (`decide_leave_hr`, approved) removes the worker's assigned shifts in the range (`shift_assignments.status = removed`, `removed_reason = 'on_leave'`, `removed_by` the approver), in the same transaction, with a preview listing each shift ("Opens 3 shifts: Gate A day, 4 to 6 Nov"). The shifts show as uncovered; a published week shows them as changed since publish.
 - `shift_assignments_guard` and `assign_worker_to_shift` refuse a worker on approved leave that day (new code, plain message "On approved leave 4 to 6 Nov"); `copy_last_week` skips them. The uncovered tray's suggestions skip workers on approved leave and mark those with pending leave.
 - Roster grid: an "On leave" chip on the worker's days.
@@ -198,6 +198,15 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 - **security-reviewer** (a definer function changing roster rows for another role).
 
 **Accept:** HR approves 3 days of leave and the worker's 3 shifts appear in the uncovered tray, with ops emailed (the BUILD_PLAN "done when").
+
+**As built (slice 4.5):**
+- **Which shifts open:** the worker's assigned shifts dated inside the request whose start is still ahead (`private.leave_shifts_to_open`): a past day, or a shift today that has started, is left alone. They are removed in the approval's transaction (removed_reason `on_leave`, removed_by the approver), audited per row and as `roster.opened_by_leave`. The dry run's `open_shifts` lists them; the preview says "Opens 3 shifts: Gate A · Day, 4 to 6 Nov".
+- **Refusing leave days:** the check lives in `shift_assignments_guard` (MLRSL, "On approved leave 4 to 6 Nov."), so `assign_worker_to_shift`, `copy_last_week`, the secret key and 4.7's line-manager assign all refuse it without replacing `assign_worker_to_shift` (4.7's migration, 170000, runs before 190000 and replaces that function; a later replace here would undo it). If 4.7 or later replaces the guard, it must keep the leave check. `copy_last_week` lists those as skipped (code MLRSL).
+- **Locks:** the guard takes the worker's leave lock (`leave_requests:<worker>`) shared; the leave functions take it exclusively. No site locks, so no cycle with publish.
+- **Cancelling approved leave** gives the days back but doesn't put the worker back on the opened shifts (others may have filled them).
+- **Roster reads:** `roster_leave(org, from, to)` (worker ids, dates, approved or pending; owner, admin, ops_manager) for the suggestions, and `roster_leave_removals(org, site, from, to)` for the "On leave" chips (only while the leave stands). Line managers and other roles get neither; the database still refuses their assignments onto leave.
+- **Ops told:** one email per approval (`claim_manager_email`, kind `leave_cover`, inside the shared caps) to the company's ops managers, else admins and owners: ops managers aren't tied to sites, so all of them count as the affected sites' ops managers. Up to 5 recipients. It names the count, the sites and each post with its days, and links to the roster week.
+- **Decision 13:** `private.roster_affected_workers` drops workers with status ended or an end date before the week, so publish and "Send notices again" never tell a leaver.
 
 ### 4.6 Queries and the HR file (after 4.0)
 - Migration `20261121160000_staff_queries.sql`.
@@ -241,7 +250,7 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 
 Wave 1: 4.0, 4.1 and 4.2 (independent; at most three agents at once). Wave 2: 4.3 off 4.2, 4.4 off 4.1, 4.6 off 4.0 (each starts from its dependency's open PR branch and merges `main` in once it lands). Wave 3: 4.5 off 4.4, 4.7 off 4.4 with 4.3 and 4.6 merged in.
 
-Migrations in order: `20261121100000` (4.0), `20261121110000` (4.1), `20261121120000` (4.2), `20261121130000` (4.3), `20261121180000` (4.4), `20261121150000` (4.5), `20261121160000` (4.6), `20261121170000` (4.7). A slice that needs a fix-up migration takes the next free minute in its own hour (for example `20261121120500`).
+Migrations in order: `20261121100000` (4.0), `20261121110000` (4.1), `20261121120000` (4.2), `20261121130000` (4.3), `20261121180000` (4.4), `20261121190000` (4.5), `20261121160000` (4.6), `20261121170000` (4.7). A slice that needs a fix-up migration takes the next free minute in its own hour (for example `20261121120500`).
 
 security-reviewer runs on 4.0, 4.2, 4.3, 4.5, 4.6 and 4.7. No money-reviewer: there is no pay maths and no kobo in Phase 4.
 

@@ -12,8 +12,9 @@ import { MutationError, type MutationSpec } from "@/server/identity/mutate";
  * Roster writes (slice 3.2), as `mutate()` specs. Each is one SQL function run with the signed-in
  * user's own client: `assign_worker_to_shift`, `remove_assignment` and `copy_last_week` check the
  * caller's role in the database (owner, admin, ops_manager, trusted sessions only), and the
- * guard on `shift_assignments` refuses, for every path, an ended worker, a closed post, an
- * archived site, a day that has passed, a full shift and an overlapping shift. Shifts and
+ * guard on `shift_assignments` refuses, for every path, an ended worker, a worker on approved
+ * leave (slice 4.5), a closed post, an archived site, a day that has passed, a full shift and an
+ * overlapping shift. Shifts and
  * assignments have no write grants; the audit triggers record every row change.
  */
 
@@ -71,7 +72,8 @@ export function fromRosterDbError(error: PostgrestError): never {
   if (error.code === "23505") {
     throw new MutationError("invalid", "This employee is already on this shift.");
   }
-  if (/^MLR[SP]\d$/.test(error.code) || error.code === "22023") {
+  // MLRSL (slice 4.5): the worker is on approved leave that day ("On approved leave 4 to 6 Nov.").
+  if (/^MLR[SP]\d$/.test(error.code) || error.code === "MLRSL" || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code}): ${error.message}`);
