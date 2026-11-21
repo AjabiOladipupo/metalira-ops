@@ -1126,6 +1126,9 @@ isOneToOne: false
 "begin_bank_account_lookup":
 { Args: { "p_bank_account_digest": string,"p_bank_account_last4": string,"p_bank_code": string,"p_client_ip"?: string,"p_organisation_id": string,"p_purpose": Database["public"]['Enums']["bank_lookup_purpose"],"p_user_id": string,"p_worker_id": string }; Returns: string
                            },
+"begin_punch_selfie_upload":
+{ Args: { "p_actor": string,"p_punch_id": string }; Returns: undefined
+                           },
 "cancel_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
                            },
@@ -1152,8 +1155,8 @@ isOneToOne: false
 "claim_inbox_email":
 { Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
                            },
-"clear_punch_selfie":
-{ Args: { "p_punch_id": string }; Returns: boolean
+"clear_punch_selfies":
+{ Args: { "p_punch_ids": (string)[] }; Returns: number
                            },
 "client_billing":
 { Args: { "p_client_id"?: string,"p_organisation_id": string }; Returns: {

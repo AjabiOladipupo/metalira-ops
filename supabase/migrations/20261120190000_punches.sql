@@ -30,7 +30,7 @@
 --    worker, that the punch expects a selfie and has none, that the path is the punch's own and
 --    that the object is in Storage with an allowed size and type. Signed-in users have no insert,
 --    update or delete on the bucket. Managers open a selfie by a 60-second signed URL.
--- 4. Retention: `punch_selfies_due` and `clear_punch_selfie` (secret key only) let the daily sweep
+-- 4. Retention: `punch_selfies_due` and `clear_punch_selfies` (secret key only) let the daily sweep
 --    delete selfies older than 90 days unless the punch is under review
 --    (private.punch_under_review, false until Phase 4 adds attendance review), keeping the row
 --    and stamping selfie_deleted_at. `punch_photo_orphans` lists uploads no punch kept.
@@ -42,7 +42,7 @@
 --      sees the geofence result, the distance to the site and the accuracy. Owner and admin read
 --      the coordinates through `punch_locations`, which writes a `punch.location_viewed` audit
 --      row. The audit rows of punches leave the point out (private.punches_audit).
---    * selfies: owner, admin, ops_manager, and a line manager for their reportees.
+--    * selfies: owner, admin, ops_manager, hr, and a line manager for their reportees.
 -- 6. private.worker_has_work_records now checks punches (slice 1.11's hook). The composite
 --    foreign key to workers takes a key-share lock on the worker row, so a punch and a staff ID
 --    correction's approval (which locks the worker row) can't race.
@@ -54,6 +54,7 @@
 --   MLPU6 no location consent                      MLPU7 a site the worker can't clock in at
 --   MLPU8 too many punches in the last hour        MLPU9 the phone's queue belongs to another login
 --   MLPS1 the punch doesn't expect this selfie     MLPS2 the upload isn't in Storage as stated
+--   MLPS3 too many selfie uploads in the last hour
 
 -- ---------------------------------------------------------------------------
 -- 1. Pure helpers: corrected time and flags (tests/unit/punches mirror them in
@@ -111,7 +112,7 @@ set search_path = ''
 as $$
   select array[
     'outside', 'near', 'no_location', 'no_shift', 'late', 'early_out', 'no_selfie',
-    'clock_drift', 'late_sync', 'time_unverified', 'double_in', 'out_without_in'
+    'clock_drift', 'delayed', 'late_sync', 'time_unverified', 'double_in', 'out_without_in'
   ]
 $$;
 
@@ -123,6 +124,10 @@ $$;
 --   early_out        clock-out before the shift end minus the grace minutes
 --   no_selfie        clock-in that will carry no selfie
 --   clock_drift      the phone's clock is more than 5 minutes off
+--   delayed          received more than 5 minutes after the time it says it happened: the time
+--                    rests on the phone's word (offline, or a direct call claiming an old event),
+--                    so Phase 4 reviews it. A delayed clock-in is also late when it arrived after
+--                    the grace period, whatever time it claims (security review M1).
 --   late_sync        received more than 2 hours after it happened
 --   time_unverified  the time is the phone's own clock (nothing to correct it with)
 --   double_in        clock-in while the previous punch is a clock-in from the last 20 hours
@@ -154,19 +159,25 @@ as $$
       (2, 'near', p_geofence_result = 'near'),
       (3, 'no_location', not coalesce(p_has_location, false)),
       (4, 'no_shift', p_shift_starts_at is null),
-      (5, 'late', p_kind = 'in' and p_shift_starts_at is not null
-        and p_recorded_at > p_shift_starts_at + make_interval(mins => coalesce(p_grace_minutes, 0))),
+      (5, 'late', p_kind = 'in' and p_shift_starts_at is not null and (
+        p_recorded_at > p_shift_starts_at + make_interval(mins => coalesce(p_grace_minutes, 0))
+        or (
+          p_received_at - p_recorded_at > interval '5 minutes'
+          and p_received_at > p_shift_starts_at + make_interval(mins => coalesce(p_grace_minutes, 0))
+        )
+      )),
       (6, 'early_out', p_kind = 'out' and p_shift_ends_at is not null
         and p_recorded_at < p_shift_ends_at - make_interval(mins => coalesce(p_grace_minutes, 0))),
       (7, 'no_selfie', p_kind = 'in' and not coalesce(p_selfie_expected, false)),
       (8, 'clock_drift', abs(coalesce(p_clock_drift_seconds, 0)) > 300),
-      (9, 'late_sync', p_received_at - p_recorded_at > interval '2 hours'),
-      (10, 'time_unverified', p_time_source = 'device'),
-      (11, 'double_in', p_kind = 'in' and coalesce(
+      (9, 'delayed', p_received_at - p_recorded_at > interval '5 minutes'),
+      (10, 'late_sync', p_received_at - p_recorded_at > interval '2 hours'),
+      (11, 'time_unverified', p_time_source = 'device'),
+      (12, 'double_in', p_kind = 'in' and coalesce(
         p_previous_kind = 'in' and p_previous_recorded_at > p_recorded_at - interval '20 hours',
         false
       )),
-      (12, 'out_without_in', p_kind = 'out' and not coalesce(
+      (13, 'out_without_in', p_kind = 'out' and not coalesce(
         p_previous_kind = 'in' and p_previous_recorded_at > p_recorded_at - interval '20 hours',
         false
       ))
@@ -370,7 +381,13 @@ begin
   end if;
   new_doc := private.audit_redact(to_jsonb(new) - 'location');
   insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after)
-  values (new.organisation_id, auth.uid(), 'punches.' || lower(tg_op), 'punches', new.id, old_doc, new_doc);
+  values (
+    new.organisation_id,
+    -- The signed-in caller; for the server's secret-key calls, the person it acts for
+    -- (attach_punch_selfie names the worker; the sweep names nobody: the system).
+    coalesce(auth.uid(), nullif(current_setting('metalira.audit_actor', true), '')::uuid),
+    'punches.' || lower(tg_op), 'punches', new.id, old_doc, new_doc
+  );
   return null;
 end;
 $$;
@@ -513,7 +530,11 @@ begin
   end if;
 
   if p_client_event_id is null or p_kind is null or p_kind not in ('in', 'out')
-    or p_device_time is null then
+    or p_device_time is null
+    or p_device_time not between '2020-01-01 00:00:00+00' and '2100-01-01 00:00:00+00'
+    or (p_sent_device_time is not null
+      and p_sent_device_time not between '2020-01-01 00:00:00+00' and '2100-01-01 00:00:00+00')
+    or (p_elapsed_ms is not null and abs(p_elapsed_ms) > 1000000000000) then
     raise exception 'This punch is incomplete.' using errcode = 'MLPU5';
   end if;
 
@@ -939,8 +960,8 @@ set public = excluded.public,
     file_size_limit = excluded.file_size_limit,
     allowed_mime_types = excluded.allowed_mime_types;
 
--- Read: owner, admin and ops_manager of the punch's company, and a line manager for their
--- reportees' punches; only for a path a punch holds now (a deleted selfie stops opening). No
+-- Read: owner, admin, ops_manager and hr of the punch's company (hr as the selfie notice says:
+-- "managers and HR"), and a line manager for their reportees' punches; only for a path a punch holds now (a deleted selfie stops opening). No
 -- insert, update or delete policies: the server uploads with the secret key after checking the
 -- bytes, and only the sweep deletes.
 create policy punch_photos_select on storage.objects
@@ -952,7 +973,7 @@ create policy punch_photos_select on storage.objects
       from public.punches p
       where p.selfie_path = objects.name
         and (
-          p.organisation_id in (select private.role_org_ids(array['owner', 'admin', 'ops_manager']))
+          p.organisation_id in (select private.role_org_ids(array['owner', 'admin', 'ops_manager', 'hr']))
           or p.worker_id in (select private.my_reportee_ids())
         )
     )
@@ -1002,6 +1023,10 @@ begin
     or v_punch.selfie_deleted_at is not null or v_punch.created_at < now() - interval '24 hours' then
     raise exception 'This punch doesn''t take a selfie now.' using errcode = 'MLPS1';
   end if;
+  -- The consent may have been withdrawn since the punch (security review L1).
+  if not private.worker_has_consent(v_punch.organisation_id, v_punch.worker_id, 'selfie') then
+    raise exception 'The worker no longer agrees to selfies.' using errcode = 'MLPS1';
+  end if;
   v_ext := substring(p_path from '\.(webp|jpg)$');
   if v_ext is null or p_path <> private.punch_selfie_path(v_punch, v_ext) then
     raise exception 'That isn''t this punch''s selfie.' using errcode = 'MLPS1';
@@ -1014,6 +1039,7 @@ begin
     raise exception 'The selfie isn''t in storage as stated.' using errcode = 'MLPS2';
   end if;
   perform set_config('metalira.audit_channel', 'worker_app', true);
+  perform set_config('metalira.audit_actor', p_actor::text, true);
   update public.punches
   set selfie_path = p_path, selfie_uploaded_at = now()
   where id = v_punch.id;
@@ -1043,9 +1069,11 @@ begin
 end;
 $$;
 
--- Secret key only: records that a selfie's file was deleted (the row stays).
-create function private.clear_punch_selfie(p_punch_id uuid)
-returns boolean
+-- Secret key only: records that these selfies' files were deleted (the rows stay), one call per
+-- chunk of the sweep (500 at most). Each is checked again: past 90 days and not under review.
+-- Returns how many were cleared.
+create function private.clear_punch_selfies(p_punch_ids uuid[])
+returns integer
 language plpgsql
 volatile
 security definer
@@ -1057,15 +1085,65 @@ begin
   if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Only the server sweeps selfies.' using errcode = '42501';
   end if;
+  if p_punch_ids is null or cardinality(p_punch_ids) = 0 then
+    return 0;
+  end if;
+  if cardinality(p_punch_ids) > 500 then
+    raise exception 'At most 500 selfies at a time.' using errcode = '22023';
+  end if;
   perform set_config('metalira.audit_channel', 'system', true);
   update public.punches p
   set selfie_path = null, selfie_deleted_at = now()
-  where p.id = p_punch_id
+  where p.id = any (p_punch_ids)
     and p.selfie_path is not null
     and p.created_at < now() - interval '90 days'
     and not private.punch_under_review(p.organisation_id, p.id);
   get diagnostics v_count = row_count;
-  return v_count > 0;
+  return v_count;
+end;
+$$;
+
+-- Selfie uploads the server has started, per worker login, for the hourly cap (security review L3).
+create table private.punch_selfie_uploads (
+  id bigint generated always as identity primary key,
+  user_id uuid not null,
+  at timestamptz not null default now()
+);
+create index punch_selfie_uploads_user_idx on private.punch_selfie_uploads (user_id, at);
+revoke all on table private.punch_selfie_uploads from public, anon, authenticated, service_role;
+
+-- Secret key only: before the server stores a selfie for `p_actor` (the worker login it verified),
+-- refuses when the punch's company has Shifts off (MLPU4) or the login has started 30 uploads in
+-- the last hour (MLPS3), and counts this one. attach_punch_selfie checks the punch itself.
+create function private.begin_punch_selfie_upload(p_punch_id uuid, p_actor uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_org uuid;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server takes selfies.' using errcode = '42501';
+  end if;
+  select p.organisation_id into v_org from public.punches p where p.id = p_punch_id;
+  if v_org is null or p_actor is null then
+    raise exception 'That punch wasn''t found.' using errcode = 'MLPS1';
+  end if;
+  if not private.org_shifts_enabled(v_org) then
+    raise exception 'Clock-in is switched off for your company.' using errcode = 'MLPU4';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('punch_selfie_upload:' || p_actor::text, 0));
+  if (
+    select count(*) from private.punch_selfie_uploads u
+    where u.user_id = p_actor and u.at > now() - interval '1 hour'
+  ) >= 30 then
+    raise exception 'Too many selfies in the last hour.' using errcode = 'MLPS3';
+  end if;
+  insert into private.punch_selfie_uploads (user_id) values (p_actor);
+  delete from private.punch_selfie_uploads u where u.at < now() - interval '1 day';
 end;
 $$;
 
@@ -1094,11 +1172,13 @@ $$;
 
 revoke all on function private.attach_punch_selfie(uuid, uuid, text) from public, anon, authenticated;
 revoke all on function private.punch_selfies_due(integer) from public, anon, authenticated;
-revoke all on function private.clear_punch_selfie(uuid) from public, anon, authenticated;
+revoke all on function private.clear_punch_selfies(uuid[]) from public, anon, authenticated;
+revoke all on function private.begin_punch_selfie_upload(uuid, uuid) from public, anon, authenticated;
 revoke all on function private.punch_photo_orphans(integer) from public, anon, authenticated;
 grant execute on function private.attach_punch_selfie(uuid, uuid, text) to service_role;
 grant execute on function private.punch_selfies_due(integer) to service_role;
-grant execute on function private.clear_punch_selfie(uuid) to service_role;
+grant execute on function private.clear_punch_selfies(uuid[]) to service_role;
+grant execute on function private.begin_punch_selfie_upload(uuid, uuid) to service_role;
 grant execute on function private.punch_photo_orphans(integer) to service_role;
 
 -- The Data API names (invoker wrappers; the secret key only).
@@ -1118,13 +1198,21 @@ security invoker
 set search_path = ''
 as $$ select * from private.punch_selfies_due(p_limit) $$;
 
-create function public.clear_punch_selfie(p_punch_id uuid)
-returns boolean
+create function public.clear_punch_selfies(p_punch_ids uuid[])
+returns integer
 language sql
 volatile
 security invoker
 set search_path = ''
-as $$ select private.clear_punch_selfie(p_punch_id) $$;
+as $$ select private.clear_punch_selfies(p_punch_ids) $$;
+
+create function public.begin_punch_selfie_upload(p_punch_id uuid, p_actor uuid)
+returns void
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$ select private.begin_punch_selfie_upload(p_punch_id, p_actor) $$;
 
 create function public.punch_photo_orphans(p_limit integer default 500)
 returns setof text
@@ -1136,11 +1224,13 @@ as $$ select * from private.punch_photo_orphans(p_limit) $$;
 
 revoke all on function public.attach_punch_selfie(uuid, uuid, text) from public, anon, authenticated;
 revoke all on function public.punch_selfies_due(integer) from public, anon, authenticated;
-revoke all on function public.clear_punch_selfie(uuid) from public, anon, authenticated;
+revoke all on function public.clear_punch_selfies(uuid[]) from public, anon, authenticated;
+revoke all on function public.begin_punch_selfie_upload(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.punch_photo_orphans(integer) from public, anon, authenticated;
 grant execute on function public.attach_punch_selfie(uuid, uuid, text) to service_role;
 grant execute on function public.punch_selfies_due(integer) to service_role;
-grant execute on function public.clear_punch_selfie(uuid) to service_role;
+grant execute on function public.clear_punch_selfies(uuid[]) to service_role;
+grant execute on function public.begin_punch_selfie_upload(uuid, uuid) to service_role;
 grant execute on function public.punch_photo_orphans(integer) to service_role;
 
 -- ---------------------------------------------------------------------------

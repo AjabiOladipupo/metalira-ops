@@ -514,6 +514,41 @@ describe("record_punch: time, shift and sequence", () => {
     expect(result.flags).not.toContain("clock_drift");
   });
 
+  it("backdating over RPC is flagged delayed, and late against when it arrived", async () => {
+    // A worker calls record_punch directly, claiming the event was 90 minutes ago (security
+    // review M1): under late_sync's 2 hours, but delayed.
+    const w = await addWorker();
+    const claimed = await recorded(w, {
+      elapsedMs: 90 * 60_000,
+      deviceTime: new Date(Date.now() - 90 * 60_000),
+    });
+    expect(claimed.flags).toContain("delayed");
+    expect(claimed.flags).not.toContain("late_sync");
+    // The same through the clock offset (no elapsed time).
+    const offset = await recorded(w, {
+      kind: "out",
+      elapsedMs: null,
+      deviceTime: new Date(Date.now() - 60 * 60_000),
+      sentDeviceTime: new Date(),
+    });
+    expect(offset.flags).toContain("delayed");
+    expect((await row(offset.id)).time_source).toBe("offset");
+    // A live punch is not delayed.
+    const fresh = await addWorker();
+    expect((await recorded(fresh)).flags).not.toContain("delayed");
+  });
+
+  it("refuses phone clocks outside 2020 to 2100", async () => {
+    const w = await addWorker();
+    expect((await punch(w, { deviceTime: new Date("2019-12-31T00:00:00Z") })).error?.code).toBe(
+      "MLPU5",
+    );
+    expect((await punch(w, { sentDeviceTime: new Date("2100-01-02T00:00:00Z") })).error?.code).toBe(
+      "MLPU5",
+    );
+    expect((await punch(w, { elapsedMs: 2_000_000_000_000 })).error?.code).toBe("MLPU5");
+  });
+
   it("flags a second clock-in and a clock-out without one", async () => {
     const w = await addWorker();
     await recorded(w, { elapsedMs: 120_000, deviceTime: new Date(Date.now() - 120_000) });
@@ -540,6 +575,15 @@ describe("record_punch: time, shift and sequence", () => {
       .single();
     const start = Date.parse(shift!.starts_at);
     const end = Date.parse(shift!.ends_at);
+    if (Date.now() > start + 20 * 60_000) {
+      // Backdated to the shift start over RPC: on time by its claim, late by its arrival (M1).
+      const backdated = await recorded(w, {
+        elapsedMs: Date.now() - start,
+        deviceTime: new Date(start),
+        selfie: false,
+      });
+      expect(backdated.flags).toEqual(expect.arrayContaining(["late", "delayed"]));
+    }
     const result = await recorded(w);
     const r = await row(result.id);
     expect(r.shift_assignment_id).toBe(assignment);
@@ -862,15 +906,88 @@ describe("selfies", () => {
       p_path: path,
     });
     expect(twice.error?.code).toBe("MLPS1");
+    // The server names the worker as the audit actor.
+    const audit = await admin
+      .from("audit_log")
+      .select("actor_id")
+      .eq("entity", "punches")
+      .eq("entity_id", punchId)
+      .eq("action", "punches.update")
+      .single();
+    expect(audit.error).toBeNull();
+    expect(audit.data!.actor_id).toBe(w.userId);
     // A clock-out never takes one.
     const out = await recorded(w, { kind: "out" });
     expect(out.selfie_wanted).toBe(false);
   });
 
-  it("managers read it by signed URL; workers, finance, others and the public can't", async () => {
-    const signed = await staff.ops.client.storage.from(BUCKET).createSignedUrl(path, 60);
-    expect(signed.error).toBeNull();
-    for (const client of [w.client, staff.finance.client, staff.hr.client, other.client]) {
+  it("refuses a selfie once the worker has withdrawn selfie consent", async () => {
+    const withdrawn = await addWorker();
+    const id = (await recorded(withdrawn, { selfie: true })).id;
+    const created = (await row(id)).created_at as Date;
+    const selfiePath = `${owner.orgId}/${created.toISOString().slice(0, 7)}/${id}.jpg`;
+    expect(
+      (
+        await admin.storage
+          .from(BUCKET)
+          .upload(selfiePath, jpeg(2000), { contentType: "image/jpeg" })
+      ).error,
+    ).toBeNull();
+    const off = await withdrawn.client.rpc("withdraw_worker_consent", {
+      p_organisation_id: owner.orgId,
+      p_kind: "selfie",
+    });
+    expect(off.error).toBeNull();
+    const attach = await admin.rpc("attach_punch_selfie", {
+      p_punch_id: id,
+      p_actor: withdrawn.userId,
+      p_path: selfiePath,
+    });
+    expect(attach.error?.code).toBe("MLPS1");
+    expect((await row(id)).selfie_path).toBeNull();
+  });
+
+  it("caps selfie uploads at 30 an hour per login and refuses with Shifts off", async () => {
+    const u = await addWorker({ orgId: other.orgId, mappedTo: otherSite, inviter: other });
+    const id = (await recorded(u, { site: otherSite })).id;
+    expect(
+      (await u.client.rpc("begin_punch_selfie_upload", { p_punch_id: id, p_actor: u.userId }))
+        .error,
+    ).not.toBeNull();
+    await db.query("update public.organisations set shifts_enabled = false where id = $1", [
+      other.orgId,
+    ]);
+    try {
+      const off = await admin.rpc("begin_punch_selfie_upload", {
+        p_punch_id: id,
+        p_actor: u.userId,
+      });
+      expect(off.error?.code).toBe("MLPU4");
+    } finally {
+      await db.query("update public.organisations set shifts_enabled = true where id = $1", [
+        other.orgId,
+      ]);
+    }
+    for (let i = 0; i < 30; i += 1) {
+      const ok = await admin.rpc("begin_punch_selfie_upload", {
+        p_punch_id: id,
+        p_actor: u.userId,
+      });
+      expect(ok.error).toBeNull();
+    }
+    const capped = await admin.rpc("begin_punch_selfie_upload", {
+      p_punch_id: id,
+      p_actor: u.userId,
+    });
+    expect(capped.error?.code).toBe("MLPS3");
+  });
+
+  it("managers and HR read it by signed URL; workers, finance, others and the public can't", async () => {
+    for (const client of [staff.ops.client, staff.hr.client, owner.client, staff.admin.client]) {
+      const signed = await client.storage.from(BUCKET).createSignedUrl(path, 60);
+      expect(signed.error).toBeNull();
+    }
+    for (const client of [w.client, staff.finance.client, staff.lineManager.client, other.client]) {
       const refused = await client.storage.from(BUCKET).createSignedUrl(path, 60);
       expect(refused.error).not.toBeNull();
     }
@@ -885,11 +1002,12 @@ describe("selfies", () => {
       expect((await w.client.rpc(fn, {})).error).not.toBeNull();
     }
     expect(
-      (await staff.ops.client.rpc("clear_punch_selfie", { p_punch_id: punchId })).error,
+      (await staff.ops.client.rpc("clear_punch_selfies", { p_punch_ids: [punchId] })).error,
     ).not.toBeNull();
-    const cleared = await admin.rpc("clear_punch_selfie", { p_punch_id: punchId });
+    const cleared = await admin.rpc("clear_punch_selfies", { p_punch_ids: [punchId] });
     expect(cleared.error).toBeNull();
-    expect(cleared.data).toBe(false);
+    expect(cleared.data).toBe(0);
+    expect((await row(punchId)).selfie_path).toBe(path);
     const due = await admin.rpc("punch_selfies_due", { p_limit: 1000 });
     expect(due.error).toBeNull();
     expect((due.data ?? []).some((d) => d.punch_id === punchId)).toBe(false);

@@ -58,6 +58,10 @@ export function codeFromSqlState(sqlState: string | undefined | null): PunchErro
     case "MLPU5":
     case "22023":
     case "22P02":
+    // Out of range, bad datetime and a check constraint: the same punch would fail again.
+    case "22003":
+    case "22008":
+    case "23514":
       return "invalid";
     case "MLPU6":
       return "no_consent";
