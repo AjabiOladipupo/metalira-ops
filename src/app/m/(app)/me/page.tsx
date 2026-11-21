@@ -16,6 +16,9 @@ import { signOutWorker } from "@/server/identity/worker-actions";
 import { requireWorkerPageSession } from "@/server/identity/worker-session";
 import type { BankChangeStatus } from "@/server/people/bank-changes";
 import { loadMyProfile, type MyBankChange, type MyChangeRequest } from "@/server/people/my-profile";
+import { isQueryOpen } from "@/lib/queries";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { loadMyQueries } from "@/server/people/queries";
 
 import { WorkerSignOutForm } from "../../_components/offline/sign-out-form";
 import { WorkerTopBar } from "../../_components/worker-top-bar";
@@ -256,10 +259,46 @@ async function ProfilePanel() {
   );
 }
 
+/** The Queries tab: the empty state, or the open count with a link to /m/queries (slice 4.6). */
+async function QueriesPanel() {
+  const session = await requireWorkerPageSession();
+  const queries = await loadMyQueries({
+    supabase: await createServerSupabase(),
+    organisationId: session.organisationId,
+    workerId: session.workerId,
+  });
+  if (queries.length === 0) {
+    return (
+      <p
+        data-testid="me-queries-empty"
+        className="m-0 rounded-xl border border-dashed border-line px-4 py-3 text-[15px] text-fg-muted"
+      >
+        {copy.queriesEmpty}
+      </p>
+    );
+  }
+  const open = queries.filter((q) => isQueryOpen(q.status)).length;
+  return (
+    <Link
+      href="/m/queries"
+      data-testid="me-queries-link"
+      className="flex items-center gap-3 rounded-xl border-[1.5px] border-foreground px-4 py-3 text-foreground no-underline hover:bg-surface hover:text-foreground"
+    >
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-[15px] font-semibold">
+          {open > 0 ? workerMessages.queries.meLink(open) : workerMessages.queries.title}
+        </span>
+        <span className="text-sm text-fg-muted">{workerMessages.queries.meLinkHint}</span>
+      </span>
+      <ChevronRight strokeWidth={1.75} className="size-4 shrink-0 text-fg-muted" aria-hidden />
+    </Link>
+  );
+}
+
 /**
  * Me, from the WkProfile board (slice 1.10): work, pay and pension, identity and contact, all
- * read with the worker's own session and shown masked. Queries open in Phase 4; until then the
- * tab shows an empty state. The tab bar is static, so it is part of the prerendered shell; only
+ * read with the worker's own session and shown masked. The Queries tab links to /m/queries
+ * (slice 4.6). The tab bar is static, so it is part of the prerendered shell; only
  * the header and the profile panel wait for the session.
  */
 export default function MePage() {
@@ -280,7 +319,15 @@ export default function MePage() {
       >
         <MeHeader />
       </Suspense>
-      <MeTabs>
+      <MeTabs
+        queries={
+          <Suspense
+            fallback={<span aria-hidden className="block h-16 w-full rounded bg-surface" />}
+          >
+            <QueriesPanel />
+          </Suspense>
+        }
+      >
         <Suspense fallback={<span aria-hidden className="h-64 w-full rounded bg-surface" />}>
           <ProfilePanel />
         </Suspense>
