@@ -265,6 +265,9 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // Slice 2.3: the company's collection bank account. Finance approves changes to it.
   { href: "/app/settings/bank-account", roles: ["owner", "admin", "finance"] },
   { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },
+  // Slice 4.1: leave types, presets, holidays and the working week.
+  { href: "/app/settings/leave", roles: ["owner", "admin", "hr"] },
+  { href: "/app/settings/holidays", roles: ["owner", "admin", "hr"] },
   // Slice 1.12: inviting, re-roling and removing managers.
   { href: "/app/settings/team", roles: ["owner", "admin"] },
   { href: "/app/people/new", roles: ["owner", "admin", "hr"] },

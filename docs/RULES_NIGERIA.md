@@ -86,23 +86,37 @@ Open points (ask before Phase 5 code depends on them):
 
 ## Leave presets (Phase 4)
 
-Owner rule (20 Nov 2026): where a rule depends on Nigerian law or practice, build the three best-fit options side by side; the owner tests them and drops two. Leave setup (slice 4.1) offers three presets. Each is a starting point the company edits, stored as its own `leave_types` and dated `leave_entitlements` rows, never hard-coded. Every preset card and every figure carries **confirm with an adviser**. None of this is legal advice, and the app never says it is.
+Owner rule (20 Nov 2026): where a rule depends on Nigerian law or practice, build the best-fit options side by side; the owner tests them and drops the rest. Owner decision (21 Nov 2026), after review: keep two presets, A and B. **Preset C ("Public-service aligned") was dropped by the owner after review** and is not offered.
+
+Leave setup (slice 4.1) offers the two presets. Each is a starting point the company edits, stored as its own `leave_types` and dated `leave_entitlements` rows, never hard-coded. Every preset card says: **These are starting values, not legal advice. Confirm them with an adviser.** None of this is legal advice, and the app never says it is.
+
+The "App values" table under each preset is what the app stores. `src/lib/leave/presets.ts` and the database's `private.leave_preset_rows` must match it exactly (a unit test and the RLS suite check). Columns: code, name, counting, days a year, paid, pay percent, minimum service in months before the type can be asked for, months of service the pay needs (`-` for none), and whether a certificate is needed.
 
 ### Preset A, "Labour Act minimum"
-Source: Labour Act, Cap L1 LFN 2004, as summarised by Chambers Employment 2025 (Nigeria), the DLA Piper leave FAQ (2024) and WageIndicator Nigeria. **Confirm with an adviser.**
+Source: Labour Act, Cap L1 LFN 2004. Sections 18 and 16 as summarised by Chambers Employment 2025 (Nigeria), the DLA Piper leave FAQ (2024) and WageIndicator Nigeria. Section 54 text read by the owner on 21 Nov 2026 on the jurist.ng mirror (https://jurist.ng/labour_act/sec-54), a third-party copy, not the official gazette. **Confirm with an adviser.**
 
 | Leave | Figure | Source | Check |
 | --- | --- | --- | --- |
 | Annual | 6 working days with pay, after 12 months' continuous service (`min_service_months` 12) | Labour Act s. 18, per DLA Piper, WageIndicator and Chambers | Confirmed by the secondary sources (21 Nov 2026 search); statute text not read |
 | Sick | Up to 12 paid working days a calendar year, certified by a registered medical practitioner (`needs_certificate`) | Labour Act s. 16, per WageIndicator and DLA Piper | Confirmed by the secondary sources; statute text not read |
-| Maternity | 12 weeks (84 calendar days; 6 weeks of it after the birth), with medical evidence of the due date | Labour Act s. 54, per WageIndicator and DLA Piper | Confirmed by the secondary sources; statute text not read |
-| Maternity pay | No less than 50% of wages (`pay_percent` 50), for a worker with at least 6 months' service | Labour Act s. 54, per news and guide summaries (ICIR, Payoneer) | **Unverified:** the 50% figure and the 6-month condition were not found in the statute text or the DLA Piper and WageIndicator pages checked on 21 Nov 2026 |
+| Maternity | 12 weeks (84 calendar days): 6 weeks before confinement (on a medical certificate that she will probably be confined within 6 weeks) and 6 weeks after it | Labour Act s. 54(1)(a) and (b), jurist.ng mirror | Verified against the jurist.ng mirror (21 Nov 2026); not checked against the official gazette |
+| Maternity pay | No less than 50% of the wages she would have earned, only if she has been continuously employed by the employer for 6 months or more immediately before the absence (`pay_percent` 50, `pay_min_service_months` 6; the leave itself needs no minimum service) | Labour Act s. 54(1)(c), jurist.ng mirror | **Verified** against the jurist.ng mirror (21 Nov 2026); not checked against the official gazette |
 | Paternity | None | The Labour Act has no private-sector paternity entitlement | Per Chambers and DLA Piper |
 | Compassionate | None | Not in the Labour Act | Per DLA Piper |
 
+App values, preset A:
+
+| Code | Name | Counting | Days | Paid | Pay % | Min service | Pay service | Certificate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| annual | Annual | working_days | 6 | yes | 100 | 12 | - | no |
+| sick | Sick | working_days | 12 | yes | 100 | 0 | - | yes |
+| maternity | Maternity | calendar_days | 84 | yes | 50 | 0 | 6 | yes |
+
 Notes:
+- s. 54(4): while a woman is absent under s. 54, no employer may give her notice of dismissal during the absence, or notice that would expire during it. The app does not enforce this (dismissal is outside the product); it is recorded here so HR sees it.
 - The Act's sick-leave and annual-leave rules cover "workers" as the Act defines them; sick leave for managerial and professional staff is set by their contracts. Companies set such staff's figures by contract.
-- A Lagos State maternity rule and the Act's protection from dismissal during maternity leave are outside what the app enforces.
+- A Lagos State maternity rule is outside what the app enforces.
+- Below 6 months' service the maternity leave can still be taken; what it pays then is a Phase 5 question (open).
 
 ### Preset B, "Common private-sector practice"
 Source: market practice described in Chambers Employment 2025 (Nigeria), the Payoneer Nigeria leave policy guide and the CXC Nigeria employment guide. Not a statute. **Confirm with an adviser.**
@@ -115,27 +129,29 @@ Source: market practice described in Chambers Employment 2025 (Nigeria), the Pay
 | Paternity | 5 working days | Common practice (Payoneer, CXC) |
 | Compassionate | 3 working days | Common practice (CXC) |
 
-### Preset C, "Public-service aligned"
-Source: the federal Public Service Rules as reported (paternity approved by the Federal Executive Council on 29 Sep 2021; maternity raised to 16 weeks for federal workers in 2018), and the annual leave scale common in the public service. Applies by law to federal public servants only; private companies use it by choice. **Confirm with an adviser.**
+App values, preset B:
 
-| Leave | Figure | Source | Check |
-| --- | --- | --- | --- |
-| Annual | 21 working days | Public-service scale, as reported by the Payoneer and CXC guides | **Unverified:** the Public Service Rules scale varies by grade level; 21 days is one point on it |
-| Sick | 12 working days | Kept at the Labour Act figure | Product choice |
-| Maternity | 16 weeks (112 calendar days), full pay | Federal Government, 2018, as reported | Reported by news sources; one report says 12 weeks before 2021, so **unverified** |
-| Paternity | 14 working days, at most once in 2 years and for up to 4 children | Federal Executive Council approval, 29 Sep 2021 (Public Service Rules 2021), reported by the Guardian, Nairametrics, Daily Trust and Voice of Nigeria | Confirmed by several news reports (21 Nov 2026 search); the rule text was not read. The app stores the 14 days; the once-in-2-years and 4-children limits are not enforced |
-| Compassionate | 5 working days | Common public-service practice, as reported | **Unverified** |
+| Code | Name | Counting | Days | Paid | Pay % | Min service | Pay service | Certificate |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| annual | Annual | working_days | 15 | yes | 100 | 0 | - | no |
+| sick | Sick | working_days | 12 | yes | 100 | 0 | - | yes |
+| maternity | Maternity | calendar_days | 84 | yes | 100 | 0 | - | yes |
+| paternity | Paternity | working_days | 5 | yes | 100 | 0 | - | no |
+| compassionate | Compassionate | working_days | 3 | yes | 100 | 0 | - | no |
+
+Certificates for sick and maternity leave in preset B are a product choice that follows preset A's rule, not a statement of practice.
 
 ### How the app uses them
+- Applying a preset adds the types the company doesn't have (first version from 1 January this year) and, for types it has (found by code), sets the preset's rules and adds a new version from the next 1 January or tomorrow. The company's other types are never deleted or changed.
 - Leave year: calendar year; joiners prorated (days left in the year ÷ days in the year, half up to a whole day); no carry-over unless the company sets a cap per type (owner decisions 2, Phase 4). The proration method is a product default, not a legal rule.
 - Working-day types skip the worker's off-days and the company's public holidays; maternity counts calendar days (PHASE_4.md "Choices made in this plan").
-- `pay_percent` is stored for Phase 5; Phase 4 does no pay maths.
+- `pay_percent` and `pay_min_service_months` are stored for Phase 5; Phase 4 does no pay maths.
 
 Sources (web search 20 and 21 Nov 2026):
+- Labour Act s. 54, jurist.ng mirror (third-party copy, not the official gazette), read by the owner 21 Nov 2026: https://jurist.ng/labour_act/sec-54
 - Chambers and Partners, Employment 2025, Nigeria: practiceguides.chambers.com/practice-guides/employment-2025/nigeria
 - DLA Piper, Employee leave in Nigeria: frequently asked questions (2024): dlapiperafrica.com/en/nigeria/insights/2024/frequently-asked-questions-employee-leave-in-nigeria.html
 - WageIndicator Nigeria, sick leave, maternity and family responsibilities: wageindicator.org/en-ng/work-in-nigeria/labour-law
 - Payoneer, Leave policy in Nigeria: payoneer.com/en-in/resources/workforce-management/leave-policy/nigeria/
 - CXC Global, Nigeria employment guide (cited in the 20 Nov search; not re-checked on 21 Nov)
 - Labour Act, Cap L1 LFN 2004 (PLAC): lawsofnigeria.placng.org/laws/L1.pdf (not read in full)
-- Paternity leave reports, 29 Sep 2021: guardian.ng/news/fg-approves-paternity-leave-for-civil-servants/, nairametrics.com/2021/09/29/fg-approves-14-days-paternity-leave-for-public-servants/

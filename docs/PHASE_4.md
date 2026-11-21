@@ -8,7 +8,7 @@ Parts of those boards that are superseded:
 - The pay and bill rate line in the timesheet detail ("₦8,000 · ₦12,500 a shift"): no money on timesheets in Phase 4. Pay is Phase 5, billing Phase 6.
 - "The system closed the shift at the rostered end" (Timesheets, no clock-out): decision 5. A missing clock-out counts no hours until the line manager fixes it.
 - "Overtime ... the contract allows billing night overtime at 1.5×": overtime minutes are counted and shown; what they pay or bill is Phase 5 and 6.
-- The Policies tab's sample rows ("Builds up 1.25 days a month; carry over up to 5 days", "Casual 3"): replaced by the three presets (decision 14) and the company's own types.
+- The Policies tab's sample rows ("Builds up 1.25 days a month; carry over up to 5 days", "Casual 3"): replaced by the two presets (decision 14) and the company's own types.
 - "Doctor's note attached (PDF, 180 KB)" (Team): no leave attachments in Phase 4. The approver ticks "Certificate seen" (carried forward).
 - "Deducted pro rata in payroll", "pays at the policy rate and shows on the payslip": Phase 5.
 - Any SMS or push wording: rule 8 (email and the in-app inbox only).
@@ -48,19 +48,19 @@ The owner answered every Phase 4 question with "all recommended":
 
 And the owner's standing rule for unclear legal rules (20 Nov 2026):
 
-14. **Three leave presets, side by side.** Build all three as selectable presets in leave setup, values editable per company, each labelled with its source and "confirm with an adviser", never presented as legal advice. The owner tests them and drops two. Figures and sources: RULES_NIGERIA.md "Leave presets (Phase 4)".
+14. **Leave presets, side by side.** Build them as selectable presets in leave setup, values editable per company, each labelled with its source and "These are starting values, not legal advice. Confirm them with an adviser.", never presented as legal advice. Figures and sources: RULES_NIGERIA.md "Leave presets (Phase 4)".
+    - **Owner decision, 21 Nov 2026 (after review, overrides the three-preset plan):** keep two presets, A and B. Preset C ("Public-service aligned") was dropped by the owner and is not built.
 
 | Preset | Annual | Sick | Maternity | Paternity | Compassionate |
 | --- | --- | --- | --- | --- | --- |
-| A, "Labour Act minimum" | 6 working days after 12 months' service | up to 12 paid working days a year with a medical certificate | 12 weeks at no less than 50% pay | none | none |
+| A, "Labour Act minimum" | 6 working days after 12 months' service | up to 12 paid working days a year with a medical certificate | 12 weeks (6 before and 6 after confinement, s.54(1)(a)/(b)); at no less than 50% pay only after 6 months' continuous service (s.54(1)(c)) | none | none |
 | B, "Common private-sector practice" | 15 working days | 12 working days | 12 weeks full pay | 5 working days | 3 working days |
-| C, "Public-service aligned" | 21 working days | 12 working days | 16 weeks full pay | 14 working days | 5 working days |
 
 ### Choices made in this plan (recommended defaults; the owner can overturn any)
 
 These fill gaps the answers above leave open. None is a Nigerian legal rule.
 
-- **Maternity counts calendar days**, not working days: 12 weeks is 84 days and 16 weeks is 112 days, because both the Act and the public-service rule state weeks. Each leave type has `counting` = `working_days` (decision 3, the default) or `calendar_days`.
+- **Maternity counts calendar days**, not working days: 12 weeks is 84 days, because the Act states weeks. Each leave type has `counting` = `working_days` (decision 3, the default) or `calendar_days`.
 - **Proration for joiners:** entitlement × days from the start date to 31 Dec ÷ days in the year, rounded half up once to a whole day. A type with a minimum service (preset A's annual leave: 12 months) can't be requested before the worker reaches it.
 - **A worker's working days:** a day with an assigned shift is a working day; a day without one is an off-day. Beyond the last rostered day, the worker's usual days (`workers.usual_work_days`, else the company's `default_work_days`, Mon to Fri) stand in, and the count is checked again at each approval.
 - **Early clock-out:** actual minutes, flagged `early_out`. The grace period applies to lateness only (decision 4 says nothing about early leaving). Open question 1.
@@ -104,14 +104,14 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 ### 4.1 Company calendar and leave setup (independent)
 - Migration `20261121110000_leave_setup.sql`.
 - `public_holidays` (date, name; unique per company and date; removed rows kept with `removed_at`, `removed_by`, never deleted). `organisations.default_work_days smallint[]` (ISO 1 to 7, default Mon to Fri) and `workers.usual_work_days smallint[] null`.
-- `leave_types` (code, name, `counting` working_days or calendar_days, paid, `needs_certificate`, `min_service_months`, `preset` A, B, C or null, `source_label`, status active or retired; retired, never deleted). Every type uses the two-step approval (decision 9).
-- `leave_entitlements`: dated versions per leave type (`effective_from`, `effective_to`, `days_per_year` integer, `carry_over_cap_days` integer null, `pay_percent` integer 0 to 100). No overlaps (GiST). A version in force is never updated except to close it; a change is a new version from a future 1 January or from tomorrow (rule 3).
+- `leave_types` (code, name, `counting` working_days or calendar_days, paid, `needs_certificate`, `min_service_months`, `preset` A, B or null (preset C dropped, owner 21 Nov 2026), `source_label`, status active or retired; retired, never deleted). Every type uses the two-step approval (decision 9).
+- `leave_entitlements`: dated versions per leave type (`effective_from`, `effective_to`, `days_per_year` integer, `carry_over_cap_days` integer null, `pay_percent` integer 0 to 100, `pay_min_service_months` integer null: the service the pay needs, preset A's maternity pay 6). No overlaps (GiST). A version in force is never updated except to close it; a change is a new version from a future 1 January or from tomorrow (rule 3).
 - Functions: `add_public_holiday`, `remove_public_holiday`, `copy_public_holidays(org, from_year, to_year)` (multi-row, preview; holidays are declared year by year, so it copies names and dates for the owner to edit), `save_leave_type`, `add_leave_entitlement_version`, `apply_leave_preset(org, preset)` (multi-row, preview: creates or versions the preset's types with their values and source labels; existing company types are never deleted).
-- Pure `src/lib/leave/presets.ts`: the three presets with their figures, source labels and the "confirm with an adviser" line, matching RULES_NIGERIA.md exactly (a unit test compares them).
-- Screens: Settings > Leave (`/app/settings/leave`): the preset picker with three cards side by side, each with its source and "These are starting values, not legal advice. Confirm them with an adviser."; the types table (the Leave board's Policies tab) with edit; Settings > Holidays (`/app/settings/holidays`) with "Copy last year".
-- Tests: unit (presets match the doc, proration helper, entitlement version planning), RLS (isolation entries, hr writes, line_manager and worker read only, no overlap, no update of a version in force), Playwright: apply preset B, edit annual to 18, see "confirm with an adviser" on every preset card.
+- Pure `src/lib/leave/presets.ts`: the two presets with their figures, source labels and the "confirm with an adviser" line, matching RULES_NIGERIA.md exactly (a unit test compares them).
+- Screens: Settings > Leave (`/app/settings/leave`): the preset picker with two cards side by side, each with its source and "These are starting values, not legal advice. Confirm them with an adviser."; the types table (the Leave board's Policies tab) with edit; Settings > Holidays (`/app/settings/holidays`) with "Copy last year".
+- Tests: unit (presets match the doc, proration helper, entitlement version planning), RLS (isolation entries, hr writes, line_manager and worker read only, no overlap, no update of a version in force), Playwright: apply preset B, edit annual to 18, see "confirm with an adviser" on both preset cards.
 
-**Accept:** an owner applies preset A, B or C, edits any figure, and every preset shows its source and "confirm with an adviser".
+**Accept:** an owner applies preset A or B, edits any figure, and every preset shows its source and "confirm with an adviser".
 
 ### 4.2 Timesheet days from punches (independent)
 - Migration `20261121120000_timesheets.sql`.
@@ -216,7 +216,7 @@ New crons (daily, Hobby): `/api/cron/timesheets` 04:00, `/api/cron/leave-year` 0
 2. Maternity leave counted in calendar days (the default), or in working days like every other type?
 3. Proration for joiners by days left in the year, rounded half up (the default), or by whole months?
 4. Should a worker-supervisor approve timesheets in the worker app (the default in 4.7), or only line managers who use the manager app?
-5. Which two leave presets to drop, after testing (decision 14).
+5. ~~Which two leave presets to drop~~: answered 21 Nov 2026, preset C dropped; A and B stay (decision 14).
 
 ## Illustrations
 - `timesheets-clear` (160) when every day in the period is decided (4.3), `leave-empty` (160) on an empty Requests tab (4.4), `team-empty` (160) for a line manager with no reportees (4.7). Add each slot to DESIGN_SYSTEM.md's table and draw it in `src/components/illustrations/` in the slice that first shows it, unless a slot already fits.
@@ -225,7 +225,7 @@ New crons (daily, Hobby): `/api/cron/timesheets` 04:00, `/api/cron/leave-year` 0
 - An approved timesheet creates billable Work Units, and approved leave opens the affected shifts (BUILD_PLAN). Proven in CI (database tests and Playwright) and on the Vercel preview.
 - A missing clock-out counts no hours until a correction with a reason; the punches are unchanged.
 - A punch's selfie is kept while its timesheet day is unapproved or disputed, and deleted after 90 days once decided.
-- All three leave presets are selectable and editable, each with its source and "confirm with an adviser".
+- Both leave presets (A and B) are selectable and editable, each with its source and "confirm with an adviser".
 - Line managers can't read reportees' bank, tax, NIN or RSA columns through the Data API.
 - Every Phase 4 table is in the isolation test; corrections, decisions, the leave ledger and query replies can't be edited or deleted by anyone.
 - Timesheets, Leave, My team, `/m/leave`, `/m/hours` and `/m/queries` work at 390px and 1440px.
