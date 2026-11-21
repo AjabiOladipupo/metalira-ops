@@ -155,6 +155,9 @@ test("a line manager raises a lateness query, the worker replies on the phone, b
   const closeForm = ownerCard.getByRole("form", { name: "Close query" });
   await closeForm.getByLabel("Outcome").fill("Explanation accepted. No further action.");
   await closeForm.getByRole("button", { name: "Close query" }).click();
-  await expect(ownerCard.getByRole("status")).toContainText("Query closed.", { timeout: 15_000 });
+  // The page refreshes: the card shows Closed with the outcome, and no more actions.
+  await expect(ownerCard).toContainText("Closed", { timeout: 15_000 });
+  await expect(ownerCard).toContainText("Explanation accepted. No further action.");
+  await expect(ownerCard.getByRole("form")).toHaveCount(0);
   await ownerContext.close();
 });
