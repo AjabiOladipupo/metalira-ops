@@ -111,7 +111,9 @@ export const NAV: NavGroup[] = [
         label: "My team",
         module: "people",
         href: "/app/team",
-        roles: ["owner", "admin", "hr", "ops_manager", "line_manager"],
+        // Slice 4.7: only line managers have reportees (public.my_reportees); hr and ops_manager
+        // would see an empty page. Owner and admin keep every item, as always.
+        roles: ["owner", "admin", "line_manager"],
         icon: "team",
         description: "The workers who report to you.",
         empty: "No one reports to you yet.",

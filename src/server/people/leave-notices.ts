@@ -3,6 +3,7 @@ import "server-only";
 import { createElement } from "react";
 import { z } from "zod";
 
+import { todayIn } from "@/lib/dates";
 import { INBOX_EMAIL_CAPS } from "@/lib/inbox";
 import { formatDayCount } from "@/lib/leave/days";
 import { formatLeaveRange } from "@/lib/leave/requests";
@@ -121,6 +122,47 @@ async function recipients(
 }
 
 /**
+ * The worker's line manager when it is a worker-supervisor (slice 4.7b): a worker login on the
+ * worker's line_manager_worker_id whose worker record is still employed (the same rule as
+ * private.leave_has_line_manager). Null otherwise.
+ */
+async function supervisorWorkerId(
+  admin: Admin,
+  organisationId: string,
+  facts: RequestFacts,
+): Promise<string | null> {
+  const lmWorker = facts.lineManagerWorkerId;
+  if (!lmWorker || lmWorker === facts.workerId) return null;
+  const login = await admin
+    .from("memberships")
+    .select("role")
+    .eq("organisation_id", organisationId)
+    .eq("worker_id", lmWorker)
+    .maybeSingle();
+  if (login.error) throw new Error(`Could not read the line manager (${login.error.code})`);
+  if (login.data?.role !== "worker") return null;
+  const record = await admin
+    .from("workers")
+    .select("status, end_date")
+    .eq("organisation_id", organisationId)
+    .eq("id", lmWorker)
+    .maybeSingle();
+  if (record.error) throw new Error(`Could not read the line manager (${record.error.code})`);
+  if (!record.data || record.data.status !== "active") return null;
+  if (record.data.end_date) {
+    // The company's own calendar day, as private.org_today uses in SQL.
+    const org = await admin
+      .from("organisations")
+      .select("timezone")
+      .eq("id", organisationId)
+      .maybeSingle();
+    if (org.error) throw new Error(`Could not read the company (${org.error.code})`);
+    if (record.data.end_date < todayIn(org.data?.timezone ?? "Africa/Lagos")) return null;
+  }
+  return lmWorker;
+}
+
+/**
  * Emails the managers who decide the next step of a request: the line manager after the worker
  * asks, HR after step 1 approves. Returns how many emails went.
  */
@@ -136,6 +178,20 @@ export async function notifyLeaveDeciders(
     const facts = await loadFacts(admin, organisationId, requestId);
     const waiting = step === "line_manager" ? "pending_line_manager" : "pending_hr";
     if (!facts || facts.status !== waiting) return 0;
+
+    // A worker-supervisor decides step 1 from /m/team (slice 4.7b): they have an inbox.
+    if (step === "line_manager") {
+      const supervisor = await supervisorWorkerId(admin, organisationId, facts);
+      if (supervisor) {
+        await notifyWorker(organisationId, supervisor, {
+          kind: "leave_step1",
+          title: `${emailDisplayName(facts.workerName)} asked for leave`,
+          body: `${emailDisplayName(facts.leaveTypeName)}: ${formatDayCount(facts.days, facts.counting)}, ${formatLeaveRange(facts.startDate, facts.endDate)}.\nOpen My team to approve or decline.`,
+          link: "/m/team",
+        });
+        return 1;
+      }
+    }
 
     const addresses: string[] = [];
     for (const userId of await recipients(admin, organisationId, facts, step)) {

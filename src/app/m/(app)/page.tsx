@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChevronRight,
   CircleHelp,
+  ClipboardCheck,
   Clock,
   Plane,
   Users,
@@ -22,6 +23,7 @@ import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 import { loadClockContext, type ClockContext } from "@/server/workforce/clock-data";
 import { loadCrewContext } from "@/server/workforce/crew-data";
+import { loadCrewTile } from "@/server/workforce/crew-team";
 import { formatShortDay } from "@/lib/roster";
 import { loadMyQueries } from "@/server/people/queries";
 
@@ -117,6 +119,13 @@ async function HomeBody() {
           .then((c) => c.crewSize)
           .catch(() => 0)
       : 0;
+  // Worker-supervisors get the Approvals row (slice 4.7b, SupHome board): their crew's days and
+  // leave at step 1, on /m/team. Shown only when they supervise someone.
+  const approvals =
+    lookup.type === "worker"
+      ? await loadCrewTile(supabase ?? (await createServerSupabase()), lookup.session.organisationId)
+          .catch(() => null)
+      : null;
   return (
     <>
       {shifts ? (
@@ -141,6 +150,29 @@ async function HomeBody() {
             </span>
           </span>
           <ChevronRight strokeWidth={1.75} className="size-5 shrink-0" aria-hidden />
+        </Link>
+      ) : null}
+
+      {approvals ? (
+        <Link
+          href="/m/team"
+          data-testid="approvals-row"
+          className="flex min-h-14 items-center gap-3.5 rounded-xl border border-line px-4 text-base font-medium text-foreground no-underline hover:bg-surface hover:text-foreground"
+        >
+          <ClipboardCheck strokeWidth={1.75} className="size-[22px] shrink-0" aria-hidden />
+          <span className="flex-1">Approvals</span>
+          <span
+            className="inline-flex items-center gap-1.5 font-semibold tabular-nums"
+            data-testid="approvals-count"
+          >
+            <span
+              aria-hidden
+              className={`inline-block size-2 rounded-full border-[1.5px] border-foreground ${approvals.count > 0 ? "bg-foreground" : ""}`}
+            />
+            {approvals.count}
+            <span className="sr-only"> to approve</span>
+          </span>
+          <ChevronRight strokeWidth={1.75} className="size-4 shrink-0 text-fg-muted" aria-hidden />
         </Link>
       ) : null}
 

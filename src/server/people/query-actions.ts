@@ -63,6 +63,8 @@ async function tell(organisationId: string, workerId: string, message: InboxMess
 function refreshWorker(workerId: string) {
   revalidatePath(`/app/people/${workerId}`);
   revalidatePath("/m/queries");
+  // My team (slice 4.7) lists the team's queries.
+  revalidatePath("/app/team");
 }
 
 /** "Send query" on the HR file. */

@@ -705,7 +705,7 @@ describe("who reads and writes", () => {
     expect(count).toBe(1);
   });
 
-  it("a line manager reads their reportees' assignments and the shifts at their sites, read-only", async () => {
+  it("a line manager reads their reportees' assignments and the shifts at their sites", async () => {
     const rows = await lineManager.client.from("shift_assignments").select("worker_id");
     expect(rows.error).toBeNull();
     expect(rows.data!.length).toBeGreaterThan(0);
@@ -717,7 +717,9 @@ describe("who reads and writes", () => {
       .select("id", { count: "exact", head: true })
       .eq("site_id", apapa);
     expect(shifts.data!.length).toBe(all.count);
-    expect((await assign(post.night, day(6), worker.a, lineManager.client)).error?.code).toBe(
+    // Slice 4.7: a line manager assigns only their reportees (tests/rls/team.test.ts covers the
+    // rest); worker.b doesn't report to them.
+    expect((await assign(post.night, day(6), worker.b, lineManager.client)).error?.code).toBe(
       "42501",
     );
   });
