@@ -442,8 +442,8 @@ describe("what approval leaves alone", () => {
     // A request starting yesterday can't be asked for; written as HR would find it.
     const { rows: req } = await db.query<{ id: string }>(
       `insert into public.leave_requests (organisation_id, worker_id, leave_type_id, leave_year,
-         start_date, end_date, days, pay_percent)
-       values ($1, $2, $3, $4, $5, $6, 3, 100) returning id`,
+         start_date, end_date, days)
+       values ($1, $2, $3, $4, $5, $6, 3) returning id`,
       [owner.orgId, kemi, annual, Number(today.slice(0, 4)), addDays(today, -1), day(1)],
     );
     await db.query("update public.leave_requests set status = 'pending_hr' where id = $1", [

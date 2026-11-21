@@ -651,11 +651,11 @@ grant execute on function public.roster_leave_removals(uuid, uuid, date, date) t
 -- ---------------------------------------------------------------------------
 -- 6. HR's final approval opens the worker's shifts
 -- ---------------------------------------------------------------------------
--- 4.4's function (migration 20261121180000, latest version) copied exactly, plus: the worker's
--- leave lock (when 4.4 doesn't take it already), the list of shifts the approval opens
--- (`open_shifts`, in the dry run and the result) and, on approval, the update that takes the
--- worker off them with removed_reason 'on_leave' and removed_by the approver, audited as
--- roster.opened_by_leave. The public wrapper is unchanged.
+-- 4.4's function (migration 20261121180000, latest version) copied exactly, plus the list of
+-- shifts the approval opens (`open_shifts`, in the dry run and the result) and, on approval, the
+-- update that takes the worker off them with removed_reason 'on_leave' and removed_by the
+-- approver, audited as roster.opened_by_leave. 4.4 takes the worker's leave lock first; the
+-- roster guard takes the same lock shared. The public wrapper is unchanged.
 create or replace function private.decide_leave_hr(
   p_organisation_id uuid,
   p_request_id uuid,
@@ -685,6 +685,7 @@ declare
   v_certificate boolean;
   v_below boolean;
   v_pay integer;
+  v_lock_worker uuid;
 begin
   if private.session_uid() is null or p_organisation_id is null then
     raise exception 'Sign in to decide leave.' using errcode = '42501';
@@ -698,6 +699,15 @@ begin
   end if;
   if p_decision = 'declined' and v_note is null then
     raise exception 'Say why, so the worker knows.' using errcode = '22023';
+  end if;
+
+  -- The worker's leave lock first (as request_leave and adjust_leave_balance take it), so two
+  -- decisions, or a decision and a request, can't both pass the balance check.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
   end if;
 
   select r.* into v_request
@@ -717,10 +727,6 @@ begin
     raise exception 'This request isn''t waiting for HR.' using errcode = 'MLLQ4';
   end if;
 
-  -- Slice 4.5: the worker's leave lock (the roster guard takes it shared), so an assignment
-  -- for this worker and this approval take turns.
-  perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_request.worker_id::text, 0));
-
   select t.* into v_type from public.leave_types t where t.id = v_request.leave_type_id;
   select w.start_date into v_start from public.workers w where w.id = v_request.worker_id;
   v_certificate := v_request.certificate_seen
@@ -736,7 +742,7 @@ begin
       and private.leave_service_months(v_start, v_request.start_date) < v_version.pay_min_service_months,
     false
   );
-  v_pay := case when v_type.paid then coalesce(v_version.pay_percent, v_request.pay_percent) else 0 end;
+  v_pay := case when v_type.paid then coalesce(v_version.pay_percent, 0) else 0 end;
 
   perform private.leave_ensure_year_core(p_organisation_id, v_request.leave_year, array[v_request.worker_id]);
   v_available := private.leave_balance(
@@ -804,12 +810,12 @@ begin
   set status = v_status,
       days = case when v_status = 'approved' then v_count.days else r.days end,
       certificate_seen = v_certificate,
-      pay_percent = case when v_status = 'approved' then v_pay else r.pay_percent end,
-      pay_below_service = case when v_status = 'approved' then v_below else r.pay_below_service end,
       decided_at = now()
   where r.id = v_request.id;
 
   if v_status = 'approved' then
+    insert into public.leave_request_pay (request_id, organisation_id, pay_percent, pay_below_service)
+    values (v_request.id, p_organisation_id, v_pay, v_below);
     insert into public.leave_ledger (
       organisation_id, worker_id, leave_type_id, leave_year, kind, days, request_id, actor
     )
