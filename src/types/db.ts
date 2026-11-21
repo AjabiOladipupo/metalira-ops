@@ -1190,8 +1190,8 @@ isOneToOne: false
 "claim_inbox_email":
 { Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
                            },
-"clear_crew_photo":
-{ Args: { "p_batch_id": string }; Returns: boolean
+"clear_crew_photos":
+{ Args: { "p_batch_ids": (string)[] }; Returns: number
                            },
 "clear_punch_selfies":
 { Args: { "p_punch_ids": (string)[] }; Returns: number

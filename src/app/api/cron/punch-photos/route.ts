@@ -6,6 +6,9 @@ import { runPunchPhotoSweep } from "@/server/workforce/punch-photo-sweep";
 // `Authorization: Bearer <CRON_SECRET>`; without a configured secret, or with the wrong one,
 // every request gets an empty 404, so the route is not revealed.
 
+/** Seconds the sweep may run: each pass deletes up to 500 files in chunks of 100. */
+export const maxDuration = 60;
+
 function notFound() {
   return new Response(null, { status: 404 });
 }

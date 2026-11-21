@@ -10,7 +10,7 @@ import { PUNCH_PHOTOS_BUCKET } from "./punches";
 /**
  * Selfie retention (slice 3.5, owner decision 20 Nov 2026): selfies are deleted 90 days after
  * the punch unless the punch is under review (private.punch_under_review). The punch row stays;
- * `clear_punch_selfie` nulls its path and stamps `selfie_deleted_at`. Uploads that no punch kept
+ * `clear_punch_selfies` nulls its path and stamps `selfie_deleted_at`. Uploads that no punch kept
  * (an attach that failed) are deleted after a day. Files go through the Storage API with the
  * secret key (Storage refuses deletes in SQL). Daily, by Vercel Cron (/api/cron/punch-photos).
  * Logs counts only, never paths.
@@ -37,12 +37,11 @@ async function expirePass(admin: Client): Promise<number> {
       .from(PUNCH_PHOTOS_BUCKET)
       .remove(chunk.map((row) => row.selfie_path));
     if (removeError) throw new Error(`Could not delete selfies (${removeError.name})`);
-    for (const row of chunk) {
-      const { error: clearError } = await admin.rpc("clear_punch_selfie", {
-        p_punch_id: row.punch_id,
-      });
-      if (clearError) throw new Error(`Could not record a deleted selfie (${clearError.code})`);
-    }
+    // One call per chunk (review L5); the function checks each row again.
+    const { error: clearError } = await admin.rpc("clear_punch_selfies", {
+      p_punch_ids: chunk.map((row) => row.punch_id),
+    });
+    if (clearError) throw new Error(`Could not record deleted selfies (${clearError.code})`);
   }
   return due.length;
 }
