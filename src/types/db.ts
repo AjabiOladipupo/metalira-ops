@@ -1263,6 +1263,11 @@ isOneToOne: false
               "assignment_id": string,"ends_at": string,"organisation_id": string,"post_name": string,"shift_date": string,"site_address": string,"site_landmark": string,"site_name": string,"starts_at": string
             }[]
                            },
+"my_reportees":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "department_id": string,"department_name": string,"email": string,"employment_type": Database["public"]['Enums']["employment_type"],"end_date": string,"first_name": string,"id": string,"job_title": string,"last_name": string,"line_manager_membership_id": string,"line_manager_name": string,"line_manager_worker_id": string,"phone": string,"site_ids": (string)[],"site_names": (string)[],"staff_id": string,"start_date": string,"status": Database["public"]['Enums']["worker_status"],"supervisor_clock_in": boolean,"usual_work_days": (number)[]
+            }[]
+                           },
 "org_bank_account_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string }; Returns: {
               "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string

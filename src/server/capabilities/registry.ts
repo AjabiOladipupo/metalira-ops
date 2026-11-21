@@ -119,6 +119,7 @@ import {
   ownChangeRequestSchema,
 } from "@/server/people/own-requests";
 import { unlockSignInSpec } from "@/server/people/sign-in-status";
+import { TEAM_READERS, loadTeamMembers, loadTeamSummary } from "@/server/people/team";
 import {
   decideStaffIdCorrectionSpec,
   requestStaffIdCorrectionSpec,
@@ -1037,6 +1038,42 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/staff-id-actions", "unlockSignInAction"),
     agent: false,
     agentNote: "Restores sign-in access: kept to people.",
+  },
+
+  // -------------------------------------------------------------------------
+  // My team (people/team.ts, slice 4.0): a line manager's reportees, safe columns only
+  // -------------------------------------------------------------------------
+  {
+    name: "team.members",
+    description:
+      "Lists the people who report to the signed-in line manager: job, department, status, start date and mapped sites.",
+    kind: "read",
+    audience: "manager",
+    roles: TEAM_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    // Lira gets no phone numbers or email addresses: it never contacts anyone directly.
+    read: async ({ supabase, organisationId }) =>
+      (await loadTeamMembers(supabase, organisationId)).map((m) => ({
+        ...m,
+        phone: null,
+        email: null,
+      })),
+    agent: true,
+  },
+  {
+    name: "team.summary",
+    description:
+      "Counts the line manager's reportees by status, those clocked in by a supervisor and those with no site.",
+    kind: "read",
+    audience: "manager",
+    roles: TEAM_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadTeamSummary(supabase, organisationId),
+    agent: true,
   },
 
   // -------------------------------------------------------------------------
