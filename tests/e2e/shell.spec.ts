@@ -20,11 +20,15 @@ const BUILT_EMPTY: Record<string, string> = {
   "/app/roster": "No posts to roster yet.",
   // Slice 3.7: the live board; nobody is rostered in a new company.
   "/app/attendance": "No one is rostered for today yet. Publish a roster to see it here.",
+  // Slice 4.3: the timesheet board; nobody has worked a shift in a new company.
+  "/app/timesheets":
+    "No one has worked a shift in this period yet. Days appear here once shifts start.",
 };
 
 /** Built pages whose heading is a number, as on their prototype. */
 const BUILT_HEADING: Record<string, string> = {
   "/app/attendance": "0 on shift now",
+  "/app/timesheets": "No timesheet days yet",
 };
 
 for (const item of NAV_ITEMS) {

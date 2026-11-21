@@ -88,7 +88,7 @@ Hand-drawn black-ink people: loose single-weight outlines, flat black fills for 
 | no-clients | Empty Clients | 2 | 160 |
 | inbox-empty | Worker app inbox, no messages yet (worker holding up an empty envelope) | 3 | 96 |
 | roster-empty | Empty roster week | 3 | 160 |
-| all-covered | No uncovered shifts | 3 | 160 |
+| all-covered | No uncovered shifts; also Timesheets when every day in the period is decided (the `timesheets-clear` slot, 4.3: this scene fits) | 3 | 160 |
 | offline | Worker app offline state (person, phone, crossed-out cloud) | 3 | 160 |
 | leave-empty | No leave requests (HR and line managers): manager beside an empty in-tray | 4 | 160 |
 | leave-approved | Leave approved success screen (person heading off with a suitcase) | 4 | 240 |

@@ -173,6 +173,16 @@ As in Phases 2 and 3 (docs/LIRA.md): every new Server Action is registered in `s
 
 **Accept:** approving a timesheet day on a manned-post shift creates one billable Work Unit with the day's minutes (the BUILD_PLAN "done when"); a reopened day cancels it.
 
+**As built (4.3).** Migration `20261121170000_timesheet_approval.sql` (renamed after 4.6 merged). What later slices need to know:
+- **Decisions:** `timesheet_decisions` (approved, rejected, disputed, reopened; reason required except approved; minutes snapshot) and `work_units` are insert-only for every role, the secret key and the database owner, with truncate guards. A Work Unit moves approved to cancelled once, naming a `reopened` decision, or a `disputed` one when the worker disputes an approved day (the day goes back to the approver, so its unit can't stay billable).
+- **Work Units:** one approved unit per line (partial unique index); made only for a shift day with minutes above 0 (no-shift days and 0-minute days make none). Billable on manned_post and per_visit. Carries `worker_id`, `unit` from the post, `contract_type`, `quantity_minutes`, `ot_minutes`; no money. `shifts.work_unit_id` stays null (a shift holds several people).
+- **Clean (Approve N clean):** pending, needs_review false, the shift finished, and no exceptions except informational ones: `supervisor`, and `no_location` / `no_selfie` only when no self-made punch on the line carries them. `corrected` is not informational. Refusal codes: not_found (no name), own, not_yours, decided, disputed, running, needs_review, flagged.
+- **Every decision refreshes the day first** under the worker's lock; a single approval is refused (MLTA7) if that changes the minutes or exceptions. A running shift can't be approved (MLTA3).
+- **Reopen:** owner, admin, ops_manager, never their own day; refused when `private.timesheet_period_posted` says so (returns false until **Phase 5 replaces it**). Dispute: the worker's own day, pending or approved, at most 3 times.
+- **Late punches:** flagged as they arrive by a punches trigger, keyed on the punch's line (shift lines by assignment, no-shift lines by the clock-out pairing), plus a refresh catch-up over punches received in the last 7 days. `punch_under_review` keeps a late punch's selfie until the day is reopened and decided again, or 180 days from arrival at most.
+- **Cron:** `refresh_timesheets_recent` returns `failed_codes` (distinct SQLSTATEs); `/api/cron/timesheets` logs counts and codes and answers 500 when anything failed or the run stopped early.
+- **For 4.7:** `/m/team` can reuse `approve_timesheet_line`, `reject_timesheet_line` and `timesheet_review_days` (a line manager sees their reportees). The HR file's "timesheet exceptions" placeholder (4.6) can read `timesheet_review_days`.
+
 ### 4.4 Leave requests and balances (after 4.1)
 - Migration `20261121140000_leave_requests.sql`.
 - `leave_ledger` (insert-only): worker, leave type, leave year, kind (`grant`, `carry_over`, `taken`, `returned`, `adjustment`), days (signed integer), request id null, reason (required for adjustments), actor. A balance is the sum, never a stored column.
