@@ -120,7 +120,7 @@ test("a line manager raises a lateness query, the worker replies on the phone, b
   await expect(mine.getByTestId("my-query-reply-by")).toContainText("Reply by");
   await expect(mine.getByRole("heading", { name: "Lateness on 23 October" })).toBeVisible();
   await mine
-    .getByLabel("Your reply")
+    .getByRole("textbox", { name: "Your reply" })
     .fill("The BRT was stopped at Mile 2 because of an accident. I called Kola at 05:50.");
   await mine.getByRole("button", { name: "Send reply" }).click();
   await expect(w.getByTestId("query-reply-sent")).toBeVisible({ timeout: 15_000 });
