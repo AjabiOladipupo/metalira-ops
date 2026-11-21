@@ -59,7 +59,8 @@ const SAFE_COLUMNS = [
   "site_names",
 ];
 
-const SENSITIVE = /(_enc|_last4|bank|account|tin|tax|pfa|nhf|rent|kobo|pay|rate|next_of_kin|nin|rsa|bvn|salary)/;
+const SENSITIVE =
+  /(_enc|_last4|bank|account|tin|tax|pfa|nhf|rent|kobo|pay|rate|next_of_kin|nin|rsa|bvn|salary)/;
 
 const CENTRE = "SRID=4326;POINT(3.3611 6.4474)";
 
