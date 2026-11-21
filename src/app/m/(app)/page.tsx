@@ -14,6 +14,8 @@ import { signOutWorker } from "@/server/identity/worker-actions";
 import { lookupWorkerPageSession } from "@/server/identity/worker-session";
 import { loadClockContext, type ClockContext } from "@/server/workforce/clock-data";
 import { loadCrewContext } from "@/server/workforce/crew-data";
+import { formatShortDay } from "@/lib/roster";
+import { loadMyQueries } from "@/server/people/queries";
 
 import { ClockButton } from "../_components/clock/clock-button";
 import { InboxLink } from "../_components/inbox-link";
@@ -149,6 +151,35 @@ async function HomeBody() {
   );
 }
 
+/**
+ * "1 query from Kola Adebayo · reply by Mon 2 Nov" (WkHome board, slice 4.6): queries still
+ * awaiting the worker's reply, the earliest reply-by date first. Nothing when there are none.
+ */
+async function QueryBanner() {
+  const lookup = await lookupWorkerPageSession();
+  if (lookup.type !== "worker") return null;
+  const queries = await loadMyQueries({
+    supabase: await createServerSupabase(),
+    organisationId: lookup.session.organisationId,
+    workerId: lookup.session.workerId,
+  }).catch(() => []);
+  const waiting = queries
+    .filter((q) => q.status === "awaiting_reply")
+    .sort((a, b) => a.replyBy.localeCompare(b.replyBy));
+  const first = waiting[0];
+  if (!first) return null;
+  return (
+    <Link
+      href="/m/queries"
+      data-testid="home-query-banner"
+      className="flex items-center justify-between gap-2 rounded-xl border-[1.5px] border-foreground px-3.5 py-3 text-[15px] font-semibold text-foreground no-underline hover:bg-surface hover:text-foreground"
+    >
+      {workerMessages.queries.homeBanner(waiting.length, first.raisedByName, formatShortDay(first.replyBy))}
+      <ChevronRight strokeWidth={1.75} className="size-[18px] shrink-0" aria-hidden />
+    </Link>
+  );
+}
+
 /** The server's last punch for the round Clock in / Clock out button (slice 3.5). */
 function clockLastPunch(clock: ClockContext) {
   return clock.lastPunch
@@ -190,6 +221,10 @@ export default function WorkerHomePage() {
         }
       >
         <Header />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <QueryBanner />
       </Suspense>
 
       <Suspense fallback={<HomeBodySkeleton />}>

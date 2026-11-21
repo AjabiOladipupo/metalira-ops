@@ -17,10 +17,11 @@ type TabKey = (typeof TABS)[number]["key"];
 /**
  * The Profile and Queries tabs on Me (WkProfile board). The profile panel is rendered on the
  * server and passed in as children, so it stays mounted (its links and sign-out form intact)
- * while Queries is shown. Queries shows an empty state until HR queries arrive (Phase 4).
+ * while Queries is shown. The Queries panel (slice 4.6) is rendered on the server too: an empty
+ * state, or a link to /m/queries with the open count.
  * Keyboard: arrow keys, Home and End move between tabs (WAI-ARIA tabs, automatic activation).
  */
-export function MeTabs({ children }: { children: ReactNode }) {
+export function MeTabs({ children, queries }: { children: ReactNode; queries: ReactNode }) {
   const [selected, setSelected] = useState<TabKey>("profile");
   const refs = useRef<Record<TabKey, HTMLButtonElement | null>>({ profile: null, queries: null });
 
@@ -87,16 +88,11 @@ export function MeTabs({ children }: { children: ReactNode }) {
         id="me-queries-panel"
         aria-labelledby="me-queries-tab"
         hidden={selected !== "queries"}
-        // No focusable content yet, so the panel itself takes focus (WAI-ARIA tabs pattern).
+        // The panel itself takes focus when it holds only the empty state (WAI-ARIA tabs pattern).
         tabIndex={0}
         className="px-4 pt-3 pb-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
       >
-        <p
-          data-testid="me-queries-empty"
-          className="m-0 rounded-xl border border-dashed border-line px-4 py-3 text-[15px] text-fg-muted"
-        >
-          {copy.queriesEmpty}
-        </p>
+        {queries}
       </div>
     </>
   );

@@ -931,6 +931,58 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"staff_queries": {
+                  Row: {
+                    "body": string,"closed_at": string | null,"closed_by": string | null,"first_replied_at": string | null,"id": string,"kind": string,"organisation_id": string,"outcome_note": string | null,"raised_at": string,"raised_by": string,"raised_by_name": string,"reminded_at": string | null,"reply_by": string,"status": string,"subject": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "body": string,"closed_at"?: string | null,"closed_by"?: string | null,"first_replied_at"?: string | null,"id"?: string,"kind": string,"organisation_id": string,"outcome_note"?: string | null,"raised_at"?: string,"raised_by": string,"raised_by_name": string,"reminded_at"?: string | null,"reply_by": string,"status"?: string,"subject": string,"worker_id": string
+                  }
+                  Update: {
+                    "body"?: string,"closed_at"?: string | null,"closed_by"?: string | null,"first_replied_at"?: string | null,"id"?: string,"kind"?: string,"organisation_id"?: string,"outcome_note"?: string | null,"raised_at"?: string,"raised_by"?: string,"raised_by_name"?: string,"reminded_at"?: string | null,"reply_by"?: string,"status"?: string,"subject"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "staff_queries_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "staff_queries_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"staff_query_replies": {
+                  Row: {
+                    "author_name": string,"author_role": string,"author_user_id": string,"body": string,"created_at": string,"id": string,"organisation_id": string,"query_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "author_name": string,"author_role": string,"author_user_id": string,"body": string,"created_at"?: string,"id"?: string,"organisation_id": string,"query_id": string
+                  }
+                  Update: {
+                    "author_name"?: string,"author_role"?: string,"author_user_id"?: string,"body"?: string,"created_at"?: string,"id"?: string,"organisation_id"?: string,"query_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "staff_query_replies_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "staff_query_replies_query_fkey"
+      columns: ["organisation_id","query_id"]
+isOneToOne: false
+      referencedRelation: "staff_queries"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"worker_assignments": {
                   Row: {
                     "client_id": string | null,"created_at": string,"created_by": string | null,"effective_from": string,"effective_to": string | null,"id": string,"organisation_id": string,"project_id": string | null,"site_id": string | null,"updated_at": string,"worker_id": string
@@ -1201,6 +1253,11 @@ isOneToOne: false
 "claim_inbox_email":
 { Args: { "p_global_cap": number,"p_item_id": string,"p_org_cap": number }; Returns: boolean
                            },
+"claim_staff_query_reminders":
+{ Args: { "p_limit": number }; Returns: {
+              "organisation_id": string,"query_id": string,"reply_by": string,"subject": string,"worker_id": string
+            }[]
+                           },
 "clear_crew_photos":
 { Args: { "p_batch_ids": (string)[] }; Returns: number
                            },
@@ -1214,6 +1271,9 @@ isOneToOne: false
                            },
 "close_post":
 { Args: { "p_last_day": string,"p_organisation_id": string,"p_post_id": string,"p_reason": string }; Returns: Json
+                           },
+"close_staff_query":
+{ Args: { "p_organisation_id": string,"p_outcome": string,"p_query_id": string }; Returns: string
                            },
 "commit_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string,"p_rows": Json }; Returns: Json
@@ -1346,6 +1406,9 @@ isOneToOne: false
               "punch_id": string,"selfie_path": string
             }[]
                            },
+"raise_staff_query":
+{ Args: { "p_body": string,"p_kind": string,"p_organisation_id": string,"p_reply_by": string,"p_subject": string,"p_worker_id": string }; Returns: string
+                           },
 "record_checkpoint_scan":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_latitude": number,"p_longitude": number,"p_queued_offline"?: boolean,"p_sent_device_time": string,"p_token": string }; Returns: Json
                            },
@@ -1368,6 +1431,9 @@ isOneToOne: false
 { Args: { "p_membership_id": string,"p_organisation_id": string }; Returns: {
               "member_email": string,"member_name": string,"member_user_id": string,"old_role": Database["public"]['Enums']["membership_role"]
             }[]
+                           },
+"reply_to_staff_query":
+{ Args: { "p_body": string,"p_organisation_id": string,"p_query_id": string }; Returns: Json
                            },
 "request_org_bank_account":
 { Args: { "p_account_name": string,"p_bank_account_digest"?: string,"p_bank_account_enc": string,"p_bank_account_last4": string,"p_bank_code"?: string,"p_bank_lookup_id"?: string,"p_bank_name": string,"p_id": string,"p_name_check"?: Database["public"]['Enums']["bank_name_check"],"p_name_check_reason"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: {
@@ -1447,6 +1513,9 @@ isOneToOne: false
                            },
 "withdraw_org_bank_account":
 { Args: { "p_id": string,"p_organisation_id": string }; Returns: string
+                           },
+"withdraw_staff_query":
+{ Args: { "p_organisation_id": string,"p_query_id": string,"p_reason": string }; Returns: string
                            },
 "withdraw_worker_consent":
 { Args: { "p_kind": string,"p_organisation_id": string }; Returns: boolean

@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { lagosToday } from "@/lib/dates";
 import { MANAGER_ROLES } from "@/lib/roles";
 import { COMPANY_BANK_REQUESTERS, COMPANY_BANK_REVEALERS } from "@/lib/company-bank";
 import {
@@ -120,6 +121,15 @@ import {
 } from "@/server/people/own-requests";
 import { unlockSignInSpec } from "@/server/people/sign-in-status";
 import { TEAM_READERS, loadTeamMembers, loadTeamSummary } from "@/server/people/team";
+import {
+  HR_FILE_READERS,
+  closeQuerySpec,
+  followUpQuerySpec,
+  loadQueriesSummary,
+  raiseQuerySpec,
+  replyToQuerySchema,
+  withdrawQuerySpec,
+} from "@/server/people/queries";
 import {
   decideStaffIdCorrectionSpec,
   requestStaffIdCorrectionSpec,
@@ -247,6 +257,8 @@ const COPY_WEEK =
   "Writes a whole week of assignments at once: kept to people for now, with its preview on the screen (the owner may enable it later).";
 const PUBLISH_WEEK =
   "Publishes a whole week and tells every affected worker by inbox and email: kept to people for now, with its preview on the screen (the owner may enable it later).";
+const QUERY_DECISION =
+  "A query is a disciplinary record about a person: raising, following up and closing one are a manager's decision.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -1076,6 +1088,81 @@ export const CAPABILITIES: readonly Capability[] = [
     action: null,
     read: ({ supabase, organisationId }) => loadTeamSummary(supabase, organisationId),
     agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Queries and the HR file (people/query-actions.ts, slice 4.6)
+  // -------------------------------------------------------------------------
+  {
+    name: "queries.raise",
+    description:
+      "Raises a disciplinary or HR query about one employee with a reply-by date, and tells them in the app.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(raiseQuerySpec),
+    changes: "one",
+    action: at("people/query-actions", "raiseQueryAction"),
+    agent: false,
+    agentNote: QUERY_DECISION,
+  },
+  {
+    name: "queries.follow_up",
+    description: "Adds a manager's follow-up to an open query; the employee is told in the app.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(followUpQuerySpec),
+    changes: "one",
+    action: at("people/query-actions", "followUpQueryAction"),
+    agent: false,
+    agentNote: QUERY_DECISION,
+  },
+  {
+    name: "queries.close",
+    description: "Closes an open query with an outcome note that stays on the employee's HR file.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(closeQuerySpec),
+    changes: "one",
+    action: at("people/query-actions", "closeQueryAction"),
+    agent: false,
+    agentNote: QUERY_DECISION,
+  },
+  {
+    name: "queries.withdraw",
+    description: "Withdraws a query the signed-in manager raised, with a reason kept on the HR file.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(withdrawQuerySpec),
+    changes: "one",
+    action: at("people/query-actions", "withdrawQueryAction"),
+    agent: false,
+    agentNote: QUERY_DECISION,
+  },
+  {
+    name: "queries.summary",
+    description:
+      "Counts the queries the manager may see: open, overdue, replied and raised in the last 30 days.",
+    kind: "read",
+    audience: "manager",
+    roles: HR_FILE_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) =>
+      loadQueriesSummary(supabase, organisationId, lagosToday()),
+    agent: true,
+  },
+  {
+    name: "me.reply_to_query",
+    description: "A worker replies to a query from their line manager or HR in the worker app.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: replyToQuerySchema,
+    changes: "one",
+    action: at("people/query-actions", "replyToQueryAction"),
+    agent: false,
+    agentNote: "A reply is the worker's own words, written in the worker app.",
   },
 
   // -------------------------------------------------------------------------
