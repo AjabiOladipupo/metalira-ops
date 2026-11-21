@@ -4,7 +4,8 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import {
-  MAX_REPLIES,
+  MAX_FOLLOW_UPS,
+  MAX_WORKER_REPLIES,
   QUERY_KINDS,
   QUERY_LIMITS,
   isQueryOpen,
@@ -213,7 +214,7 @@ function fromDbError(error: PostgrestError, field?: string): never {
     case "MLQY7":
       throw new MutationError(
         "invalid",
-        `This query has ${MAX_REPLIES} replies already. Close it and raise a new one if needed.`,
+        `This query has reached its limit of ${MAX_WORKER_REPLIES} replies from the employee or ${MAX_FOLLOW_UPS} follow-ups. Close it and raise a new one if needed.`,
       );
   }
   throw new Error(`Database refused the query change (${error.code})`);

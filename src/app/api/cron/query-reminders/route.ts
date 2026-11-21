@@ -6,7 +6,7 @@ import { runQueryReminders } from "@/server/people/query-reminders";
 // caps. Vercel sends `Authorization: Bearer <CRON_SECRET>`; without a configured secret, or with
 // the wrong one, every request gets an empty 404, so the route is not revealed.
 
-/** Seconds the run may take: up to 10 passes of 100 notices, 4 at a time. */
+/** Seconds the run may take: up to 3 passes of 100 notices, 4 at a time. */
 export const maxDuration = 60;
 
 function notFound() {

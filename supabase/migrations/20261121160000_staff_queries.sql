@@ -33,7 +33,8 @@
 --   raise_staff_query     owner, admin, hr for any active worker; a line manager for their
 --                         current reportees; never about the caller's own worker record
 --   reply_to_staff_query  the worker (their own query, channel worker_app), or a manager who may
---                         read it (a follow-up); only while awaiting_reply or replied
+--                         read it (a follow-up); only while awaiting_reply or replied, at most 25
+--                         worker replies and 5 follow-ups (the insert trigger, for every inserter)
 --   close_staff_query     owner, admin, hr, the current line manager or the raiser, with an
 --                         outcome note
 --   withdraw_staff_query  the raiser only, with a reason
@@ -56,7 +57,7 @@
 --   MLQY4 a query about the caller's own worker record
 --   MLQY5 the reply-by date is in the past or more than 60 days away
 --   MLQY6 the query is closed or withdrawn
---   MLQY7 the query has 30 replies already
+--   MLQY7 the query has its 25 replies from the worker, or its 5 follow-ups from managers
 --   42501 not signed in with a trusted session, or not a member of the company
 --   P0002 the worker or query isn't in the company, or the caller can't read it
 -- Nothing here stores money.
@@ -317,8 +318,35 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_status text;
+  v_count integer;
 begin
   if tg_op = 'INSERT' then
+    -- Whoever inserts (the functions, the secret key, the database owner): only onto an open
+    -- query, and within its caps, so the worker can't use up the managers' follow-ups. The
+    -- parent row is locked, so two replies can't both take the last place.
+    select q.status into v_status
+    from public.staff_queries q
+    where q.organisation_id = new.organisation_id and q.id = new.query_id
+    for update;
+    if v_status is null then
+      raise exception 'That query wasn''t found.' using errcode = 'P0002';
+    end if;
+    if v_status not in ('awaiting_reply', 'replied') then
+      raise exception 'This query is closed.' using errcode = 'MLQY6';
+    end if;
+    select count(*) into v_count
+    from public.staff_query_replies r
+    where r.organisation_id = new.organisation_id
+      and r.query_id = new.query_id
+      and r.author_role = new.author_role;
+    if new.author_role = 'worker' and v_count >= 25 then
+      raise exception 'This query has 25 replies from the employee already.' using errcode = 'MLQY7';
+    end if;
+    if new.author_role = 'manager' and v_count >= 5 then
+      raise exception 'This query has 5 follow-ups already.' using errcode = 'MLQY7';
+    end if;
     new.created_at := now();
     return new;
   end if;
@@ -358,13 +386,17 @@ set search_path = ''
 as $$
   select q.id
   from public.staff_queries q
-  where q.organisation_id in (select private.role_org_ids(array['owner', 'admin', 'hr']))
-    or q.worker_id in (select private.my_reportee_ids())
-    or q.worker_id in (select private.my_worker_ids())
-    or (
-      q.raised_by = (select private.session_uid())
-      and q.organisation_id in (
-        select private.role_org_ids(array['owner', 'admin', 'hr', 'line_manager'])
+  -- Only the caller's own companies are scanned (security review L1), then the read rule.
+  where q.organisation_id in (select private.user_org_ids())
+    and (
+      q.organisation_id in (select private.role_org_ids(array['owner', 'admin', 'hr']))
+      or q.worker_id in (select private.my_reportee_ids())
+      or q.worker_id in (select private.my_worker_ids())
+      or (
+        q.raised_by = (select private.session_uid())
+        and q.organisation_id in (
+          select private.role_org_ids(array['owner', 'admin', 'hr', 'line_manager'])
+        )
       )
     )
 $$;
@@ -376,7 +408,10 @@ alter table public.staff_query_replies enable row level security;
 
 create policy staff_query_replies_select on public.staff_query_replies
   for select to authenticated
-  using (query_id in (select private.my_staff_query_ids()));
+  using (
+    organisation_id in (select private.user_org_ids())
+    and query_id in (select private.my_staff_query_ids())
+  );
 
 comment on policy staff_query_replies_select on public.staff_query_replies is
   'Whoever may read the query reads its replies (private.my_staff_query_ids; slice 4.6).';
@@ -574,7 +609,6 @@ declare
   v_is_worker boolean;
   v_role text;
   v_author_name text;
-  v_count integer;
   v_id uuid;
 begin
   if v_uid is null or p_organisation_id is null then
@@ -615,12 +649,7 @@ begin
   if not private.staff_query_text_ok(p_body, 2, 2000, true) then
     raise exception 'Check the reply''s text.' using errcode = 'MLQY1';
   end if;
-  select count(*) into v_count
-  from public.staff_query_replies r
-  where r.organisation_id = p_organisation_id and r.query_id = p_query_id;
-  if v_count >= 30 then
-    raise exception 'This query has 30 replies already.' using errcode = 'MLQY7';
-  end if;
+  -- The caps (25 worker replies, 5 follow-ups) are checked by the replies' insert trigger.
 
   insert into public.staff_query_replies (
     organisation_id, query_id, author_user_id, author_role, author_name, body

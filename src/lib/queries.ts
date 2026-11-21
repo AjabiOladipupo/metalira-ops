@@ -42,8 +42,12 @@ export const QUERY_LIMITS = {
 export const MAX_REPLY_DAYS = 60;
 /** The default reply-by date on the form: 3 days from today. */
 export const DEFAULT_REPLY_DAYS = 3;
-/** Most replies one query takes, worker and managers together. */
-export const MAX_REPLIES = 30;
+/**
+ * Most replies one query takes: 25 from the worker and 5 follow-ups from managers, counted
+ * apart so the worker can't use up the managers' follow-ups (the database enforces both).
+ */
+export const MAX_WORKER_REPLIES = 25;
+export const MAX_FOLLOW_UPS = 5;
 
 /** Common domain endings: "acme-pay.com" or "pay.ng" reads as a web address. */
 const DOMAIN = /\b[a-z0-9-]+\.(com|net|org|ng|io|co|info|biz|xyz|app|ly|link|site|online)\b/i;

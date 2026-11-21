@@ -548,6 +548,70 @@ describe("replies, closing and withdrawing", () => {
   });
 });
 
+describe("reply caps and the replies' insert trigger", () => {
+  /** A reply written with the secret key, past the functions. */
+  function seedReply(queryId: string, role: "worker" | "manager") {
+    return admin.from("staff_query_replies").insert({
+      organisation_id: owner.orgId,
+      query_id: queryId,
+      author_user_id: staff.hr.id,
+      author_role: role,
+      author_name: "Seeded",
+      body: "Seeded reply.",
+    });
+  }
+
+  it("counts 25 worker replies and 5 follow-ups apart", async () => {
+    const queryId = await raised(staff.lm.client, { subject: "Cap check" });
+    for (let i = 1; i <= 25; i += 1) {
+      const sent = await reply(musaClient, queryId, `Reply number ${i}.`);
+      expect(sent.error, `reply ${i}`).toBeNull();
+    }
+    expect((await reply(musaClient, queryId, "One too many.")).error?.code).toBe("MLQY7");
+    // The worker's replies didn't use up the managers' follow-ups.
+    for (let i = 1; i <= 5; i += 1) {
+      const sent = await reply(staff.hr.client, queryId, `Follow-up number ${i}.`);
+      expect(sent.error, `follow-up ${i}`).toBeNull();
+    }
+    expect((await reply(staff.lm.client, queryId, "Sixth follow-up.")).error?.code).toBe("MLQY7");
+    // Not even the secret key gets past the caps.
+    expect((await seedReply(queryId, "worker")).error?.code).toBe("MLQY7");
+    expect((await seedReply(queryId, "manager")).error?.code).toBe("MLQY7");
+  });
+
+  it("refuses a reply to a closed or withdrawn query, whoever inserts", async () => {
+    const closedId = await raised(staff.lm.client, { subject: "Closed then seeded" });
+    const closed = await staff.lm.client.rpc("close_staff_query", {
+      p_organisation_id: owner.orgId,
+      p_query_id: closedId,
+      p_outcome: "No further action.",
+    });
+    expect(closed.error).toBeNull();
+    expect((await seedReply(closedId, "worker")).error?.code).toBe("MLQY6");
+    expect((await seedReply(closedId, "manager")).error?.code).toBe("MLQY6");
+
+    const withdrawnId = await raised(staff.lm.client, { subject: "Withdrawn then seeded" });
+    const withdrawn = await staff.lm.client.rpc("withdraw_staff_query", {
+      p_organisation_id: owner.orgId,
+      p_query_id: withdrawnId,
+      p_reason: "Raised in error.",
+    });
+    expect(withdrawn.error).toBeNull();
+    expect((await seedReply(withdrawnId, "worker")).error?.code).toBe("MLQY6");
+    expect(
+      await ownerError(
+        "insert into public.staff_query_replies (organisation_id, query_id, author_user_id, author_role, author_name, body) values ($1, $2, $3, 'worker', 'Owner', 'Owner insert.')",
+        [owner.orgId, withdrawnId, staff.hr.id],
+      ),
+    ).toBe("MLQY6");
+    const { rows } = await db.query<{ n: string }>(
+      "select count(*) as n from public.staff_query_replies where query_id = any($1)",
+      [[closedId, withdrawnId]],
+    );
+    expect(rows[0]!.n).toBe("0");
+  });
+});
+
 describe("insert-only replies, never-deleted queries", () => {
   let queryId: string;
   let replyId: string;
