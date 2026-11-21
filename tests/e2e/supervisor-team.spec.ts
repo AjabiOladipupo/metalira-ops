@@ -219,14 +219,16 @@ test("a supervisor approves a crew day and a leave step 1 from My team at 390px"
   await expect(day).toContainText("Musa Ibrahim");
   await expect(day).toContainText("12 h");
   await day.getByRole("button", { name: "Approve" }).click();
-  await expect(day.getByTestId("crew-day-done")).toContainText("Approved");
+  // The page refreshes after the decision: the approved day leaves the list.
+  await expect(page.getByTestId("team-days-empty")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("team-count")).toHaveText("1 to approve");
 
   const leave = page.getByTestId("crew-leave").first();
   await expect(leave).toContainText("Musa Ibrahim");
   await expect(leave).toContainText("3 working days");
   await expect(leave.getByTestId("crew-leave-balance")).toContainText("15 days left");
   await leave.getByRole("button", { name: "Approve" }).click();
-  await expect(leave.getByTestId("crew-leave-done")).toContainText("sent to HR");
+  await expect(page.getByTestId("team-leave-empty")).toBeVisible({ timeout: 15_000 });
 
   await page.reload();
   await expect(page.getByTestId("team-count")).toHaveText("Nothing to approve");
