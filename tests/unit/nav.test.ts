@@ -120,6 +120,7 @@ describe("nav by role", () => {
       "Home",
       "Live attendance",
       "Timesheets",
+      "People",
       "My team",
       "Leave",
     ]);
@@ -230,7 +231,6 @@ describe("nav by role", () => {
     // RLS shows them no one else); finance doesn't.
     expect(canAccessHref("ops_manager", `/app/people/${id}`)).toBe(true);
     expect(canAccessHref("line_manager", `/app/people/${id}`)).toBe(true);
-    expect(canAccessHref("line_manager", "/app/people")).toBe(false);
     expect(canAccessHref("line_manager", "/app/people/approvals")).toBe(false);
     expect(canAccessHref("line_manager", "/app/people/invites")).toBe(false);
     expect(canAccessHref("finance", `/app/people/${id}`)).toBe(false);
@@ -239,6 +239,33 @@ describe("nav by role", () => {
     // A segment that only starts like an extra page is not one.
     expect(canAccessHref("ops_manager", "/app/settings/departments-old")).toBe(false);
     expect(canAccessHref("ops_manager", "/app/people/new-hires")).toBe(true);
+  });
+
+  it("opens the People list and a person's page to line managers, and nothing that changes data (slice 4.0b)", () => {
+    const id = "b0000000-0000-4000-8000-000000000002";
+    expect(canAccessHref("line_manager", "/app/people")).toBe(true);
+    expect(pageAccess("line_manager", "/app/people")).toBe("allow");
+    expect(canAccessHref("line_manager", `/app/people/${id}`)).toBe(true);
+    for (const path of [
+      "/app/people/new",
+      "/app/people/import",
+      "/app/people/import/template",
+      "/app/people/import/c0000000-0000-4000-8000-000000000003/problems",
+      `/app/people/${id}/edit`,
+      "/app/people/invites",
+      "/app/people/approvals",
+      "/app/settings/departments",
+      "/app/settings/bank-account",
+      "/app/payroll",
+    ]) {
+      expect(canAccessHref("line_manager", path), path).toBe(false);
+    }
+    // The People module switch still applies.
+    expect(
+      pageAccess("line_manager", "/app/people", { shifts: true, people: false, payroll: true }),
+    ).toBe("switched_off");
+    // Finance still has no People list.
+    expect(canAccessHref("finance", "/app/people")).toBe(false);
   });
 
   it("lets owner, admin, hr and finance open bank-detail approvals", () => {
