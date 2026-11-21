@@ -1130,10 +1130,14 @@ export const CAPABILITIES: readonly Capability[] = [
     input: boardInputSchema,
     changes: "none",
     action: at("workforce/board-actions", "attendanceBoardAction"),
-    // Lira gets the board without phone numbers: it never dials anyone.
+    // Lira gets the board without phone numbers, not even the last four digits: it never
+    // dials anyone (security review L1).
     read: async ({ supabase, organisationId }) => {
       const board = await loadAttendanceBoard(supabase, organisationId);
-      return { ...board, rows: board.rows.map((row) => ({ ...row, phone: null })) };
+      return {
+        ...board,
+        rows: board.rows.map((row) => ({ ...row, phone: null, phoneLast4: null })),
+      };
     },
     agent: true,
   },
