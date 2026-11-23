@@ -336,6 +336,22 @@ Reviews: **money-reviewer** on every slice (5.0 to 5.7). **security-reviewer** o
 
 No new crons. New buckets: `payroll-files`, `payslips`, `payroll-evidence`.
 
+### Estimated time (at the Phase 3 and 4 pace)
+
+Phase 3 took about 14 hours for 9 slices and Phase 4 about 16 hours for 10. A slice takes build, CI, review, fixes and CI again. Phase 5 adds the money-reviewer to every slice, so each slice runs about 30 to 45 minutes longer than its Phase 4 equivalent. Sizes: M as 4.0 and 4.1, L as 4.2 to 4.4.
+
+| Wave | Slices | Size | Runs | Time |
+| --- | --- | --- | --- | --- |
+| 1 | 5.0 rule sets and engine · 5.1 pay inputs and earnings | M · L | in parallel | 4 to 5 h |
+| 2 | 5.2 payroll run | L | alone, started from 5.1's branch | 3.5 to 4 h |
+| 3 | 5.3 approval, posting and the period lock | M | alone | 2.5 to 3 h |
+| 4 | 5.4 bank file · 5.5 payslips · 5.6 statutory | L · M · M | in parallel | 4 to 5 h |
+| 5 | 5.7 corrections, reversals, off-cycle runs | L | alone | 3.5 to 4 h |
+| | Sign-off and live-site checklist | | | 0.5 h |
+| | **Total** | | | **18 to 21.5 h** |
+
+Starting each wave from the previous slice's open branch (the build-speed rule) overlaps the waves by about an hour each, which brings the total to about 17 to 21 hours of continuous running: one day and night, or 1.5 to 2 days with breaks. Waves 2, 3 and 5 are single slices on the critical path, so more agents would not shorten them. The risks that stretch it: the golden test failing on a rule nobody has confirmed (5.0), the local database stack failing (it slowed Phase 4), and session restarts.
+
 ## Illustrations
 - `payroll-ready` (160) when a run waits for approval (5.2), and `payslip-empty` (96) on `/m/payslips` with none yet (5.5). Both slots are already in DESIGN_SYSTEM.md's table; draw them in `src/components/illustrations/` if they aren't drawn yet.
 
