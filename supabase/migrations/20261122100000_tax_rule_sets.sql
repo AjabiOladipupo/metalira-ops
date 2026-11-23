@@ -14,7 +14,9 @@
 -- 3. Functions (private security definer behind public invoker wrappers, search_path ''):
 --    ensure_tax_rule_set (owner, hr or the secret key; copies the template on first use,
 --    idempotent), add_tax_rule_set_version (owner, hr; from tomorrow or later; dry run for the
---    preview) and confirm_tax_rule_set (owner; the adviser's confirmation).
+--    preview), confirm_tax_rule_set (owner; the adviser's confirmation) and tax_rule_set_on
+--    (owner, hr, finance or the secret key; the version in force on a date: decision 15, one
+--    version per payroll run, the one in force on its pay date).
 -- 4. The hook private.tax_rule_set_in_posted_run(id) returns false until 5.3 posts payroll.
 --
 -- Who reads: owner, hr and finance (the plan's access table). Admins, ops managers, line
@@ -326,9 +328,10 @@ revoke all on function private.tax_rule_set_in_posted_run(uuid) from public, ano
 -- * an insert has no adviser confirmation and runs on (effective_to null); a company's first
 --   version may start on any date, a later one tomorrow or later;
 -- * the figures, name, start, source, reason and author never change;
--- * effective_to changes only on a version that hasn't ended: a version in force only closes
---   earlier, today at the earliest; a version not yet in force may close on any date from its
---   start; never on a version a posted run used;
+-- * effective_to changes only inside add_tax_rule_set_version (which adds the successor from
+--   the next day in the same transaction), only on a version that hasn't ended: a version in
+--   force only closes earlier, today at the earliest; a version not yet in force may close on
+--   any date from its start; never on a version a posted run used;
 -- * the adviser's confirmation is recorded once and never changed or removed;
 -- * only a version not yet in force, and not used by a posted run, may be deleted (a scheduled
 --   change being replaced).
@@ -390,6 +393,13 @@ begin
   end if;
 
   if new.effective_to is distinct from old.effective_to then
+    -- A version is closed only by add_tax_rule_set_version, in the same transaction that adds
+    -- its successor from the next day, so the rules never have a gap. The function sets this
+    -- transaction-local flag; nothing a signed-in user can call sets it.
+    if coalesce(current_setting('metalira.tax_rule_set_closing', true), '') <> 'on' then
+      raise exception 'A version closes only when a new version is added from the next day.'
+        using errcode = 'MLPR8';
+    end if;
     if private.tax_rule_set_in_posted_run(old.id) then
       raise exception 'Posted payroll used this version; it is kept as it is.' using errcode = 'MLPR8';
     end if;
@@ -705,9 +715,11 @@ begin
     if v_before.id is not null and (
       v_before.effective_to is null or v_before.effective_to >= p_effective_from
     ) then
+      perform set_config('metalira.tax_rule_set_closing', 'on', true);
       update public.tax_rule_sets t
       set effective_to = p_effective_from - 1
       where t.id = v_before.id;
+      perform set_config('metalira.tax_rule_set_closing', '', true);
     end if;
     insert into public.tax_rule_sets (
       organisation_id, name, effective_from, rules, policy, source_label, reason
@@ -845,3 +857,65 @@ $$;
 
 revoke all on function public.confirm_tax_rule_set(uuid, uuid, text) from public, anon;
 grant execute on function public.confirm_tax_rule_set(uuid, uuid, text) to authenticated;
+
+-- The version in force on p_on, for a payroll run (decision 15: one version per run, the one in
+-- force on the run's pay date, snapshotted on the run by 5.2). Owner, hr or finance in a trusted
+-- session, or the secret key. No row when the company has no version yet (ensure_tax_rule_set
+-- gives it one) or none covers the date.
+create function private.tax_rule_set_on(p_organisation_id uuid, p_on date)
+returns table (
+  id uuid,
+  name text,
+  effective_from date,
+  effective_to date,
+  rules jsonb,
+  policy jsonb,
+  adviser_confirmed_at timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' and (
+    private.session_uid() is null or p_organisation_id is null
+    or not private.has_role(p_organisation_id, array['owner', 'hr', 'finance'])
+  ) then
+    raise exception 'Only an owner, HR or Finance can read the payroll rules.' using errcode = '42501';
+  end if;
+  if p_on is null then
+    raise exception 'Choose the date.' using errcode = '22023';
+  end if;
+  return query
+    select t.id, t.name, t.effective_from, t.effective_to, t.rules, t.policy, t.adviser_confirmed_at
+    from public.tax_rule_sets t
+    where t.organisation_id = p_organisation_id
+      and t.effective_from <= p_on
+      and (t.effective_to is null or t.effective_to >= p_on);
+end;
+$$;
+
+revoke all on function private.tax_rule_set_on(uuid, date) from public, anon;
+grant execute on function private.tax_rule_set_on(uuid, date) to authenticated, service_role;
+
+create function public.tax_rule_set_on(p_organisation_id uuid, p_on date)
+returns table (
+  id uuid,
+  name text,
+  effective_from date,
+  effective_to date,
+  rules jsonb,
+  policy jsonb,
+  adviser_confirmed_at timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.tax_rule_set_on(p_organisation_id, p_on)
+$$;
+
+revoke all on function public.tax_rule_set_on(uuid, date) from public, anon;
+grant execute on function public.tax_rule_set_on(uuid, date) to authenticated, service_role;

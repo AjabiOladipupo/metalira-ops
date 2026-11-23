@@ -79,7 +79,7 @@ async function PayrollRulesPage({
         back={{ href: "/app/settings", label: "Settings" }}
         eyebrow="Settings"
         title="Payroll rules"
-        description={`${figureCount} figures · ${v.name} in force since ${formatDate(v.effectiveFrom)}. Every payslip is worked out from the version in force on its pay period.`}
+        description={`${figureCount} figures · ${v.name} in force since ${formatDate(v.effectiveFrom)}. A payroll run uses the version in force on its pay date for the whole run.`}
         actions={
           canEdit ? (
             <Button asChild>
@@ -90,7 +90,8 @@ async function PayrollRulesPage({
       />
       {added ? (
         <p role="status" className="m-0 rounded-lg border border-line px-3 py-2.5 text-sm">
-          Version saved · starts {added}. Earlier pay keeps the rules in force then.
+          Version saved · starts {added}. Runs paid before then keep the version in force on their
+          pay date.
         </p>
       ) : null}
 

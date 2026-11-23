@@ -80,7 +80,7 @@ export function AddVersionForm({
             required
             min={minDate}
             defaultValue={v("effectiveFrom")}
-            hint="Tomorrow or later. Pay before it keeps today's rules."
+            hint="Tomorrow or later. A run uses the version in force on its pay date."
             error={errors?.effectiveFrom}
           />
         </div>

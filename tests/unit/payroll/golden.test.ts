@@ -16,6 +16,7 @@ import { allocateKobo, parseNairaToKobo, sumKobo, type Kobo } from "@/lib/money"
 import type { EarningLine } from "@/lib/payroll/contract";
 import { grossToNet } from "@/lib/payroll/gross-to-net";
 import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
+import { storedTrace } from "@/lib/payroll/trace";
 
 const kobo = (naira: number): Kobo => parseNairaToKobo(String(naira));
 
@@ -101,28 +102,28 @@ describe("october 2026 golden fixture, from the engine alone", () => {
     const step = (id: string) => musa.trace.filter((s) => s.step === id);
     expect(step("annual_gross")[0]).toMatchObject({
       label: "Gross pay (₦120,000 × 12)",
-      value_kobo: "144000000",
+      valueKobo: 144000000n,
     });
     expect(step("annual_pension")[0]).toMatchObject({
       label: "Less employee pension 8%",
-      value_kobo: "11520000",
+      valueKobo: 11520000n,
     });
     expect(step("rent_relief")[0]).toMatchObject({
       label: "Less rent relief, 20% of ₦360,000 rent (cap ₦500,000)",
-      value_kobo: "7200000",
+      valueKobo: 7200000n,
     });
-    expect(step("taxable")[0]!.value_kobo).toBe("125280000");
-    expect(step("paye_band").map((s) => [s.label, s.value_kobo])).toEqual([
+    expect(step("taxable")[0]!.valueKobo?.toString()).toBe("125280000");
+    expect(step("paye_band").map((s) => [s.label, s.valueKobo?.toString()])).toEqual([
       ["0% on ₦800,000", "0"],
       ["15% on ₦452,800", "6792000"],
     ]);
-    expect(step("annual_tax")[0]!.value_kobo).toBe("6792000");
-    expect(step("paye")[0]!.value_kobo).toBe("566000");
-    expect(step("employer_cost")[0]!.value_kobo).toBe("13440000");
+    expect(step("annual_tax")[0]!.valueKobo?.toString()).toBe("6792000");
+    expect(step("paye")[0]!.valueKobo?.toString()).toBe("566000");
+    expect(step("employer_cost")[0]!.valueKobo?.toString()).toBe("13440000");
   });
 
   it("keeps names out of the trace (the engine is never given one)", () => {
-    const text = JSON.stringify(results.map((r) => r.result.trace));
+    const text = JSON.stringify(results.map((r) => storedTrace(r.result.trace)));
     for (const w of golden.workers) expect(text).not.toContain(w.name);
   });
 });

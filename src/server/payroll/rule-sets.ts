@@ -49,7 +49,13 @@ export function fromPayrollRulesDbError(error: PostgrestError): never {
   if (error.code === "MLPR7") {
     throw new MutationError("invalid", error.message, { effectiveFrom: error.message });
   }
-  if (/^MLPR[89]$/.test(error.code) || error.code === "22023" || error.code === "23514") {
+  if (error.code === "23514") {
+    throw new MutationError(
+      "invalid",
+      "The figures aren't complete or aren't in range. Check them and try again.",
+    );
+  }
+  if (/^MLPR[89]$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   if (error.code === "23P01") {

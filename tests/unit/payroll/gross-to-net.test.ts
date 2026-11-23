@@ -14,7 +14,8 @@ import type {
   GrossToNetInput,
 } from "@/lib/payroll/contract";
 import { grossToNet, PayrollInputError } from "@/lib/payroll/gross-to-net";
-import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
+import { NTA_2025_V1, type RuleSet } from "@/lib/payroll/rule-set";
+import { storedTrace } from "@/lib/payroll/trace";
 
 const N = (naira: bigint) => naira * 100n;
 const ITF_ON = { itfApplies: true };
@@ -62,18 +63,24 @@ describe("PAYE band edges through a payslip", () => {
   it("₦800,000 taxable pays nothing; ₦800,001 pays 1 kobo", () => {
     // ₦80,000 gross: 12 × (80,000 − 6,400) = ₦883,200; rent ₦416,000 gives ₦83,200 relief.
     const at = run({ earnings: salary(N(80_000n)), annualRentKobo: N(416_000n) });
-    expect(at.trace.find((s) => s.step === "taxable")!.value_kobo).toBe(N(800_000n).toString());
+    expect(at.trace.find((s) => s.step === "taxable")!.valueKobo?.toString()).toBe(
+      N(800_000n).toString(),
+    );
     expect(at.payeKobo).toBe(0n);
     // ₦5 less rent: ₦1 less relief, so ₦800,001 taxable: 15 kobo a year, 1.25 a month → 1.
     const above = run({ earnings: salary(N(80_000n)), annualRentKobo: N(415_995n) });
-    expect(above.trace.find((s) => s.step === "taxable")!.value_kobo).toBe(N(800_001n).toString());
+    expect(above.trace.find((s) => s.step === "taxable")!.valueKobo?.toString()).toBe(
+      N(800_001n).toString(),
+    );
     expect(above.payeKobo).toBe(1n);
   });
 
   it("₦3,000,000 taxable pays ₦27,500 a month", () => {
     // ₦300,000 gross: 12 × 276,000 = ₦3,312,000, less ₦312,000 relief (rent ₦1,560,000).
     const r = run({ earnings: salary(N(300_000n)), annualRentKobo: N(1_560_000n) });
-    expect(r.trace.find((s) => s.step === "taxable")!.value_kobo).toBe(N(3_000_000n).toString());
+    expect(r.trace.find((s) => s.step === "taxable")!.valueKobo?.toString()).toBe(
+      N(3_000_000n).toString(),
+    );
     expect(r.payeKobo).toBe(N(27_500n));
   });
 
@@ -85,7 +92,9 @@ describe("PAYE band edges through a payslip", () => {
       annualRentKobo: N(200_000n),
     });
     expect(r.pensionEmployeeKobo).toBe(N(80_000n));
-    expect(r.trace.find((s) => s.step === "taxable")!.value_kobo).toBe(N(50_000_000n).toString());
+    expect(r.trace.find((s) => s.step === "taxable")!.valueKobo?.toString()).toBe(
+      N(50_000_000n).toString(),
+    );
     expect(r.payeKobo).toBe(86_916_667n);
     expect(r.trace.filter((s) => s.step === "paye_band")).toHaveLength(5);
   });
@@ -97,11 +106,11 @@ describe("rent relief", () => {
       run({ earnings: salary(N(400_000n)), annualRentKobo: N(rent) }).trace.find(
         (s) => s.step === "rent_relief",
       )!;
-    expect(relief(360_000n).value_kobo).toBe(N(72_000n).toString());
-    expect(relief(2_499_995n).value_kobo).toBe(N(499_999n).toString());
-    expect(relief(2_500_000n)).toMatchObject({ value_kobo: N(500_000n).toString() });
-    expect(relief(3_000_000n)).toMatchObject({ value_kobo: N(500_000n).toString() });
-    expect(relief(3_000_000n).inputs.capped).toBe(true);
+    expect(relief(360_000n).valueKobo?.toString()).toBe(N(72_000n).toString());
+    expect(relief(2_499_995n).valueKobo?.toString()).toBe(N(499_999n).toString());
+    expect(relief(2_500_000n)).toMatchObject({ valueKobo: N(500_000n) });
+    expect(relief(3_000_000n)).toMatchObject({ valueKobo: N(500_000n) });
+    expect(relief(3_000_000n).inputs.capped).toBe("true");
     expect(relief(0n).label).toBe("Rent relief (no rent declared)");
   });
 
@@ -121,7 +130,7 @@ describe("rent relief", () => {
     const step = r.trace.find((s) => s.step === "rent_relief")!;
     expect(step.inputs.exact_num).toBe("6000");
     expect(step.inputs.exact_den).toBe("10000");
-    expect(step.value_kobo).toBe("1");
+    expect(step.valueKobo?.toString()).toBe("1");
   });
 });
 
@@ -375,5 +384,132 @@ describe("properties for any input", () => {
         last = paye;
       }
     }
+  });
+});
+
+describe("the rule set decides the bases", () => {
+  it("takes pension on other allowances when the version's base includes them", () => {
+    const wide: RuleSet = structuredClone(NTA_2025_V1);
+    wide.rules.pension.base = ["basic", "housing", "transport", "other_allowances"];
+    const r = grossToNet(
+      input({
+        earnings: [
+          earning("basic", N(100_000n)),
+          earning("other_allowances", N(20_000n), { pensionable: false }),
+        ],
+      }),
+      wide,
+      ITF_ON,
+    );
+    expect(r.pensionEmployeeKobo).toBe(960_000n);
+    expect(r.pensionEmployerKobo).toBe(1_200_000n);
+    const override = r.trace.filter((s) => s.step === "base_override");
+    expect(override).toHaveLength(1);
+    expect(override[0]!.inputs).toMatchObject({
+      code: "other_allowances",
+      line_pensionable: "false",
+      pensionable: "true",
+    });
+    expect(r.trace.find((s) => s.step === "pension_base")!.formula).toContain(
+      "basic + housing + transport + other allowances",
+    );
+  });
+
+  it("leaves out a salary line flagged pensionable that the version leaves out", () => {
+    const r = run({
+      earnings: [
+        earning("basic", N(100_000n)),
+        earning("other_allowances", N(20_000n), { pensionable: true }),
+      ],
+    });
+    expect(r.pensionEmployeeKobo).toBe(N(8_000n));
+    expect(r.trace.some((s) => s.step === "base_override")).toBe(true);
+  });
+
+  it("keeps a non-salary line's own flag", () => {
+    const r = run({
+      earnings: [
+        earning("basic", N(100_000n)),
+        earning("adjustment_earning", N(10_000n), { pensionable: true }),
+      ],
+    });
+    expect(r.pensionEmployeeKobo).toBe(N(8_800n));
+    expect(r.trace.some((s) => s.step === "base_override")).toBe(false);
+  });
+});
+
+describe("the trace", () => {
+  it("starts with the rule set and gives the employer lines their bases", () => {
+    const r = grossToNet(input(), NTA_2025_V1, { itfApplies: true, ruleSetId: "rs-1" });
+    expect(r.trace[0]).toMatchObject({
+      step: "rule_set",
+      label: "Rule set NTA 2025 v1",
+      valueKobo: null,
+    });
+    expect(r.trace[0]!.inputs).toMatchObject({ rule_set: "NTA 2025 v1", rule_set_id: "rs-1" });
+    for (const id of ["pension_employer", "nsitf", "itf"]) {
+      expect(r.trace.find((s) => s.step === id)!.inputs.base_kobo, id).toBe(N(120_000n).toString());
+    }
+  });
+
+  it("stores kobo as strings in snake case", () => {
+    const stored = storedTrace(run().trace);
+    expect(stored.trace_version).toBe(1);
+    expect(stored.steps.find((s) => s.step === "paye")).toMatchObject({
+      value_kobo: "656000",
+      rule_ref: "RULES_NIGERIA rounding",
+    });
+    expect(stored.steps[0]!.value_kobo).toBeNull();
+    expect(() => JSON.stringify(stored)).not.toThrow();
+  });
+});
+
+describe("more gross-to-net cases", () => {
+  it("zero gross gives nothing", () => {
+    const r = run({ earnings: salary(0n) });
+    expect([r.grossKobo, r.payeKobo, r.pensionEmployeeKobo, r.netKobo, r.employerCostKobo]).toEqual(
+      [0n, 0n, 0n, 0n, 0n],
+    );
+  });
+
+  it("₦10m a month with ₦3m rent and NHF on", () => {
+    // Pension ₦800,000; NHF 2.5% of ₦5m basic = ₦125,000; 12 × 9,075,000 − 500,000 = ₦108,400,000
+    // taxable: 10,430,000 + 25% of 58,400,000 = ₦25,030,000 a year, ÷ 12 = ₦2,085,833.33.
+    const r = run({
+      earnings: salary(N(10_000_000n)),
+      annualRentKobo: N(3_000_000n),
+      nhfOptIn: true,
+    });
+    expect(r.pensionEmployeeKobo).toBe(N(800_000n));
+    expect(r.nhfKobo).toBe(N(125_000n));
+    expect(r.payeKobo).toBe(208_583_333n);
+    expect(r.netKobo).toBe(698_916_667n);
+  });
+
+  it("floors a negative taxable income at ₦0 and says so", () => {
+    const r = run({ earnings: salary(N(10_000n)), annualRentKobo: N(3_000_000n) });
+    const taxable = r.trace.find((s) => s.step === "taxable")!;
+    expect(taxable.valueKobo).toBe(0n);
+    expect(taxable.inputs.floored).toBe("true");
+    expect(taxable.formula).toBe("Below ₦0 after reliefs, so ₦0");
+    expect(r.trace.some((s) => s.step === "paye_band")).toBe(false);
+    expect(r.payeKobo).toBe(0n);
+    expect(r.netKobo).toBe(N(10_000n - 800n));
+  });
+
+  it("₦12,000,000 and ₦25,000,000 taxable a year", () => {
+    // Basic ₦1,000,000 (pension ₦80,000) + ₦80,000 allowance: 12 × 1,000,000 = ₦12,000,000.
+    const at12 = run({
+      earnings: [earning("basic", N(1_000_000n)), earning("adjustment_earning", N(80_000n))],
+    });
+    expect(at12.trace.find((s) => s.step === "taxable")!.valueKobo).toBe(N(12_000_000n));
+    expect(at12.payeKobo).toBe(N(162_500n)); // 1,950,000 ÷ 12
+    // + ₦1,180,000 allowance and ₦200,000 relief: 12 × 2,100,000 − 200,000 = ₦25,000,000.
+    const at25 = run({
+      earnings: [earning("basic", N(1_000_000n)), earning("adjustment_earning", N(1_180_000n))],
+      annualRentKobo: N(1_000_000n),
+    });
+    expect(at25.trace.find((s) => s.step === "taxable")!.valueKobo).toBe(N(25_000_000n));
+    expect(at25.payeKobo).toBe(N(390_000n)); // 4,680,000 ÷ 12
   });
 });

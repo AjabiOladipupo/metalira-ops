@@ -28,7 +28,7 @@ export function describeRuleSetVersion(result: RuleSetVersionPreview): Capabilit
   if (result.replaces.length > 0) {
     summary += ` It replaces ${result.replaces.map((r) => `${r.name} (from ${formatDate(r.effectiveFrom)})`).join(", ")}.`;
   }
-  summary += ` Pay before ${from} keeps the rules in force then. ${TAX_ADVISER_LINE}`;
+  summary += ` A run uses the version in force on its pay date, so runs paid before ${from} keep the rules in force then. ${TAX_ADVISER_LINE}`;
   return {
     summary,
     changes: result.changes.map((c) => ({

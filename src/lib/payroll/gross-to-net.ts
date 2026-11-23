@@ -8,7 +8,13 @@ import type {
   PayslipResult,
 } from "./contract";
 import { annualPaye, monthlyPaye, roundFraction, type Fraction } from "./paye";
-import { formatBps, type RuleSet } from "./rule-set";
+import {
+  SALARY_COMPONENTS,
+  formatBps,
+  formatComponents,
+  type RuleSet,
+  type SalaryComponent,
+} from "./rule-set";
 import { traceLess, traceNaira, traceStep, type TraceStep } from "./trace";
 
 /**
@@ -33,6 +39,11 @@ import { traceLess, traceNaira, traceStep, type TraceStep } from "./trace";
  * The rates come from the rule set (docs/RULES_NIGERIA.md; confirm with a tax adviser before the
  * first live payroll), never from this file.
  */
+
+/** A salary component's code ("basic", ...), whose base membership the rule set decides. */
+function salaryComponent(code: string): SalaryComponent | null {
+  return (SALARY_COMPONENTS as readonly string[]).includes(code) ? (code as SalaryComponent) : null;
+}
 
 export class PayrollInputError extends Error {
   override name = "PayrollInputError";
@@ -77,8 +88,47 @@ export function grossToNet(
   const lines: PayslipLine[] = [];
   const flags: AnomalyCode[] = [];
 
+  trace.push(
+    traceStep(
+      "rule_set",
+      `Rule set ${rules.name}`,
+      "The version in force on the run's pay date, for the whole run",
+      null,
+      "PHASE_5 decision 15",
+      { rule_set: rules.name, rule_set_id: options.ruleSetId ?? "starting values, not yet saved" },
+    ),
+  );
+
+  // The rule set decides which salary components count toward the pension and NHF bases; a
+  // line's own flag counts only for other codes (overtime, adjustments, leave deductions).
+  const earnings = input.earnings.map((e) => {
+    const component = salaryComponent(e.code);
+    if (!component) return e;
+    const pensionable = r.pension.base.includes(component);
+    const nhfBase = r.nhf.base.includes(component);
+    if (pensionable !== e.pensionable || nhfBase !== e.nhfBase) {
+      trace.push(
+        traceStep(
+          "base_override",
+          `${e.label}: counted as ${rules.name} sets`,
+          `Pension base: ${pensionable ? "in" : "out"}; NHF base: ${nhfBase ? "in" : "out"}`,
+          e.amountKobo,
+          REF.pension,
+          {
+            code: e.code,
+            line_pensionable: e.pensionable,
+            line_nhf_base: e.nhfBase,
+            pensionable,
+            nhf_base: nhfBase,
+          },
+        ),
+      );
+    }
+    return { ...e, pensionable, nhfBase };
+  });
+
   // 1. Gross.
-  for (const e of input.earnings) {
+  for (const e of earnings) {
     lines.push({
       code: e.code,
       kind: "earning",
@@ -89,24 +139,18 @@ export function grossToNet(
       sources: e.sources,
     });
   }
-  const gross = sumKobo(input.earnings.map((e) => e.amountKobo));
+  const gross = sumKobo(earnings.map((e) => e.amountKobo));
   if (gross < 0n)
     throw new PayrollInputError("Gross pay is below ₦0: a leave deduction exceeds pay.");
   trace.push(
-    traceStep(
-      "gross",
-      "Gross pay",
-      `${input.earnings.length} earning lines added`,
-      gross,
-      REF.gross,
-      {
-        lines: input.earnings.length,
-      },
-    ),
+    traceStep("gross", "Gross pay", `${earnings.length} earning lines added`, gross, REF.gross, {
+      lines: earnings.length,
+    }),
   );
 
   const exempt = input.employmentType === "daily" && r.dailyWorkersExempt;
 
+  let pensionBase = 0n;
   let pensionEmployee = 0n;
   let pensionEmployer = 0n;
   let nhf = 0n;
@@ -124,9 +168,7 @@ export function grossToNet(
     );
   } else {
     // 3. Pension.
-    const pensionBase = sumKobo(
-      input.earnings.filter((e) => e.pensionable).map((e) => e.amountKobo),
-    );
+    pensionBase = sumKobo(earnings.filter((e) => e.pensionable).map((e) => e.amountKobo));
     if (pensionBase < 0n) throw new PayrollInputError("The pension base is below ₦0.");
     pensionEmployee = applyBps(pensionBase, r.pension.employeeBps);
     pensionEmployer = applyBps(pensionBase, r.pension.employerBps);
@@ -134,7 +176,7 @@ export function grossToNet(
       traceStep(
         "pension_base",
         "Pension base",
-        "Basic + housing + transport this month",
+        `${formatComponents(r.pension.base)}, and any other pensionable line, this month`,
         pensionBase,
         REF.pension,
       ),
@@ -150,14 +192,14 @@ export function grossToNet(
 
     // 4. NHF.
     if (input.nhfOptIn) {
-      const nhfBase = sumKobo(input.earnings.filter((e) => e.nhfBase).map((e) => e.amountKobo));
+      const nhfBase = sumKobo(earnings.filter((e) => e.nhfBase).map((e) => e.amountKobo));
       if (nhfBase < 0n) throw new PayrollInputError("The NHF base is below ₦0.");
       nhf = applyBps(nhfBase, r.nhf.rateBps);
       trace.push(
         traceStep(
           "nhf",
           `NHF ${formatBps(r.nhf.rateBps)}`,
-          `${traceNaira(nhfBase)} basic × ${formatBps(r.nhf.rateBps)}, rounded half up`,
+          `${traceNaira(nhfBase)} ${formatComponents(r.nhf.base)} × ${formatBps(r.nhf.rateBps)}, rounded half up`,
           nhf,
           REF.nhf,
           { base_kobo: nhfBase.toString(), rate_bps: r.nhf.rateBps, opted_in: true },
@@ -167,9 +209,7 @@ export function grossToNet(
 
     // 5. Annual taxable income, exact: everything is scaled by 10,000 so the rent relief (a
     //    rate in basis points) stays whole.
-    const taxableMonthly = sumKobo(
-      input.earnings.filter((e) => e.taxable).map((e) => e.amountKobo),
-    );
+    const taxableMonthly = sumKobo(earnings.filter((e) => e.taxable).map((e) => e.amountKobo));
     const allTaxable = taxableMonthly === gross;
     const annualTaxablePay = 12n * taxableMonthly;
     const reliefRaw = input.annualRentKobo * BigInt(r.rentRelief.rateBps);
@@ -452,10 +492,10 @@ export function grossToNet(
       traceStep(
         "pension_employer",
         `Employer pension ${formatBps(r.pension.employerBps)}`,
-        `Pension base × ${formatBps(r.pension.employerBps)}, rounded half up`,
+        `${traceNaira(pensionBase)} × ${formatBps(r.pension.employerBps)}, rounded half up`,
         pensionEmployer,
         REF.pension,
-        { rate_bps: r.pension.employerBps },
+        { base_kobo: pensionBase.toString(), rate_bps: r.pension.employerBps },
       ),
       traceStep(
         "nsitf",
@@ -463,7 +503,7 @@ export function grossToNet(
         `${traceNaira(gross)} × ${formatBps(r.nsitf.rateBps)}, rounded half up`,
         nsitf,
         REF.levies,
-        { rate_bps: r.nsitf.rateBps },
+        { base_kobo: gross.toString(), rate_bps: r.nsitf.rateBps },
       ),
       traceStep(
         "itf",
@@ -473,7 +513,7 @@ export function grossToNet(
           : `Under ${r.itf.minStaff} staff in the levy base, or switched off`,
         itf,
         REF.levies,
-        { rate_bps: r.itf.rateBps, applies: options.itfApplies },
+        { base_kobo: gross.toString(), rate_bps: r.itf.rateBps, applies: options.itfApplies },
       ),
     );
   }

@@ -42,7 +42,7 @@ export interface PayrollRules {
   today: string;
   /** False until the company's first version is saved (the starting values are shown). */
   stored: boolean;
-  /** The version in force today. */
+  /** The version in force on the date asked (default today). */
   inForce: RuleSetVersion;
   /** Versions starting after today, soonest first. */
   scheduled: RuleSetVersion[];
@@ -75,10 +75,14 @@ async function companyToday(supabase: Client, organisationId: string): Promise<s
   return todayIn(data?.timezone ?? LAGOS_TIME_ZONE);
 }
 
-/** The company's payroll rules: the version in force, scheduled ones and earlier ones. */
+/**
+ * The company's payroll rules: the version in force on `on` (default today; a run passes its
+ * pay date, decision 15), and the versions scheduled after and ended before today.
+ */
 export async function loadPayrollRules(
   supabase: Client,
   organisationId: string,
+  on?: string,
 ): Promise<PayrollRules> {
   const [today, rows] = await Promise.all([
     companyToday(supabase, organisationId),
@@ -114,9 +118,10 @@ export async function loadPayrollRules(
       latest: TEMPLATE,
     };
   }
+  const at = on ?? today;
   const inForce =
     versions.find(
-      (v) => v.effectiveFrom <= today && (v.effectiveTo === null || v.effectiveTo >= today),
+      (v) => v.effectiveFrom <= at && (v.effectiveTo === null || v.effectiveTo >= at),
     ) ??
     // Every company's first version starts 1 Jan 2026, so this only happens before then.
     versions[0]!;

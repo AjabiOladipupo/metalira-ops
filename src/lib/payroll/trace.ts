@@ -3,24 +3,23 @@ import { formatNaira, type Kobo } from "@/lib/money";
 /**
  * The step-by-step trace of a payslip (slice 5.0; docs/PHASE_5.md "Outputs"). Pure.
  *
- * Stored on `payslips.trace` (5.2) as `{ trace_version, steps }` and shown by the run's Explain
- * panel and summarised on the payslip. Each step says what was worked out, how, from which
- * inputs, the value in kobo and the rule it comes from. Kobo travel as strings so the jsonb
- * holds every bigint exactly. Never names, account numbers, RSA PINs or TINs.
- *
- * The earnings stage (5.1) adds its steps first; `grossToNet` continues the same list.
+ * In memory a step has the same shape as slice 5.1's `earning-lines.ts` `TraceStep` (kobo as
+ * `bigint`, camel case), so the earnings stage's steps and gross to net's form one list.
+ * `storedTrace` gives the jsonb stored on `payslips.trace` (5.2): `{ trace_version, steps }`
+ * with each step as `{step, label, formula, inputs, value_kobo, rule_ref}` and kobo as strings,
+ * so the jsonb holds every bigint exactly. Never names, account numbers, RSA PINs or TINs.
  */
 
 export const TRACE_VERSION = 1;
 
 export type TraceStepId =
   // Earnings stage (5.1) steps keep their own ids; these are the gross-to-net ones.
-  | "earning"
+  | "rule_set"
   | "gross"
   | "daily_worker"
+  | "base_override"
   | "pension_base"
   | "pension_employee"
-  | "nhf_base"
   | "nhf"
   | "annual_gross"
   | "annual_pension"
@@ -46,32 +45,59 @@ export interface TraceStep {
   label: string;
   /** How, in words and numbers: "₦120,000 × 8%". */
   formula: string;
-  /** Inputs: kobo as strings of digits, days, minutes, basis points. */
-  inputs: Record<string, string | number | boolean | null>;
+  /** Inputs: kobo as strings of digits, days, minutes, basis points; yes/no as "true"/"false". */
+  inputs: Record<string, string | number>;
   /**
-   * The step's value in kobo, as a string (rounded half up when the exact value is a fraction),
-   * or null for a step that counts days or minutes rather than money.
+   * The step's value in kobo (rounded half up when the exact value is a fraction, which the
+   * inputs then give exactly), or null for a step that holds no amount.
    */
-  value_kobo: string | null;
+  valueKobo: Kobo | null;
   /** Where the rule comes from: "RULES_NIGERIA PAYE", "PHASE_5 decision 6". */
+  ruleRef: string;
+}
+
+/** A step as stored in `payslips.trace`. */
+export interface StoredTraceStep {
+  step: string;
+  label: string;
+  formula: string;
+  inputs: Record<string, string | number>;
+  value_kobo: string | null;
   rule_ref: string;
 }
 
-export interface Trace {
+export interface StoredTrace {
   trace_version: number;
-  steps: TraceStep[];
+  steps: StoredTraceStep[];
 }
 
-/** Builds a step; `value` is kobo. */
+/** Builds a step; `value` is kobo or null. */
 export function traceStep(
   step: TraceStepId,
   label: string,
   formula: string,
-  value: Kobo,
+  value: Kobo | null,
   ruleRef: string,
-  inputs: TraceStep["inputs"] = {},
+  inputs: Record<string, string | number | boolean> = {},
 ): TraceStep {
-  return { step, label, formula, inputs, value_kobo: value.toString(), rule_ref: ruleRef };
+  const clean: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(inputs)) clean[k] = typeof v === "boolean" ? String(v) : v;
+  return { step, label, formula, inputs: clean, valueKobo: value, ruleRef };
+}
+
+/** The jsonb for `payslips.trace`. */
+export function storedTrace(steps: readonly TraceStep[]): StoredTrace {
+  return {
+    trace_version: TRACE_VERSION,
+    steps: steps.map((s) => ({
+      step: s.step,
+      label: s.label,
+      formula: s.formula,
+      inputs: { ...s.inputs },
+      value_kobo: s.valueKobo === null ? null : s.valueKobo.toString(),
+      rule_ref: s.ruleRef,
+    })),
+  };
 }
 
 /** "₦120,000" for whole naira, "₦0.15" otherwise: the Explain panel's money. */
@@ -82,26 +108,4 @@ export function traceNaira(kobo: Kobo): string {
 /** "-₦9,600" style signed value for a "Less ..." row. */
 export function traceLess(kobo: Kobo): string {
   return kobo === 0n ? traceNaira(0n) : `-${traceNaira(kobo)}`;
-}
-
-/** A step as the earnings stage (5.1) holds it in memory: kobo as `bigint`, camel case. */
-export interface EarningsTraceStep {
-  step: string;
-  label: string;
-  formula: string;
-  inputs: Record<string, string | number>;
-  valueKobo: Kobo | null;
-  ruleRef: string;
-}
-
-/** The stored shape of an earnings-stage step, so gross to net can continue the same trace. */
-export function fromEarningsStep(s: EarningsTraceStep): TraceStep {
-  return {
-    step: s.step,
-    label: s.label,
-    formula: s.formula,
-    inputs: { ...s.inputs },
-    value_kobo: s.valueKobo === null ? null : s.valueKobo.toString(),
-    rule_ref: s.ruleRef,
-  };
 }

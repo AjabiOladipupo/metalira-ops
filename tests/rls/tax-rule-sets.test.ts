@@ -6,6 +6,8 @@
  * database's template equals src/lib/payroll/rule-set.ts NTA_2025_V1 (which a unit test compares
  * with docs/RULES_NIGERIA.md).
  */
+import { randomUUID } from "node:crypto";
+
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -19,8 +21,10 @@ import {
 
 import {
   adminClient,
+  anonClient,
   createTenantUser,
   createTestUser,
+  markPasswordTrusted,
   pgClient,
   type Client,
   type TenantUser,
@@ -414,5 +418,101 @@ describe("the adviser's confirmation", () => {
       p_note: "Confirmed",
     });
     expect(error?.code).toBe("P0002");
+  });
+});
+
+describe("closing a version", () => {
+  it("is refused outside add_tax_rule_set_version, even for the database owner and the secret key", async () => {
+    // The other company's only version, NTA 2025 v1, is open and in force.
+    const [open] = await versions(other.orgId);
+    expect(open!.effective_to).toBeNull();
+    for (const to of [today, addDays(today, 5)]) {
+      await expect(
+        db.query("update public.tax_rule_sets set effective_to = $2 where id = $1", [open!.id, to]),
+      ).rejects.toMatchObject({ code: "MLPR8" });
+    }
+    const viaKey = await admin
+      .from("tax_rule_sets")
+      .update({ effective_to: addDays(today, 5) })
+      .eq("id", open!.id);
+    expect(viaKey.error?.code).toBe("MLPR8");
+    expect((await versions(other.orgId))[0]!.effective_to).toBeNull();
+  });
+});
+
+describe("the version on a date", () => {
+  it("gives the version in force on a run's pay date to owner, hr, finance and the secret key", async () => {
+    const rows = await versions();
+    const v2 = rows.find((r) => r.name === "NTA 2025 v2")!;
+    for (const reader of [owner, hr, finance]) {
+      const { data, error } = await reader.client.rpc("tax_rule_set_on", {
+        p_organisation_id: owner.orgId,
+        p_on: "2026-10-25",
+      });
+      expect(error).toBeNull();
+      expect(data!.map((d) => d.name)).toEqual(["NTA 2025 v1"]);
+    }
+    const later = await admin.rpc("tax_rule_set_on", {
+      p_organisation_id: owner.orgId,
+      p_on: tomorrow,
+    });
+    expect(later.data!.map((d) => d.id)).toEqual([v2.id]);
+    const before = await hr.client.rpc("tax_rule_set_on", {
+      p_organisation_id: owner.orgId,
+      p_on: "2025-12-25",
+    });
+    expect(before.data).toEqual([]);
+  });
+
+  it("refuses everyone else", async () => {
+    for (const caller of [adminUser, opsManager, lineManager, worker, other]) {
+      const { error } = await caller.client.rpc("tax_rule_set_on", {
+        p_organisation_id: owner.orgId,
+        p_on: today,
+      });
+      expect(error?.code).toBe(PERMISSION_DENIED);
+    }
+  });
+});
+
+describe("an untrusted session", () => {
+  it("reads nothing and can call nothing until the password is trusted", async () => {
+    const email = `rls-rules-untrusted-${randomUUID()}@example.test`;
+    const password = `${randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    expect(created.error).toBeNull();
+    const userId = created.data.user!.id;
+    const client = anonClient();
+    expect((await client.auth.signInWithPassword({ email, password })).error).toBeNull();
+    const { error: joinError } = await admin
+      .from("memberships")
+      .insert({ organisation_id: owner.orgId, user_id: userId, role: "hr" });
+    expect(joinError).toBeNull();
+    const [v1] = await versions();
+
+    const read = await client.from("tax_rule_sets").select("id").eq("organisation_id", owner.orgId);
+    expect(read.data ?? []).toEqual([]);
+    const calls = [
+      client.rpc("ensure_tax_rule_set", { p_organisation_id: owner.orgId }),
+      client.rpc("add_tax_rule_set_version", {
+        ...addArgs({ p_effective_from: `${year + 2}-01-01` }),
+        p_dry_run: true,
+      }),
+      client.rpc("confirm_tax_rule_set", {
+        p_organisation_id: owner.orgId,
+        p_rule_set_id: v1!.id,
+        p_note: "x",
+      }),
+      client.rpc("tax_rule_set_on", { p_organisation_id: owner.orgId, p_on: today }),
+    ];
+    for (const { error } of await Promise.all(calls)) expect(error?.code).toBe(PERMISSION_DENIED);
+
+    await markPasswordTrusted(userId);
+    await client.auth.refreshSession();
+    const trusted = await client
+      .from("tax_rule_sets")
+      .select("id")
+      .eq("organisation_id", owner.orgId);
+    expect(trusted.data!.length).toBeGreaterThan(0);
   });
 });

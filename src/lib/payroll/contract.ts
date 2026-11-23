@@ -74,6 +74,8 @@ export interface GrossToNetInput {
 export interface GrossToNetOptions {
   /** ITF accrues this run (open question 14: 5 or more workers in the levy base, or the owner's switch). */
   itfApplies: boolean;
+  /** The id of the rule set version used (null for the starting values not yet saved). */
+  ruleSetId?: string | null;
   /** Steps from the earnings stage, continued by gross to net. */
   priorTrace?: TraceStep[];
 }

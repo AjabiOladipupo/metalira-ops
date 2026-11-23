@@ -1205,14 +1205,14 @@ isOneToOne: false
                   ]
                 },"tax_rule_sets": {
                   Row: {
-                    "adviser_confirmed_at": string | null,"adviser_confirmed_by": string | null,"adviser_note": string | null,"created_at": string,"created_by": string | null,"currency": string,"effective_from": string,"effective_to": string | null,"id": string,"name": string,"organisation_id": string,"policy": Json,"reason": string,"rules": Json,"source_label": string | null
+                    "adviser_confirmed_at": string | null,"adviser_confirmed_by": string | null,"adviser_note": string | null,"created_at": string,"created_by": string | null,"currency": string,"effective_from": string,"effective_to": string | null,"id": string,"name": string,"organisation_id": string,"policy": NonNullable<Json>,"reason": string,"rules": NonNullable<Json>,"source_label": string | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "adviser_confirmed_at"?: string | null,"adviser_confirmed_by"?: string | null,"adviser_note"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"effective_from": string,"effective_to"?: string | null,"id"?: string,"name": string,"organisation_id": string,"policy": Json,"reason": string,"rules": Json,"source_label"?: string | null
+                    "adviser_confirmed_at"?: string | null,"adviser_confirmed_by"?: string | null,"adviser_note"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"effective_from": string,"effective_to"?: string | null,"id"?: string,"name": string,"organisation_id": string,"policy": NonNullable<Json>,"reason": string,"rules": NonNullable<Json>,"source_label"?: string | null
                   }
                   Update: {
-                    "adviser_confirmed_at"?: string | null,"adviser_confirmed_by"?: string | null,"adviser_note"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"effective_from"?: string,"effective_to"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"policy"?: Json,"reason"?: string,"rules"?: Json,"source_label"?: string | null
+                    "adviser_confirmed_at"?: string | null,"adviser_confirmed_by"?: string | null,"adviser_note"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"effective_from"?: string,"effective_to"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"policy"?: NonNullable<Json>,"reason"?: string,"rules"?: NonNullable<Json>,"source_label"?: string | null
                   }
                   Relationships: [
                     {
@@ -2109,6 +2109,11 @@ isOneToOne: false
 "site_geofences":
 { Args: { "p_organisation_id": string,"p_site_id"?: string }; Returns: {
               "area_m2": number,"boundary": Json,"centre_lat": number,"centre_lng": number,"radius_m": number,"site_id": string
+            }[]
+                           },
+"tax_rule_set_on":
+{ Args: { "p_on": string,"p_organisation_id": string }; Returns: {
+              "adviser_confirmed_at": string,"effective_from": string,"effective_to": string,"id": string,"name": string,"policy": Json,"rules": Json
             }[]
                            },
 "team_leave_open_shifts":
