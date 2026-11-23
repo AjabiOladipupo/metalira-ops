@@ -112,6 +112,7 @@ export function WorkerForm({
   worker,
   today,
   companyWeekLabel,
+  canSetPay = false,
 }: {
   mode: "create" | "update";
   options: { departments: Option[]; lineManagers: Option[] };
@@ -119,6 +120,8 @@ export function WorkerForm({
   today: string;
   /** "Mon to Fri": the company's working week (slice 4.4). */
   companyWeekLabel?: string;
+  /** Owner or HR (owner decision, 23 Nov 2026): only they see and set pay. */
+  canSetPay?: boolean;
 }) {
   const [state, action] = useActionState(
     mode === "create" ? createWorkerAction : updateWorkerAction,
@@ -272,7 +275,7 @@ export function WorkerForm({
         ) : null}
       </Fieldset>
 
-      {mode === "create" ? (
+      {mode === "create" && canSetPay ? (
         <Fieldset
           legend="Pay"
           note="Amounts in naira. Leave the pay type blank to add pay later; payroll skips employees without pay details."

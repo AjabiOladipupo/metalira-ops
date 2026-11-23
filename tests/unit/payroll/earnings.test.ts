@@ -138,12 +138,19 @@ describe("monthly salary and proration", () => {
   });
 
   it("splits the components with allocateKobo so they sum to the rounded total", () => {
-    const rate = monthly({ basic: 6_543_211n, housing: 3_210_007n, transport: 1_234_567n, otherAllowances: 99_999n });
+    const rate = monthly({
+      basic: 6_543_211n,
+      housing: 3_210_007n,
+      transport: 1_234_567n,
+      otherAllowances: 99_999n,
+    });
     for (let i = 1; i < 30; i += 1) {
       const startDate = addDays(OCT.start, i);
       const r = run(worker({ payRates: [rate], startDate }));
       const gross = rate.basic + rate.housing + rate.transport + rate.otherAllowances;
-      const salary = r.lines.filter((l) => ["basic", "housing", "transport", "other_allowances"].includes(l.code));
+      const salary = r.lines.filter((l) =>
+        ["basic", "housing", "transport", "other_allowances"].includes(l.code),
+      );
       const expected = roundHalfUp(gross * BigInt(r.days.employedRostered), 21n);
       expect(total(salary)).toBe(expected);
       expect(salary.map((l) => l.amountKobo)).toEqual(
@@ -166,8 +173,12 @@ describe("monthly salary and proration", () => {
         lines: [line("2026-10-02", 480, 60), line("2026-10-06", 480, 60)],
       }),
     );
-    const salary1 = r.lines.filter((l) => l.sources.some((s) => s.kind === "pay_rate" && s.id === v1.id));
-    const salary2 = r.lines.filter((l) => l.sources.some((s) => s.kind === "pay_rate" && s.id === v2.id));
+    const salary1 = r.lines.filter((l) =>
+      l.sources.some((s) => s.kind === "pay_rate" && s.id === v1.id),
+    );
+    const salary2 = r.lines.filter((l) =>
+      l.sources.some((s) => s.kind === "pay_rate" && s.id === v2.id),
+    );
     expect(total(salary1)).toBe(roundHalfUp(12_000_000n * 10n, 21n)); // 5,714,286
     expect(total(salary2)).toBe(roundHalfUp(15_000_000n * 11n, 21n)); // 7,857,143
     const ot = byCode(r.lines, "overtime");
@@ -196,7 +207,13 @@ describe("monthly salary and proration", () => {
     }));
     const calendar = rosteredCalendar(
       OCT,
-      { startDate: "2025-01-01", endDate: null, usualWorkDays: null, shifts, lastRostered: "2026-10-04" },
+      {
+        startDate: "2025-01-01",
+        endDate: null,
+        usualWorkDays: null,
+        shifts,
+        lastRostered: "2026-10-04",
+      },
       MON_FRI,
     );
     const working = calendar.filter((d) => d.working).map((d) => d.date);
@@ -233,14 +250,21 @@ describe("overtime, off days and public holidays", () => {
     const r = run(worker({ lines: [l] }));
     const ot = byCode(r.lines, "overtime");
     expect(ot).toHaveLength(1);
-    expect(ot[0]).toMatchObject({ amountKobo: 25_000n, pensionable: false, nhfBase: false, taxable: true });
+    expect(ot[0]).toMatchObject({
+      amountKobo: 25_000n,
+      pensionable: false,
+      nhfBase: false,
+      taxable: true,
+    });
     expect(ot[0]!.label).toBe("Overtime, 20 min at ₦750.00 an hour");
     expect(ot[0]!.sources).toEqual([{ kind: "timesheet_line", id: l.id, workDate: "2026-10-01" }]);
   });
 
   it("rounds overtime once per pay version, not per day", () => {
     const rate = monthly({ basic: 6_000_001n }); // 1,250.0001... kobo a minute
-    const r = run(worker({ payRates: [rate], lines: [line("2026-10-01", 480, 1), line("2026-10-02", 480, 1)] }));
+    const r = run(
+      worker({ payRates: [rate], lines: [line("2026-10-01", 480, 1), line("2026-10-02", 480, 1)] }),
+    );
     const gross = 12_000_001n;
     expect(amount(r.lines, "overtime")).toBe(roundHalfUp(gross * 2n, 9_600n));
     expect(byCode(r.lines, "overtime")).toHaveLength(1);
@@ -262,7 +286,9 @@ describe("overtime, off days and public holidays", () => {
     const r = run(worker({ lines: [...before.map((d) => line(d, 480)), line("2026-09-20", 480)] }));
     expect(byCode(r.lines, "off_day")).toHaveLength(1);
     // The days before the cycle are never paid here.
-    expect(r.lines.flatMap((l) => l.sources).filter((s) => s.kind === "timesheet_line")).toHaveLength(1);
+    expect(
+      r.lines.flatMap((l) => l.sources).filter((s) => s.kind === "timesheet_line"),
+    ).toHaveLength(1);
   });
 
   it("pays a no-shift day as an off day", () => {
@@ -274,7 +300,9 @@ describe("overtime, off days and public holidays", () => {
     const r = run(worker({ lines: [line("2026-10-01", 480, 60)] }), { holidays: ["2026-10-01"] });
     expect(amount(r.lines, "overtime")).toBe(75_000n);
     expect(amount(r.lines, "public_holiday")).toBe(540n * 1_250n);
-    expect(amount(r.lines, "basic") + amount(r.lines, "housing") + amount(r.lines, "transport")).toBe(12_000_000n);
+    expect(
+      amount(r.lines, "basic") + amount(r.lines, "housing") + amount(r.lines, "transport"),
+    ).toBe(12_000_000n);
   });
 
   it("keeps full pay for a rostered public holiday not worked", () => {
@@ -284,10 +312,14 @@ describe("overtime, off days and public holidays", () => {
   });
 
   it("pays the larger rule, never both, for a public holiday on an off day", () => {
-    const long = run(worker({ lines: [line("2026-10-03", 600, 0, false)] }), { holidays: ["2026-10-03"] });
+    const long = run(worker({ lines: [line("2026-10-03", 600, 0, false)] }), {
+      holidays: ["2026-10-03"],
+    });
     expect(amount(long.lines, "public_holiday")).toBe(600n * 1_250n);
     expect(byCode(long.lines, "off_day")).toEqual([]);
-    const short = run(worker({ lines: [line("2026-10-03", 300, 0, false)] }), { holidays: ["2026-10-03"] });
+    const short = run(worker({ lines: [line("2026-10-03", 300, 0, false)] }), {
+      holidays: ["2026-10-03"],
+    });
     expect(amount(short.lines, "off_day")).toBe(480n * 1_250n);
     expect(byCode(short.lines, "public_holiday")).toEqual([]);
   });
@@ -298,7 +330,11 @@ describe("overtime, off days and public holidays", () => {
     const r = run(worker({ lines: [night, next] }), { holidays: ["2026-10-20"] });
     expect(amount(r.lines, "overtime")).toBe(30n * 1_250n);
     expect(byCode(r.lines, "public_holiday")).toEqual([]);
-    expect(r.lines.flatMap((l) => l.sources).some((s) => s.kind === "timesheet_line" && s.id === next.id)).toBe(false);
+    expect(
+      r.lines
+        .flatMap((l) => l.sources)
+        .some((s) => s.kind === "timesheet_line" && s.id === next.id),
+    ).toBe(false);
   });
 
   it("ignores approved days with no minutes", () => {
@@ -331,18 +367,24 @@ describe("leave", () => {
     );
     expect(parts[0]).toMatchObject({ pensionable: true, nhfBase: true });
     expect(parts[0]!.label).toBe("Leave paid at 50%, 5 to 9 Oct (5 days), basic");
-    expect(parts[0]!.sources).toEqual([{ kind: "leave_request", id: l.requestId, from: "2026-10-05", to: "2026-10-09" }]);
+    expect(parts[0]!.sources).toEqual([
+      { kind: "leave_request", id: l.requestId, from: "2026-10-05", to: "2026-10-09" },
+    ]);
     expect(r.days.leaveDeducted).toBe(5);
   });
 
   it("deducts preset A maternity in full below 6 months' service (unpaid)", () => {
     const r = run(worker({ leave: [leave({ payBelowService: true })] }));
     expect(amount(r.lines, "leave_deduction")).toBe(-roundHalfUp(12_000_000n * 5n, 21n));
-    expect(r.trace.find((t) => t.step === "leave_deduction")!.ruleRef).toBe("leave.pay_below_service");
+    expect(r.trace.find((t) => t.step === "leave_deduction")!.ruleRef).toBe(
+      "leave.pay_below_service",
+    );
   });
 
   it("deducts calendar-day leave only for the days that would have been working days", () => {
-    const r = run(worker({ leave: [leave({ startDate: "2026-10-03", endDate: "2026-10-11", payPercent: 0 })] }));
+    const r = run(
+      worker({ leave: [leave({ startDate: "2026-10-03", endDate: "2026-10-11", payPercent: 0 })] }),
+    );
     expect(r.days.leaveDeducted).toBe(5);
   });
 
@@ -352,20 +394,39 @@ describe("leave", () => {
   });
 
   it("splits unpaid leave across the 19th and the 20th: each day is deducted in its own cycle, once", () => {
-    const l = leave({ typeCode: "unpaid", counting: "working_days", startDate: "2026-10-15", endDate: "2026-10-23", payPercent: 0 });
+    const l = leave({
+      typeCode: "unpaid",
+      counting: "working_days",
+      startDate: "2026-10-15",
+      endDate: "2026-10-23",
+      payPercent: 0,
+    });
     const oct = run(worker({ leave: [l] }));
     expect(oct.days.leaveDeducted).toBe(3); // 15, 16 and 19 Oct
     expect(amount(oct.lines, "leave_deduction")).toBe(-roundHalfUp(12_000_000n * 3n, 21n));
-    expect(byCode(oct.lines, "leave_deduction")[0]!.sources[0]).toMatchObject({ from: "2026-10-15", to: "2026-10-19" });
+    expect(byCode(oct.lines, "leave_deduction")[0]!.sources[0]).toMatchObject({
+      from: "2026-10-15",
+      to: "2026-10-19",
+    });
 
     const nov = run(worker({ leave: [l] }), { period: NOV });
     expect(nov.days.leaveDeducted).toBe(4); // 20 to 23 Oct
-    expect(byCode(nov.lines, "leave_deduction")[0]!.sources[0]).toMatchObject({ from: "2026-10-20", to: "2026-10-23" });
-    expect(amount(nov.lines, "leave_deduction")).toBe(-roundHalfUp(12_000_000n * 4n, BigInt(nov.days.rostered)));
+    expect(byCode(nov.lines, "leave_deduction")[0]!.sources[0]).toMatchObject({
+      from: "2026-10-20",
+      to: "2026-10-23",
+    });
+    expect(amount(nov.lines, "leave_deduction")).toBe(
+      -roundHalfUp(12_000_000n * 4n, BigInt(nov.days.rostered)),
+    );
   });
 
   it("pays 0 for a cycle entirely on unpaid leave", () => {
-    const r = run(worker({ payRates: [monthly({ otherAllowances: 777_777n })], leave: [leave({ startDate: "2026-09-20", endDate: "2026-10-19", payPercent: 0 })] }));
+    const r = run(
+      worker({
+        payRates: [monthly({ otherAllowances: 777_777n })],
+        leave: [leave({ startDate: "2026-09-20", endDate: "2026-10-19", payPercent: 0 })],
+      }),
+    );
     expect(total(r.lines)).toBe(0n);
   });
 
@@ -376,15 +437,38 @@ describe("leave", () => {
   });
 
   it("gives daily and hourly workers no leave deduction", () => {
-    const daily = { ...monthly(), payType: "daily" as const, basic: 0n, housing: 0n, transport: 0n, dailyRate: 800_000n };
-    const r = run(worker({ employmentType: "daily", payRates: [daily], leave: [leave({ payPercent: 0 })] }));
+    const daily = {
+      ...monthly(),
+      payType: "daily" as const,
+      basic: 0n,
+      housing: 0n,
+      transport: 0n,
+      dailyRate: 800_000n,
+    };
+    const r = run(
+      worker({ employmentType: "daily", payRates: [daily], leave: [leave({ payPercent: 0 })] }),
+    );
     expect(r.lines).toEqual([]);
   });
 });
 
 describe("daily and hourly workers", () => {
-  const daily = (): PayRateInput => ({ ...monthly(), payType: "daily", basic: 0n, housing: 0n, transport: 0n, dailyRate: 800_000n });
-  const hourly = (): PayRateInput => ({ ...monthly(), payType: "hourly", basic: 0n, housing: 0n, transport: 0n, hourlyRate: 100_000n });
+  const daily = (): PayRateInput => ({
+    ...monthly(),
+    payType: "daily",
+    basic: 0n,
+    housing: 0n,
+    transport: 0n,
+    dailyRate: 800_000n,
+  });
+  const hourly = (): PayRateInput => ({
+    ...monthly(),
+    payType: "hourly",
+    basic: 0n,
+    housing: 0n,
+    transport: 0n,
+    hourlyRate: 100_000n,
+  });
 
   it("pays a daily worker once per date, with overtime at daily rate ÷ shift hours", () => {
     const r = run(
@@ -403,27 +487,43 @@ describe("daily and hourly workers", () => {
   });
 
   it("does not count a daily worker's date with overtime only", () => {
-    const r = run(worker({ employmentType: "daily", payRates: [daily()], lines: [line("2026-10-01", 0, 60)] }));
+    const r = run(
+      worker({ employmentType: "daily", payRates: [daily()], lines: [line("2026-10-01", 0, 60)] }),
+    );
     expect(byCode(r.lines, "daily_pay")).toEqual([]);
     expect(amount(r.lines, "overtime")).toBe(100_000n);
   });
 
   it("pays an hourly worker for approved minutes", () => {
-    const r = run(worker({ payRates: [hourly()], lines: [line("2026-10-01", 480, 30), line("2026-10-04", 125, 0, false)] }));
+    const r = run(
+      worker({
+        payRates: [hourly()],
+        lines: [line("2026-10-01", 480, 30), line("2026-10-04", 125, 0, false)],
+      }),
+    );
     expect(amount(r.lines, "hourly_pay")).toBe(roundHalfUp(605n * 100_000n, 60n));
     expect(amount(r.lines, "overtime")).toBe(50_000n);
     expect(byCode(r.lines, "off_day")).toEqual([]);
   });
 
   it("adds the public-holiday premium for a daily worker who works the holiday", () => {
-    const r = run(worker({ employmentType: "daily", payRates: [daily()], lines: [line("2026-10-01", 480)] }), { holidays: ["2026-10-01"] });
+    const r = run(
+      worker({ employmentType: "daily", payRates: [daily()], lines: [line("2026-10-01", 480)] }),
+      { holidays: ["2026-10-01"] },
+    );
     expect(amount(r.lines, "daily_pay")).toBe(800_000n);
     expect(amount(r.lines, "public_holiday")).toBe(800_000n);
   });
 });
 
 describe("arrears", () => {
-  const arrear = (workDate: string, worked: number, ot: number, hasShift = true, weekShiftDays = 5) => ({
+  const arrear = (
+    workDate: string,
+    worked: number,
+    ot: number,
+    hasShift = true,
+    weekShiftDays = 5,
+  ) => ({
     ...line(workDate, worked, ot, hasShift),
     periodStart: "2026-08-20",
     weekShiftDays,
@@ -439,7 +539,9 @@ describe("arrears", () => {
     // Overtime only (the salary was paid), at the old rate: ₦110,000 ÷ 9,600 minutes x 30.
     expect(arrears[0]!.amountKobo).toBe(roundHalfUp(11_000_000n * 30n, 9_600n));
     expect(arrears[0]!.label).toBe("Arrears, 20 Aug to 19 Sep, approved after posting (1 day)");
-    expect(arrears[0]!.sources).toEqual([{ kind: "timesheet_line", id: a.id, workDate: "2026-09-10" }]);
+    expect(arrears[0]!.sources).toEqual([
+      { kind: "timesheet_line", id: a.id, workDate: "2026-09-10" },
+    ]);
     expect(total(r.lines)).toBe(12_000_000n + arrears[0]!.amountKobo);
   });
 
@@ -449,8 +551,21 @@ describe("arrears", () => {
   });
 
   it("pays a daily worker's arrears day with its daily pay", () => {
-    const daily = { ...monthly(), payType: "daily" as const, basic: 0n, housing: 0n, transport: 0n, dailyRate: 800_000n };
-    const r = run(worker({ employmentType: "daily", payRates: [daily], arrears: [arrear("2026-09-10", 480, 0)] }));
+    const daily = {
+      ...monthly(),
+      payType: "daily" as const,
+      basic: 0n,
+      housing: 0n,
+      transport: 0n,
+      dailyRate: 800_000n,
+    };
+    const r = run(
+      worker({
+        employmentType: "daily",
+        payRates: [daily],
+        arrears: [arrear("2026-09-10", 480, 0)],
+      }),
+    );
     expect(amount(r.lines, "arrears")).toBe(800_000n);
   });
 });
@@ -467,16 +582,29 @@ describe("flags and trace", () => {
     const r = run(worker({ startDate: "2026-10-01", lines: [line("2026-10-01", 480, 20)] }));
     expect(r.trace.map((t) => t.step)).toEqual(["rostered_days", "salary", "overtime"]);
     const salary = r.trace[1]!;
-    expect(salary.inputs).toMatchObject({ monthly_gross_kobo: "12000000", employed_rostered_days: 13, rostered_days: 21 });
+    expect(salary.inputs).toMatchObject({
+      monthly_gross_kobo: "12000000",
+      employed_rostered_days: 13,
+      rostered_days: 21,
+    });
     expect(salary.valueKobo).toBe(7_428_571n);
     for (const step of r.trace) {
-      for (const value of Object.values(step.inputs)) expect(typeof value === "string" || Number.isInteger(value)).toBe(true);
+      for (const value of Object.values(step.inputs))
+        expect(typeof value === "string" || Number.isInteger(value)).toBe(true);
     }
   });
 
   it("never rounds a line twice: each line equals its trace value", () => {
-    const r = run(worker({ startDate: "2026-09-23", lines: [line("2026-10-01", 480, 17), line("2026-10-04", 61, 0, false)] }), { holidays: ["2026-10-01"] });
-    for (const step of r.trace.filter((t) => ["overtime", "off_day", "public_holiday"].includes(t.step))) {
+    const r = run(
+      worker({
+        startDate: "2026-09-23",
+        lines: [line("2026-10-01", 480, 17), line("2026-10-04", 61, 0, false)],
+      }),
+      { holidays: ["2026-10-01"] },
+    );
+    for (const step of r.trace.filter((t) =>
+      ["overtime", "off_day", "public_holiday"].includes(t.step),
+    )) {
       const lines = byCode(r.lines, step.step as EarningLine["code"]);
       expect(total(lines)).toBe(step.valueKobo);
     }

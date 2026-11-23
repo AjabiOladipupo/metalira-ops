@@ -100,11 +100,7 @@ export interface EarningsInput {
 }
 
 export type EarningsFlag =
-  | "no_pay_rate"
-  | "no_rostered_days"
-  | "leave_pay_missing"
-  | "no_show_days"
-  | "open_timesheet_days";
+  "no_pay_rate" | "no_rostered_days" | "leave_pay_missing" | "no_show_days" | "open_timesheet_days";
 
 export interface EarningsResult {
   workerId: string;
@@ -224,7 +220,13 @@ interface DayLines {
 
 /** Approved lines with minutes, one entry per date (a date counts once). */
 function groupByDate(
-  lines: readonly { id: string; workDate: string; workedMinutes: number; otMinutes: number; hasShift: boolean }[],
+  lines: readonly {
+    id: string;
+    workDate: string;
+    workedMinutes: number;
+    otMinutes: number;
+    hasShift: boolean;
+  }[],
 ): Map<string, DayLines> {
   const days = new Map<string, DayLines>();
   for (const line of lines) {
@@ -270,7 +272,16 @@ function extraShiftDates(days: Map<string, DayLines>, perWeek: number): Set<stri
 }
 
 interface Contribution {
-  code: Exclude<EarningCode, "basic" | "housing" | "transport" | "other_allowances" | "leave_deduction" | "adjustment_earning" | "arrears">;
+  code: Exclude<
+    EarningCode,
+    | "basic"
+    | "housing"
+    | "transport"
+    | "other_allowances"
+    | "leave_deduction"
+    | "adjustment_earning"
+    | "arrears"
+  >;
   value: Fraction;
   minutes: number;
   days: number;
@@ -415,7 +426,11 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     step: "rostered_days",
     label: `${plural(rostered, "rostered working day")} in ${formatLeaveRange(period.start, period.end, false)}, ${employedWorking.length} while employed`,
     formula: "assigned shifts (leave removals included); else usual days; else company days",
-    inputs: { cycle_days: calendar.length, rostered_days: rostered, employed_days: employedWorking.length },
+    inputs: {
+      cycle_days: calendar.length,
+      rostered_days: rostered,
+      employed_days: employedWorking.length,
+    },
     valueKobo: null,
     ruleRef: "pay_policy.proration",
   });
@@ -432,7 +447,8 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
   const wholeCycleRate = employedAll
     ? (monthlyRates.find(
         (r) =>
-          r.effectiveFrom <= period.start && (r.effectiveTo === null || r.effectiveTo >= period.end),
+          r.effectiveFrom <= period.start &&
+          (r.effectiveTo === null || r.effectiveTo >= period.end),
       ) ?? null)
     : null;
 
@@ -455,7 +471,9 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       parts = componentAmounts(rate);
       formula = "monthly gross (employed the whole cycle on one pay rate)";
     } else {
-      days = employedWorking.filter((d) => versionOn(worker.payRates, d.date)?.id === rate.id).length;
+      days = employedWorking.filter(
+        (d) => versionOn(worker.payRates, d.date)?.id === rate.id,
+      ).length;
       if (days === 0 || rostered === 0) continue;
       total = roundHalfUp(monthlyGross(rate) * BigInt(days), BigInt(rostered));
       parts = allocateKobo(total, componentAmounts(rate));
@@ -508,7 +526,12 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     periodStart?: string;
   }
   const buckets = new Map<string, Bucket>();
-  const addTo = (key: string, seed: Omit<Bucket, "value" | "minutes" | "days" | "sources">, c: Contribution, day: DayLines) => {
+  const addTo = (
+    key: string,
+    seed: Omit<Bucket, "value" | "minutes" | "days" | "sources">,
+    c: Contribution,
+    day: DayLines,
+  ) => {
     const bucket = buckets.get(key) ?? { ...seed, value: ZERO, minutes: 0, days: 0, sources: [] };
     bucket.value = add(bucket.value, c.value);
     bucket.minutes += c.minutes;
@@ -550,7 +573,12 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     usedRates.add(rate.id);
     const offDay = !day.anyShift || meta.weekShiftDays > policy.workDaysPerWeek;
     for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), policy)) {
-      addTo(`arrears|${meta.periodStart}`, { code: "arrears", rate: null, periodStart: meta.periodStart }, c, day);
+      addTo(
+        `arrears|${meta.periodStart}`,
+        { code: "arrears", rate: null, periodStart: meta.periodStart },
+        c,
+        day,
+      );
     }
   }
 
@@ -560,7 +588,15 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       const start = bucket.periodStart!;
       const end = periodEnd(start);
       const label = `Arrears, ${formatLeaveRange(start, end, false)}, approved after posting (${plural(bucket.days, "day")})`;
-      lines.push({ code: "arrears", label, amountKobo: amount, pensionable: false, nhfBase: false, taxable: true, sources: bucket.sources });
+      lines.push({
+        code: "arrears",
+        label,
+        amountKobo: amount,
+        pensionable: false,
+        nhfBase: false,
+        taxable: true,
+        sources: bucket.sources,
+      });
       trace.push({
         step: "arrears",
         label,
@@ -579,7 +615,15 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         : code === "off_day"
           ? `Off-day work, ${plural(bucket.days, "day")} of ${formatMinutes(policy.offDayPaidMinutes)} at ${hourlyLabel(rate, policy, true)}`
           : `${BUCKET_LABEL[code]}, ${formatMinutes(bucket.minutes)} at ${hourlyLabel(rate, policy, code !== "hourly_pay")}`;
-    lines.push({ code, label, amountKobo: amount, pensionable: false, nhfBase: false, taxable: true, sources: bucket.sources });
+    lines.push({
+      code,
+      label,
+      amountKobo: amount,
+      pensionable: false,
+      nhfBase: false,
+      taxable: true,
+      sources: bucket.sources,
+    });
     trace.push({
       step: code,
       label,
@@ -630,7 +674,10 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       ),
     );
     const den = BigInt(rostered) * 100n;
-    const total = roundHalfUp(weights.reduce((a, b) => a + b, 0n), den);
+    const total = roundHalfUp(
+      weights.reduce((a, b) => a + b, 0n),
+      den,
+    );
     if (total === 0n) continue;
     leaveDeducted += days;
     const parts = allocateKobo(total, weights);
@@ -652,7 +699,8 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     trace.push({
       step: "leave_deduction",
       label,
-      formula: "monthly gross x leave days ÷ rostered days in the cycle x (100 − pay percent)%, rounded once",
+      formula:
+        "monthly gross x leave days ÷ rostered days in the cycle x (100 − pay percent)%, rounded once",
       inputs: {
         leave_days: days,
         rostered_days: rostered,

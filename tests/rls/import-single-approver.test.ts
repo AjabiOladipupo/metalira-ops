@@ -1,9 +1,10 @@
 /**
  * Slice 1.11 (owner decision 20) against the real database: the owner's FIRST
  * commit_import_batch while company setup is unfinished writes new workers' bank details
- * directly, audited per worker. A later import by the owner (even during setup), HR's or an
- * admin's import during setup, the owner's import after setup, and a direct create_worker call
- * all keep the two-person hold (a pending bank-detail change).
+ * directly, audited per worker. A later import by the owner (even during setup), HR's import
+ * during setup, the owner's import after setup, and a direct create_worker call all keep the
+ * two-person hold (a pending bank-detail change). An admin can't import at all since the file
+ * carries pay (owner decision, 23 Nov 2026).
  */
 import { randomBytes, randomUUID } from "node:crypto";
 
@@ -162,13 +163,23 @@ afterAll(async () => {
 });
 
 describe("first import during unfinished setup", () => {
-  it("HR's and an admin's import during setup keep the two-person hold", async () => {
-    for (const by of [hr.client, orgAdmin.client]) {
-      const { workerId, result } = await importOne(by);
-      expect(result).toMatchObject({ created: 1, bank_details_saved: 0 });
-      expect(await bankState(workerId)).toEqual(held);
-      expect(await exceptionAudits(workerId)).toEqual([]);
-    }
+  it("HR's import during setup keeps the two-person hold", async () => {
+    const { workerId, result } = await importOne(hr.client);
+    expect(result).toMatchObject({ created: 1, bank_details_saved: 0 });
+    expect(await bankState(workerId)).toEqual(held);
+    expect(await exceptionAudits(workerId)).toEqual([]);
+  });
+
+  it("an admin can't import: the file carries pay", async () => {
+    const id = randomUUID();
+    const { error } = await orgAdmin.client.from("import_batches").insert({
+      id,
+      organisation_id: owner.orgId,
+      file_name: "employees.csv",
+      file_format: "csv",
+      file_path: `${owner.orgId}/${id}.csv`,
+    });
+    expect(error?.code).toBe("42501");
   });
 
   it("the owner's first import saves bank details directly and audits each worker", async () => {

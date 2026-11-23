@@ -194,6 +194,7 @@ async function PeopleList({
       <BankApprovalsLink count={pendingBankChanges} />
       <PeopleActions
         canEdit={ctx.canEdit}
+        canImport={ctx.canEditPay}
         canInvite={canAccessHref(ctx.role, "/app/people/invites")}
       />
     </>

@@ -813,15 +813,16 @@ describe("who sees and changes people", () => {
     expect(assigned.error).toBeNull();
   });
 
-  it("finance and operations managers read workers and pay but cannot write", async () => {
+  it("finance and operations managers read workers but cannot write; only finance reads pay", async () => {
     for (const reader of [people.finance, people.ops]) {
       const workers = await reader.client
         .from("workers")
         .select("id")
         .in("id", [reportee, notMine]);
       expect(workers.data).toHaveLength(2);
+      // Owner decision, 23 Nov 2026: pay for owner, hr and finance only.
       const pay = await reader.client.from("pay_rates").select("id").eq("worker_id", reportee);
-      expect(pay.data).toHaveLength(1);
+      expect(pay.data).toHaveLength(reader === people.finance ? 1 : 0);
 
       const insert = await createWorker({}, null, reader.client);
       expect(insert.error?.code).toBe(PERMISSION_DENIED);
@@ -932,9 +933,51 @@ describe("who sees and changes people", () => {
     expect(right.error).toBeNull();
   });
 
-  it("an admin can add workers", async () => {
+  it("an admin can add workers, but not with pay", async () => {
     const { error } = await createWorker({}, null, people.admin.client);
     expect(error).toBeNull();
+    const withPay = await createWorker({}, monthly("2025-01-06"), people.admin.client);
+    expect(withPay.error).not.toBeNull();
+  });
+
+  // Owner decision, 23 Nov 2026: pay is visible to owner, hr and finance only.
+  it("admins and operations managers read no pay and can't change it; owner, hr and finance read it", async () => {
+    for (const reader of [owner, people.hr, people.finance]) {
+      const pay = await reader.client.from("pay_rates").select("id").eq("worker_id", reportee);
+      expect(pay.data).toHaveLength(1);
+    }
+    for (const blind of [people.admin, people.ops, people.lineManager]) {
+      const pay = await blind.client.from("pay_rates").select("id, basic_kobo");
+      expect(pay.data).toEqual([]);
+    }
+    const otherPay = await other.client.from("pay_rates").select("id").eq("worker_id", reportee);
+    expect(otherPay.data).toEqual([]);
+
+    const [current] = await versions(reportee);
+    const added = await people.admin.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_worker_id: reportee,
+      p_rate: monthly(IN_60),
+    });
+    expect(added.error).not.toBeNull();
+    const written = await people.admin.client.from("pay_rates").insert({
+      organisation_id: owner.orgId,
+      worker_id: reportee,
+      pay_type: "monthly",
+      basic_kobo: 1,
+      housing_kobo: 0,
+      transport_kobo: 0,
+      other_allowances_kobo: 0,
+      effective_from: IN_60,
+    });
+    expect(written.error).not.toBeNull();
+    const deleted = await people.admin.client
+      .from("pay_rates")
+      .delete()
+      .eq("id", current!.id)
+      .select();
+    expect(deleted.data ?? []).toEqual([]);
+    expect(await versions(reportee)).toHaveLength(1);
   });
 
   it("a line manager reads only their reportees, their mapping, and no pay", async () => {

@@ -505,12 +505,42 @@ describe("cancelPayRate", () => {
     ).rejects.toMatchObject({ code: "invalid", fieldErrors: { payRateId: message } });
   });
 
-  it("refuses finance before touching anything", async () => {
+  it.each(["finance", "admin", "ops_manager"] as const)(
+    "refuses %s before touching anything",
+    async (role) => {
+      const fake = fakeSupabase();
+      await expect(
+        runMutation(context(fake.client, role), cancelPayRateSpec, { payRateId: RATE }),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      expect(fake.rpc).not.toHaveBeenCalled();
+    },
+  );
+});
+
+// Owner decision, 23 Nov 2026: pay is owner, hr and finance only; owner and hr change it.
+describe("pay is owner and hr only", () => {
+  it.each(["admin", "ops_manager", "finance"] as const)(
+    "refuses %s a pay change before touching anything",
+    async (role) => {
+      const fake = fakeSupabase();
+      await expect(
+        runMutation(context(fake.client, role), addPayRateSpec, {
+          workerId: WORKER,
+          payType: "daily",
+          dailyRate: "8000",
+          effectiveFrom: "2030-01-01",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      expect(fake.rpc).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets an admin add an employee without pay, never with it", async () => {
     const fake = fakeSupabase();
     await expect(
-      runMutation(context(fake.client, "finance"), cancelPayRateSpec, { payRateId: RATE }),
-    ).rejects.toMatchObject({ code: "forbidden" });
-    expect(fake.rpc).not.toHaveBeenCalled();
+      runMutation(context(fake.client, "admin"), createWorkerSpec, newWorker),
+    ).rejects.toMatchObject({ code: "forbidden", fieldErrors: { payType: expect.any(String) } });
+    expect(fake.rpc).not.toHaveBeenCalledWith("create_worker", expect.anything());
   });
 });
 

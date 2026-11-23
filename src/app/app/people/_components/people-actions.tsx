@@ -6,14 +6,23 @@ import { Button } from "@/components/ui/button";
 /**
  * The People header actions: Import (the CSV and Excel import from slice 1.8), Invite (worker
  * invites from slice 1.9) and Add employee. Import and Add employee show to roles that may add
- * employees; Invite to roles that may open the invites page (the same check its RouteGate makes).
+ * employees, except that Import is owner and HR only (the file carries pay; owner decision,
+ * 23 Nov 2026); Invite to roles that may open the invites page (the same check its RouteGate makes).
  * The pages and actions check the role again.
  */
-export function PeopleActions({ canEdit, canInvite }: { canEdit: boolean; canInvite: boolean }) {
+export function PeopleActions({
+  canEdit,
+  canImport,
+  canInvite,
+}: {
+  canEdit: boolean;
+  canImport: boolean;
+  canInvite: boolean;
+}) {
   if (!canEdit && !canInvite) return null;
   return (
     <>
-      {canEdit ? (
+      {canEdit && canImport ? (
         <Button asChild variant="outline" className="h-10 rounded-lg">
           <Link href="/app/people/import">
             <Upload strokeWidth={1.75} aria-hidden />
