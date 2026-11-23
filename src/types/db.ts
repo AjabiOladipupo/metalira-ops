@@ -1203,6 +1203,26 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"tax_rule_sets": {
+                  Row: {
+                    "adviser_confirmed_at": string | null,"adviser_confirmed_by": string | null,"adviser_note": string | null,"created_at": string,"created_by": string | null,"currency": string,"effective_from": string,"effective_to": string | null,"id": string,"name": string,"organisation_id": string,"policy": Json,"reason": string,"rules": Json,"source_label": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "adviser_confirmed_at"?: string | null,"adviser_confirmed_by"?: string | null,"adviser_note"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"effective_from": string,"effective_to"?: string | null,"id"?: string,"name": string,"organisation_id": string,"policy": Json,"reason": string,"rules": Json,"source_label"?: string | null
+                  }
+                  Update: {
+                    "adviser_confirmed_at"?: string | null,"adviser_confirmed_by"?: string | null,"adviser_note"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"effective_from"?: string,"effective_to"?: string | null,"id"?: string,"name"?: string,"organisation_id"?: string,"policy"?: Json,"reason"?: string,"rules"?: Json,"source_label"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "tax_rule_sets_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"timesheet_corrections": {
                   Row: {
                     "actor_id": string,"corrected_at": string | null,"created_at": string,"id": string,"kind": string,"line_id": string,"minutes": number | null,"organisation_id": string,"ot_minutes": number | null,"punch_id": string | null,"reason": string,"seq": number,"worker_id": string
@@ -1671,6 +1691,9 @@ isOneToOne: false
 "add_rate_card_version":
 { Args: { "p_contract_id": string,"p_effective_from": string,"p_lines": Json,"p_note"?: string,"p_organisation_id": string }; Returns: string
                            },
+"add_tax_rule_set_version":
+{ Args: { "p_dry_run"?: boolean,"p_effective_from": string,"p_name": string,"p_organisation_id": string,"p_policy": Json,"p_reason": string,"p_rules": Json,"p_source_label"?: string }; Returns: Json
+                           },
 "add_timesheet_correction":
 { Args: { "p_corrected_at"?: string,"p_kind": string,"p_line_id": string,"p_minutes"?: number,"p_organisation_id": string,"p_ot_minutes"?: number,"p_punch_id"?: string,"p_reason": string }; Returns: Json
                            },
@@ -1775,6 +1798,9 @@ isOneToOne: false
 "confirm_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: undefined
                            },
+"confirm_tax_rule_set":
+{ Args: { "p_note": string,"p_organisation_id": string,"p_rule_set_id": string }; Returns: undefined
+                           },
 "contract_welcome_allowed":
 { Args: { "p_contact_ids": (string)[],"p_contract_id": string,"p_organisation_id": string }; Returns: string[]
                            },
@@ -1858,6 +1884,9 @@ isOneToOne: false
                            },
 "ensure_leave_year":
 { Args: { "p_organisation_id": string,"p_year": number }; Returns: number
+                           },
+"ensure_tax_rule_set":
+{ Args: { "p_organisation_id": string }; Returns: string
                            },
 "finish_bank_account_lookup":
 { Args: { "p_account_name"?: string,"p_id": string,"p_source"?: string,"p_status": Database["public"]['Enums']["bank_lookup_status"] }; Returns: boolean

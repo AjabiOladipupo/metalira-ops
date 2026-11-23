@@ -42,11 +42,16 @@ const SECTIONS = [
     title: "Holidays",
     body: "Public holidays and the working week that leave counts.",
   },
+  {
+    href: "/app/settings/payroll",
+    title: "Payroll rules",
+    body: "PAYE bands, reliefs, pension, NHF and levies, as dated versions.",
+  },
 ] as const;
 
 /**
  * Settings sections the viewer's role may open (company and team: owner and admin; where clients pay:
- * also finance; departments, leave and holidays: also hr).
+ * also finance; departments, leave and holidays: also hr; payroll rules: owner, hr and finance).
  */
 async function SettingsSections() {
   const session = await getPageSession();
