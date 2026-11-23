@@ -79,6 +79,8 @@ const arrearsSchema = z
     project_id: z.uuid().nullable(),
     period_start: isoDate,
     week_shift_rank: z.number().int().min(0).max(7),
+    week_shift_days: z.number().int().min(0).max(7),
+    week_off_days_paid: z.number().int().min(0).max(7),
   })
   .transform((l) => ({
     id: l.id,
@@ -89,6 +91,8 @@ const arrearsSchema = z
     projectId: l.project_id,
     periodStart: l.period_start,
     weekShiftRank: l.week_shift_rank,
+    weekShiftDays: l.week_shift_days,
+    weekOffDaysPaid: l.week_off_days_paid,
   }));
 
 const leaveSchema = z
@@ -235,8 +239,8 @@ export interface CalendarInput {
  * open question 1).
  *
  * Days outside the worker's employment have no roster, so the worker's own weekly pattern stands
- * in there (`outsidePattern`): the weekdays of their shifts in the cycle, else their usual days,
- * else the company's. The full cycle's count then follows the worker's own week whether they
+ * in there (`outsidePattern`): the weekdays of their shifts in complete ISO weeks of the cycle
+ * they were rostered for while employed, else their usual days, else the company's. The full cycle's count then follows the worker's own week whether they
  * joined, left or stayed.
  */
 export interface OutsidePattern {
@@ -245,14 +249,37 @@ export interface OutsidePattern {
   source: "roster" | "usual" | "company";
 }
 
-/** The worker's own weekly pattern for days outside their employment (see `rosteredCalendar`). */
+/**
+ * The worker's own weekly pattern for days outside their employment (see `rosteredCalendar`).
+ * Only complete ISO weeks count: Monday to Sunday inside the cycle, inside the employment, and on
+ * or before the last rostered day, so a partial week (a joiner's first days, a leaver's last)
+ * never makes a pattern of its own.
+ */
 export function outsidePattern(
-  worker: Pick<CalendarInput, "usualWorkDays" | "shifts">,
+  period: Pick<PayPeriod, "start" | "end">,
+  worker: CalendarInput,
   defaultWorkDays: readonly number[],
 ): OutsidePattern {
-  if (worker.shifts.length > 0) {
-    const days = [...new Set(worker.shifts.map((s) => isoWeekday(s.date)))].sort((a, b) => a - b);
-    return { workDays: days, source: "roster" };
+  const pattern = new Set<number>();
+  if (worker.lastRostered !== null) {
+    const span = spanDays(period.start, period.end);
+    for (let i = 0; i < span; i += 1) {
+      const monday = addDays(period.start, i);
+      if (isoWeekday(monday) !== 1) continue;
+      const sunday = addDays(monday, 6);
+      const complete =
+        sunday <= period.end &&
+        monday >= worker.startDate &&
+        (worker.endDate === null || sunday <= worker.endDate) &&
+        sunday <= worker.lastRostered;
+      if (!complete) continue;
+      for (const s of worker.shifts) {
+        if (s.date >= monday && s.date <= sunday) pattern.add(isoWeekday(s.date));
+      }
+    }
+  }
+  if (pattern.size > 0) {
+    return { workDays: [...pattern].sort((a, b) => a - b), source: "roster" };
   }
   if (worker.usualWorkDays) return { workDays: [...worker.usualWorkDays], source: "usual" };
   return { workDays: [...defaultWorkDays], source: "company" };
@@ -265,7 +292,7 @@ export function rosteredCalendar(
 ): CalendarDay[] {
   const days = spanDays(period.start, period.end);
   const usual = worker.usualWorkDays ?? defaultWorkDays;
-  const outside = outsidePattern(worker, defaultWorkDays).workDays;
+  const outside = outsidePattern(period, worker, defaultWorkDays).workDays;
   const shifts = worker.shifts.map((s) => ({ date: s.date, site: "" }));
   const holidays = new Set<string>();
   const out: CalendarDay[] = [];

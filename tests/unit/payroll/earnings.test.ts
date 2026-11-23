@@ -121,15 +121,41 @@ describe("monthly salary and proration", () => {
     });
   });
 
-  it("prorates a joiner whose roster starts on their first day (days before it follow the roster's weekdays)", () => {
+  it("never takes a pattern from a joiner's partial first week: company days, flagged", () => {
     const shifts = ["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06"].map((date) => ({
       date,
       onLeave: false,
     }));
     const r = run(worker({ startDate: "2026-10-01", shifts, lastRostered: "2026-10-06" }));
-    // Employed: 4 shifts up to the 6th, then usual days 7 to 19 Oct (9): 13. Before joining, the
-    // roster's weekdays (Mon, Tue, Thu, Fri): 21, 22, 24, 25, 28 and 29 Sep (6). 13 of 19.
-    expect(r.days).toMatchObject({ rostered: 19, employedRostered: 13 });
+    // Employed: 4 shifts up to the 6th, then usual days 7 to 19 Oct (9): 13. No complete ISO week
+    // is rostered, so the days before joining are the company's (Mon to Fri): 13 of 21, flagged.
+    expect(r.days).toMatchObject({ rostered: 21, employedRostered: 13 });
+    expect(r.flags).toContain("roster_pattern_unknown");
+  });
+
+  it("pays a one-shift joiner on Thu 15 Oct 3 of 21, not 3 of 6", () => {
+    const r = run(
+      worker({
+        startDate: "2026-10-15",
+        shifts: [{ date: "2026-10-15", onLeave: false }],
+        lastRostered: "2026-10-15",
+      }),
+    );
+    expect(r.days).toMatchObject({ rostered: 21, employedRostered: 3 });
+    expect(total(r.lines)).toBe(roundHalfUp(12_000_000n * 3n, 21n));
+    expect(r.flags).toContain("roster_pattern_unknown");
+  });
+
+  it("pays a joiner with a 3-shift partial week on the company's days outside employment", () => {
+    const shifts = ["2026-10-08", "2026-10-09", "2026-10-10"].map((date) => ({
+      date,
+      onLeave: false,
+    }));
+    const r = run(worker({ startDate: "2026-10-08", shifts, lastRostered: "2026-10-10" }));
+    // 3 shifts (Thu, Fri and Sat 10 Oct), then usual days 12 to 16 and 19 Oct (6): 9. Before
+    // joining, the company's days, not the partial week's Thu to Sat: 13. 9 of 22.
+    expect(r.days).toMatchObject({ rostered: 22, employedRostered: 9 });
+    expect(total(r.lines)).toBe(roundHalfUp(12_000_000n * 9n, 22n));
   });
 
   it("prorates a leaver on Monday 5 Oct: 11 of 21", () => {
@@ -373,6 +399,13 @@ describe("overtime, off days and public holidays", () => {
     ).toEqual([25_000n, 37_500n]);
   });
 
+  it("never lets an explicit undefined in the day's policy override a default", () => {
+    const r = run(worker({ lines: [line("2026-10-01", 480, 20)] }), {
+      policyOn: () => ({ overtimeMultiplierBps: undefined, offDayPaidMinutes: undefined }),
+    });
+    expect(amount(r.lines, "overtime")).toBe(25_000n);
+  });
+
   it("keeps full pay for a rostered public holiday not worked", () => {
     const r = run(worker(), { holidays: ["2026-10-01"] });
     expect(total(r.lines)).toBe(12_000_000n);
@@ -507,6 +540,14 @@ describe("leave", () => {
     expect(amount(r.lines, "leave_deduction")).toBe(-roundHalfUp(12_000_000n * 4n, 21n));
   });
 
+  it("keeps public holidays in a calendar-day leave's deduction", () => {
+    const r = run(
+      worker({ leave: [leave({ startDate: "2026-09-28", endDate: "2026-10-02", payPercent: 0 })] }),
+      { holidays: ["2026-10-01"] },
+    );
+    expect(r.days.leaveDeducted).toBe(5);
+  });
+
   it("pays 0 for a cycle entirely on unpaid leave", () => {
     const r = run(
       worker({
@@ -619,10 +660,14 @@ describe("arrears", () => {
     ot: number,
     hasShift = true,
     weekShiftRank = 5,
+    weekShiftDays = 5,
+    weekOffDaysPaid = 0,
   ) => ({
     ...line(workDate, worked, ot, hasShift),
     periodStart: "2026-08-20",
     weekShiftRank,
+    weekShiftDays,
+    weekOffDaysPaid,
   });
 
   it("pays a day approved after its cycle was posted as arrears at that day's rate, once", () => {
@@ -641,17 +686,29 @@ describe("arrears", () => {
     expect(total(r.lines)).toBe(12_000_000n + arrears[0]!.amountKobo);
   });
 
-  it("prices only the sixth shift of a week as an off day, by its rank in the week", () => {
-    // A six-shift week Mon 7 to Sat 12 Sep: Monday (rank 1) pays nothing more than its salary;
-    // Saturday (rank 6) pays one 8-hour shift.
-    const monday = run(worker({ arrears: [arrear("2026-09-07", 480, 0, true, 1)] }));
+  it("owes a six-shift week's off day when its late-approved Monday arrives", () => {
+    // Tue 8 to Sat 12 Sep were approved and paid as normal days (5 in the week, no off day). Mon 7
+    // is approved after posting: the week now has 6 shift days and no off day paid, so Monday
+    // carries the week's off day.
+    const monday = run(worker({ arrears: [arrear("2026-09-07", 480, 0, true, 1, 6, 0)] }));
+    expect(amount(monday.lines, "arrears")).toBe(600_000n);
+  });
+
+  it("owes nothing more when the original run already paid the week's off day", () => {
+    const monday = run(worker({ arrears: [arrear("2026-09-07", 480, 0, true, 1, 6, 1)] }));
     expect(amount(monday.lines, "arrears")).toBe(0n);
-    const saturday = run(worker({ arrears: [arrear("2026-09-12", 480, 0, true, 6)] }));
-    expect(amount(saturday.lines, "arrears")).toBe(600_000n);
+  });
+
+  it("puts the owed off day on the latest-ranked arrears day of the week", () => {
+    const mon = arrear("2026-09-07", 480, 0, true, 1, 6, 0);
+    const sat = arrear("2026-09-12", 480, 30, true, 6, 6, 0);
+    const r = run(worker({ arrears: [mon, sat] }));
+    // Saturday: one 8-hour shift instead of its minutes; Monday: nothing beyond salary.
+    expect(amount(r.lines, "arrears")).toBe(600_000n);
   });
 
   it("pays an arrears day that isn't the extra shift for its overtime only", () => {
-    const r = run(worker({ arrears: [arrear("2026-09-09", 480, 30, true, 3)] }));
+    const r = run(worker({ arrears: [arrear("2026-09-09", 480, 30, true, 3, 5, 0)] }));
     expect(amount(r.lines, "arrears")).toBe(37_500n);
   });
 

@@ -27,8 +27,9 @@
  *   A day that is both an off day and a holiday pays the larger of the two, never both.
  * - Leave (monthly pay): one deduction per approved request, monthly gross x the request's
  *   rostered working days in the cycle ÷ rostered days in the cycle x (100 − pay percent)%, the
- *   same base as proration, so a fully unpaid cycle pays 0. Public holidays are left out of the
- *   leave's days (as the 4.4 leave counter does) but stay in the base. Below the pay's service (preset A
+ *   same base as proration, so a fully unpaid cycle pays 0. Public holidays are left out of a
+ *   working-day leave's days (as the 4.4 leave counter does) but stay in the base; calendar-day
+ *   leave keeps them. Below the pay's service (preset A
  *   maternity under 6 months) the leave is unpaid. The deduction is split across the salary
  *   components with allocateKobo so the pension and NHF bases fall with it.
  * - Daily pay: daily rate x the dates with an approved line with worked minutes above 0 (a date
@@ -459,12 +460,19 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
   const workingOn = new Map(calendar.map((d) => [d.date, d.working]));
   if (
     calendar.some((d) => !d.employed) &&
-    worker.lastRostered !== null &&
-    outsidePattern(worker, input.defaultWorkDays).source === "company"
+    (worker.lastRostered !== null || worker.shifts.length > 0) &&
+    outsidePattern(period, worker, input.defaultWorkDays).source === "company"
   ) {
     flags.add("roster_pattern_unknown");
   }
-  const dayPolicy = (date: string): PayPolicy => ({ ...policy, ...(input.policyOn?.(date) ?? {}) });
+  const dayPolicy = (date: string): PayPolicy => {
+    const on = input.policyOn?.(date) ?? {};
+    return {
+      ...policy,
+      overtimeMultiplierBps: on.overtimeMultiplierBps ?? policy.overtimeMultiplierBps,
+      offDayPaidMinutes: on.offDayPaidMinutes ?? policy.offDayPaidMinutes,
+    };
+  };
 
   for (const day of employedWorking) {
     if (!versionOn(worker.payRates, day.date)) unrated.add(day.date);
@@ -603,6 +611,26 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
   // --- Arrears: days from posted cycles approved after posting -------------------------------
   const arrearsDays = groupByDate(worker.arrears);
   const arrearsWeek = new Map(worker.arrears.map((a) => [a.workDate, a]));
+  // Off days owed per ISO week: approved shift days past work_days_per_week, less the off days the
+  // original run already paid for that week. The latest-ranked arrears days of the week carry
+  // them, so a late-approved Monday in a six-shift week still brings the week's off day.
+  const arrearsOffDays = new Set<string>();
+  const byWeek = new Map<string, ArrearsDayInput[]>();
+  for (const a of worker.arrears) {
+    if (!a.hasShift || a.workedMinutes + a.otMinutes <= 0) continue;
+    const key = weekKey(a.workDate);
+    if (!byWeek.get(key)?.some((x) => x.workDate === a.workDate)) {
+      byWeek.set(key, [...(byWeek.get(key) ?? []), a]);
+    }
+  }
+  for (const days of byWeek.values()) {
+    const first = days[0]!;
+    const owed = Math.max(0, first.weekShiftDays - policy.workDaysPerWeek - first.weekOffDaysPaid);
+    days
+      .sort((x, y) => y.weekShiftRank - x.weekShiftRank || y.workDate.localeCompare(x.workDate))
+      .slice(0, owed)
+      .forEach((d) => arrearsOffDays.add(d.workDate));
+  }
   for (const day of [...arrearsDays.values()].sort((a, b) => a.date.localeCompare(b.date))) {
     const meta = arrearsWeek.get(day.date);
     const rate = versionOn(worker.payRates, day.date);
@@ -611,10 +639,8 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       continue;
     }
     usedRates.add(rate.id);
-    // weekShiftRank: this date's place among the approved shift dates of its ISO week, so only
-    // the days past work_days_per_week are off days. (The earlier cycle's calendar isn't
-    // gathered, so a no-shift arrears day counts as an off day.)
-    const offDay = !day.anyShift || meta.weekShiftRank > policy.workDaysPerWeek;
+    // (The earlier cycle's calendar isn't gathered, so a no-shift arrears day is an off day.)
+    const offDay = !day.anyShift || arrearsOffDays.has(day.date);
     const p = dayPolicy(day.date);
     for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), p)) {
       addTo(
@@ -702,9 +728,11 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     if (from > to || percent >= 100) continue;
     const perRate = new Map<string, { rate: PayRateInput; days: number }>();
     for (const day of employedWorking) {
-      // Public holidays are left out of the leave's days, as the 4.4 leave counter does; they stay
-      // in the rostered-day base, so the worker keeps the holiday's pay.
-      if (day.date < from || day.date > to || holidays.has(day.date)) continue;
+      // Public holidays are left out of a working-day leave's days, as the 4.4 leave counter does;
+      // they stay in the rostered-day base, so the worker keeps the holiday's pay. Calendar-day
+      // leave (maternity) keeps them: the leave covers every day.
+      if (day.date < from || day.date > to) continue;
+      if (leave.counting === "working_days" && holidays.has(day.date)) continue;
       const rate = versionOn(worker.payRates, day.date);
       if (!rate || rate.payType !== "monthly") continue;
       const entry = perRate.get(rate.id) ?? { rate, days: 0 };

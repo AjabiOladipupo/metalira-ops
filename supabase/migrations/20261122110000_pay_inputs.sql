@@ -40,8 +40,10 @@
 --      with the Work Unit's project (null until Phase 8: overtime multiplier 1.0x);
 --    * arrears: approved lines from an earlier cycle that private.timesheet_period_posted says is
 --      posted (false until 5.3, so none yet), up to 400 days back, each with its rank among the
---      approved worked shift dates of its ISO week up to and including its own date (a rank past
---      work_days_per_week is an off day). Slice 5.2 MUST also leave out lines already recorded as
+--      approved worked shift dates of its ISO week up to and including its own date, the week's
+--      approved shift days, and the off days already paid for that week (0 until 5.2: TODO). The
+--      earnings stage owes (shift days - work_days_per_week - off days paid) off days for the
+--      week, carried by its latest-ranked arrears days. Slice 5.2 MUST also leave out lines already recorded as
 --      a payslip source (decision 10: a source is paid once); tests/rls/payroll-inputs.test.ts
 --      has the skipped test it must un-skip;
 --    * the dates of no-show and rejected days in the cycle (open question 8: flagged only), and
@@ -765,7 +767,19 @@ begin
                     and l2.worked_minutes + l2.ot_minutes > 0
                     and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
                     and l2.work_date <= l.work_date
-                )
+                ),
+                'week_shift_days', (
+                  select count(distinct l2.work_date)
+                  from public.timesheet_lines l2
+                  where l2.organisation_id = p_organisation_id and l2.worker_id = w.id
+                    and l2.status = 'approved'
+                    and l2.shift_assignment_id is not null
+                    and l2.worked_minutes + l2.ot_minutes > 0
+                    and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
+                ),
+                -- TODO(5.2): the off days the original run already paid for this ISO week, from
+                -- payslip_sources (off_day lines whose sources fall in the week). 0 until then.
+                'week_off_days_paid', 0
               ) order by l.work_date, l.id
             )
             from public.timesheet_lines l
