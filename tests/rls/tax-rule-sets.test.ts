@@ -360,8 +360,9 @@ describe("the dated-version guard", () => {
   it("refuses a bad shape even from the database owner", async () => {
     await expect(
       db.query(
-        "insert into public.tax_rule_sets (organisation_id, name, effective_from, rules, policy, reason) values ($1, 'Bad', '2026-01-01', '{}'::jsonb, $2, 'x')",
-        [other.orgId, policy],
+        "insert into public.tax_rule_sets (organisation_id, name, effective_from, rules, policy, reason) values ($1, 'Bad', $3, '{}'::jsonb, $2, 'x')",
+        // A future start passes the guard, so the shape check is what refuses it.
+        [other.orgId, policy, `${year + 4}-01-01`],
       ),
     ).rejects.toMatchObject({ code: "23514" });
   });
