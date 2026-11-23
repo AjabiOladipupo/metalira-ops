@@ -181,7 +181,12 @@ beforeAll(async () => {
   await addLine(steady, "2026-10-01", { worked: 480, ot: 20 });
   await addLine(steady, "2026-09-18", { worked: 480, ot: 0 });
   await addLine(steady, "2026-10-02", { worked: 480, ot: 0, status: "pending" });
-  await addLine(steady, "2026-10-07", { worked: 0, ot: 0, status: "rejected", exceptions: ["no_show"] });
+  await addLine(steady, "2026-10-07", {
+    worked: 0,
+    ot: 0,
+    status: "rejected",
+    exceptions: ["no_show"],
+  });
   await addLine(steady, "2026-10-20", { worked: 480, ot: 0 }); // next cycle
 
   const typeId = randomUUID();
@@ -293,7 +298,11 @@ describe("what the inputs carry", () => {
     expect(text).not.toMatch(/first_name|last_name|staff_id|bank|account|"nin|bvn|"rsa_pin/i);
 
     const parsed = parsePayrollInputs(data);
-    expect(parsed.period).toEqual({ start: "2026-09-20", end: "2026-10-19", payDate: "2026-10-25" });
+    expect(parsed.period).toEqual({
+      start: "2026-09-20",
+      end: "2026-10-19",
+      payDate: "2026-10-25",
+    });
     expect(parsed.holidays).toContain("2026-10-01");
     const j = parsed.workers.find((w) => w.workerId === joiner)!;
     expect(j.statutory).toMatchObject({
@@ -343,13 +352,51 @@ describe("what the inputs carry", () => {
   });
 });
 
+describe("arrears are paid once", () => {
+  // TODO(5.2): un-skip once payslip_sources exists. Decision 10: a timesheet line recorded as a
+  // source of a standing payslip must never come back from payroll_inputs as arrears.
+  it.skip("TODO(5.2): a line already paid on a standing payslip never comes back as arrears", () => {
+    expect.fail(
+      "Slice 5.2: seed a posted run whose payslip_sources holds an approved line, then check payroll_inputs leaves it out of arrears.",
+    );
+  });
+});
+
+describe("the audit log hides pay from admins (security review H1)", () => {
+  it("shows pay_rates audit rows to the owner only; admins keep every other entity", async () => {
+    const mine = await owner.client.from("audit_log").select("id").eq("entity", "pay_rates");
+    expect((mine.data ?? []).length).toBeGreaterThan(0);
+    const adminPay = await staff.admin.client
+      .from("audit_log")
+      .select("id, before, after")
+      .eq("entity", "pay_rates");
+    expect(adminPay.error).toBeNull();
+    expect(adminPay.data).toEqual([]);
+    const adminWorkers = await staff.admin.client
+      .from("audit_log")
+      .select("id")
+      .eq("entity", "workers");
+    expect((adminWorkers.data ?? []).length).toBeGreaterThan(0);
+    // hr and finance never read the audit log (unchanged).
+    for (const client of [staff.hr.client, staff.finance.client, staff.ops.client]) {
+      const { data } = await client.from("audit_log").select("id").limit(5);
+      expect(data).toEqual([]);
+    }
+  });
+});
+
 describe("pay rates: owner, hr and finance only (owner decision, 23 Nov 2026)", () => {
   it("shows pay rates to owner, hr and finance, and to nobody else", async () => {
     for (const client of [owner.client, staff.hr.client, staff.finance.client]) {
       const { data } = await client.from("pay_rates").select("id").eq("worker_id", joiner);
       expect(data).toHaveLength(1);
     }
-    for (const client of [staff.admin.client, staff.ops.client, staff.lineManager.client, other.client]) {
+    for (const client of [
+      staff.admin.client,
+      staff.ops.client,
+      staff.lineManager.client,
+      other.client,
+    ]) {
       const { data } = await client.from("pay_rates").select("id").eq("worker_id", joiner);
       expect(data).toEqual([]);
     }

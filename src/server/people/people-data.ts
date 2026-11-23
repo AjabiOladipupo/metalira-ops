@@ -649,9 +649,8 @@ export interface WorkerProfileOptions {
    */
   viewer?: "manager" | "self" | "line_manager";
   /**
-   * Whether to read the pay history (owner, hr and finance: owner decision, 23 Nov 2026). RLS
-   * returns no pay rows to anyone else anyway; this skips the read. Defaults to true for
-   * "manager" so existing callers keep their behaviour under RLS.
+   * Whether to read the pay history (owner, hr and finance: owner decision, 23 Nov 2026). Off
+   * unless the caller passes it; RLS returns no pay rows to anyone else anyway.
    */
   seePay?: boolean;
 }
@@ -662,7 +661,7 @@ export async function loadWorkerProfile(
   organisationId: string,
   workerId: string,
   today: string,
-  { viewer = "manager", seePay = true }: WorkerProfileOptions = {},
+  { viewer = "manager", seePay = false }: WorkerProfileOptions = {},
 ): Promise<WorkerProfile | null> {
   const limited = viewer === "line_manager";
   const read = await loadProfileRow(supabase, organisationId, workerId, limited);

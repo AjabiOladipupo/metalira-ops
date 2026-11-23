@@ -11,7 +11,7 @@
 import { z } from "zod";
 
 import { addDays } from "@/lib/dates";
-import { countLeaveDays, spanDays } from "@/lib/leave/days";
+import { countLeaveDays, isoWeekday, spanDays } from "@/lib/leave/days";
 import { toKobo, type Kobo } from "@/lib/money";
 
 const isoDate = z.iso.date();
@@ -78,7 +78,7 @@ const arrearsSchema = z
     has_shift: z.boolean(),
     project_id: z.uuid().nullable(),
     period_start: isoDate,
-    week_shift_days: z.number().int().min(0).max(7),
+    week_shift_rank: z.number().int().min(0).max(7),
   })
   .transform((l) => ({
     id: l.id,
@@ -88,7 +88,7 @@ const arrearsSchema = z
     hasShift: l.has_shift,
     projectId: l.project_id,
     periodStart: l.period_start,
-    weekShiftDays: l.week_shift_days,
+    weekShiftRank: l.week_shift_rank,
   }));
 
 const leaveSchema = z
@@ -234,9 +234,30 @@ export interface CalendarInput {
  * holidays stay working days (a monthly worker keeps full pay for an unworked rostered holiday,
  * open question 1).
  *
- * Days outside the worker's employment have no roster, so the usual days always stand in there:
- * the full cycle's count is then the same whether the worker joined, left or stayed.
+ * Days outside the worker's employment have no roster, so the worker's own weekly pattern stands
+ * in there (`outsidePattern`): the weekdays of their shifts in the cycle, else their usual days,
+ * else the company's. The full cycle's count then follows the worker's own week whether they
+ * joined, left or stayed.
  */
+export interface OutsidePattern {
+  workDays: number[];
+  /** Where the weekdays came from: the worker's shifts, their usual days, or the company's. */
+  source: "roster" | "usual" | "company";
+}
+
+/** The worker's own weekly pattern for days outside their employment (see `rosteredCalendar`). */
+export function outsidePattern(
+  worker: Pick<CalendarInput, "usualWorkDays" | "shifts">,
+  defaultWorkDays: readonly number[],
+): OutsidePattern {
+  if (worker.shifts.length > 0) {
+    const days = [...new Set(worker.shifts.map((s) => isoWeekday(s.date)))].sort((a, b) => a - b);
+    return { workDays: days, source: "roster" };
+  }
+  if (worker.usualWorkDays) return { workDays: [...worker.usualWorkDays], source: "usual" };
+  return { workDays: [...defaultWorkDays], source: "company" };
+}
+
 export function rosteredCalendar(
   period: Pick<PayPeriod, "start" | "end">,
   worker: CalendarInput,
@@ -244,6 +265,7 @@ export function rosteredCalendar(
 ): CalendarDay[] {
   const days = spanDays(period.start, period.end);
   const usual = worker.usualWorkDays ?? defaultWorkDays;
+  const outside = outsidePattern(worker, defaultWorkDays).workDays;
   const shifts = worker.shifts.map((s) => ({ date: s.date, site: "" }));
   const holidays = new Set<string>();
   const out: CalendarDay[] = [];
@@ -253,7 +275,7 @@ export function rosteredCalendar(
       date >= worker.startDate && (worker.endDate === null || date <= worker.endDate);
     const working =
       countLeaveDays(date, date, "working_days", {
-        workDays: usual,
+        workDays: employed ? usual : outside,
         lastRostered: employed ? worker.lastRostered : null,
         holidays,
         shifts: employed ? shifts : [],

@@ -18,15 +18,17 @@
  * - Overtime: approved ot_minutes at the hourly rate x the multiplier (1.0x until Phase 8), one
  *   line per pay version. Only time past the assigned shift's end is overtime: that is how
  *   timesheet lines count ot_minutes (slice 4.2), so a 12-hour shift worked in full has none.
- * - Off-day work (monthly pay): a day with approved minutes and no shift, or a shift beyond
+ * - Off-day work (monthly pay): a day with approved minutes, no shift and off in the calendar, or a shift beyond
  *   work_days_per_week in its ISO week (the latest days are the extra ones), pays a flat
  *   off_day_paid_minutes (480) at the overtime rate instead of its minutes.
- * - Public holidays: every minute worked on one (worked plus overtime) is paid at the overtime
- *   rate on top of normal pay; a monthly worker keeps full pay for a rostered holiday not worked.
+ * - Public holidays: every minute worked on one (worked plus overtime) is paid once, at the
+ *   overtime rate, on top of normal pay (its overtime minutes are not paid again as overtime); a
+ *   monthly worker keeps full pay for a rostered holiday not worked.
  *   A day that is both an off day and a holiday pays the larger of the two, never both.
  * - Leave (monthly pay): one deduction per approved request, monthly gross x the request's
  *   rostered working days in the cycle ÷ rostered days in the cycle x (100 − pay percent)%, the
- *   same base as proration, so a fully unpaid cycle pays 0. Below the pay's service (preset A
+ *   same base as proration, so a fully unpaid cycle pays 0. Public holidays are left out of the
+ *   leave's days (as the 4.4 leave counter does) but stay in the base. Below the pay's service (preset A
  *   maternity under 6 months) the leave is unpaid. The deduction is split across the salary
  *   components with allocateKobo so the pension and NHF bases fall with it.
  * - Daily pay: daily rate x the dates with an approved line with worked minutes above 0 (a date
@@ -46,6 +48,7 @@ import { formatMinutes, periodEnd } from "@/lib/timesheets/minutes";
 
 import type { EarningCode, EarningLine, PaySourceRef, TraceStep } from "./earning-lines";
 import {
+  outsidePattern,
   rosteredCalendar,
   type ArrearsDayInput,
   type CalendarDay,
@@ -70,9 +73,13 @@ export interface PayPolicy {
 
 /**
  * The policy figures that live in the rule set's `policy` part (slice 5.0's `tax_rule_sets`);
- * the owner's starting values. Slice 5.2 takes them from the rule set in force.
+ * the owner's starting values. Slice 5.2 takes them from the rule set in force on each day
+ * (`EarningsInput.policyOn`), arrears days included.
  */
 export const POLICY_DEFAULTS = { overtimeMultiplierBps: 10_000, offDayPaidMinutes: 480 } as const;
+
+/** The policy figures that can change by day (a dated rule set version). */
+export type DayPolicy = Partial<Pick<PayPolicy, "overtimeMultiplierBps" | "offDayPaidMinutes">>;
 
 export interface EarningsWorker {
   workerId: string;
@@ -97,10 +104,22 @@ export interface EarningsInput {
   /** organisations.default_work_days. */
   defaultWorkDays: readonly number[];
   worker: EarningsWorker;
+  /**
+   * The rule set's policy in force on a day (overtime multiplier, off-day minutes), for days
+   * worked and arrears days. Left out, or a figure missing: the `policy` argument's. NOTE for
+   * 5.2: pass the dated rule set version in force on each day.
+   */
+  policyOn?: (date: string) => DayPolicy;
 }
 
 export type EarningsFlag =
-  "no_pay_rate" | "no_rostered_days" | "leave_pay_missing" | "no_show_days" | "open_timesheet_days";
+  | "no_pay_rate"
+  | "no_rostered_days"
+  | "leave_pay_missing"
+  | "no_show_days"
+  | "open_timesheet_days"
+  /** Days outside employment counted on the company's days for a worker who has a roster. */
+  | "roster_pattern_unknown";
 
 export interface EarningsResult {
   workerId: string;
@@ -329,7 +348,9 @@ function dayContributions(
       days: 1,
     });
   }
-  if (day.ot > 0) {
+  // On a public holiday every minute worked (worked plus overtime) is paid once, at the overtime
+  // rate, on top of normal pay: its overtime minutes are in the holiday line, not here.
+  if (day.ot > 0 && !holiday) {
     out.push({
       code: "overtime",
       value: overtimeValue(rate, day.ot, policy),
@@ -435,6 +456,15 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     ruleRef: "pay_policy.proration",
   });
   if (rostered === 0) flags.add("no_rostered_days");
+  const workingOn = new Map(calendar.map((d) => [d.date, d.working]));
+  if (
+    calendar.some((d) => !d.employed) &&
+    worker.lastRostered !== null &&
+    outsidePattern(worker, input.defaultWorkDays).source === "company"
+  ) {
+    flags.add("roster_pattern_unknown");
+  }
+  const dayPolicy = (date: string): PayPolicy => ({ ...policy, ...(input.policyOn?.(date) ?? {}) });
 
   for (const day of employedWorking) {
     if (!versionOn(worker.payRates, day.date)) unrated.add(day.date);
@@ -459,7 +489,8 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       period.start,
       period.end,
     );
-    if (from > to) continue;
+    // No rostered working days in the cycle: no salary at all (flagged no_rostered_days).
+    if (from > to || rostered === 0) continue;
     let total: Kobo;
     let parts: Kobo[];
     let days: number;
@@ -474,7 +505,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       days = employedWorking.filter(
         (d) => versionOn(worker.payRates, d.date)?.id === rate.id,
       ).length;
-      if (days === 0 || rostered === 0) continue;
+      if (days === 0) continue;
       total = roundHalfUp(monthlyGross(rate) * BigInt(days), BigInt(rostered));
       parts = allocateKobo(total, componentAmounts(rate));
       formula = "monthly gross x rostered employed days ÷ rostered days in the cycle, rounded once";
@@ -524,6 +555,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     days: number;
     sources: PaySourceRef[];
     periodStart?: string;
+    policy: PayPolicy;
   }
   const buckets = new Map<string, Bucket>();
   const addTo = (
@@ -554,9 +586,17 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       continue;
     }
     usedRates.add(rate.id);
-    const offDay = !day.anyShift || extra.has(day.date);
-    for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), policy)) {
-      addTo(`${c.code}|${rate.id}`, { code: c.code, rate }, c, day);
+    // A no-shift day is an off day only when the calendar has it off: a clock-in on a fallback
+    // working day is covered by salary (its overtime minutes are still paid).
+    const offDay = (!day.anyShift && !workingOn.get(day.date)) || extra.has(day.date);
+    const p = dayPolicy(day.date);
+    for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), p)) {
+      addTo(
+        `${c.code}|${rate.id}|${p.overtimeMultiplierBps}|${p.offDayPaidMinutes}`,
+        { code: c.code, rate, policy: p },
+        c,
+        day,
+      );
     }
   }
 
@@ -571,11 +611,15 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       continue;
     }
     usedRates.add(rate.id);
-    const offDay = !day.anyShift || meta.weekShiftDays > policy.workDaysPerWeek;
-    for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), policy)) {
+    // weekShiftRank: this date's place among the approved shift dates of its ISO week, so only
+    // the days past work_days_per_week are off days. (The earlier cycle's calendar isn't
+    // gathered, so a no-shift arrears day counts as an off day.)
+    const offDay = !day.anyShift || meta.weekShiftRank > policy.workDaysPerWeek;
+    const p = dayPolicy(day.date);
+    for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), p)) {
       addTo(
         `arrears|${meta.periodStart}`,
-        { code: "arrears", rate: null, periodStart: meta.periodStart },
+        { code: "arrears", rate: null, periodStart: meta.periodStart, policy: p },
         c,
         day,
       );
@@ -609,6 +653,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     }
     const rate = bucket.rate!;
     const code = bucket.code as Contribution["code"];
+    const policy = bucket.policy;
     const label =
       code === "daily_pay"
         ? `Daily pay, ${plural(bucket.days, "day")} at ${formatNaira(rate.dailyRate)}`
@@ -657,7 +702,9 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     if (from > to || percent >= 100) continue;
     const perRate = new Map<string, { rate: PayRateInput; days: number }>();
     for (const day of employedWorking) {
-      if (day.date < from || day.date > to) continue;
+      // Public holidays are left out of the leave's days, as the 4.4 leave counter does; they stay
+      // in the rostered-day base, so the worker keeps the holiday's pay.
+      if (day.date < from || day.date > to || holidays.has(day.date)) continue;
       const rate = versionOn(worker.payRates, day.date);
       if (!rate || rate.payType !== "monthly") continue;
       const entry = perRate.get(rate.id) ?? { rate, days: 0 };

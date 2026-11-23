@@ -11,6 +11,9 @@
 --      import is owner and hr only: the table and bucket policies narrow, and a guard refuses any
 --      write to import_batches or import_rows from a signed-in user who is not owner or hr (the
 --      import's definer functions included). The secret key (sweeps) is unaffected.
+--    * The audit log: pay_rates rows carry the amounts, so admins (who read the log with the
+--      owner) no longer see entity 'pay_rates' rows; owners still see everything.
+--    * commit_import_batch's own role check narrows to owner and hr.
 --    No definer function returns pay amounts to admin or ops_manager (checked 23 Nov 2026:
 --    the workers guard reads pay_rates only to set needs_pay_details, a flag).
 --
@@ -36,9 +39,11 @@
 --      cycle only place a day in its ISO week for the off-day rule; they are never paid here),
 --      with the Work Unit's project (null until Phase 8: overtime multiplier 1.0x);
 --    * arrears: approved lines from an earlier cycle that private.timesheet_period_posted says is
---      posted (false until 5.3, so none yet), up to 400 days back, each with the number of
---      approved worked shift days in its ISO week. Slice 5.2 MUST also leave out lines already
---      recorded as a payslip source (decision 10: a source is paid once);
+--      posted (false until 5.3, so none yet), up to 400 days back, each with its rank among the
+--      approved worked shift dates of its ISO week up to and including its own date (a rank past
+--      work_days_per_week is an off day). Slice 5.2 MUST also leave out lines already recorded as
+--      a payslip source (decision 10: a source is paid once); tests/rls/payroll-inputs.test.ts
+--      has the skipped test it must un-skip;
 --    * the dates of no-show and rejected days in the cycle (open question 8: flagged only), and
 --      the count of pending and disputed days;
 --    * approved leave overlapping the cycle, with its type's code and counting and
@@ -136,6 +141,365 @@ create trigger import_batches_writer_guard before insert or update on public.imp
   for each row execute function private.import_writer_guard();
 create trigger import_rows_writer_guard before insert or update on public.import_rows
   for each row execute function private.import_writer_guard();
+
+-- commit_import_batch (latest version: 20261119115000_bank_account_lookup.sql), unchanged except
+-- its role check: owner and hr, as the policies above (security review L1).
+create or replace function public.commit_import_batch(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_rows jsonb
+)
+returns jsonb
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+set statement_timeout = '300s'
+as $$
+declare
+  v_status public.import_batch_status;
+  v_sent integer;
+  v_found integer;
+  v_done integer;
+  v_held integer;
+  v_item jsonb;
+  v_worker jsonb;
+  v_worker_id uuid;
+  v_departments jsonb;
+  v_clients jsonb;
+  v_sites jsonb;
+  v_projects jsonb;
+  v_department uuid;
+  v_client uuid;
+  v_site uuid;
+  v_project uuid;
+  v_created integer := 0;
+  v_new_departments integer := 0;
+  v_new_clients integer := 0;
+  v_new_sites integer := 0;
+  v_new_projects integer := 0;
+  v_single_approver boolean := false;
+  v_bank public.workers;
+  v_bank_saved integer := 0;
+begin
+  if not private.has_role(p_organisation_id, array['owner', 'hr']) then
+    raise exception 'Your role can''t import employees.' using errcode = '42501';
+  end if;
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' then
+    raise exception 'Nothing to import.' using errcode = '22023';
+  end if;
+
+  -- One commit per batch at a time.
+  select b.status into v_status
+  from public.import_batches b
+  where b.id = p_batch_id and b.organisation_id = p_organisation_id
+  for update;
+  if v_status is null then
+    raise exception 'That import wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_status = 'cancelled' then
+    raise exception 'This import was cancelled. Upload the file again.' using errcode = 'MLIM2';
+  end if;
+  if v_status = 'uploaded' then
+    raise exception 'Check the file before importing it.' using errcode = 'MLIM2';
+  end if;
+
+  -- The rows named (kept still by the batch lock above).
+  select count(*)::integer into v_sent from jsonb_array_elements(p_rows);
+  select count(*)::integer,
+         count(*) filter (where r.status = 'imported')::integer,
+         count(*) filter (where r.status = 'held')::integer
+  into v_found, v_done, v_held
+  from public.import_rows r
+  where r.batch_id = p_batch_id
+    and r.organisation_id = p_organisation_id
+    and r.id in (select (e.item ->> 'row_id')::uuid from jsonb_array_elements(p_rows) as e (item));
+
+  if v_found <> v_sent then
+    raise exception 'A row of this import wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_sent = 0 then
+    return jsonb_build_object('created', 0, 'already_imported', 0, 'departments', 0,
+      'clients', 0, 'sites', 0, 'projects', 0);
+  end if;
+  if v_done = v_sent then
+    return jsonb_build_object('created', 0, 'already_imported', v_done, 'departments', 0,
+      'clients', 0, 'sites', 0, 'projects', 0);
+  end if;
+  if v_done > 0 then
+    raise exception 'Some of these rows were imported a moment ago. Check the file again.'
+      using errcode = 'MLIM1';
+  end if;
+  if v_held > 0 then
+    raise exception 'Rows that need fixing can''t be imported yet. Check the file again.'
+      using errcode = 'MLIM1';
+  end if;
+
+  -- Decision 20: the owner's import before setup is finished saves bank details directly.
+  v_single_approver := private.import_single_approver(p_organisation_id, p_batch_id);
+
+  -- New names, once each. The server sends a name only when it found no match.
+  insert into public.departments (organisation_id, name)
+  select distinct on (lower(n.name)) p_organisation_id, n.name
+  from (
+    select btrim(e.item -> 'department' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where (e.item -> 'department') ? 'name'
+  ) as n
+  where n.name <> ''
+  on conflict (organisation_id, lower(name)) do nothing;
+  get diagnostics v_new_departments = row_count;
+
+  insert into public.clients (organisation_id, name)
+  select distinct on (lower(n.name)) p_organisation_id, n.name
+  from (
+    select btrim(e.item -> 'client' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object' and (e.item -> 'client') ? 'name'
+  ) as n
+  where n.name <> ''
+  on conflict (organisation_id, lower(name)) do nothing;
+  get diagnostics v_new_clients = row_count;
+
+  -- Lookups by id and by lower-case name, for this organisation only.
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_departments
+  from public.departments d
+  cross join lateral (values ('id:' || d.id::text, d.id), ('name:' || lower(d.name), d.id)) as m (k, v)
+  where d.organisation_id = p_organisation_id;
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_clients
+  from public.clients c
+  cross join lateral (values ('id:' || c.id::text, c.id), ('name:' || lower(c.name), c.id)) as m (k, v)
+  where c.organisation_id = p_organisation_id;
+
+  -- Sites and projects belong to a client: new ones once each per client.
+  insert into public.sites (organisation_id, client_id, name)
+  select distinct on (n.client_id, lower(n.name)) p_organisation_id, n.client_id, n.name
+  from (
+    select (v_clients ->> case
+              when (e.item -> 'client') ? 'id' then 'id:' || (e.item -> 'client' ->> 'id')
+              else 'name:' || lower(btrim(e.item -> 'client' ->> 'name'))
+            end)::uuid as client_id,
+           btrim(e.item -> 'site' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object'
+      and jsonb_typeof(e.item -> 'site') = 'object'
+      and (e.item -> 'site') ? 'name'
+  ) as n
+  where n.client_id is not null and n.name <> ''
+  on conflict (organisation_id, client_id, lower(name)) do nothing;
+  get diagnostics v_new_sites = row_count;
+
+  insert into public.projects (organisation_id, client_id, name)
+  select distinct on (n.client_id, lower(n.name)) p_organisation_id, n.client_id, n.name
+  from (
+    select (v_clients ->> case
+              when (e.item -> 'client') ? 'id' then 'id:' || (e.item -> 'client' ->> 'id')
+              else 'name:' || lower(btrim(e.item -> 'client' ->> 'name'))
+            end)::uuid as client_id,
+           btrim(e.item -> 'project' ->> 'name') as name
+    from jsonb_array_elements(p_rows) as e (item)
+    where jsonb_typeof(e.item -> 'client') = 'object'
+      and jsonb_typeof(e.item -> 'project') = 'object'
+      and (e.item -> 'project') ? 'name'
+  ) as n
+  where n.client_id is not null and n.name <> ''
+  on conflict (organisation_id, client_id, lower(name)) do nothing;
+  get diagnostics v_new_projects = row_count;
+
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_sites
+  from public.sites s
+  cross join lateral (
+    values ('id:' || s.client_id::text || ':' || s.id::text, s.id),
+           ('name:' || s.client_id::text || ':' || lower(s.name), s.id)
+  ) as m (k, v)
+  where s.organisation_id = p_organisation_id;
+  select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) into v_projects
+  from public.projects p
+  cross join lateral (
+    values ('id:' || p.client_id::text || ':' || p.id::text, p.id),
+           ('name:' || p.client_id::text || ':' || lower(p.name), p.id)
+  ) as m (k, v)
+  where p.organisation_id = p_organisation_id;
+
+  for v_item in
+    select e.item from jsonb_array_elements(p_rows) with ordinality as e (item, n) order by e.n
+  loop
+    v_department := (v_departments ->> case
+      when (v_item -> 'department') ? 'id' then 'id:' || (v_item -> 'department' ->> 'id')
+      else 'name:' || lower(btrim(v_item -> 'department' ->> 'name'))
+    end)::uuid;
+    if v_department is null then
+      raise exception 'An employee in this import has no department.' using errcode = '22023';
+    end if;
+
+    v_client := null;
+    v_site := null;
+    v_project := null;
+    if jsonb_typeof(v_item -> 'client') = 'object' then
+      v_client := (v_clients ->> case
+        when (v_item -> 'client') ? 'id' then 'id:' || (v_item -> 'client' ->> 'id')
+        else 'name:' || lower(btrim(v_item -> 'client' ->> 'name'))
+      end)::uuid;
+      if v_client is null then
+        raise exception 'A client in this import wasn''t found.' using errcode = 'P0002';
+      end if;
+      if jsonb_typeof(v_item -> 'site') = 'object' then
+        v_site := (v_sites ->> case
+          when (v_item -> 'site') ? 'id' then 'id:' || v_client::text || ':' || (v_item -> 'site' ->> 'id')
+          else 'name:' || v_client::text || ':' || lower(btrim(v_item -> 'site' ->> 'name'))
+        end)::uuid;
+        if v_site is null then
+          raise exception 'A site in this import wasn''t found.' using errcode = 'P0002';
+        end if;
+      end if;
+      if jsonb_typeof(v_item -> 'project') = 'object' then
+        v_project := (v_projects ->> case
+          when (v_item -> 'project') ? 'id' then 'id:' || v_client::text || ':' || (v_item -> 'project' ->> 'id')
+          else 'name:' || v_client::text || ':' || lower(btrim(v_item -> 'project' ->> 'name'))
+        end)::uuid;
+        if v_project is null then
+          raise exception 'A project in this import wasn''t found.' using errcode = 'P0002';
+        end if;
+      end if;
+    end if;
+
+    -- The worker, always in this organisation, with the department and line manager resolved
+    -- here. create_worker runs as the caller: RLS, grants and the workers triggers apply
+    -- (line-manager checks, needs_pay_details, audit).
+    v_worker := coalesce(v_item -> 'worker', '{}'::jsonb)
+      || jsonb_build_object(
+        'organisation_id', p_organisation_id,
+        'department_id', v_department,
+        'line_manager_worker_id', v_item -> 'line_manager' ->> 'worker_id',
+        'line_manager_membership_id', v_item -> 'line_manager' ->> 'membership_id'
+      );
+    v_bank := jsonb_populate_record(null::public.workers, v_worker);
+    if v_single_approver
+      and num_nulls(v_bank.bank_name, v_bank.account_name, v_bank.bank_account_enc, v_bank.bank_account_last4) = 0 then
+      v_worker_id := public.create_worker(
+        v_worker - 'bank_name' - 'account_name' - 'bank_account_enc' - 'bank_account_last4',
+        null
+      );
+      perform private.import_bank_details_single_approver(
+        p_organisation_id, p_batch_id, v_worker_id, v_bank.bank_name, v_bank.account_name,
+        v_bank.bank_account_enc, v_bank.bank_account_last4
+      );
+      v_bank_saved := v_bank_saved + 1;
+    else
+      -- Slice 2.3b: create_worker no longer takes unchecked bank details from a signed-in
+      -- caller, so they go in as a `not_checked` request through the definer function.
+      v_worker_id := public.create_worker(
+        v_worker - 'bank_name' - 'account_name' - 'bank_account_enc' - 'bank_account_last4'
+          - 'bank_code' - 'bank_lookup_id' - 'bank_account_digest' - 'name_check'
+          - 'name_check_reason',
+        null
+      );
+      if num_nulls(v_bank.bank_name, v_bank.account_name, v_bank.bank_account_enc,
+          v_bank.bank_account_last4) = 0 then
+        perform private.import_bank_change(
+          p_organisation_id, p_batch_id, v_worker_id, v_bank.bank_name, v_bank.account_name,
+          v_bank.bank_account_enc, v_bank.bank_account_last4, v_bank.bank_code
+        );
+      end if;
+    end if;
+
+    -- The first pay version from the start date. The worker is new, so there is nothing to
+    -- close; private.pay_rates_guard still checks the start date.
+    if jsonb_typeof(v_item -> 'pay_rate') = 'object' then
+      insert into public.pay_rates (
+        organisation_id, worker_id, pay_type, basic_kobo, housing_kobo, transport_kobo,
+        other_allowances_kobo, daily_rate_kobo, hourly_rate_kobo, effective_from
+      )
+      values (
+        p_organisation_id,
+        v_worker_id,
+        (v_item -> 'pay_rate' ->> 'pay_type')::public.pay_type,
+        (v_item -> 'pay_rate' ->> 'basic_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'housing_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'transport_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'other_allowances_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'daily_rate_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'hourly_rate_kobo')::bigint,
+        (v_item -> 'pay_rate' ->> 'effective_from')::date
+      );
+    end if;
+
+    if v_client is not null then
+      insert into public.worker_assignments (
+        organisation_id, worker_id, client_id, site_id, project_id, effective_from
+      )
+      values (
+        p_organisation_id, v_worker_id, v_client, v_site, v_project,
+        (v_worker ->> 'start_date')::date
+      );
+    end if;
+
+    v_created := v_created + 1;
+  end loop;
+
+  perform private.mark_import_rows_imported(p_organisation_id, p_batch_id, p_rows);
+
+  update public.import_batches b
+  set status = 'committed',
+      committed_at = coalesce(b.committed_at, now()),
+      committed_by = coalesce(b.committed_by, (select auth.uid())),
+      rows_ready = counts.ready,
+      rows_held = counts.held,
+      rows_imported = counts.imported
+  from (
+    select
+      count(*) filter (where r.status in ('ready', 'fixed'))::integer as ready,
+      count(*) filter (where r.status = 'held')::integer as held,
+      count(*) filter (where r.status = 'imported')::integer as imported
+    from public.import_rows r
+    where r.batch_id = p_batch_id
+  ) as counts
+  where b.id = p_batch_id and b.organisation_id = p_organisation_id;
+
+  perform public.log_audit(
+    p_organisation_id,
+    'people.import_committed',
+    'import_batches',
+    p_batch_id,
+    null,
+    jsonb_build_object(
+      'created', v_created,
+      'departments', v_new_departments,
+      'clients', v_new_clients,
+      'sites', v_new_sites,
+      'projects', v_new_projects,
+      'bank_details_saved', v_bank_saved
+    ),
+    null
+  );
+
+  return jsonb_build_object(
+    'created', v_created,
+    'already_imported', 0,
+    'departments', v_new_departments,
+    'clients', v_new_clients,
+    'sites', v_new_sites,
+    'projects', v_new_projects,
+    'bank_details_saved', v_bank_saved
+  );
+end;
+$$;
+
+revoke all on function public.commit_import_batch(uuid, uuid, jsonb) from public, anon;
+grant execute on function public.commit_import_batch(uuid, uuid, jsonb) to authenticated, service_role;
+
+-- The audit log: pay_rates rows carry every pay amount in before and after. Owners keep the
+-- whole log; admins see everything except pay_rates rows (security review H1). No other audited
+-- entity carries pay amounts: import rows are not audited, import batches hold counts, and the
+-- app-level import events name columns, never values.
+alter policy audit_log_select on public.audit_log
+  using (
+    organisation_id in (select private.role_org_ids(array['owner']))
+    or (
+      organisation_id in (select private.role_org_ids(array['admin']))
+      and entity <> 'pay_rates'
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- 2. The pay cycle
@@ -392,7 +756,7 @@ begin
                 'has_shift', l.shift_assignment_id is not null,
                 'project_id', u.project_id,
                 'period_start', private.timesheet_period_start(l.work_date, v_org.pay_cycle_start_day),
-                'week_shift_days', (
+                'week_shift_rank', (
                   select count(distinct l2.work_date)
                   from public.timesheet_lines l2
                   where l2.organisation_id = p_organisation_id and l2.worker_id = w.id
@@ -400,6 +764,7 @@ begin
                     and l2.shift_assignment_id is not null
                     and l2.worked_minutes + l2.ot_minutes > 0
                     and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
+                    and l2.work_date <= l.work_date
                 )
               ) order by l.work_date, l.id
             )

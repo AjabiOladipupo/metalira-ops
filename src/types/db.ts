@@ -1936,7 +1936,7 @@ isOneToOne: false
             }[]
                            },
 "payroll_inputs":
-{ Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: string[] }; Returns: Json
+{ Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
 "payroll_period":
 { Args: { "p_date": string,"p_organisation_id": string }; Returns: {

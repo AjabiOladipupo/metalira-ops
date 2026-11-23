@@ -2624,7 +2624,9 @@ export const CAPABILITIES: readonly Capability[] = [
         period ?? (await organisationToday(supabase, organisationId)),
       );
     },
-    agent: true,
+    agent: false,
+    agentNote:
+      "Lira does nothing in Payroll (docs/PHASE_5.md decision 8); payroll inputs stay with owner, HR and finance.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)
