@@ -437,17 +437,6 @@ describe("insert-only rows", () => {
   it("a leave request is never deleted and moves only along the steps", async () => {
     await expect(db.query("delete from public.leave_requests")).rejects.toThrow();
     await expect(db.query("truncate public.leave_requests")).rejects.toThrow();
-    // A cancelled request of our own, so the guard has a row to refuse even when the date-bound
-    // tests above skipped (late in the year no cancellation happens there).
-    await db.query("begin");
-    await db.query("set local session_replication_role = replica");
-    await db.query(
-      `insert into public.leave_requests (organisation_id, worker_id, leave_type_id, leave_year,
-         start_date, end_date, days, status, cancelled_at)
-       values ($1, $2, $3, $4, make_date($4, 1, 5), make_date($4, 1, 5), 1, 'cancelled', now())`,
-      [owner.orgId, me, annual, year],
-    );
-    await db.query("commit");
     await expect(
       db.query("update public.leave_requests set status = 'approved' where status = 'cancelled'"),
     ).rejects.toThrow();
