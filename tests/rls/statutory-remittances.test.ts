@@ -15,11 +15,18 @@
  *   receipt's own path with the size checked (MLSR5). Signed-in users can't read, list or write
  *   either payroll bucket, their own company's paths included.
  */
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { encryptPiiForDb } from "@/server/crypto/pii";
+import { MutationError, runMutation } from "@/server/identity/mutate";
+import {
+  recordPaymentSpec,
+  scheduleLinkSpec,
+  startReceiptSpec,
+} from "@/server/payroll/remittances";
 import type { Database } from "@/types/db";
 
 import { OCT_START } from "./helpers/payroll";
@@ -35,6 +42,7 @@ import {
   adminClient,
   createTenantUser,
   createTestUser,
+  loadLocalEnv,
   pgClient,
   type Client,
   type TenantUser,
@@ -79,7 +87,22 @@ const record = (
     p_reference: over.reference ?? "PFA-REF-1",
   });
 
+const RSA_PIN = "PEN100012345678";
+
+const ctxOf = (user: TestUser, role: Role) => ({
+  supabase: user.client,
+  userId: user.id,
+  organisationId: owner.orgId,
+  role,
+});
+
 beforeAll(async () => {
+  // The server modules read these (the admin client and the RSA PIN's decryption).
+  const env = loadLocalEnv();
+  process.env.NEXT_PUBLIC_SUPABASE_URL = env.apiUrl;
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = env.publishableKey;
+  process.env.SUPABASE_SECRET_KEY = env.secretKey;
+  process.env.PII_ENCRYPTION_KEY ??= randomBytes(32).toString("base64");
   admin = adminClient();
   db = await pgClient();
   owner = await createTenantUser("stat-owner", "Statutory Org");
@@ -107,7 +130,21 @@ beforeAll(async () => {
   });
   expect(days.error).toBeNull();
 
-  const seeded = await seedSubmittedRun(admin, owner);
+  // The worker's RSA PIN, sealed for its own row (the id is chosen first), and a TIN.
+  const workerId = randomUUID();
+  const seeded = await seedSubmittedRun(admin, owner, {
+    workerExtra: {
+      id: workerId,
+      tin: "12345678-0001",
+      rsa_pin_enc: encryptPiiForDb(RSA_PIN, {
+        organisationId: owner.orgId,
+        table: "workers",
+        column: "rsa_pin_enc",
+        rowId: workerId,
+      }),
+      rsa_pin_last4: "5678",
+    },
+  });
   runId = seeded.runId;
   await addMember(workerUser, "worker", owner.orgId, seeded.workerId);
   await approveRun(admin, owner.orgId, runId, finance);
@@ -417,6 +454,125 @@ describe("insert-only (rule 4)", () => {
         [rem.pension],
       ),
     ).rejects.toMatchObject({ code: "MLSR1" });
+  });
+});
+
+describe("through the server (src/server/payroll/remittances.ts)", () => {
+  it("makes the pension schedule with the RSA PIN decrypted, behind a link, audited by id", async () => {
+    await expect(
+      runMutation(ctxOf(lineManager, "line_manager"), scheduleLinkSpec, {
+        remittanceId: rem.pension,
+      }),
+    ).rejects.toBeInstanceOf(MutationError);
+
+    const link = await runMutation(ctxOf(finance, "finance"), scheduleLinkSpec, {
+      remittanceId: rem.pension,
+    });
+    expect(link.fileName).toBe("pension-to-stanbic-ibtc-pensions-2026-10.csv");
+    const res = await fetch(link.url);
+    expect(res.ok).toBe(true);
+    const text = (await res.text()).replace(/^﻿/, "");
+    const lines = text.split(/\r\n/);
+    expect(lines[0]).toBe("Staff ID,Name,RSA PIN,Employee 8% (NGN),Employer 10% (NGN),Total (NGN)");
+    expect(lines[1]).toMatch(
+      new RegExp(`^PR-[0-9a-f]{8},Musa Ibrahim,${RSA_PIN},9600.00,12000.00,21600.00$`),
+    );
+    expect(lines[2]).toBe("Total,1 worker,,9600.00,12000.00,21600.00");
+
+    // The PAYE schedule names the TIN.
+    const paye = await runMutation(ctxOf(hr, "hr"), scheduleLinkSpec, { remittanceId: rem.paye });
+    expect(await (await fetch(paye.url)).text()).toContain(
+      ",Musa Ibrahim,12345678-0001,120000.00,",
+    );
+
+    // Audited by id only: no PIN, no link, no file contents.
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("actor_id, entity, entity_id, before, after")
+      .eq("organisation_id", owner.orgId)
+      .eq("action", "payroll.schedule_downloaded")
+      .eq("entity_id", rem.pension!);
+    expect(audit).toHaveLength(1);
+    expect(audit![0]).toMatchObject({ actor_id: finance.id, entity: "statutory_remittances" });
+    expect(JSON.stringify(audit)).not.toContain(RSA_PIN);
+    expect(JSON.stringify(audit)).not.toContain("token");
+  });
+
+  it("records a payment: the receipt goes to its signed path and is checked by its bytes", async () => {
+    // A file named .pdf that isn't one is refused and deleted.
+    const fake = await runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
+      remittanceId: rem.nsitf,
+      fileName: "receipt.pdf",
+      size: 5,
+    });
+    expect(fake.path).toBe(`${owner.orgId}/${rem.nsitf}/${fake.receiptId}.pdf`);
+    expect(
+      (
+        await hr.client.storage
+          .from(EVIDENCE_BUCKET)
+          .uploadToSignedUrl(fake.path, fake.token, Buffer.from("hello"), {
+            contentType: "application/pdf",
+          })
+      ).error,
+    ).toBeNull();
+    const payment = {
+      remittanceId: rem.nsitf,
+      paidOn: "2026-10-30",
+      amount: "1,200",
+      reference: "NSITF-OCT",
+      fileExt: "pdf",
+    };
+    await expect(
+      runMutation(ctxOf(hr, "hr"), recordPaymentSpec, { ...payment, receiptId: fake.receiptId }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    expect((await admin.storage.from(EVIDENCE_BUCKET).download(fake.path)).data).toBeNull();
+
+    // A real PDF is checked, recorded with the secret key naming hr, then paid as hr.
+    const real = await runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
+      remittanceId: rem.nsitf,
+      fileName: "NSITF receipt.PDF",
+      size: RECEIPT_PDF.length,
+    });
+    expect(
+      (
+        await hr.client.storage
+          .from(EVIDENCE_BUCKET)
+          .uploadToSignedUrl(real.path, real.token, RECEIPT_PDF, { contentType: "application/pdf" })
+      ).error,
+    ).toBeNull();
+    const paid = await runMutation(ctxOf(hr, "hr"), recordPaymentSpec, {
+      ...payment,
+      receiptId: real.receiptId,
+    });
+    const { data: row } = await admin
+      .from("statutory_payments")
+      .select("paid_amount_kobo, reference, recorded_by, receipt_id")
+      .eq("id", paid.paymentId)
+      .single();
+    expect(row).toEqual({
+      paid_amount_kobo: 120000,
+      reference: "NSITF-OCT",
+      recorded_by: hr.id,
+      receipt_id: real.receiptId,
+    });
+    const { data: receipt } = await admin
+      .from("statutory_receipts")
+      .select("checked_by, size_bytes, mime_type")
+      .eq("id", real.receiptId)
+      .single();
+    expect(receipt).toEqual({
+      checked_by: hr.id,
+      size_bytes: RECEIPT_PDF.length,
+      mime_type: "application/pdf",
+    });
+    // Paid now: no second upload is even started.
+    await expect(
+      runMutation(ctxOf(finance, "finance"), startReceiptSpec, {
+        remittanceId: rem.nsitf,
+        fileName: "again.pdf",
+        size: 10,
+      }),
+    ).rejects.toMatchObject({ code: "invalid" });
   });
 });
 

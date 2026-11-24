@@ -62,9 +62,13 @@ export async function approveRun(
 export async function seedSubmittedRun(
   admin: Client,
   owner: TenantUser,
-  options: { pfaName?: string | null; periodStart?: string } = {},
+  options: {
+    pfaName?: string | null;
+    periodStart?: string;
+    workerExtra?: Record<string, unknown>;
+  } = {},
 ): Promise<{ runId: string; workerId: string }> {
-  const { workerId, payRateId } = await addPayrollWorker(admin, owner.orgId);
+  const { workerId, payRateId } = await addPayrollWorker(admin, owner.orgId, options.workerExtra);
   const created = await owner.client.rpc("create_payroll_run", {
     p_organisation_id: owner.orgId,
     p_period_start: options.periodStart ?? OCT_START,
