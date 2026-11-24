@@ -100,8 +100,6 @@ create table public.payroll_runs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint payroll_runs_organisation_id_id_key unique (organisation_id, id),
-  constraint payroll_runs_rule_set_fkey foreign key (organisation_id, rule_set_id)
-    references public.tax_rule_sets (organisation_id, id),
   constraint payroll_runs_dates check (
     period_end >= period_start and pay_date >= period_start and pay_date <= period_end + 45
   ),
@@ -177,8 +175,6 @@ create table public.payslips (
     references public.payroll_runs (organisation_id, id),
   constraint payslips_worker_fkey foreign key (organisation_id, worker_id)
     references public.workers (organisation_id, id),
-  constraint payslips_rule_set_fkey foreign key (organisation_id, rule_set_id)
-    references public.tax_rule_sets (organisation_id, id),
   constraint payslips_net check (
     net_kobo = gross_kobo - paye_kobo - pension_employee_kobo - nhf_kobo - other_deductions_kobo
   ),
@@ -417,6 +413,13 @@ set search_path = ''
 as $$
 begin
   if tg_op = 'INSERT' then
+    -- No foreign key to tax_rule_sets (5.0's truncate guard must stay first): checked here.
+    if not exists (
+      select 1 from public.tax_rule_sets t
+      where t.organisation_id = new.organisation_id and t.id = new.rule_set_id
+    ) then
+      raise exception 'The run''s rule set isn''t one of the company''s.' using errcode = 'MLPRD';
+    end if;
     if new.status <> 'draft' or new.calculated_at is not null or new.submitted_at is not null
       or new.inputs_sha256 is not null or new.worker_count <> 0 or new.gross_kobo <> 0
       or new.net_kobo <> 0 or new.employer_cost_kobo <> 0 or not new.needs_recalculation then
@@ -551,6 +554,30 @@ revoke all on function private.payroll_anomalies_guard() from public, anon, auth
 
 create trigger payroll_anomalies_guard before insert or update or delete on public.payroll_anomalies
   for each row execute function private.payroll_anomalies_guard();
+
+-- A version of the payroll rules a run uses is never deleted (5.0's guard already keeps versions
+-- in force or past; this keeps a scheduled one a run snapshotted).
+create function private.tax_rule_sets_used_by_run()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if exists (
+    select 1 from public.payroll_runs r
+    where r.organisation_id = old.organisation_id and r.rule_set_id = old.id
+  ) then
+    raise exception 'A payroll run uses this version of the rules; it is kept.' using errcode = 'MLPR8';
+  end if;
+  return old;
+end;
+$$;
+
+revoke all on function private.tax_rule_sets_used_by_run() from public, anon, authenticated;
+
+create trigger tax_rule_sets_used_by_run before delete on public.tax_rule_sets
+  for each row execute function private.tax_rule_sets_used_by_run();
 
 -- Decisions are insert-only for everyone.
 create function private.payroll_insert_only_guard()

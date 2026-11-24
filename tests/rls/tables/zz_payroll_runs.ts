@@ -4,6 +4,9 @@
  * acknowledged, submitted), which fills all seven tables: payroll_runs, payslips, payslip_lines,
  * payslip_sources, payroll_adjustments, payroll_anomalies and payroll_run_decisions. Signed-in
  * roles have no write grants on any of them (the functions write), so every attack is 42501.
+ *
+ * Named to sort last: its seed adds a worker, and earlier seeds pick a company's first worker
+ * (`firstId(admin, "workers", ...)` in people.ts) for rows that must match their own worker.
  */
 import { randomUUID } from "node:crypto";
 

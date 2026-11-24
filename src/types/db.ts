@@ -859,12 +859,6 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "organisations"
       referencedColumns: ["id"]
-    },{
-      foreignKeyName: "payroll_runs_rule_set_fkey"
-      columns: ["organisation_id","rule_set_id"]
-isOneToOne: false
-      referencedRelation: "tax_rule_sets"
-      referencedColumns: ["organisation_id","id"]
     }
                   ]
                 },"payslip_lines": {
@@ -937,12 +931,6 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "organisations"
       referencedColumns: ["id"]
-    },{
-      foreignKeyName: "payslips_rule_set_fkey"
-      columns: ["organisation_id","rule_set_id"]
-isOneToOne: false
-      referencedRelation: "tax_rule_sets"
-      referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "payslips_run_fkey"
       columns: ["organisation_id","run_id"]

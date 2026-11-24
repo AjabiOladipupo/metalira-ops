@@ -19,6 +19,7 @@ import {
   type TenantUser,
   type TestUser,
 } from "./helpers/supabase";
+import { seedPayrollRun } from "./helpers/payroll";
 
 type Role = Database["public"]["Enums"]["membership_role"];
 
@@ -312,21 +313,43 @@ describe("when a correction is allowed", () => {
       "MLSI6",
     );
 
-    // A Phase 5 payslips table appears without the hook being updated: corrections fail closed.
+    // Slice 5.2: the payslips table exists with a real check (it replaced the fail-closed
+    // placeholder this test used to simulate): a payslip of a run past draft is a work record; a
+    // draft's payslip, replaced at each recalculation, isn't.
     // (Timesheet lines have a real check since slice 4.2: tests/rls/timesheets.test.ts.)
-    const worker = await addWorker();
-    await db.query("create table public.payslips (id uuid primary key)");
-    try {
-      const { rows: closed } = await db.query<{ has: boolean }>(
-        "select private.worker_has_work_records($1, $2) as has",
-        [owner.orgId, worker.id],
-      );
-      expect(closed[0]!.has).toBe(true);
-      const { error } = await raise(staff.hr.client, worker.id, `TIMESHEET-${counter}`);
-      expect(error?.code).toBe("MLSI6");
-    } finally {
-      await db.query("drop table public.payslips");
-    }
+    const run = await seedPayrollRun(admin, owner);
+    const has = async (workerId: string) =>
+      (
+        await db.query<{ has: boolean }>("select private.worker_has_work_records($1, $2) as has", [
+          owner.orgId,
+          workerId,
+        ])
+      ).rows[0]!.has;
+    expect(await has(run.workerId)).toBe(false);
+    const { data: anomalies } = await admin
+      .from("payroll_anomalies")
+      .select("id")
+      .eq("run_id", run.runId);
+    expect(
+      (
+        await owner.client.rpc("acknowledge_payroll_anomalies", {
+          p_organisation_id: owner.orgId,
+          p_run_id: run.runId,
+          p_anomaly_ids: (anomalies ?? []).map((a) => a.id),
+        })
+      ).error,
+    ).toBeNull();
+    expect(
+      (
+        await owner.client.rpc("submit_payroll_run", {
+          p_organisation_id: owner.orgId,
+          p_run_id: run.runId,
+        })
+      ).error,
+    ).toBeNull();
+    expect(await has(run.workerId)).toBe(true);
+    const { error } = await raise(staff.hr.client, run.workerId, `PAYSLIP-${counter}`);
+    expect(error?.code).toBe("MLSI6");
   });
 
   it("refuses a correction raised for a worker whose ID changed meanwhile", async () => {
