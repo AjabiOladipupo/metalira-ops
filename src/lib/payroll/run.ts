@@ -547,6 +547,7 @@ function storedSource(ref: PaySourceRef, period: { start: string; end: string })
       };
     case "leave_request":
     case "pay_rate":
+    case "leave_refund":
       return { kind: ref.kind, id: ref.id, from: ref.from, to: ref.to, off_day: false };
     case "adjustment":
       return { kind: ref.kind, id: ref.id, from: period.start, to: period.end, off_day: false };

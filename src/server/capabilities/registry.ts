@@ -249,6 +249,13 @@ import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
 import { bankFileIdSchema, downloadBankFileSpec, makeBankFileSpec } from "@/server/payroll/payouts";
 import { loadPayoutSummary } from "@/server/payroll/payouts-data";
 import { releaseRunSpec } from "@/server/payroll/release";
+import { loadCarriedDeductionsSummary } from "@/server/payroll/carried-data";
+import {
+  confirmSupplementSpec,
+  downloadSupplementSpec,
+  makeSupplementSpec,
+  supplementIdSchema,
+} from "@/server/payroll/supplements";
 import { loadRemittanceSummary } from "@/server/payroll/remittance-data";
 import {
   REMITTANCE_RECORDERS,
@@ -323,8 +330,10 @@ import {
   previewAddRuleSetVersion,
   previewApprovePayrollRun,
   previewCarryPayrollInstalment,
+  previewConfirmPayrollSupplement,
   previewCreatePayrollRun,
   previewMakePayrollBankFile,
+  previewMakePayrollSupplement,
   previewRecalculatePayrollRun,
   previewReleasePayrollRun,
   previewRemovePayrollAdjustment,
@@ -2939,6 +2948,64 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Releasing payroll is a person's confirmation, never anyone who prepared the run (rule 10); Lira never releases payroll.",
+  },
+  // -------------------------------------------------------------------------
+  // Supplementary payout files and carried deductions (payroll/payout-actions.ts, slice 5.7c)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.make_supplementary_file",
+    description:
+      "Makes a bank file for workers a released run's file left out, once their bank details are in force.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(makeSupplementSpec),
+    changes: "many",
+    action: at("payroll/payout-actions", "makeSupplementAction"),
+    preview: previewMakePayrollSupplement,
+    agent: false,
+    agentNote:
+      "Lira never makes, downloads or confirms a bank file (docs/PHASE_5.md decision 8; docs/LIRA.md: never moves money). It holds account numbers.",
+  },
+  {
+    name: "payroll.download_supplementary_file",
+    description:
+      "Opens a supplementary bank file for 60 seconds, for an owner or Finance; audited.",
+    kind: "read",
+    audience: "manager",
+    roles: fromSpec(downloadSupplementSpec).roles,
+    input: supplementIdSchema,
+    changes: "none",
+    action: at("payroll/payout-actions", "downloadSupplementAction"),
+    agent: false,
+    agentNote:
+      "A supplementary bank file holds account numbers (CLAUDE.md rule 9): only a person downloads it, on the screen.",
+  },
+  {
+    name: "payroll.confirm_supplementary_file",
+    description:
+      "Finance or the owner confirms a supplementary bank file went to the bank; never its maker or the run's preparer.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(confirmSupplementSpec),
+    changes: "many",
+    action: at("payroll/payout-actions", "confirmSupplementAction"),
+    preview: previewConfirmPayrollSupplement,
+    agent: false,
+    agentNote:
+      "Confirming a payment went to the bank is a person's statement (rule 10); Lira never confirms or releases payroll.",
+  },
+  {
+    name: "payroll.carried_deductions_summary",
+    description:
+      "Gives the total of carried deductions still owed and how many workers owe one, across posted runs.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadCarriedDeductionsSummary(supabase, organisationId),
+    agent: true,
   },
   // -------------------------------------------------------------------------
   // Payslips: PDFs, the worker app and notices (payroll/payslip-actions.ts, slice 5.5)

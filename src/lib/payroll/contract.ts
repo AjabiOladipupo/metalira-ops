@@ -21,7 +21,8 @@ export type EarningCode =
   | "public_holiday"
   | "leave_deduction" // negative
   | "adjustment_earning"
-  | "arrears";
+  | "arrears"
+  | "leave_refund"; // slice 5.7c: leave cancelled after a posted payslip deducted it
 
 /**
  * What a line pays, so a source is paid once (decision 10). The same shape as slice 5.1's
@@ -43,7 +44,12 @@ export type PaySourceRef =
     }
   | { kind: "leave_request"; id: string; from: string; to: string }
   | { kind: "pay_rate"; id: string; from: string; to: string }
-  | { kind: "adjustment"; id: string };
+  | { kind: "adjustment"; id: string }
+  /**
+   * Slice 5.7c: a refund of leave cancelled after a posted payslip deducted it, naming the
+   * deduction's exact days (paid once, as every source).
+   */
+  | { kind: "leave_refund"; id: string; from: string; to: string };
 
 export interface EarningLine {
   code: EarningCode;

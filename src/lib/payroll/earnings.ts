@@ -39,6 +39,11 @@
  *   on that day, without the salary a monthly worker was already paid; one line per earlier
  *   cycle.
  * - Absence without leave is flagged (no-show and rejected days), never deducted.
+ * - Leave arrears (slice 5.7c): unpaid or part-paid leave approved after its period was posted is
+ *   deducted now by the same leave rule, on that period's own rostered days (the posted payslip's
+ *   base and the worker's shifts then), one set of lines per leave request and period.
+ * - Leave refunds (slice 5.7c): leave cancelled after a posted payslip deducted it is paid back
+ *   line by line, exactly what each deduction line took (pensionable and taxable as it was).
  */
 
 import { addDays } from "@/lib/dates";
@@ -53,7 +58,9 @@ import {
   rosteredCalendar,
   type ArrearsDayInput,
   type CalendarDay,
+  type LeaveArrearsInput,
   type LeaveInput,
+  type LeaveRefundInput,
   type PayPeriod,
   type PayRateInput,
   type TimesheetDayInput,
@@ -96,6 +103,10 @@ export interface EarningsWorker {
   leave: readonly LeaveInput[];
   noShowDates: readonly string[];
   openLineCount: number;
+  /** Slice 5.7c: leave approved after its period was posted (deducted now). */
+  leaveArrears?: readonly LeaveArrearsInput[];
+  /** Slice 5.7c: leave cancelled after a posted payslip deducted it (refunded now). */
+  leaveRefunds?: readonly LeaveRefundInput[];
 }
 
 export interface EarningsInput {
@@ -301,6 +312,7 @@ interface Contribution {
     | "leave_deduction"
     | "adjustment_earning"
     | "arrears"
+    | "leave_refund"
   >;
   value: Fraction;
   minutes: number;
@@ -406,6 +418,7 @@ const ORDER: Record<EarningCode, number> = {
   arrears: 9,
   adjustment_earning: 10,
   leave_deduction: 11,
+  leave_refund: 12,
 };
 
 function plural(n: number, word: string): string {
@@ -428,6 +441,117 @@ function minDate(a: string | null, b: string | null): string | null {
 
 function clampRange(from: string, to: string | null, lo: string, hi: string): [string, string] {
   return [from > lo ? from : lo, to === null || to > hi ? hi : to];
+}
+
+/** The salary component a leave deduction line was for, from the engine's own label. */
+function componentOf(label: string): (typeof COMPONENTS)[number] | null {
+  const tail = label
+    .slice(label.lastIndexOf(", ") + 2)
+    .trim()
+    .toLowerCase();
+  return COMPONENTS.find((c) => c.label.toLowerCase() === tail) ?? null;
+}
+
+interface LeaveDeductionArgs {
+  requestId: string;
+  typeCode: string;
+  counting: "working_days" | "calendar_days";
+  percent: number;
+  belowService: boolean;
+  /** The leave's days inside the cycle the deduction is for. */
+  from: string;
+  to: string;
+  /** That cycle's rostered working days while employed. */
+  employedWorking: readonly CalendarDay[];
+  /** That cycle's rostered days (the proration base). */
+  rostered: number;
+  holidays: ReadonlySet<string>;
+  payRates: readonly PayRateInput[];
+  /** "Unpaid leave, 5 Oct to 9 Oct"; the day count and component follow. */
+  label: string;
+  /** Closes the label after the day count (arrears put it inside brackets). */
+  closeLabel?: string;
+  step: "leave_deduction" | "leave_arrears";
+}
+
+interface LeaveDeductionResult {
+  lines: EarningLine[];
+  trace: TraceStep;
+  days: number;
+  rates: string[];
+}
+
+/**
+ * One leave request's deduction for one cycle (open questions 3 and 4): monthly gross x the
+ * leave's rostered working days ÷ rostered days in the cycle x (100 − pay percent)%, rounded once
+ * and split across the salary components with allocateKobo. Public holidays are left out of a
+ * working-day leave's days (as the 4.4 leave counter does) but stay in the base; calendar-day leave
+ * keeps them. Null when it deducts nothing.
+ */
+function leaveDeduction(a: LeaveDeductionArgs): LeaveDeductionResult | null {
+  const perRate = new Map<string, { rate: PayRateInput; days: number }>();
+  for (const day of a.employedWorking) {
+    if (day.date < a.from || day.date > a.to) continue;
+    if (a.counting === "working_days" && a.holidays.has(day.date)) continue;
+    const rate = versionOn(a.payRates, day.date);
+    if (!rate || rate.payType !== "monthly") continue;
+    const entry = perRate.get(rate.id) ?? { rate, days: 0 };
+    entry.days += 1;
+    perRate.set(rate.id, entry);
+  }
+  const days = [...perRate.values()].reduce((n, e) => n + e.days, 0);
+  if (days === 0 || a.rostered === 0) return null;
+  const unpaid = BigInt(100 - a.percent);
+  const weights = COMPONENTS.map((_, i) =>
+    [...perRate.values()].reduce(
+      (sum, e) => sum + (componentAmounts(e.rate)[i] ?? 0n) * BigInt(e.days) * unpaid,
+      0n,
+    ),
+  );
+  const total = roundHalfUp(
+    weights.reduce((x, y) => x + y, 0n),
+    BigInt(a.rostered) * 100n,
+  );
+  if (total === 0n) return null;
+  const parts = allocateKobo(total, weights);
+  const label =
+    a.closeLabel !== undefined
+      ? `${a.label}, ${plural(days, "day")}${a.closeLabel}`
+      : `${a.label} (${plural(days, "day")})`;
+  const lines: EarningLine[] = [];
+  COMPONENTS.forEach((component, i) => {
+    const amount = parts[i] ?? 0n;
+    if (amount === 0n) return;
+    lines.push({
+      code: "leave_deduction",
+      label: `${label}, ${component.label.toLowerCase()}`,
+      amountKobo: -amount,
+      pensionable: component.pensionable,
+      nhfBase: component.nhfBase,
+      taxable: true,
+      sources: [{ kind: "leave_request", id: a.requestId, from: a.from, to: a.to }],
+    });
+  });
+  return {
+    lines,
+    days,
+    rates: [...perRate.keys()],
+    trace: {
+      step: a.step,
+      label,
+      formula:
+        "monthly gross x leave days ÷ rostered days in the cycle x (100 − pay percent)%, rounded once",
+      inputs: {
+        leave_days: days,
+        rostered_days: a.rostered,
+        pay_percent: a.percent,
+        below_service: a.belowService ? 1 : 0,
+        type: a.typeCode,
+      },
+      valueKobo: -total,
+      ruleRef: a.belowService ? "leave.pay_below_service" : "leave.pay_percent",
+    },
+  };
 }
 
 /** The worker's earning lines for the cycle, with the trace (see the file header). */
@@ -734,65 +858,94 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     const percent = leave.payBelowService ? 0 : leave.payPercent;
     const [from, to] = clampRange(leave.startDate, leave.endDate, period.start, period.end);
     if (from > to || percent >= 100) continue;
-    const perRate = new Map<string, { rate: PayRateInput; days: number }>();
-    for (const day of employedWorking) {
-      // Public holidays are left out of a working-day leave's days, as the 4.4 leave counter does;
-      // they stay in the rostered-day base, so the worker keeps the holiday's pay. Calendar-day
-      // leave (maternity) keeps them: the leave covers every day.
-      if (day.date < from || day.date > to) continue;
-      if (leave.counting === "working_days" && holidays.has(day.date)) continue;
-      const rate = versionOn(worker.payRates, day.date);
-      if (!rate || rate.payType !== "monthly") continue;
-      const entry = perRate.get(rate.id) ?? { rate, days: 0 };
-      entry.days += 1;
-      perRate.set(rate.id, entry);
-    }
-    const days = [...perRate.values()].reduce((n, e) => n + e.days, 0);
-    if (days === 0 || rostered === 0) continue;
-    const unpaid = BigInt(100 - percent);
-    const weights = COMPONENTS.map((_, i) =>
-      [...perRate.values()].reduce(
-        (sum, e) => sum + (componentAmounts(e.rate)[i] ?? 0n) * BigInt(e.days) * unpaid,
-        0n,
-      ),
-    );
-    const den = BigInt(rostered) * 100n;
-    const total = roundHalfUp(
-      weights.reduce((a, b) => a + b, 0n),
-      den,
-    );
-    if (total === 0n) continue;
-    leaveDeducted += days;
-    const parts = allocateKobo(total, weights);
     const what = percent === 0 ? "Unpaid leave" : `Leave paid at ${percent}%`;
-    const label = `${what}, ${formatLeaveRange(from, to, false)} (${plural(days, "day")})`;
-    COMPONENTS.forEach((component, i) => {
-      const amount = parts[i] ?? 0n;
-      if (amount === 0n) return;
-      lines.push({
-        code: "leave_deduction",
-        label: `${label}, ${component.label.toLowerCase()}`,
-        amountKobo: -amount,
-        pensionable: component.pensionable,
-        nhfBase: component.nhfBase,
-        taxable: true,
-        sources: [{ kind: "leave_request", id: leave.requestId, from, to }],
-      });
-    });
-    trace.push({
+    const out = leaveDeduction({
+      requestId: leave.requestId,
+      typeCode: leave.typeCode,
+      counting: leave.counting,
+      percent,
+      belowService: leave.payBelowService === true,
+      from,
+      to,
+      employedWorking,
+      rostered,
+      holidays,
+      payRates: worker.payRates,
+      label: `${what}, ${formatLeaveRange(from, to, false)}`,
       step: "leave_deduction",
-      label,
-      formula:
-        "monthly gross x leave days ÷ rostered days in the cycle x (100 − pay percent)%, rounded once",
-      inputs: {
-        leave_days: days,
-        rostered_days: rostered,
-        pay_percent: percent,
-        below_service: leave.payBelowService ? 1 : 0,
-        type: leave.typeCode,
-      },
-      valueKobo: -total,
-      ruleRef: leave.payBelowService ? "leave.pay_below_service" : "leave.pay_percent",
+    });
+    if (!out) continue;
+    leaveDeducted += out.days;
+    lines.push(...out.lines);
+    trace.push(out.trace);
+  }
+
+  // --- Leave arrears: approved after its period was posted (slice 5.7c) ---------------------
+  for (const leave of worker.leaveArrears ?? []) {
+    if (leave.payPercent === null) {
+      flags.add("leave_pay_missing");
+      continue;
+    }
+    const percent = leave.payBelowService ? 0 : leave.payPercent;
+    if (percent >= 100 || leave.from > leave.to) continue;
+    // The posted period's own calendar: the worker's shifts then, else their usual days.
+    const earlier = rosteredCalendar(
+      { start: leave.periodStart, end: leave.periodEnd },
+      { ...worker, shifts: leave.shifts },
+      input.defaultWorkDays,
+    ).filter((d) => d.working && d.employed);
+    const what = percent === 0 ? "Unpaid leave" : `Leave paid at ${percent}%`;
+    const out = leaveDeduction({
+      requestId: leave.requestId,
+      typeCode: leave.typeCode,
+      counting: leave.counting,
+      percent,
+      belowService: leave.payBelowService === true,
+      from: leave.from,
+      to: leave.to,
+      employedWorking: earlier,
+      rostered: leave.rosteredDays,
+      holidays,
+      payRates: worker.payRates,
+      label: `${what} in ${formatLeaveRange(leave.periodStart, leave.periodEnd, false)}, approved after posting (${formatLeaveRange(leave.from, leave.to, false)}`,
+      closeLabel: ")",
+      step: "leave_arrears",
+    });
+    if (!out) continue;
+    for (const id of out.rates) usedRates.add(id);
+    lines.push(...out.lines);
+    trace.push(out.trace);
+  }
+
+  // --- Leave refunds: cancelled after a posted payslip deducted it (slice 5.7c) -------------
+  for (const refund of worker.leaveRefunds ?? []) {
+    const range = formatLeaveRange(refund.periodStart, refund.periodEnd, false);
+    const days = formatLeaveRange(refund.from, refund.to, false);
+    let total = 0n;
+    for (const line of refund.lines) {
+      // Each deduction line is paid back as it was posted (never more, never less).
+      if (line.amountKobo >= 0n) continue;
+      const component = componentOf(line.label);
+      const amount = -line.amountKobo;
+      total += amount;
+      lines.push({
+        code: "leave_refund",
+        label: `Leave refund in ${range}, cancelled after posting (${days})${component ? `, ${component.label.toLowerCase()}` : ""}`,
+        amountKobo: amount,
+        pensionable: line.pensionable,
+        nhfBase: component?.nhfBase ?? false,
+        taxable: line.taxable,
+        sources: [{ kind: "leave_refund", id: refund.requestId, from: refund.from, to: refund.to }],
+      });
+    }
+    if (total === 0n) continue;
+    trace.push({
+      step: "leave_refund",
+      label: `Leave refund in ${range}, cancelled after posting (${days})`,
+      formula: "what the posted payslip's leave deduction took, line by line",
+      inputs: { lines: refund.lines.length, deducted_kobo: (-total).toString() },
+      valueKobo: total,
+      ruleRef: "earnings.leave_refund",
     });
   }
 

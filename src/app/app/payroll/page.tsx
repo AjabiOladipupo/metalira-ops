@@ -9,11 +9,13 @@ import { addDays, formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira } from "@/lib/money";
 import { RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
+import { loadCarriedDeductions } from "@/server/payroll/carried-data";
 import { listRuns } from "@/server/payroll/run-data";
 import { canPreparePayroll } from "@/server/payroll/runs";
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../_shell/slots";
+import { CarriedPanel } from "./_components/carried-panel";
 import { CreateRunForm } from "./_components/run-forms";
 
 export const metadata: Metadata = { title: "Payroll run" };
@@ -22,6 +24,7 @@ async function PayrollRunsPage() {
   const ctx = await peoplePageContext();
   const runs = await listRuns(ctx.supabase, ctx.organisationId);
   const canPrepare = canPreparePayroll(ctx.role);
+  const carried = await loadCarriedDeductions(ctx.supabase, ctx.organisationId);
 
   // The period holding today and the five before it, without a run yet.
   const periods: { value: string; label: string; payDate: string }[] = [];
@@ -128,6 +131,8 @@ async function PayrollRunsPage() {
           </table>
         </div>
       )}
+
+      <CarriedPanel data={carried} />
     </>
   );
 }

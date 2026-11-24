@@ -14,6 +14,12 @@ import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payr
 import { previewMakeBankFile, type makeBankFileSchema } from "@/server/payroll/payouts";
 import { previewRelease, type releaseRunSchema } from "@/server/payroll/release";
 import {
+  previewConfirmSupplement,
+  previewMakeSupplement,
+  type confirmSupplementSchema,
+  type makeSupplementSchema,
+} from "@/server/payroll/supplements";
+import {
   previewAcknowledge,
   previewAddAdjustment,
   previewApprove,
@@ -106,6 +112,15 @@ export const previewMakePayrollBankFile: PreviewFn<typeof makeBankFileSchema> = 
   previewMakeBankFile(ctx, ctx.data);
 export const previewReleasePayrollRun: PreviewFn<typeof releaseRunSchema> = (ctx) =>
   previewRelease(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// Supplementary payout files (slice 5.7c)
+// ---------------------------------------------------------------------------
+
+export const previewMakePayrollSupplement: PreviewFn<typeof makeSupplementSchema> = (ctx) =>
+  previewMakeSupplement(ctx, ctx.data);
+export const previewConfirmPayrollSupplement: PreviewFn<typeof confirmSupplementSchema> = (ctx) =>
+  previewConfirmSupplement(ctx, ctx.data);
 
 // ---------------------------------------------------------------------------
 // Statutory remittances (slice 5.6)

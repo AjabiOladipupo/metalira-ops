@@ -21,6 +21,16 @@ import {
 } from "./payouts";
 import { onPayrollReleased, previewRelease, releaseRunSchema, releaseRunSpec } from "./release";
 import type { RunFormState } from "./run-actions";
+import {
+  confirmSupplementSchema,
+  confirmSupplementSpec,
+  downloadSupplementSpec,
+  makeSupplementSchema,
+  makeSupplementSpec,
+  previewConfirmSupplement,
+  previewMakeSupplement,
+  type MadeSupplement,
+} from "./supplements";
 
 /**
  * Server Actions for the run's Pay step (slice 5.4). Making the file and releasing are money
@@ -72,6 +82,8 @@ function previewSpec<S extends z.ZodType>(
 
 const previewMakeSpec = previewSpec(makeBankFileSchema, previewMakeBankFile);
 const previewReleaseSpec = previewSpec(releaseRunSchema, previewRelease);
+const previewMakeSupplementSpec = previewSpec(makeSupplementSchema, previewMakeSupplement);
+const previewConfirmSupplementSpec = previewSpec(confirmSupplementSchema, previewConfirmSupplement);
 
 async function twoStep<R>(
   formData: FormData,
@@ -154,6 +166,63 @@ export async function downloadBankFileAction(input: unknown): Promise<DownloadRe
     const cause = error instanceof MutationError ? error.cause : error;
     console.error(
       "payroll_bank_file.download_failed:",
+      cause instanceof Error ? cause.name : "unknown error",
+    );
+    return { ok: false, message: "The file didn't open. Try again in a minute." };
+  }
+}
+
+/**
+ * "Make a supplementary file" (slice 5.7c): preview (who it pays, the total, who still waits), then
+ * make, store and record a bank file for workers the released run's file left out.
+ */
+export async function makeSupplementAction(
+  _prev: RunFormState,
+  formData: FormData,
+): Promise<RunFormState> {
+  return twoStep(
+    formData,
+    previewMakeSupplementSpec as MutationSpec<z.ZodType, CapabilityPreview>,
+    makeSupplementSpec as MutationSpec<z.ZodType, MadeSupplement>,
+    (made) => {
+      revalidatePath(`${PAYROLL_PATH}/${made.runId}`);
+      return {
+        ok: true,
+        status: 200,
+        message: `Supplementary file made: ${made.itemCount} ${made.itemCount === 1 ? "worker" : "workers"}. Check the control totals, then download it.`,
+      };
+    },
+  );
+}
+
+/** "I uploaded it to the bank" for a supplementary file: preview, then confirm (slice 5.7c). */
+export async function confirmSupplementAction(
+  _prev: RunFormState,
+  formData: FormData,
+): Promise<RunFormState> {
+  return twoStep(
+    formData,
+    previewConfirmSupplementSpec as MutationSpec<z.ZodType, CapabilityPreview>,
+    confirmSupplementSpec as MutationSpec<z.ZodType, { runId: string; supplementId: string }>,
+    (r) => {
+      revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
+      return { ok: true, status: 200, message: "Confirmed. Those workers are paid." };
+    },
+  );
+}
+
+/** "Download" a supplementary file: a 60-second link (owner or finance); audited. */
+export async function downloadSupplementAction(input: unknown): Promise<DownloadResult> {
+  try {
+    return { ok: true, ...(await mutate(downloadSupplementSpec, input)) };
+  } catch (error) {
+    if (error instanceof MutationError && error.code === "unauthenticated") redirect(SIGN_IN_PATH);
+    if (error instanceof MutationError && error.code !== "failed") {
+      return { ok: false, message: error.message };
+    }
+    const cause = error instanceof MutationError ? error.cause : error;
+    console.error(
+      "payroll_supplementary_file.download_failed:",
       cause instanceof Error ? cause.name : "unknown error",
     );
     return { ok: false, message: "The file didn't open. Try again in a minute." };

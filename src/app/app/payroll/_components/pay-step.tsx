@@ -10,6 +10,7 @@ import type { RunDetail } from "@/server/payroll/run-data";
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { DownloadBankFileButton, MakeBankFileForm, ReleaseRunForm } from "./pay-forms";
+import { SupplementSection } from "./supplement-section";
 
 const naira = (k: Kobo) => formatNaira(k, { whole: true });
 const TH = "px-3 py-2.5 text-left font-semibold whitespace-nowrap";
@@ -186,30 +187,16 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
         </p>
       ) : null}
 
-      {released && leftOut.length > 0 ? (
-        <section
-          aria-labelledby="outstanding"
-          className="flex flex-col gap-2 rounded-xl border border-foreground p-4"
-          data-testid="outstanding"
-        >
-          <h3 id="outstanding" className="m-0 type-h3">
-            {leftOut.length} outstanding ·{" "}
-            {naira(leftOut.reduce((n, i) => n + (netOf.get(i.payslipId) ?? 0n), 0n))}
-          </h3>
-          <p className="m-0 text-sm text-fg-muted">
-            Not in this file, so not paid by it. Their payslips stand; pay them outside the file
-            until corrections and supplementary files come (slice 5.7).
-          </p>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
-            {leftOut.map((i) => (
-              <li key={i.id}>
-                <span className="font-semibold">{i.workerName}</span> ·{" "}
-                {naira(netOf.get(i.payslipId) ?? 0n)} ·{" "}
-                {i.leftOutReason ? LEFT_OUT_LABEL[i.leftOutReason] : "Not in this file"}
-              </li>
-            ))}
-          </ul>
-        </section>
+      {released ? (
+        <SupplementSection
+          supabase={ctx.supabase}
+          organisationId={ctx.organisationId}
+          runId={run.id}
+          leftOut={leftOut}
+          netOf={netOf}
+          canMake={canMake}
+          names={new Map([...d.names, ...payout.people])}
+        />
       ) : null}
 
       {!released && canMake ? (

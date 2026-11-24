@@ -7,7 +7,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
 import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
-import { parsePayrollInputs, type PayrollInputs } from "@/lib/payroll/inputs";
+import {
+  parseLeaveCorrections,
+  parsePayrollInputs,
+  type LeaveCorrections,
+  type PayrollInputs,
+} from "@/lib/payroll/inputs";
 import { NTA_2025_V1, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set";
 import {
   canonicalJson,
@@ -290,6 +295,25 @@ async function openDaysBySite(
   }));
 }
 
+/** Slice 5.7c: the run's leave corrections (`payroll_leave_corrections`), as the signed-in user. */
+async function loadLeaveCorrections(
+  supabase: Client,
+  organisationId: string,
+  periodStart: string,
+  workerIds: readonly string[],
+  runId: string | null,
+): Promise<{ raw: unknown; parsed: LeaveCorrections }> {
+  const { data, error } = await supabase.rpc("payroll_leave_corrections", {
+    p_organisation_id: organisationId,
+    p_period_start: periodStart,
+    p_worker_ids: [...workerIds],
+    ...(runId ? { p_run_id: runId } : {}),
+  });
+  // The code only: the message can name the period or the company.
+  if (error) throw new Error(`Could not read leave corrections (${error.code})`);
+  return { raw: data, parsed: parseLeaveCorrections(data) };
+}
+
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -318,6 +342,15 @@ export async function calculateRun(
   if (error) throw new Error(`Could not read pay inputs (${error.code})`);
   const inputs: PayrollInputs = parsePayrollInputs(raw);
   const period = inputs.period;
+  // Slice 5.7c: leave decided after its period was posted (arrears and refunds), read beside the
+  // inputs as the same user and hashed with them.
+  const corrections = await loadLeaveCorrections(
+    supabase,
+    organisationId,
+    period.start,
+    inputs.workers.map((w) => w.workerId),
+    target.runId,
+  );
 
   // Decision 15: one rule set for the whole run, the version in force on the pay date.
   const versions = await ruleSetVersions(supabase, organisationId);
@@ -368,7 +401,7 @@ export async function calculateRun(
           period,
           holidays: inputs.holidays,
           defaultWorkDays: inputs.organisation.defaultWorkDays,
-          worker: w,
+          worker: { ...w, ...corrections.parsed.byWorker.get(w.workerId) },
           policyOn,
         },
         policy,
@@ -502,6 +535,9 @@ export async function calculateRun(
         policy: v.policy,
       })),
       inputs: raw,
+      // Present only when there is something to correct, so runs without corrections keep the
+      // hash they had before slice 5.7c.
+      ...(corrections.parsed.byWorker.size > 0 ? { leave_corrections: corrections.raw } : {}),
       adjustments: [...adjustments].sort((a, b) => a.id.localeCompare(b.id)),
       bank: bank.fingerprint,
       previous: {
