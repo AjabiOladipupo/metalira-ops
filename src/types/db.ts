@@ -2510,11 +2510,11 @@ isOneToOne: false
 "record_payroll_approval_check":
 { Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_read_started_at": string,"p_run_id": string }; Returns: Json
                            },
-"record_payslip_document":
-{ Args: { "p_actor": string,"p_organisation_id": string,"p_payslip_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string
-                           },
 "record_payroll_file_sweep":
 { Args: { "p_organisation_id": string,"p_paths": (string)[] }; Returns: string
+                           },
+"record_payslip_document":
+{ Args: { "p_actor": string,"p_organisation_id": string,"p_payslip_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string
                            },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json

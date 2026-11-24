@@ -860,7 +860,8 @@ declare
   v_left integer;
   v_total bigint;
   v_left_kobo bigint;
-  v_downloaded record;
+  -- When the current file was last downloaded (null: never, or no current file).
+  v_downloaded_at timestamptz;
 begin
   if p_run_id is null or p_batch_id is null then
     raise exception 'Name the run and the file.' using errcode = '22023';
@@ -904,13 +905,13 @@ begin
   -- Money review H1: a file someone downloaded may be at the bank already. Replacing it needs the
   -- caller's explicit statement that it wasn't uploaded, kept in the void reason and the audit row.
   if v_active.id is not null then
-    select l.actor_id, l.at into v_downloaded
+    select l.at into v_downloaded_at
     from public.audit_log l
     where l.organisation_id = p_organisation_id and l.action = 'payroll.bank_file_downloaded'
       and l.entity = 'payout_batches' and l.entity_id = v_active.id
     order by l.at desc
     limit 1;
-    if v_downloaded.at is not null then
+    if v_downloaded_at is not null then
       if not coalesce(p_not_uploaded, false) then
         raise exception 'The current file was downloaded. Confirm it wasn''t uploaded to the bank before replacing it, or two files may be paid.'
           using errcode = 'MLBFB';
@@ -1052,8 +1053,8 @@ begin
       'run_id', p_run_id, 'batch_id', p_batch_id, 'bank_format', p_bank_format,
       'item_count', v_count, 'total_kobo', v_total::text, 'left_out_count', v_left,
       'file_sha256', p_file_sha256, 'voided_batch_id', v_active.id,
-      'replaced_was_downloaded', v_downloaded.at is not null,
-      'not_uploaded_attested', v_downloaded.at is not null and coalesce(p_not_uploaded, false)
+      'replaced_was_downloaded', v_downloaded_at is not null,
+      'not_uploaded_attested', v_downloaded_at is not null and coalesce(p_not_uploaded, false)
     ),
     v_reason
   );
