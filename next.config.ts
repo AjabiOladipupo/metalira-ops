@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  // Payslip PDFs (slice 5.5) embed Inter from src/server/payroll/fonts, read from disk when a
+  // run's payslips are published from the payroll pages.
+  outputFileTracingIncludes: {
+    "/app/payroll/**": ["src/server/payroll/fonts/*.ttf"],
+  },
   async headers() {
     return [
       {

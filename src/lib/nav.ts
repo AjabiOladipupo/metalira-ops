@@ -285,6 +285,8 @@ export const EXTRA_PAGES: readonly {
   { href: "/app/settings/payroll/new", roles: ["owner", "hr"], module: "payroll" },
   // Slice 5.2: a payroll run's page (owner, hr, finance; hr and owner prepare, finance decides).
   { href: "/app/payroll/[id]", roles: ["owner", "hr", "finance"], module: "payroll" },
+  // Slice 5.5: a run's payslips with their PDFs (owner, hr, finance).
+  { href: "/app/payroll/[id]/payslips", roles: ["owner", "hr", "finance"], module: "payroll" },
   // Slice 4.4: leave balances (and HR's adjustments). Ops managers read requests' dates and type
   // only, never balances. A request's own page follows Leave.
   { href: "/app/leave/balances", roles: ["owner", "admin", "hr", "line_manager"] },
