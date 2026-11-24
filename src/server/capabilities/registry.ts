@@ -117,6 +117,12 @@ import {
   setWorkWeekSpec,
 } from "@/server/people/leave-setup";
 import { loadHolidays, loadLeaveSetupSummary } from "@/server/people/leave-setup-data";
+import {
+  PAYROLL_RULES_READERS,
+  addRuleSetVersionSpec,
+  confirmRuleSetSpec,
+} from "@/server/payroll/rule-sets";
+import { loadPayrollRulesSummary } from "@/server/payroll/rule-sets-data";
 import { holidayYearSchema } from "@/server/people/leave-setup-schemas";
 import { loadBalances, loadLeaveRequests, loadLeaveSummary } from "@/server/people/leave-data";
 import {
@@ -278,6 +284,7 @@ import {
   previewHrLeaveDecision,
   previewPreset,
 } from "./leave-previews";
+import { previewAddRuleSetVersion } from "./payroll-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { previewApproveClean, previewCorrection } from "./timesheet-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
@@ -2470,6 +2477,48 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/leave-setup-actions", "applyPresetAction"),
     preview: previewPreset,
     agent: true,
+  },
+
+  // -------------------------------------------------------------------------
+  // Payroll rules (payroll/rule-sets-actions.ts, slice 5.0)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.rules_summary",
+    description:
+      "Names the payroll rule set in force, its start, whether the tax adviser confirmed it, and versions scheduled.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_RULES_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadPayrollRulesSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "payroll.add_rule_set_version",
+    description:
+      "Adds a dated version of the PAYE bands, reliefs, pension, NHF, levies and pay policy from tomorrow or later.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(addRuleSetVersionSpec),
+    changes: "many",
+    action: at("payroll/rule-sets-actions", "addRuleSetVersionAction"),
+    preview: previewAddRuleSetVersion,
+    agent: false,
+    agentNote:
+      "Changes how every payslip is worked out: kept to the owner or HR, on the screen, after the tax adviser's advice.",
+  },
+  {
+    name: "payroll.confirm_rule_set",
+    description: "Records, once, that the company's tax adviser confirmed a version of the payroll rules.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(confirmRuleSetSpec),
+    changes: "one",
+    action: at("payroll/rule-sets-actions", "confirmRuleSetAction"),
+    agent: false,
+    agentNote: "A statement about the tax adviser's advice: only the owner can make it.",
   },
 
   // -------------------------------------------------------------------------

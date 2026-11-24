@@ -60,6 +60,7 @@ These are the plan's defaults. Every statutory figure below is **confirm with a 
 12. **The bank file is pluggable.** One generic CSV format first; each pilot's bank bulk-payment template is added as a format when the owner supplies it.
 13. **Levies per worker.** Employer pension, NSITF and ITF are worked out per payslip and rounded per line; the remittance is the sum of the lines, so Phase 7's per-site labour cost adds up to the remittance to the kobo.
 14. **Payslip PDFs** are made once at release with `@react-pdf/renderer`, stored in a private bucket with their SHA-256, and opened by 60-second signed URLs: the worker their own, owner, hr and finance any. They show masked bank account and RSA PIN (last 4) only.
+15. **One rule set per run** (coordinator, 23 Nov 2026, from the 5.0 money review). A payroll run uses one `tax_rule_sets` version: the one in force on the run's pay date (the 25th, clamped to the month), snapshotted on the run by 5.2 (`private.tax_rule_set_on(org, date)`). The pay-policy figures (overtime multiplier, off-day minutes) are taken per day, from the version in force on the day worked.
 
 ### Choices made in this plan (recommended defaults; the owner can overturn any)
 
@@ -111,7 +112,7 @@ holidays, adjustments      public holiday, leave,      cut to fit
 
 - `src/lib/payroll/rule-set.ts`: the rule set type, a Zod schema for `tax_rule_sets.rules`, and `NTA_2025_V1`, the starting values, which must equal RULES_NIGERIA.md (a unit test compares them figure by figure, as `src/lib/leave/presets.ts` does).
 - `src/lib/payroll/paye.ts`: annual tax on taxable kobo through the bands, kept as an exact fraction (kobo × basis points), and `monthlyPaye` that divides by 12 and rounds half up once.
-- `src/lib/payroll/gross-to-net.ts` (5.0): `grossToNet(input: GrossToNetInput, rules: RuleSet): PayslipResult`.
+- `src/lib/payroll/gross-to-net.ts` (5.0): `grossToNet(input: GrossToNetInput, rules: RuleSet, options: GrossToNetOptions): PayslipResult`, where `options` is `{ itfApplies: boolean; ruleSetId?: string | null; priorTrace?: TraceStep[] }` (ITF is a per-run choice, open question 14).
 - `src/lib/payroll/earnings.ts` (5.1): `computeEarnings(input: PayInputs, policy: PayPolicy): EarningsResult`, which returns the earning lines and the trace steps that `grossToNet` continues.
 - `src/lib/payroll/trace.ts`: the trace's shape and the text the Explain panel shows ("Gross pay (₦120,000 × 12)", "Less employee pension 8%", "15% on ₦452,800").
 
@@ -148,6 +149,8 @@ interface PayslipResult {
   lines: PayslipLine[]; trace: TraceStep[]; flags: AnomalyCode[];
 }
 ```
+
+As built in 5.0: the contract types are in `src/lib/payroll/contract.ts`, with `PaySourceRef` in 5.1's shape. The rule set decides which salary components (`basic`, `housing`, `transport`, `other_allowances`) count toward the pension and NHF bases; a line's own `pensionable` and `nhfBase` flags count only for other codes, and an overridden flag is recorded in the trace (`base_override`). In memory a `TraceStep` has 5.1's shape (`valueKobo: bigint | null`, `ruleRef`, camel case); `storedTrace()` in `src/lib/payroll/trace.ts` gives the stored jsonb (`value_kobo` as a string, `rule_ref`). 5.2 keeps one definition of `EarningLine` and `TraceStep` (5.1's `earning-lines.ts` and 5.0's `contract.ts` / `trace.ts` agree in shape).
 
 ### Inputs (5.1)
 

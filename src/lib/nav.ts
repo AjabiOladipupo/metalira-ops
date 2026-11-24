@@ -264,7 +264,12 @@ export function homeCopy(modules: Modules): { description: string; empty: string
  * import included). A segment written `[name]` matches any one segment
  * (`/app/people/[id]/edit`). The most specific match (most segments) wins over NAV.
  */
-export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = [
+export const EXTRA_PAGES: readonly {
+  href: string;
+  roles: readonly Role[];
+  /** The module the page belongs to when it isn't its nav item's (Settings > Payroll rules). */
+  module?: ModuleId;
+}[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
   // Slice 2.3: the company's collection bank account. Finance approves changes to it.
@@ -273,6 +278,10 @@ export const EXTRA_PAGES: readonly { href: string; roles: readonly Role[] }[] = 
   // Slice 4.1: leave types, presets, holidays and the working week.
   { href: "/app/settings/leave", roles: ["owner", "admin", "hr"] },
   { href: "/app/settings/holidays", roles: ["owner", "admin", "hr"] },
+  // Slice 5.0: payroll rules. Owner, hr and finance read; owner and hr add a version (admins see
+  // no payroll, PHASE_5 decision 8). Part of Payroll: hidden when the company has it off.
+  { href: "/app/settings/payroll", roles: ["owner", "hr", "finance"], module: "payroll" },
+  { href: "/app/settings/payroll/new", roles: ["owner", "hr"], module: "payroll" },
   // Slice 4.4: leave balances (and HR's adjustments). Ops managers read requests' dates and type
   // only, never balances. A request's own page follows Leave.
   { href: "/app/leave/balances", roles: ["owner", "admin", "hr", "line_manager"] },
@@ -353,10 +362,13 @@ function roleMayOpen(role: Role, pathname: string): boolean {
 }
 
 /**
- * The module `pathname` belongs to: the module of the nav item whose route contains it
- * (`/app/people/[id]/edit` and `/app/people/import` belong to People), or null.
+ * The module `pathname` belongs to: an extra page's own module (Settings > Payroll rules belongs
+ * to Payroll), else the module of the nav item whose route contains it (`/app/people/[id]/edit`
+ * and `/app/people/import` belong to People), or null.
  */
 export function moduleForHref(pathname: string): ModuleId | null {
+  const extra = extraPage(pathname);
+  if (extra?.module) return extra.module;
   const href = activeNavHref(pathname);
   if (!href) return null;
   return findNavItem(href).module ?? null;
