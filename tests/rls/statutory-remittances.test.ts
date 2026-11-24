@@ -337,7 +337,9 @@ describe("payments: once, with a receipt, voided with a reason", () => {
       "MLSR3",
     );
     // A receipt of another remittance.
-    expect((await record(hr, rem.paye!, mine.receiptId)).error?.code).toBe("MLSR2");
+    expect((await record(hr, rem.paye!, mine.receiptId, { amount: "100000" })).error?.code).toBe(
+      "MLSR2",
+    );
     // Roles that don't record.
     for (const by of [lineManager, adminRole, workerUser]) {
       expect((await record(by, rem.pension!, mine.receiptId)).error?.code, by.email).toBe(DENIED);

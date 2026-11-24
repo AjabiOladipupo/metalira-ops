@@ -7,7 +7,7 @@
  * refused. Finance's membership is removed again after seeding, so the company's only member
  * stays its owner (isolation.test.ts checks that).
  *
- * Named to sort after zz_payroll_runs.ts, whose run it approves.
+ * Named to sort after zz_payroll_runs.ts, whose run in review it approves.
  */
 import { randomUUID } from "node:crypto";
 
@@ -57,13 +57,22 @@ export const tables: TableSpec[] = [
     }),
     { due_date: "2030-01-01" },
     async ({ admin, side }) => {
-      const runId = await firstId(admin, "payroll_runs", side.orgId);
+      // zz_payroll_runs.ts's October run, still in review (5.5's seed adds a released June run).
+      const { data: run, error: runError } = await admin
+        .from("payroll_runs")
+        .select("id")
+        .eq("organisation_id", side.orgId)
+        .eq("status", "review")
+        .single();
+      if (runError) throw new Error(`payroll_runs: ${runError.message}`);
+      const runId = run.id;
       const finance = await addFinance(admin, side.orgId, "iso-stat-fin");
       await approveRun(admin, side.orgId, runId, finance);
       const { data: paye, error } = await admin
         .from("statutory_remittances")
         .select("id")
         .eq("organisation_id", side.orgId)
+        .eq("run_id", runId)
         .eq("kind", "paye")
         .single();
       if (error) throw new Error(`statutory_remittances: ${error.message}`);
