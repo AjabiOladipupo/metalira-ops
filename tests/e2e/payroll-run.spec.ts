@@ -110,6 +110,7 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
 
   // Explain: how Musa Ibrahim's PAYE is worked out.
   await page.getByRole("link", { name: "Explain Musa Ibrahim" }).click();
+  await expect(page).toHaveURL(/explain=/);
   const explain = page.getByTestId("explain");
   await expect(explain).toContainText("How Musa Ibrahim's PAYE is worked out");
   await expect(explain).toContainText("Gross pay (₦120,000 × 12)");
@@ -121,6 +122,7 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
     .getByRole("link", { name: /Submit$/ })
     .first()
     .click();
+  await expect(page).toHaveURL(/step=submit/);
   const submit = page.getByRole("form", { name: "Submit to Finance" });
   await submit.getByRole("button", { name: "Submit to Finance" }).click();
   await expect(submit.getByTestId("run-preview")).toContainText("Submits 20 Sep to 19 Oct 2026");
@@ -132,6 +134,7 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
     .getByRole("link", { name: /Earnings$/ })
     .first()
     .click();
+  await expect(page).toHaveURL(/step=earnings/);
   const add = page.getByRole("form", { name: "Add an earning or deduction" });
   await add.getByLabel("Worker").selectOption(workers["Grace Edet"]!);
   await add.getByLabel("Item").fill("Supervisor allowance");
@@ -150,6 +153,10 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
     .getByRole("link", { name: /Anomalies$/ })
     .first()
     .click();
+  await expect(page).toHaveURL(/step=anomalies/);
+  await expect(
+    page.getByRole("form", { name: "Acknowledge anomalies" }).getByRole("checkbox").first(),
+  ).toBeVisible();
   const ack = page.getByRole("form", { name: "Acknowledge anomalies" });
   const boxes = ack.getByRole("checkbox");
   const count = await boxes.count();
@@ -166,13 +173,16 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
     .getByRole("link", { name: /Gross to net$/ })
     .first()
     .click();
+  await expect(page).toHaveURL(/step=gross-to-net/);
   await page.getByRole("link", { name: "Explain Musa Ibrahim" }).click();
+  await expect(page).toHaveURL(/explain=/);
   await expect(page.getByTestId("explain").getByRole("definition").last()).toHaveText("₦5,660");
 
   await page
     .getByRole("link", { name: /Submit$/ })
     .first()
     .click();
+  await expect(page).toHaveURL(/step=submit/);
   const submitAgain = page.getByRole("form", { name: "Submit to Finance" });
   await expect(page.getByTestId("control-totals")).toContainText("Net pay to 6 workers");
   await submitAgain.getByRole("button", { name: "Submit to Finance" }).click();

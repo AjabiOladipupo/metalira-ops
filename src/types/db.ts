@@ -1950,6 +1950,9 @@ isOneToOne: false
 "cancel_rate_card_version":
 { Args: { "p_organisation_id": string,"p_rate_card_id": string }; Returns: undefined
                            },
+"carry_payroll_instalment":
+{ Args: { "p_organisation_id": string,"p_run_id": string,"p_series_id": string }; Returns: string
+                           },
 "change_member_role":
 { Args: { "p_membership_id": string,"p_organisation_id": string,"p_role": Database["public"]['Enums']["membership_role"] }; Returns: {
               "member_email": string,"member_name": string,"member_user_id": string,"new_role": Database["public"]['Enums']["membership_role"],"old_role": Database["public"]['Enums']["membership_role"]
@@ -2024,9 +2027,6 @@ isOneToOne: false
                            },
 "create_organisation":
 { Args: { "p_name": string }; Returns: string
-                           },
-"carry_payroll_instalment":
-{ Args: { "p_organisation_id": string,"p_run_id": string,"p_series_id": string }; Returns: string
                            },
 "create_payroll_run":
 { Args: { "p_organisation_id": string,"p_pay_date"?: string,"p_period_start": string }; Returns: string
