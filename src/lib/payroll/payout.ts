@@ -14,7 +14,11 @@
 
 import type { Kobo } from "@/lib/money";
 
-export const LEFT_OUT_REASONS = ["no_bank_details", "bank_change_in_hold", "nothing_to_pay"] as const;
+export const LEFT_OUT_REASONS = [
+  "no_bank_details",
+  "bank_change_in_hold",
+  "nothing_to_pay",
+] as const;
 export type LeftOutReason = (typeof LEFT_OUT_REASONS)[number];
 
 export const LEFT_OUT_LABEL: Record<LeftOutReason, string> = {
@@ -49,7 +53,10 @@ export type PayoutDecision =
 
 export function decidePayout(row: PayoutPlanRow): PayoutDecision {
   const usable =
-    row.onFile && row.bankName !== null && row.accountName !== null && row.bankAccountLast4 !== null;
+    row.onFile &&
+    row.bankName !== null &&
+    row.accountName !== null &&
+    row.bankAccountLast4 !== null;
   const acknowledged = row.acknowledgedCode !== null;
   if (row.netKobo === 0n) return { kind: "left_out", reason: "nothing_to_pay" };
   if (!usable) {
@@ -79,7 +86,13 @@ export interface PayoutPlanSummary {
 
 /** Splits the plan into paid, left out and refused (by name), keeping the plan's order. */
 export function summarisePlan(rows: readonly PayoutPlanRow[]): PayoutPlanSummary {
-  const out: PayoutPlanSummary = { paid: [], leftOut: [], noDetails: [], noCode: [], totalKobo: 0n };
+  const out: PayoutPlanSummary = {
+    paid: [],
+    leftOut: [],
+    noDetails: [],
+    noCode: [],
+    totalKobo: 0n,
+  };
   for (const row of rows) {
     const d = decidePayout(row);
     if (d.kind === "pay") {

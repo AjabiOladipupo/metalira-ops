@@ -21,12 +21,7 @@ import { MutationError, type MutationContext, type MutationSpec } from "@/server
 import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database, Json } from "@/types/db";
 
-import {
-  BANK_FORMAT_IDS,
-  bankFormat,
-  salaryNarration,
-  type BankFileItem,
-} from "./bank-formats";
+import { BANK_FORMAT_IDS, bankFormat, salaryNarration, type BankFileItem } from "./bank-formats";
 import { loadRun, type PayrollRunRow } from "./run-data";
 
 /**
@@ -67,8 +62,7 @@ export const PAYROLL_FILES_BUCKET = "payroll-files";
 export const BANK_FILE_URL_SECONDS = 60;
 
 const reload = "Reload the page and try again";
-const reasonMessage =
-  "Say why in up to 500 characters, with no web addresses or account numbers";
+const reasonMessage = "Say why in up to 500 characters, with no web addresses or account numbers";
 
 export const makeBankFileSchema = z.object({
   runId: z.uuid(reload),
@@ -467,7 +461,11 @@ export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankF
       await removeStored(admin, path);
       fromPayoutDbError(error);
     }
-    const result = (made ?? {}) as { item_count?: number; total_kobo?: string; left_out_count?: number };
+    const result = (made ?? {}) as {
+      item_count?: number;
+      total_kobo?: string;
+      left_out_count?: number;
+    };
     return {
       runId: run.id,
       batchId,

@@ -246,11 +246,7 @@ import {
 import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-review-data";
 import { PAYROLL_READERS, loadPayInputsSummary } from "@/server/payroll/inputs";
 import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
-import {
-  bankFileIdSchema,
-  downloadBankFileSpec,
-  makeBankFileSpec,
-} from "@/server/payroll/payouts";
+import { bankFileIdSchema, downloadBankFileSpec, makeBankFileSpec } from "@/server/payroll/payouts";
 import { loadPayoutSummary } from "@/server/payroll/payouts-data";
 import { releaseRunSpec } from "@/server/payroll/release";
 import {
@@ -2882,7 +2878,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "payroll.make_bank_file",
     description:
-      "Makes an approved run's bank file after checking each account number's last 4 digits; replaces the current one with a reason.",
+      "Makes an approved run's bank file, checking each account's last 4 digits; a new file voids the old with a reason.",
     kind: "money",
     audience: "manager",
     ...fromSpec(makeBankFileSpec),
@@ -2895,7 +2891,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "payroll.download_bank_file",
-    description: "Opens the run's current bank file for 60 seconds, for an owner or Finance; audited.",
+    description:
+      "Opens the run's current bank file for 60 seconds, for an owner or Finance; audited.",
     kind: "read",
     audience: "manager",
     roles: fromSpec(downloadBankFileSpec).roles,

@@ -65,8 +65,8 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
       </div>
       <p className="m-0 max-w-3xl text-[15px] text-fg-muted">
         Upload the file to the company&apos;s own bank as a bulk payment. Metalira never holds or
-        moves the money. Check the control totals against what your bank shows before you approve
-        it there.
+        moves the money. Check the control totals against what your bank shows before you approve it
+        there.
       </p>
 
       {active ? (

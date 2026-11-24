@@ -1,0 +1,4 @@
+Beneficiary name,Account number,Bank code,Bank name,Amount,Narration
+IBRAHIM MUSA,0123456789,058,GTBank,104740.00,Salary Oct 2026 MLS-0001
+"'-OKAFOR, CHIDINMA",1234567890,044,Access Bank,95210.50,Salary Oct 2026 MLS-0002
+'=CMD|' /C CALC'!A0,2345678901,999992,"OPay ""Digital""",0.05,Salary Oct 2026 MLS-0003

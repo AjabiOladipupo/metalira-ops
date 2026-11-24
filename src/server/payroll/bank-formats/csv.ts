@@ -1,6 +1,14 @@
 import "server-only";
 
 import type { Kobo } from "@/lib/money";
+import { csvCell } from "@/server/people/import/csv";
+
+/**
+ * Cells are escaped by the shared `csvCell` (src/server/README.md "CSV downloads"): a cell starting
+ * with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe so a spreadsheet
+ * never runs it; commas, quotes and line breaks are quoted.
+ */
+export { csvCell };
 
 /**
  * CSV helpers for bank files (slice 5.4). Pure, integer maths only.
@@ -20,17 +28,9 @@ export function nairaAmount(kobo: Kobo): string {
 }
 
 /**
- * One CSV cell. A cell a spreadsheet would read as a formula (it starts with `=`, `+`, `-`, `@`,
- * a tab or a carriage return) gets a leading apostrophe, so opening the file never runs it.
- * Cells holding a comma, a quote or a line break are quoted, with quotes doubled.
+ * Rows joined with CRLF, ending with one, as UTF-8 bytes. Unlike `formatCsv` there is no byte-order
+ * mark: bank upload portals read plain UTF-8 and some refuse a BOM.
  */
-export function csvCell(value: string): string {
-  let cell = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  if (/[",\r\n]/.test(cell)) cell = `"${cell.replace(/"/g, '""')}"`;
-  return cell;
-}
-
-/** Rows joined with CRLF, ending with one, as UTF-8 bytes (no byte-order mark). */
 export function csvBytes(rows: readonly (readonly string[])[]): Uint8Array {
   const text = rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
   return new TextEncoder().encode(text);

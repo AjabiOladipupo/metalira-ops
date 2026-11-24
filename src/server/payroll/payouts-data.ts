@@ -161,7 +161,10 @@ export async function loadPayoutDetail(
   ];
   const people = new Map<string, string>();
   if (ids.length > 0) {
-    const { data } = await supabase.from("profiles").select("user_id, full_name").in("user_id", ids);
+    const { data } = await supabase
+      .from("profiles")
+      .select("user_id, full_name")
+      .in("user_id", ids);
     for (const p of data ?? []) if (p.full_name) people.set(p.user_id, p.full_name);
   }
   return { batches, active, items, people };
