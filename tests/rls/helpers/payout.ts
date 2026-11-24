@@ -227,6 +227,7 @@ export async function makeBatch(
   options: {
     items?: (plan: PlanRow[]) => unknown[];
     voidReason?: string;
+    notUploaded?: boolean;
     store?: boolean;
     bytes?: number;
     sha?: string;
@@ -249,6 +250,32 @@ export async function makeBatch(
     p_file_bytes: options.bytes ?? stored.bytes,
     p_items: (options.items ? options.items(rows) : payAll(rows)) as Json,
     ...(options.voidReason ? { p_void_reason: options.voidReason } : {}),
+    ...(options.notUploaded ? { p_not_uploaded: true } : {}),
   });
-  return { ...result, batchId, path: stored.path, plan: rows };
+  return { ...result, batchId, path: stored.path, plan: rows, sha: options.sha ?? "c".repeat(64) };
+}
+
+/** The audited download, as `by`. */
+export function download(by: Client, orgId: string, batchId: string, reason?: string) {
+  return by.rpc("payout_file_download", {
+    p_organisation_id: orgId,
+    p_batch_id: batchId,
+    ...(reason ? { p_reason: reason } : {}),
+  });
+}
+
+/** The release, as `by`, naming the file by id and SHA-256 (default: the test files' hash). */
+export function release(
+  by: Client,
+  orgId: string,
+  runId: string,
+  batchId: string,
+  sha = "c".repeat(64),
+) {
+  return by.rpc("release_payroll_run", {
+    p_organisation_id: orgId,
+    p_run_id: runId,
+    p_batch_id: batchId,
+    p_file_sha256: sha,
+  });
 }

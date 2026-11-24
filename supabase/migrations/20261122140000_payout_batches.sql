@@ -34,7 +34,8 @@
 --    * payout_file_download(org, batch): owner or finance; the active batch's path, audited as
 --      payroll.bank_file_downloaded (the batch id only).
 --    * release_payroll_run(org, run): owner or finance, never anyone who prepared or changed the
---      run (private.payroll_run_touchers: rule 10's stricter reading), with an active batch;
+--      run (private.payroll_run_touchers: rule 10's stricter reading) nor whoever made the active
+--      file (MLBFA), with an active batch;
 --      approved -> released; the decision row; audited. 5.5 hooks payslip publication to it on the
 --      server (src/server/payroll/release.ts, onPayrollReleased).
 --
@@ -58,6 +59,11 @@
 --   MLBF7 release needs an active bank file
 --   MLBF8 the releaser prepared or changed the run (rule 10)
 --   MLBF9 the file isn't stored at the batch's path with that size
+--   MLBFA the releaser made the active bank file (security review M1)
+--   MLBFB replacing a downloaded file needs the statement that it wasn't uploaded (money H1)
+--   MLBFC release named a file that isn't the active one, or its hash differs (money H2)
+--   MLBFD release before anyone downloaded the active file (money L1)
+--   MLBFE a download after release needs a reason (money L2)
 -- Reused: 42501 (role, untrusted session), 22023 (bad input), P0002 (not in the company), MLPRD
 -- (5.2/5.3's posted-run guard).
 -- No money maths here beyond sums and equality checks; naira formatting is the server's.
@@ -100,9 +106,23 @@ $$;
 
 revoke all on function private.bank_detail_changes_previous_code() from public, anon, authenticated;
 
+-- Backfill (security review L5): approved changes still inside their hold get the worker's code
+-- now, which is still the code in force before the change (nothing applied it yet). Done before
+-- the trigger exists, with 1.7's ordinary triggers skipped (they refuse an update without a status
+-- move); the audit trigger is skipped too, and the backfill writes no number.
+set session_replication_role = replica;
+update public.bank_detail_changes c
+set previous_bank_code = w.bank_code
+from public.workers w
+where w.id = c.worker_id and w.organisation_id = c.organisation_id
+  and c.status = 'approved' and c.applies_after > now();
+set session_replication_role = origin;
+
 create trigger bank_detail_changes_previous_code
   before insert or update on public.bank_detail_changes
   for each row execute function private.bank_detail_changes_previous_code();
+-- Fires whatever session_replication_role says, as 5.3's payroll guards do.
+alter table public.bank_detail_changes enable always trigger bank_detail_changes_previous_code;
 
 -- 1.7's function (migration 20261116214500, its latest version), with bank_code added as the last
 -- column. The return type changes, so it is dropped and created again with the same grants.
@@ -114,6 +134,7 @@ drop function private.worker_bank_details_as_of(uuid, uuid, timestamptz);
 -- the worker's current details. Correct whether or not the apply job has run yet.
 -- bank_account_enc decrypts under workers.bank_account_enc of the worker.
 --
+-- 5.4: unchanged but for bank_code and the secret-key branch of the role check.
 -- Definer, with its own role check: run as a caller who can't read bank_detail_changes, the
 -- "changes" step would find nothing and quietly fall back to the worker's current row, which
 -- during the gap between applies_after and the next apply run is still the old account. So only
@@ -140,8 +161,13 @@ set search_path = ''
 as $$
 #variable_conflict use_column
 begin
-  if auth.uid() is not null
-    and not private.has_role(p_organisation_id, array['owner', 'hr', 'finance']) then
+  -- 5.4 (security review L6): no signed-in user means the secret key only, as payout_plan.
+  if auth.uid() is not null then
+    if not private.has_role(p_organisation_id, array['owner', 'hr', 'finance']) then
+      raise exception 'Only the owner, HR or finance can read the bank details used for a payout.'
+        using errcode = '42501';
+    end if;
+  elsif coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Only the owner, HR or finance can read the bank details used for a payout.'
       using errcode = '42501';
   end if;
@@ -355,6 +381,9 @@ create table public.payout_batches (
   -- Object name in the private payroll-files bucket. Opened only by 60-second signed URLs.
   file_path text not null
     constraint payout_batches_file_path_key unique,
+  -- The SHA-256 of the file's bytes as the server made them (security review L2): attested by
+  -- the server, which made and stored the file; the database can't hash a stored object. No
+  -- signed-in role can write to the bucket, so a batch can only point at a file the server stored.
   file_sha256 text not null
     constraint payout_batches_file_sha256_format check (file_sha256 ~ '^[0-9a-f]{64}$'),
   file_bytes integer not null constraint payout_batches_file_bytes check (file_bytes > 0),
@@ -376,7 +405,7 @@ create table public.payout_batches (
       void_reason = btrim(void_reason) and char_length(void_reason) between 1 and 500
       and void_reason !~ '[\x01-\x1f\x7f-\x9f<>]' and void_reason !~* '(://|www\.)'
       -- An account number never lands in free text (and so in audit_log) in clear.
-      and void_reason !~ '[0-9]{10}'
+      and regexp_replace(void_reason, '[^0-9]', '', 'g') !~ '[0-9]{10}'
     ),
   constraint payout_batches_organisation_id_id_key unique (organisation_id, id),
   constraint payout_batches_run_fkey foreign key (organisation_id, run_id)
@@ -807,7 +836,8 @@ create function private.make_payout_batch(
   p_file_sha256 text,
   p_file_bytes integer,
   p_items jsonb,
-  p_void_reason text
+  p_void_reason text,
+  p_not_uploaded boolean
 )
 returns jsonb
 language plpgsql
@@ -832,6 +862,7 @@ declare
   v_left integer;
   v_total bigint;
   v_left_kobo bigint;
+  v_downloaded record;
 begin
   if p_run_id is null or p_batch_id is null then
     raise exception 'Name the run and the file.' using errcode = '22023';
@@ -850,7 +881,7 @@ begin
   end if;
   if v_reason is not null and (
     char_length(v_reason) > 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]'
-    or v_reason ~* '(://|www\.)' or v_reason ~ '[0-9]{10}'
+    or v_reason ~* '(://|www\.)' or regexp_replace(v_reason, '[^0-9]', '', 'g') ~ '[0-9]{10}'
   ) then
     raise exception 'Say why in up to 500 characters, with no web addresses or account numbers.'
       using errcode = '22023';
@@ -871,6 +902,26 @@ begin
   for update;
   if v_active.id is not null and v_reason is null then
     raise exception 'This run already has a bank file. Say why it is replaced.' using errcode = 'MLBF6';
+  end if;
+  -- Money review H1: a file someone downloaded may be at the bank already. Replacing it needs the
+  -- caller's explicit statement that it wasn't uploaded, kept in the void reason and the audit row.
+  if v_active.id is not null then
+    select l.actor_id, l.at into v_downloaded
+    from public.audit_log l
+    where l.organisation_id = p_organisation_id and l.action = 'payroll.bank_file_downloaded'
+      and l.entity = 'payout_batches' and l.entity_id = v_active.id
+    order by l.at desc
+    limit 1;
+    if v_downloaded.at is not null then
+      if not coalesce(p_not_uploaded, false) then
+        raise exception 'The current file was downloaded. Confirm it wasn''t uploaded to the bank before replacing it, or two files may be paid.'
+          using errcode = 'MLBFB';
+      end if;
+      v_reason := v_reason || ' (confirmed the replaced file was not uploaded to the bank)';
+      if char_length(v_reason) > 500 then
+        raise exception 'Say why in fewer words.' using errcode = '22023';
+      end if;
+    end if;
   end if;
 
   -- The file is stored at this batch's path with the size the server says.
@@ -1002,7 +1053,9 @@ begin
     jsonb_build_object(
       'run_id', p_run_id, 'batch_id', p_batch_id, 'bank_format', p_bank_format,
       'item_count', v_count, 'total_kobo', v_total::text, 'left_out_count', v_left,
-      'file_sha256', p_file_sha256, 'voided_batch_id', v_active.id
+      'file_sha256', p_file_sha256, 'voided_batch_id', v_active.id,
+      'replaced_was_downloaded', v_downloaded.at is not null,
+      'not_uploaded_attested', v_downloaded.at is not null and coalesce(p_not_uploaded, false)
     ),
     v_reason
   );
@@ -1014,9 +1067,9 @@ begin
 end;
 $$;
 
-revoke all on function private.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text)
+revoke all on function private.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text, boolean)
   from public, anon;
-grant execute on function private.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text)
+grant execute on function private.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text, boolean)
   to authenticated;
 
 create function public.make_payout_batch(
@@ -1027,7 +1080,8 @@ create function public.make_payout_batch(
   p_file_sha256 text,
   p_file_bytes integer,
   p_items jsonb,
-  p_void_reason text default null
+  p_void_reason text default null,
+  p_not_uploaded boolean default false
 )
 returns jsonb
 language sql
@@ -1037,18 +1091,24 @@ set search_path = ''
 as $$
   select private.make_payout_batch(
     p_organisation_id, p_run_id, p_batch_id, p_bank_format, p_file_sha256, p_file_bytes, p_items,
-    p_void_reason
+    p_void_reason, p_not_uploaded
   )
 $$;
 
-revoke all on function public.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text)
+revoke all on function public.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text, boolean)
   from public, anon;
-grant execute on function public.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text)
+grant execute on function public.make_payout_batch(uuid, uuid, uuid, text, text, integer, jsonb, text, boolean)
   to authenticated;
 
 -- The active bank file's object name, for the server to open by a 60-second signed URL (owner or
--- finance, trusted session). Audited as payroll.bank_file_downloaded with the batch id only.
-create function private.payout_file_download(p_organisation_id uuid, p_batch_id uuid)
+-- finance, trusted session). Audited as payroll.bank_file_downloaded with the batch id only (and
+-- the reason, once the run is released). Once released, a download needs a reason (money review
+-- L2): the file is already paid and must not be uploaded again.
+create function private.payout_file_download(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_reason text
+)
 returns text
 language plpgsql
 volatile
@@ -1058,6 +1118,7 @@ as $$
 declare
   v_uid uuid := private.require_payout_maker(p_organisation_id);
   v_batch public.payout_batches%rowtype;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
 begin
   select b.* into v_batch
   from public.payout_batches b
@@ -1068,35 +1129,102 @@ begin
   if v_batch.status <> 'active' then
     raise exception 'This file was replaced. Download the current one.' using errcode = 'MLBF5';
   end if;
+  if v_reason is not null and (
+    char_length(v_reason) > 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]'
+    or v_reason ~* '(://|www\.)' or regexp_replace(v_reason, '[^0-9]', '', 'g') ~ '[0-9]{10}'
+  ) then
+    raise exception 'Say why in up to 500 characters, with no web addresses or account numbers.'
+      using errcode = '22023';
+  end if;
+  if private.payroll_run_status(p_organisation_id, v_batch.run_id) = 'released' and v_reason is null then
+    raise exception 'This file is already paid. Say why you need it again; never upload it to the bank again.'
+      using errcode = 'MLBFE';
+  end if;
   perform private.log_audit_impl(
     p_organisation_id, 'payroll.bank_file_downloaded', 'payout_batches', v_batch.id, null,
-    jsonb_build_object('batch_id', v_batch.id), null
+    jsonb_build_object('batch_id', v_batch.id), v_reason
   );
   return v_batch.file_path;
 end;
 $$;
 
-revoke all on function private.payout_file_download(uuid, uuid) from public, anon;
-grant execute on function private.payout_file_download(uuid, uuid) to authenticated;
+revoke all on function private.payout_file_download(uuid, uuid, text) from public, anon;
+grant execute on function private.payout_file_download(uuid, uuid, text) to authenticated;
 
-create function public.payout_file_download(p_organisation_id uuid, p_batch_id uuid)
+create function public.payout_file_download(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_reason text default null
+)
 returns text
 language sql
 volatile
 security invoker
 set search_path = ''
 as $$
-  select private.payout_file_download(p_organisation_id, p_batch_id)
+  select private.payout_file_download(p_organisation_id, p_batch_id, p_reason)
 $$;
 
-revoke all on function public.payout_file_download(uuid, uuid) from public, anon;
-grant execute on function public.payout_file_download(uuid, uuid) to authenticated;
+revoke all on function public.payout_file_download(uuid, uuid, text) from public, anon;
+grant execute on function public.payout_file_download(uuid, uuid, text) to authenticated;
 
--- Releases an approved run: Finance or the owner confirms its bank file went to the bank. Never
--- anyone who prepared or changed the run (MLBF8, rule 10's stricter reading: the same list as
--- approval); needs an active bank file (MLBF7). Records the decision and returns its id. The
--- server then publishes the payslips (5.5, src/server/payroll/release.ts).
-create function private.release_payroll_run(p_organisation_id uuid, p_run_id uuid)
+-- Who downloaded a run's bank files and when (owner, hr, finance), from the audit log: the Pay
+-- step and the make-file preview say "downloaded by … at …" before a file is replaced.
+create function private.payout_file_downloads(p_organisation_id uuid, p_run_id uuid)
+returns table (batch_id uuid, actor_id uuid, downloaded_at timestamptz)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if private.session_uid() is null
+    or not private.has_role(p_organisation_id, array['owner', 'hr', 'finance']) then
+    raise exception 'Only an owner, HR or Finance sees bank file downloads.' using errcode = '42501';
+  end if;
+  return query
+  select l.entity_id, l.actor_id, l.at
+  from public.audit_log l
+  join public.payout_batches b on b.organisation_id = l.organisation_id and b.id = l.entity_id
+  where l.organisation_id = p_organisation_id and b.run_id = p_run_id
+    and l.action = 'payroll.bank_file_downloaded' and l.entity = 'payout_batches'
+  order by l.at desc
+  limit 500;
+end;
+$$;
+
+revoke all on function private.payout_file_downloads(uuid, uuid) from public, anon;
+grant execute on function private.payout_file_downloads(uuid, uuid) to authenticated;
+
+create function public.payout_file_downloads(p_organisation_id uuid, p_run_id uuid)
+returns table (batch_id uuid, actor_id uuid, downloaded_at timestamptz)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.payout_file_downloads(p_organisation_id, p_run_id)
+$$;
+
+revoke all on function public.payout_file_downloads(uuid, uuid) from public, anon;
+grant execute on function public.payout_file_downloads(uuid, uuid) to authenticated;
+
+-- Releases an approved run: Finance or the owner confirms that the bank file named (its id and
+-- SHA-256, as the screen showed it) went to the bank. Refused:
+--   MLBF8 anyone who prepared or changed the run (rule 10's stricter reading: approval's list);
+--   MLBF7 no active file;  MLBFC the file named isn't the active one, or its hash differs (a file
+--   replaced while the person was looking: money review H2);  MLBFA whoever made the active file
+--   (security review M1; the approver may release);  MLBFD nobody downloaded the active file
+--   (money review L1).
+-- A retry of the same release (the run released with that file) returns the release's decision
+-- instead of failing (money review M2), so the server's idempotent follow-ups run again. Records
+-- the decision and returns its id. The server then runs onPayrollReleased (5.5's publication).
+create function private.release_payroll_run(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_batch_id uuid,
+  p_file_sha256 text
+)
 returns uuid
 language plpgsql
 volatile
@@ -1109,8 +1237,26 @@ declare
   v_batch public.payout_batches%rowtype;
   v_id uuid;
 begin
+  if p_batch_id is null or p_file_sha256 is null or p_file_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception 'Name the bank file you uploaded (its id and SHA-256).' using errcode = '22023';
+  end if;
   v_run := private.payroll_lock_run(p_organisation_id, p_run_id);
+  select b.* into v_batch
+  from public.payout_batches b
+  where b.organisation_id = p_organisation_id and b.run_id = p_run_id and b.status = 'active'
+  for share;
   if v_run.status = 'released' then
+    if v_batch.id = p_batch_id and v_batch.file_sha256 = p_file_sha256 then
+      select d.id into v_id
+      from public.payroll_run_decisions d
+      where d.organisation_id = p_organisation_id and d.run_id = p_run_id
+        and d.decision = 'released'
+      order by d.created_at desc
+      limit 1;
+      if v_id is not null then
+        return v_id;
+      end if;
+    end if;
     raise exception 'This run is already released.' using errcode = 'MLBF5';
   end if;
   if v_run.status <> 'approved' then
@@ -1120,13 +1266,27 @@ begin
     raise exception 'You prepared or changed this run, so a different person must release it.'
       using errcode = 'MLBF8';
   end if;
-  select b.* into v_batch
-  from public.payout_batches b
-  where b.organisation_id = p_organisation_id and b.run_id = p_run_id and b.status = 'active'
-  for share;
   if v_batch.id is null then
     raise exception 'Make the bank file and upload it to the bank before releasing.'
       using errcode = 'MLBF7';
+  end if;
+  if v_batch.id <> p_batch_id or v_batch.file_sha256 <> p_file_sha256 then
+    raise exception 'The bank file changed since you looked. Reload the page, check the control totals and confirm again.'
+      using errcode = 'MLBFC';
+  end if;
+  -- Security review M1: whoever made the file doesn't confirm it went to the bank. (The approver
+  -- may release; the preparer may make the file, so P prepares and makes, F approves and releases.)
+  if v_uid = v_batch.made_by then
+    raise exception 'You made this bank file, so a different person must confirm it went to the bank.'
+      using errcode = 'MLBFA';
+  end if;
+  if not exists (
+    select 1 from public.audit_log l
+    where l.organisation_id = p_organisation_id and l.action = 'payroll.bank_file_downloaded'
+      and l.entity = 'payout_batches' and l.entity_id = v_batch.id
+  ) then
+    raise exception 'Nobody has downloaded this bank file yet. Download it and upload it to the bank first.'
+      using errcode = 'MLBFD';
   end if;
 
   update public.payroll_runs r
@@ -1145,7 +1305,8 @@ begin
     jsonb_build_object(
       'decision_id', v_id, 'batch_id', v_batch.id, 'item_count', v_batch.item_count,
       'total_kobo', v_batch.total_kobo::text, 'left_out_count', v_batch.left_out_count,
-      'net_kobo', v_run.net_kobo::text, 'file_sha256', v_batch.file_sha256
+      'left_out_kobo', v_batch.left_out_kobo::text, 'net_kobo', v_run.net_kobo::text,
+      'file_sha256', v_batch.file_sha256
     ),
     null
   );
@@ -1153,18 +1314,127 @@ begin
 end;
 $$;
 
-revoke all on function private.release_payroll_run(uuid, uuid) from public, anon;
-grant execute on function private.release_payroll_run(uuid, uuid) to authenticated;
+revoke all on function private.release_payroll_run(uuid, uuid, uuid, text) from public, anon;
+grant execute on function private.release_payroll_run(uuid, uuid, uuid, text) to authenticated;
 
-create function public.release_payroll_run(p_organisation_id uuid, p_run_id uuid)
+create function public.release_payroll_run(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_batch_id uuid,
+  p_file_sha256 text
+)
 returns uuid
 language sql
 volatile
 security invoker
 set search_path = ''
 as $$
-  select private.release_payroll_run(p_organisation_id, p_run_id)
+  select private.release_payroll_run(p_organisation_id, p_run_id, p_batch_id, p_file_sha256)
 $$;
 
-revoke all on function public.release_payroll_run(uuid, uuid) from public, anon;
-grant execute on function public.release_payroll_run(uuid, uuid) to authenticated;
+revoke all on function public.release_payroll_run(uuid, uuid, uuid, text) from public, anon;
+grant execute on function public.release_payroll_run(uuid, uuid, uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 6. Sweeping bank files (security review M2)
+-- ---------------------------------------------------------------------------
+
+-- Bank files due for removal, oldest first: an object at the bank-file path shape
+-- ({organisation_id}/{run_id}/{batch_id}.csv, three uuids) that no batch names, 15 minutes after
+-- it was stored (the server stores, then records, within seconds; a refusal deletes at once), and
+-- the file of a batch voided 7 days ago or more. Other paths in the bucket (5.6's) are never
+-- matched. The secret key only. Storage refuses deletes in SQL, so the server removes the objects
+-- through the Storage API (src/server/payroll/payout-sweep.ts: after each file it makes, for that
+-- company, and daily from /api/cron/import-uploads), then records the sweep below.
+create function private.payroll_files_due(p_organisation_id uuid, p_limit integer)
+returns table (organisation_id uuid, path text, reason text)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is not null or coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server sweeps bank files.' using errcode = '42501';
+  end if;
+  return query
+  select split_part(o.name, '/', 1)::uuid, o.name,
+    case when b.id is null then 'orphan' else 'voided' end
+  from storage.objects o
+  left join public.payout_batches b on b.file_path = o.name
+  where o.bucket_id = 'payroll-files'
+    and o.name ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.csv$'
+    and (p_organisation_id is null or split_part(o.name, '/', 1) = p_organisation_id::text)
+    and (
+      (b.id is null and o.created_at < now() - interval '15 minutes')
+      or (b.status = 'voided' and b.voided_at < now() - interval '7 days')
+    )
+  order by o.created_at
+  limit greatest(1, least(coalesce(p_limit, 500), 1000));
+end;
+$$;
+
+revoke all on function private.payroll_files_due(uuid, integer) from public, anon, authenticated;
+grant execute on function private.payroll_files_due(uuid, integer) to service_role;
+
+create function public.payroll_files_due(p_organisation_id uuid default null, p_limit integer default 500)
+returns table (organisation_id uuid, path text, reason text)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.payroll_files_due(p_organisation_id, p_limit)
+$$;
+
+revoke all on function public.payroll_files_due(uuid, integer) from public, anon, authenticated;
+grant execute on function public.payroll_files_due(uuid, integer) to service_role;
+
+-- One audit row per company per sweep: the paths removed (never a file's contents). The secret
+-- key only; the actor is the system (null).
+create function private.record_payroll_file_sweep(p_organisation_id uuid, p_paths text[])
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_id uuid;
+begin
+  if auth.uid() is not null or coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Only the server records a sweep.' using errcode = '42501';
+  end if;
+  if p_organisation_id is null or coalesce(cardinality(p_paths), 0) = 0
+    or cardinality(p_paths) > 1000
+    or exists (
+      select 1 from unnest(p_paths) x
+      where x is null or split_part(x, '/', 1) <> p_organisation_id::text
+    ) then
+    raise exception 'Name the company and the paths removed (its own).' using errcode = '22023';
+  end if;
+  insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after)
+  values (
+    p_organisation_id, null, 'payroll.bank_files_swept', 'payout_batches', null, null,
+    jsonb_build_object('paths', to_jsonb(p_paths), 'count', cardinality(p_paths))
+  )
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+revoke all on function private.record_payroll_file_sweep(uuid, text[]) from public, anon, authenticated;
+grant execute on function private.record_payroll_file_sweep(uuid, text[]) to service_role;
+
+create function public.record_payroll_file_sweep(p_organisation_id uuid, p_paths text[])
+returns uuid
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.record_payroll_file_sweep(p_organisation_id, p_paths)
+$$;
+
+revoke all on function public.record_payroll_file_sweep(uuid, text[]) from public, anon, authenticated;
+grant execute on function public.record_payroll_file_sweep(uuid, text[]) to service_role;

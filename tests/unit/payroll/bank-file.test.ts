@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { sumKobo, type Kobo } from "@/lib/money";
 import {
   decidePayout,
+  formulaRefusal,
   nameList,
   planRefusal,
   summarisePlan,
@@ -35,7 +36,7 @@ const ITEMS: BankFileItem[] = [
     narration: salaryNarration("2026-10-19", "MLS-0001"),
   },
   {
-    beneficiaryName: "-OKAFOR, CHIDINMA",
+    beneficiaryName: "OKAFOR, CHIDINMA",
     accountNumber: "1234567890",
     bankCode: "044",
     bankName: "Access Bank",
@@ -43,7 +44,7 @@ const ITEMS: BankFileItem[] = [
     narration: salaryNarration("2026-10-19", "MLS-0002"),
   },
   {
-    beneficiaryName: "=CMD|' /C CALC'!A0",
+    beneficiaryName: "ADA OBI",
     accountNumber: "2345678901",
     bankCode: "999992",
     bankName: 'OPay "Digital"',
@@ -58,6 +59,15 @@ describe("generic CSV", () => {
     const bytes = genericCsv.render(ITEMS);
     expect(Buffer.from(bytes).equals(expected)).toBe(true);
     expect(bytes[0]).toBe("B".charCodeAt(0));
+  });
+
+  it("refuses a payee name or bank name that starts like a formula", () => {
+    for (const name of ["=CMD|' /C CALC'!A0", "+234", "-OKAFOR", "@SUM(1)"]) {
+      expect(() => genericCsv.render([{ ...ITEMS[0]!, beneficiaryName: name }])).toThrow(
+        RangeError,
+      );
+      expect(() => genericCsv.render([{ ...ITEMS[0]!, bankName: name }])).toThrow(RangeError);
+    }
   });
 
   it("is the registered format", () => {
@@ -152,11 +162,19 @@ describe("who is paid (decision 11)", () => {
     expect(decidePayout(row())).toEqual({ kind: "pay" });
   });
 
-  it("leaves out net ₦0 whatever the details", () => {
-    expect(decidePayout(row({ netKobo: 0n, onFile: false }))).toEqual({
-      kind: "left_out",
-      reason: "nothing_to_pay",
-    });
+  it("leaves out net ₦0 (or below) whatever the details", () => {
+    for (const netKobo of [0n, -1n]) {
+      expect(decidePayout(row({ netKobo, onFile: false }))).toEqual({
+        kind: "left_out",
+        reason: "nothing_to_pay",
+      });
+    }
+  });
+
+  it("refuses payee names that start like a formula, by name", () => {
+    expect(formulaRefusal([row()])).toBeNull();
+    expect(formulaRefusal([row({ accountName: "=HYPERLINK(1)" })])).toContain("Musa Ibrahim");
+    expect(formulaRefusal([row({ bankName: "-Bank" })])).toContain("starts with =, +, - or @");
   });
 
   it("leaves out missing details only when HR acknowledged them; refuses otherwise", () => {

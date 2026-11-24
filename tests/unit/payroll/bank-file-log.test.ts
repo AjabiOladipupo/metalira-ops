@@ -21,13 +21,25 @@ const NUMBERS = { [W1]: "0123456789", [W2]: "8012345671", [W3]: "3029384756" } a
 const uploads: { path: string; bytes: Buffer }[] = [];
 const removed: string[] = [];
 const plan = { rows: [] as Record<string, unknown>[] };
+/** Whether the batch exists when the server re-checks after an unexpected failure. */
+const recorded = { batch: false };
 
 vi.mock("@/server/supabase/admin", () => ({
   createAdminSupabase: () => ({
     rpc: async (name: string) =>
       name === "payout_plan"
         ? { data: plan.rows, error: null }
-        : { data: null, error: { code: "XX000", message: "unexpected" } },
+        : name === "payroll_files_due"
+          ? { data: [], error: null }
+          : { data: null, error: { code: "XX000", message: "unexpected" } },
+    from: () => {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        maybeSingle: async () => ({ data: recorded.batch ? { id: "x" } : null, error: null }),
+      };
+      return builder;
+    },
     storage: {
       from: () => ({
         upload: async (path: string, bytes: Uint8Array) => {
@@ -87,6 +99,9 @@ const runRecord = {
 };
 
 const userRpc = vi.fn();
+const makeResult = { current: null as unknown };
+/** The user's own read of the plan has no ciphertext (security review L1). */
+const userPlan = () => plan.rows.map((r) => ({ ...r, bank_account_enc: null }));
 function userClient() {
   return {
     from: (table: string) => {
@@ -100,7 +115,11 @@ function userClient() {
       };
       return builder;
     },
-    rpc: userRpc,
+    rpc: async (name: string, args: unknown) => {
+      userRpc(name, args);
+      if (name === "payout_plan") return { data: userPlan(), error: null };
+      return makeResult.current;
+    },
   };
 }
 
@@ -188,6 +207,8 @@ beforeEach(() => {
   uploads.length = 0;
   removed.length = 0;
   userRpc.mockReset();
+  recorded.batch = false;
+  makeResult.current = { data: null, error: { code: "XX000", message: "unexpected" } };
   plan.rows = [
     planRow(W1, "Musa Ibrahim", "MLS-0001", "6789", "10474000"),
     planRow(W2, "Grace Edet", "MLS-0002", "5671", "9521050"),
@@ -203,10 +224,10 @@ afterEach(() => {
 
 describe("a bank file run logs no account number", () => {
   it("makes the file: numbers in its bytes only, never in the log or the database call", async () => {
-    userRpc.mockResolvedValue({
+    makeResult.current = {
       data: { batch_id: "x", item_count: 3, total_kobo: "29999700", left_out_count: 0 },
       error: null,
-    });
+    };
     const made = await runMutation(ctx(), makeBankFileSpec, {
       runId: RUN,
       format: "generic-csv",
@@ -222,7 +243,9 @@ describe("a bank file run logs no account number", () => {
     expect(file).toContain("104740.00");
 
     // The database gets last 4 digits only.
-    const [name, args] = userRpc.mock.calls[0]!;
+    // The user's own read came first (security review L1), then the record.
+    expect(userRpc.mock.calls.map(([n]) => n)).toEqual(["payout_plan", "make_payout_batch"]);
+    const [name, args] = userRpc.mock.calls[1]!;
     expect(name).toBe("make_payout_batch");
     const sent = JSON.stringify(args);
     expect(sent).toContain('"bank_account_last4":"6789"');
@@ -236,7 +259,7 @@ describe("a bank file run logs no account number", () => {
     expect(error.message).toContain("Grace Edet");
     expect(error.message).toContain("doesn't match its last 4 digits");
     expect(uploads).toHaveLength(0);
-    expect(userRpc).not.toHaveBeenCalled();
+    expect(userRpc.mock.calls.map(([n]) => n)).toEqual(["payout_plan"]);
     expectNoNumbers([error.message, String(error.stack)]);
   });
 
@@ -249,10 +272,10 @@ describe("a bank file run logs no account number", () => {
   });
 
   it("deletes the stored file when the database refuses, and logs no number", async () => {
-    userRpc.mockResolvedValue({
+    makeResult.current = {
       data: null,
       error: { code: "MLBF4", message: "The file doesn't match. Try again." },
-    });
+    };
     const error = await refused();
     expect(error.message).toContain("Try again");
     expect(removed).toEqual([uploads[0]!.path]);
@@ -266,5 +289,18 @@ describe("a bank file run logs no account number", () => {
     expect((error.cause as Error).message).toBe("PiiKeyError");
     expect(uploads).toHaveLength(0);
     expectNoNumbers([String((error.cause as Error).stack)]);
+  });
+
+  it("keeps the stored file after an unexpected failure when the batch was recorded", async () => {
+    makeResult.current = { data: null, error: { code: "08006", message: "connection lost" } };
+    recorded.batch = true;
+    const kept = await refused();
+    expect(kept.message).toBe("The change was not saved.");
+    expect(removed).toEqual([]);
+
+    recorded.batch = false;
+    await refused();
+    expect(removed).toEqual([uploads[1]!.path]);
+    expectNoNumbers();
   });
 });

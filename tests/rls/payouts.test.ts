@@ -28,12 +28,14 @@ import {
   approveRun,
   BANK,
   BUCKET,
+  download,
   enc,
   giveBankDetails,
   makeBatch,
   NET,
   payAll,
   readPlan,
+  release,
   seedSubmittedRun,
   storeFile,
   type PlanRow,
@@ -546,25 +548,32 @@ describe("the bucket and downloads", () => {
 });
 
 describe("release", () => {
-  it("needs owner or finance, a file, and someone who didn't prepare the run", async () => {
+  it("needs owner or finance, a downloaded file, and someone who didn't prepare the run or make the file", async () => {
+    // The two-person path: the owner (P) prepares and makes the file; Finance (F) approves and
+    // releases.
     const c = await approvedCompany("release");
-    const release = (client: Client) =>
-      client.rpc("release_payroll_run", {
-        p_organisation_id: c.owner.orgId,
-        p_run_id: c.run.runId,
-      });
+    const none = await release(c.finance.client, c.owner.orgId, c.run.runId, randomUUID());
+    expect(none.error?.code).toBe("MLBF7");
+    const made = await makeBatch(admin, c.owner.client, c.owner.orgId, c.run.runId);
+    expect(made.error).toBeNull();
+    const go = (client: Client) => release(client, c.owner.orgId, c.run.runId, made.batchId);
 
-    expect((await release(c.finance.client)).error?.code).toBe("MLBF7");
-    expect((await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId)).error).toBeNull();
-
-    expect((await release(c.hr.client)).error?.code).toBe(DENIED);
-    expect((await release(c.lineManager.client)).error?.code).toBe(DENIED);
+    expect((await go(c.hr.client)).error?.code).toBe(DENIED);
+    expect((await go(c.lineManager.client)).error?.code).toBe(DENIED);
     // The owner prepared, acknowledged and submitted the run.
-    const own = await release(c.owner.client);
+    const own = await go(c.owner.client);
     expect(own.error?.code).toBe("MLBF8");
     expect(own.error?.message).toContain("a different person must release it");
+    // Nobody downloaded it yet (money review L1).
+    expect((await go(c.finance.client)).error?.code).toBe("MLBFD");
+    expect((await download(c.owner.client, c.owner.orgId, made.batchId)).error).toBeNull();
+    // The wrong file or hash (money review H2).
+    expect(
+      (await release(c.finance.client, c.owner.orgId, c.run.runId, made.batchId, "d".repeat(64)))
+        .error?.code,
+    ).toBe("MLBFC");
 
-    const done = await release(c.finance.client);
+    const done = await go(c.finance.client);
     expect(done.error).toBeNull();
     const { data: run } = await admin
       .from("payroll_runs")
@@ -586,12 +595,27 @@ describe("release", () => {
       net_kobo: NET,
     });
 
-    // Once released: no second release, no new file, nothing changes.
-    expect((await release(c.finance.client)).error?.code).toBe("MLBF5");
+    // A retry of the same release returns the same decision (money review M2); anything else is
+    // refused.
+    const retry = await go(c.finance.client);
+    expect(retry.error).toBeNull();
+    expect(retry.data).toBe(done.data);
+    expect(
+      (await release(c.finance.client, c.owner.orgId, c.run.runId, randomUUID())).error?.code,
+    ).toBe("MLBF5");
+
+    // Once released: no new file, nothing changes; a download needs a reason (money review L2).
     const again = await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId, {
       voidReason: "Too late",
     });
     expect(again.error?.code).toBe("MLBF5");
+    expect((await download(c.finance.client, c.owner.orgId, made.batchId)).error?.code).toBe(
+      "MLBFE",
+    );
+    expect(
+      (await download(c.finance.client, c.owner.orgId, made.batchId, "The bank asked for a copy"))
+        .error,
+    ).toBeNull();
     const edit = await asDbOwner(
       "update public.payroll_runs set net_kobo = net_kobo where id = $1",
       [c.run.runId],
@@ -605,6 +629,44 @@ describe("release", () => {
       true,
     );
     expect(voidAfter.error?.code).toBe("MLBF5");
+  });
+
+  it("refuses whoever made the file, even a second Finance member who touched nothing else", async () => {
+    const c = await approvedCompany("release-maker");
+    const finance2 = await createTestUser("pout-release-maker-fin2");
+    await addMember(finance2, "finance", c.owner.orgId);
+    const made = await makeBatch(admin, finance2.client, c.owner.orgId, c.run.runId);
+    expect(made.error).toBeNull();
+    expect((await download(finance2.client, c.owner.orgId, made.batchId)).error).toBeNull();
+    const maker = await release(finance2.client, c.owner.orgId, c.run.runId, made.batchId);
+    expect(maker.error?.code).toBe("MLBFA");
+    // The approver may release a file someone else made.
+    const approver = await release(c.finance.client, c.owner.orgId, c.run.runId, made.batchId);
+    expect(approver.error).toBeNull();
+  });
+
+  it("refuses a release naming a file that was replaced meanwhile (the race)", async () => {
+    const c = await approvedCompany("release-race");
+    const first = await makeBatch(admin, c.owner.client, c.owner.orgId, c.run.runId);
+    expect(first.error).toBeNull();
+    expect((await download(c.owner.client, c.owner.orgId, first.batchId)).error).toBeNull();
+    // Finance looks at file A; meanwhile the owner replaces it (confirming A wasn't uploaded).
+    const second = await makeBatch(admin, c.owner.client, c.owner.orgId, c.run.runId, {
+      voidReason: "Wrong format for our bank",
+      notUploaded: true,
+      sha: "e".repeat(64),
+    });
+    expect(second.error).toBeNull();
+    const stale = await release(c.finance.client, c.owner.orgId, c.run.runId, first.batchId);
+    expect(stale.error?.code).toBe("MLBFC");
+    const staleHash = await release(
+      c.finance.client,
+      c.owner.orgId,
+      c.run.runId,
+      second.batchId,
+      first.sha,
+    );
+    expect(staleHash.error?.code).toBe("MLBFC");
   });
 
   it("keeps the releaser apart from the preparer in SQL, and a release changes nothing else", async () => {
@@ -626,6 +688,133 @@ describe("release", () => {
       true,
     );
     expect(sneaky.error?.code).toBe("MLPRD");
+  });
+});
+
+describe("replacing a downloaded file (money review H1)", () => {
+  it("needs the statement that it wasn't uploaded, kept in the reason and the audit row", async () => {
+    const c = await approvedCompany("h1");
+    const first = await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId);
+    expect(first.error).toBeNull();
+    expect((await download(c.finance.client, c.owner.orgId, first.batchId)).error).toBeNull();
+    // Who downloaded it, for the preview.
+    const seen = await c.owner.client.rpc("payout_file_downloads", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: c.run.runId,
+    });
+    expect(seen.error).toBeNull();
+    expect(seen.data).toEqual([
+      expect.objectContaining({ batch_id: first.batchId, actor_id: c.finance.id }),
+    ]);
+    expect(
+      (
+        await c.lineManager.client.rpc("payout_file_downloads", {
+          p_organisation_id: c.owner.orgId,
+          p_run_id: c.run.runId,
+        })
+      ).error?.code,
+    ).toBe(DENIED);
+
+    const silent = await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId, {
+      voidReason: "Wrong format",
+    });
+    expect(silent.error?.code).toBe("MLBFB");
+    const second = await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId, {
+      voidReason: "Wrong format",
+      notUploaded: true,
+    });
+    expect(second.error).toBeNull();
+    const { data: old } = await admin
+      .from("payout_batches")
+      .select("status, void_reason")
+      .eq("id", first.batchId)
+      .single();
+    expect(old).toEqual({
+      status: "voided",
+      void_reason: "Wrong format (confirmed the replaced file was not uploaded to the bank)",
+    });
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("after")
+      .eq("organisation_id", c.owner.orgId)
+      .eq("action", "payroll.bank_file_made")
+      .eq("entity_id", second.batchId)
+      .single();
+    expect(audit?.after).toMatchObject({
+      voided_batch_id: first.batchId,
+      replaced_was_downloaded: true,
+      not_uploaded_attested: true,
+    });
+  });
+
+  it("refuses ten digits in a reason however they are spaced", async () => {
+    const c = await approvedCompany("h1-digits");
+    expect((await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId)).error).toBeNull();
+    const spaced = await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId, {
+      voidReason: "Paid to 012 345 6789 by mistake",
+    });
+    expect(spaced.error?.code).toBe("22023");
+  });
+});
+
+describe("sweeping bank files (security review M2)", () => {
+  it("lists only orphaned bank-file paths past 15 minutes, for the secret key, and audits a sweep", async () => {
+    const c = await approvedCompany("sweep");
+    const made = await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId);
+    expect(made.error).toBeNull();
+    const fresh = await storeFile(admin, c.owner.orgId, c.run.runId, randomUUID());
+    const old = await storeFile(admin, c.owner.orgId, c.run.runId, randomUUID());
+    // Another shape in the bucket (5.6's schedules) is never matched.
+    const otherShape = `${c.owner.orgId}/${c.run.runId}/schedules/pension.csv`;
+    expect(
+      (
+        await admin.storage
+          .from(BUCKET)
+          .upload(otherShape, Buffer.from("a,b\r\n"), { contentType: "text/csv" })
+      ).error,
+    ).toBeNull();
+    await db.query(
+      `update storage.objects set created_at = now() - interval '1 hour'
+       where bucket_id = 'payroll-files' and name = any($1)`,
+      [[old.path, made.path, otherShape]],
+    );
+
+    expect(
+      (await c.finance.client.rpc("payroll_files_due", { p_organisation_id: c.owner.orgId })).error
+        ?.code,
+    ).toBe(DENIED);
+    const due = await admin.rpc("payroll_files_due", { p_organisation_id: c.owner.orgId });
+    expect(due.error).toBeNull();
+    expect(due.data).toEqual([
+      { organisation_id: c.owner.orgId, path: old.path, reason: "orphan" },
+    ]);
+    expect(due.data!.map((d) => d.path)).not.toContain(fresh.path);
+
+    const swept = await admin.rpc("record_payroll_file_sweep", {
+      p_organisation_id: c.owner.orgId,
+      p_paths: [old.path],
+    });
+    expect(swept.error).toBeNull();
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("actor_id, after")
+      .eq("id", swept.data!)
+      .single();
+    expect(audit).toEqual({ actor_id: null, after: { paths: [old.path], count: 1 } });
+    // Another company's path can't be recorded under this one.
+    const other = await admin.rpc("record_payroll_file_sweep", {
+      p_organisation_id: c.owner.orgId,
+      p_paths: [`${randomUUID()}/${randomUUID()}/${randomUUID()}.csv`],
+    });
+    expect(other.error?.code).toBe("22023");
+    expect(
+      (
+        await c.owner.client.rpc("record_payroll_file_sweep", {
+          p_organisation_id: c.owner.orgId,
+          p_paths: [old.path],
+        })
+      ).error?.code,
+    ).toBe(DENIED);
   });
 });
 

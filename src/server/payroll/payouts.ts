@@ -6,7 +6,9 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { formatNaira, toKobo, type Kobo } from "@/lib/money";
+import { formatDateTime } from "@/lib/dates";
 import {
+  formulaRefusal,
   LEFT_OUT_LABEL,
   nameList,
   planRefusal,
@@ -22,6 +24,7 @@ import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database, Json } from "@/types/db";
 
 import { BANK_FORMAT_IDS, bankFormat, salaryNarration, type BankFileItem } from "./bank-formats";
+import { PAYROLL_FILES_BUCKET, sweepPayrollFiles } from "./payout-sweep";
 import { loadRun, type PayrollRunRow } from "./run-data";
 
 /**
@@ -58,31 +61,51 @@ export function canMakeBankFile(role: ManagerRole): boolean {
   return (PAYOUT_MAKERS as readonly ManagerRole[]).includes(role);
 }
 
-export const PAYROLL_FILES_BUCKET = "payroll-files";
+export { PAYROLL_FILES_BUCKET };
 export const BANK_FILE_URL_SECONDS = 60;
 
 const reload = "Reload the page and try again";
 const reasonMessage = "Say why in up to 500 characters, with no web addresses or account numbers";
 
-export const makeBankFileSchema = z.object({
-  runId: z.uuid(reload),
-  format: z.enum(BANK_FORMAT_IDS, "Choose a bank file format"),
-  voidReason: z
+/**
+ * An optional reason: up to `max` characters, no control characters or web addresses, and never
+ * ten digits once everything but digits is taken out (security review L3), so an account number
+ * can't land in it in any spacing.
+ */
+const optionalReason = (max: number) =>
+  z
     .string()
     .optional()
     .transform((v) => (v ?? "").trim())
     .refine(
       (v) =>
-        v.length <= 500 &&
+        v.length <= max &&
         !/[\u0001-\u001f\u007f-\u009f<>]/.test(v) &&
         !/(:\/\/|www\.)/i.test(v) &&
-        !/\d{10}/.test(v),
+        v.replace(/\D/g, "").length < 10,
       reasonMessage,
     )
-    .transform((v) => (v === "" ? null : v)),
+    .transform((v) => (v === "" ? null : v));
+
+const checkbox = z
+  .string()
+  .optional()
+  .transform((v) => v === "on" || v === "true");
+
+export const makeBankFileSchema = z.object({
+  runId: z.uuid(reload),
+  format: z.enum(BANK_FORMAT_IDS, "Choose a bank file format"),
+  // Room for the attestation the database adds when the replaced file was downloaded.
+  voidReason: optionalReason(420),
+  /** "The current file was not uploaded to the bank" (needed when it was downloaded). */
+  notUploaded: checkbox,
 });
 
-export const bankFileIdSchema = z.object({ batchId: z.uuid(reload) });
+export const bankFileIdSchema = z.object({
+  batchId: z.uuid(reload),
+  /** Needed once the run is released: the file is already paid. */
+  reason: optionalReason(500),
+});
 
 /** Rule 10 for release, as the person reads it. */
 export const RELEASE_TWO_PERSON_MESSAGE =
@@ -100,7 +123,7 @@ export function fromPayoutDbError(error: Pick<PostgrestError, "code" | "message"
   if (error.code === "P0002") {
     throw new MutationError("invalid", `${error.message} Reload the page.`);
   }
-  if (/^MLBF[2-79]$/.test(error.code) || error.code === "22023") {
+  if (/^MLBF[2-79A-E]$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code})`);
@@ -176,7 +199,10 @@ export interface ActiveBatch {
   id: string;
   itemCount: number;
   totalKobo: Kobo;
+  leftOutCount: number;
+  leftOutKobo: Kobo;
   fileSha256: string;
+  madeBy: string;
 }
 
 export async function loadActiveBatch(
@@ -186,7 +212,9 @@ export async function loadActiveBatch(
 ): Promise<ActiveBatch | null> {
   const { data, error } = await supabase
     .from("payout_batches")
-    .select("id, item_count, total_kobo::text, file_sha256")
+    .select(
+      "id, item_count, total_kobo::text, left_out_count, left_out_kobo::text, file_sha256, made_by",
+    )
     .eq("organisation_id", organisationId)
     .eq("run_id", runId)
     .eq("status", "active")
@@ -197,14 +225,56 @@ export async function loadActiveBatch(
     id: string;
     item_count: number;
     total_kobo: string;
+    left_out_count: number;
+    left_out_kobo: string;
     file_sha256: string;
+    made_by: string;
   };
   return {
     id: row.id,
     itemCount: row.item_count,
     totalKobo: toKobo(row.total_kobo),
+    leftOutCount: row.left_out_count,
+    leftOutKobo: toKobo(row.left_out_kobo),
     fileSha256: row.file_sha256,
+    madeBy: row.made_by,
   };
+}
+
+export interface FileDownload {
+  batchId: string;
+  actorId: string | null;
+  actorName: string;
+  downloadedAt: string;
+}
+
+/** Who downloaded the run's bank files and when, newest first (owner, hr, finance). */
+export async function loadFileDownloads(
+  supabase: Client,
+  organisationId: string,
+  runId: string,
+): Promise<FileDownload[]> {
+  const { data, error } = await supabase.rpc("payout_file_downloads", {
+    p_organisation_id: organisationId,
+    p_run_id: runId,
+  });
+  if (error) fromPayoutDbError(error);
+  const rows = data ?? [];
+  const ids = [...new Set(rows.map((r) => r.actor_id).filter((id): id is string => !!id))];
+  const names = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: people } = await supabase
+      .from("profiles")
+      .select("user_id, full_name")
+      .in("user_id", ids);
+    for (const p of people ?? []) if (p.full_name) names.set(p.user_id, p.full_name);
+  }
+  return rows.map((r) => ({
+    batchId: r.batch_id,
+    actorId: r.actor_id,
+    actorName: (r.actor_id && names.get(r.actor_id)) || "a manager",
+    downloadedAt: r.downloaded_at,
+  }));
 }
 
 /** The run, approved and not released, or a refusal the person can act on. */
@@ -337,12 +407,80 @@ async function removeStored(admin: Client, path: string): Promise<void> {
   }
 }
 
+/** A refusal the database made on purpose: the batch certainly wasn't recorded. */
+const REFUSAL_CODE = /^(MLBF[0-9A-Z]|22023|42501|P0002)$/;
+
+/**
+ * After `make_payout_batch` failed (money review M3): a real refusal means nothing was recorded,
+ * so the stored file goes. Anything else (a timeout, a lost connection) may have committed, so the
+ * file is deleted only once the batch is known not to exist; if that can't be read, it stays for
+ * the sweep, which removes it after 15 minutes when no batch names it.
+ */
+async function cleanUpAfterFailure(
+  admin: Client,
+  error: Pick<PostgrestError, "code">,
+  organisationId: string,
+  batchId: string,
+  path: string,
+): Promise<void> {
+  if (REFUSAL_CODE.test(error.code ?? "")) {
+    await removeStored(admin, path);
+    return;
+  }
+  const { data, error: readError } = await admin
+    .from("payout_batches")
+    .select("id")
+    .eq("organisation_id", organisationId)
+    .eq("id", batchId)
+    .maybeSingle();
+  if (!readError && !data) await removeStored(admin, path);
+}
+
 // ---------------------------------------------------------------------------
 // Preview and specs
 // ---------------------------------------------------------------------------
 
 const money = (k: Kobo) => formatNaira(k, { whole: true });
 const workers = (n: number) => `${n} ${n === 1 ? "worker" : "workers"}`;
+
+/** "File made 24 Nov was downloaded by Adaeze Okafor at 24 Nov 2026, 10:02." */
+function downloadedText(d: FileDownload): string {
+  return `The current file was downloaded by ${d.actorName} at ${formatDateTime(d.downloadedAt)}.`;
+}
+
+const NOT_UPLOADED =
+  "Tick that the current file was not uploaded to the bank, or two files may be paid. If it was uploaded, don't replace it.";
+
+/**
+ * Checks shared by the preview and the write: a reason to replace the current file and, when the
+ * current file was downloaded, the statement that it wasn't uploaded (money review H1).
+ */
+async function replacementCheck(
+  supabase: Client,
+  organisationId: string,
+  runId: string,
+  data: z.output<typeof makeBankFileSchema>,
+): Promise<{ active: ActiveBatch | null; downloaded: FileDownload | null }> {
+  const active = await loadActiveBatch(supabase, organisationId, runId);
+  if (!active) return { active, downloaded: null };
+  if (!data.voidReason) {
+    throw new MutationError(
+      "invalid",
+      "This run already has a bank file. Say why it is replaced.",
+      {
+        voidReason: "Say why the current file is replaced",
+      },
+    );
+  }
+  const downloads = await loadFileDownloads(supabase, organisationId, runId);
+  const downloaded = downloads.find((d) => d.batchId === active.id) ?? null;
+  if (downloaded && !data.notUploaded) {
+    throw new MutationError("invalid", `${downloadedText(downloaded)} ${NOT_UPLOADED}`, {
+      notUploaded: NOT_UPLOADED,
+    });
+  }
+  return { active, downloaded };
+}
 
 /**
  * "Make file": who is paid, the total and who is left out, from the details in force now, as the
@@ -353,22 +491,23 @@ export async function previewMakeBankFile(
   data: z.output<typeof makeBankFileSchema>,
 ): Promise<CapabilityPreview> {
   const run = await approvedRun(ctx.supabase, ctx.organisationId, data.runId);
-  const active = await loadActiveBatch(ctx.supabase, ctx.organisationId, run.id);
-  if (active && !data.voidReason) {
-    throw new MutationError(
-      "invalid",
-      "This run already has a bank file. Say why it is replaced.",
-      { voidReason: "Say why the current file is replaced" },
-    );
-  }
+  const { active, downloaded } = await replacementCheck(
+    ctx.supabase,
+    ctx.organisationId,
+    run.id,
+    data,
+  );
   const { rows } = await loadPayoutPlan(ctx.supabase, ctx.organisationId, run.id);
   const summary = summarisePlan(rows);
-  const refusal = planRefusal(summary);
+  const refusal = planRefusal(summary) ?? formulaRefusal(summary.paid);
   if (refusal) throw new MutationError("invalid", refusal);
   const format = bankFormat(data.format);
   let text = `Makes the ${runMonth(run.periodEnd)} bank file (${format?.label ?? data.format}): ${workers(summary.paid.length)}, ${money(summary.totalKobo)}; ${summary.leftOut.length} left out.`;
   if (active) {
     text += ` Replaces the current file (${workers(active.itemCount)}, ${money(active.totalKobo)}), which is voided: "${data.voidReason}".`;
+    if (downloaded) {
+      text += ` ${downloadedText(downloaded)} You confirm it was not uploaded to the bank.`;
+    }
   }
   text +=
     " Each account number is checked against its last 4 digits as the file is made. Nothing is paid until the company uploads the file to its own bank.";
@@ -395,6 +534,19 @@ export interface MadeBankFile {
   sha256: string;
 }
 
+/** The same payslips and bank-detail versions in both reads of the plan. */
+function samePlan(a: readonly PayoutPlanRow[], b: readonly PayoutPlanRow[]): boolean {
+  const key = (r: PayoutPlanRow) =>
+    [
+      r.payslipId,
+      r.netKobo.toString(),
+      r.bankDetailChangeId ?? "",
+      r.bankAccountLast4 ?? "",
+      r.bankCode ?? "",
+    ].join("|");
+  return a.length === b.length && a.map(key).join(",") === b.map(key).join(",");
+}
+
 /** Makes, stores and records the run's bank file (owner or finance). */
 export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankFile> = {
   module: "payroll",
@@ -402,22 +554,27 @@ export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankF
   roles: PAYOUT_MAKERS,
   run: async ({ supabase, organisationId, data }) => {
     const run = await approvedRun(supabase, organisationId, data.runId);
-    const active = await loadActiveBatch(supabase, organisationId, run.id);
-    if (active && !data.voidReason) {
-      throw new MutationError(
-        "invalid",
-        "This run already has a bank file. Say why it is replaced.",
-        { voidReason: "Say why the current file is replaced" },
-      );
-    }
+    await replacementCheck(supabase, organisationId, run.id, data);
     const format = bankFormat(data.format);
     if (!format) throw new MutationError("invalid", "Choose a bank file format.");
 
+    // Security review L1: the signed-in user's own read first (the database checks their role and
+    // session), before anything is read with the secret key or decrypted.
+    const mine = await loadPayoutPlan(supabase, organisationId, run.id, false);
+    const mineSummary = summarisePlan(mine.rows);
+    const refusal = planRefusal(mineSummary) ?? formulaRefusal(mineSummary.paid);
+    if (refusal) throw new MutationError("invalid", refusal);
+
     const admin = createAdminSupabase();
     const plan = await loadPayoutPlan(admin, organisationId, run.id, true);
+    if (!samePlan(mine.rows, plan.rows)) {
+      plan.ciphertext.clear();
+      throw new MutationError(
+        "invalid",
+        "Bank details changed while the file was being made. Try again.",
+      );
+    }
     const summary = summarisePlan(plan.rows);
-    const refusal = planRefusal(summary);
-    if (refusal) throw new MutationError("invalid", refusal);
 
     const decrypted = decryptForFile(organisationId, summary.paid, plan.ciphertext, run.periodEnd);
     plan.ciphertext.clear();
@@ -438,6 +595,7 @@ export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankF
     const bytes = format.render(decrypted.items);
     decrypted.items.length = 0;
     const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const size = bytes.byteLength;
     const batchId = randomUUID();
     const path = `${organisationId}/${run.id}/${batchId}.${format.extension}`;
 
@@ -453,14 +611,19 @@ export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankF
       p_batch_id: batchId,
       p_bank_format: format.id,
       p_file_sha256: sha256,
-      p_file_bytes: bytes.byteLength,
+      p_file_bytes: size,
       p_items: itemsPayload(summary.paid, summary.leftOut),
       ...(data.voidReason ? { p_void_reason: data.voidReason } : {}),
+      p_not_uploaded: data.notUploaded,
     });
     if (error) {
-      await removeStored(admin, path);
+      await cleanUpAfterFailure(admin, error, organisationId, batchId, path);
       fromPayoutDbError(error);
     }
+    // Files this company left behind (a refused record whose delete failed) go now, not daily.
+    await sweepPayrollFiles(admin, organisationId).catch((e: unknown) =>
+      console.error("payroll.bank_file_sweep_failed:", e instanceof Error ? e.name : "unknown"),
+    );
     const result = (made ?? {}) as {
       item_count?: number;
       total_kobo?: string;
@@ -477,7 +640,10 @@ export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankF
   },
 };
 
-/** Opens the active file for 60 seconds (owner or finance); the database audits the download. */
+/**
+ * Opens the active file for 60 seconds (owner or finance); the database audits the download. Once
+ * the run is released a reason is needed: the file is already paid (money review L2).
+ */
 export const downloadBankFileSpec: MutationSpec<typeof bankFileIdSchema, { url: string }> = {
   module: "payroll",
   schema: bankFileIdSchema,
@@ -486,6 +652,7 @@ export const downloadBankFileSpec: MutationSpec<typeof bankFileIdSchema, { url: 
     const { data: path, error } = await supabase.rpc("payout_file_download", {
       p_organisation_id: organisationId,
       p_batch_id: data.batchId,
+      ...(data.reason ? { p_reason: data.reason } : {}),
     });
     if (error) fromPayoutDbError(error);
     const { data: signed, error: signError } = await createAdminSupabase()

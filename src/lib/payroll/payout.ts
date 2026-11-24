@@ -58,7 +58,7 @@ export function decidePayout(row: PayoutPlanRow): PayoutDecision {
     row.accountName !== null &&
     row.bankAccountLast4 !== null;
   const acknowledged = row.acknowledgedCode !== null;
-  if (row.netKobo === 0n) return { kind: "left_out", reason: "nothing_to_pay" };
+  if (row.netKobo <= 0n) return { kind: "left_out", reason: "nothing_to_pay" };
   if (!usable) {
     return acknowledged
       ? { kind: "left_out", reason: "no_bank_details" }
@@ -115,6 +115,26 @@ export function planRefusal(summary: PayoutPlanSummary): string | null {
   }
   if (summary.paid.length === 0) return "Nobody in this run can be paid by bank file.";
   return null;
+}
+
+/** A cell a spreadsheet would read as a formula. */
+export const FORMULA_START = /^[=+\-@\t\r]/;
+
+/**
+ * Workers paid by the file whose payee name (the account name, or the bank name) starts like a
+ * formula. The file refuses them by name rather than writing an escaped name the bank would show.
+ */
+export function formulaNames(paid: readonly PayoutPlanRow[]): string[] {
+  return paid
+    .filter((r) => FORMULA_START.test(r.accountName ?? "") || FORMULA_START.test(r.bankName ?? ""))
+    .map((r) => r.workerName);
+}
+
+/** The refusal for payee names that start with =, +, - or @, or null. */
+export function formulaRefusal(paid: readonly PayoutPlanRow[]): string | null {
+  const names = formulaNames(paid);
+  if (names.length === 0) return null;
+  return `The account name or bank name on file for ${nameList(names)} starts with =, +, - or @, which a bank's spreadsheet could run. Correct their bank details, then make the file again.`;
 }
 
 /** "•••• 7712" */

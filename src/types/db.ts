@@ -2223,7 +2223,7 @@ isOneToOne: false
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
                            },
 "make_payout_batch":
-{ Args: { "p_bank_format": string,"p_batch_id": string,"p_file_bytes": number,"p_file_sha256": string,"p_items": Json,"p_organisation_id": string,"p_run_id": string,"p_void_reason"?: string }; Returns: Json
+{ Args: { "p_bank_format": string,"p_batch_id": string,"p_file_bytes": number,"p_file_sha256": string,"p_items": Json,"p_not_uploaded"?: boolean,"p_organisation_id": string,"p_run_id": string,"p_void_reason"?: string }; Returns: Json
                            },
 "membership_invite_lookup":
 { Args: { "p_token": string }; Returns: {
@@ -2276,7 +2276,12 @@ isOneToOne: false
 { Args: { "p_organisation_id": string }; Returns: string
                            },
 "payout_file_download":
-{ Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: string
+{ Args: { "p_batch_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
+                           },
+"payout_file_downloads":
+{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: {
+              "actor_id": string,"batch_id": string,"downloaded_at": string
+            }[]
                            },
 "payout_plan":
 { Args: { "p_organisation_id": string,"p_run_id": string,"p_with_ciphertext"?: boolean }; Returns: {
@@ -2285,6 +2290,11 @@ isOneToOne: false
                            },
 "payroll_clock":
 { Args: Record<PropertyKey, never>; Returns: string
+                           },
+"payroll_files_due":
+{ Args: { "p_limit"?: number,"p_organisation_id"?: string }; Returns: {
+              "organisation_id": string,"path": string,"reason": string
+            }[]
                            },
 "payroll_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
@@ -2328,6 +2338,9 @@ isOneToOne: false
 "record_payroll_approval_check":
 { Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_read_started_at": string,"p_run_id": string }; Returns: Json
                            },
+"record_payroll_file_sweep":
+{ Args: { "p_organisation_id": string,"p_paths": (string)[] }; Returns: string
+                           },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json
                            },
@@ -2344,7 +2357,7 @@ isOneToOne: false
 { Args: { "p_line_id": string,"p_organisation_id": string,"p_reason": string }; Returns: Json
                            },
 "release_payroll_run":
-{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
+{ Args: { "p_batch_id": string,"p_file_sha256": string,"p_organisation_id": string,"p_run_id": string }; Returns: string
                            },
 "remove_assignment":
 { Args: { "p_assignment_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json

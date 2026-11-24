@@ -1,5 +1,7 @@
 import "server-only";
 
+import { FORMULA_START } from "@/lib/payroll/payout";
+
 import { csvBytes, nairaAmount } from "./csv";
 import type { BankFileItem, BankFormat } from "./types";
 
@@ -22,6 +24,13 @@ export const genericCsv: BankFormat = {
   extension: "csv",
   contentType: "text/csv",
   render(items: readonly BankFileItem[]): Uint8Array {
+    // Payee names that start like a formula are refused before the file is made (security review
+    // L4); every cell is still escaped by csvCell as the last defence.
+    if (
+      items.some((i) => FORMULA_START.test(i.beneficiaryName) || FORMULA_START.test(i.bankName))
+    ) {
+      throw new RangeError("A payee name starts with =, +, - or @.");
+    }
     return csvBytes([
       GENERIC_CSV_HEADER,
       ...items.map((item) => [

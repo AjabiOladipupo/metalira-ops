@@ -4,6 +4,7 @@ import { formatNaira, type Kobo } from "@/lib/money";
 import { LEFT_OUT_LABEL, maskedLast4 } from "@/lib/payroll/payout";
 import { cn } from "@/lib/utils";
 import { bankFormat, bankFormatOptions } from "@/server/payroll/bank-formats";
+import { loadFileDownloads } from "@/server/payroll/payouts";
 import { loadPayoutDetail } from "@/server/payroll/payouts-data";
 import type { RunDetail } from "@/server/payroll/run-data";
 import { peoplePageContext } from "@/server/people/page-context";
@@ -52,6 +53,12 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
   const person = (id: string | null) =>
     (id && (payout.people.get(id) ?? d.names.get(id))) || "a manager";
   const released = run.status === "released";
+  const netOf = new Map(d.payslips.map((p) => [p.id, p.netKobo] as const));
+  const downloads = await loadFileDownloads(ctx.supabase, ctx.organisationId, run.id);
+  const activeDownload = active ? (downloads.find((x) => x.batchId === active.id) ?? null) : null;
+  const downloadedNote = activeDownload
+    ? `The current file was downloaded by ${activeDownload.actorName} at ${formatDateTime(activeDownload.downloadedAt)}.`
+    : null;
 
   return (
     <section aria-labelledby="pay" className="flex flex-col gap-4">
@@ -109,7 +116,12 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
               by {person(active.madeBy)} · {formatDateTime(active.createdAt)}
             </dd>
           </dl>
-          {canMake ? <DownloadBankFileButton batchId={active.id} /> : null}
+          {downloadedNote ? (
+            <p className="m-0 text-sm" data-testid="bank-file-downloaded">
+              {downloadedNote}
+            </p>
+          ) : null}
+          {canMake ? <DownloadBankFileButton batchId={active.id} released={released} /> : null}
 
           <div className="relative overflow-x-auto rounded-xl border border-line">
             <table className="w-full border-collapse text-sm" aria-label="Workers in the bank file">
@@ -174,6 +186,32 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
         </p>
       ) : null}
 
+      {released && leftOut.length > 0 ? (
+        <section
+          aria-labelledby="outstanding"
+          className="flex flex-col gap-2 rounded-xl border border-foreground p-4"
+          data-testid="outstanding"
+        >
+          <h3 id="outstanding" className="m-0 type-h3">
+            {leftOut.length} outstanding ·{" "}
+            {naira(leftOut.reduce((n, i) => n + (netOf.get(i.payslipId) ?? 0n), 0n))}
+          </h3>
+          <p className="m-0 text-sm text-fg-muted">
+            Not in this file, so not paid by it. Their payslips stand; pay them outside the file
+            until corrections and supplementary files come (slice 5.7).
+          </p>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+            {leftOut.map((i) => (
+              <li key={i.id}>
+                <span className="font-semibold">{i.workerName}</span> ·{" "}
+                {naira(netOf.get(i.payslipId) ?? 0n)} ·{" "}
+                {i.leftOutReason ? LEFT_OUT_LABEL[i.leftOutReason] : "Not in this file"}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {!released && canMake ? (
         <div className="flex flex-col gap-3 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">{active ? "Replace the file" : "Make the file"}</h3>
@@ -182,7 +220,12 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
               ? "Only if something changed: the current file is voided with your reason and can't be downloaded again."
               : "Pays each worker's net pay to the bank details in force now. Workers HR left out for missing details or a bank change in its hold are listed as not in this file."}
           </p>
-          <MakeBankFileForm runId={run.id} formats={bankFormatOptions()} replaces={!!active} />
+          <MakeBankFileForm
+            runId={run.id}
+            formats={bankFormatOptions()}
+            replaces={!!active}
+            downloadedNote={downloadedNote}
+          />
         </div>
       ) : null}
 
@@ -194,10 +237,10 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
           <h3 className="m-0 type-h3">After you upload it</h3>
           <p className="m-0 text-sm text-fg-muted">
             Confirm the file went to the bank. This releases the run: workers can see their
-            payslips, and the file can&apos;t be replaced. Someone who prepared or changed the run
-            can&apos;t release it.
+            payslips, and the file can&apos;t be replaced. Someone who prepared or changed the run,
+            or made this file, can&apos;t release it, and the file must have been downloaded.
           </p>
-          <ReleaseRunForm runId={run.id} />
+          <ReleaseRunForm runId={run.id} batchId={active.id} fileSha256={active.fileSha256} />
         </div>
       ) : null}
 
