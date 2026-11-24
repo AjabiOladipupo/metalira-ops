@@ -1,0 +1,14 @@
+# Lira test questions: payroll rules
+
+Each request is what a manager might type, with the outcome Lira must reach (docs/LIRA.md). "Card" means a confirmation card showing the capability's preview; nothing changes until the person confirms. Capabilities are named as in `src/server/capabilities/registry.ts`. Every answer that quotes a statutory figure ends with "Confirm with a tax adviser before the first live payroll." until the adviser's confirmation is recorded on the version in force. Payroll writes are `agent: false`: Lira never adds a rule set version or records the adviser's confirmation, it points to Settings > Payroll rules.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | hr | Which tax rules are we using? | Answer from `payroll.rules_summary`: "NTA 2025 v1, in force since 1 Jan 2026, not yet confirmed by your tax adviser." If a version is scheduled: "NTA 2025 v2 starts 1 Jan 2027." Ends with the adviser line. No change. |
+| 2 | finance | What are the PAYE bands? | Answer from the version in force (Settings > Payroll rules): 0% on the first ₦800,000, 15% on the next ₦2,200,000, 18% on the next ₦9,000,000, 21% on the next ₦13,000,000, 23% on the next ₦25,000,000, 25% above ₦50,000,000, on yearly taxable income. Ends with the adviser line and a link to the page. |
+| 3 | owner | Change NSITF to 1.5% from January. | No card: `payroll.add_rule_set_version` is `agent: false`. Lira says the owner or HR adds a dated version on Settings > Payroll rules > Add a version, which previews the figures that change before saving, and links there. |
+| 4 | hr | Make the new PAYE bands apply from last month. | Refused: a version starts tomorrow or later, and pay already worked out keeps the version it used (rule 3). Lira explains and offers the page; no card. |
+| 5 | admin | Show me the payroll rules. | Refused: admins see no payroll (`payroll.rules_summary` roles are owner, hr and finance). Lira says who can. |
+| 6 | owner | Our tax adviser has checked the rules, mark them confirmed. | No card: `payroll.confirm_rule_set` is `agent: false` (a statement about the adviser's advice). Lira links the owner to the confirmation form on Settings > Payroll rules. |
+| 7 | finance | Is the minimum-wage earner exempt from PAYE? | No card. Lira says the rule set has no minimum-wage exemption: PAYE comes from the bands only (docs/PHASE_5.md open question 9), and the question is for the company's tax adviser. |
+| 8 | hr | Why is Musa Ibrahim's PAYE ₦5,660? | Answered from the payslip's trace once 5.2 stores it (`payslips.trace`): ₦120,000 × 12 = ₦1,440,000, less ₦115,200 employee pension and ₦72,000 rent relief (20% of ₦360,000) gives ₦1,252,800 taxable; 15% on ₦452,800 = ₦67,920 a year; ÷ 12 = ₦5,660. No names with amounts in a summary read; the trace itself carries none. |

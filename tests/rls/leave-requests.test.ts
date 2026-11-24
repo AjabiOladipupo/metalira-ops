@@ -437,9 +437,40 @@ describe("insert-only rows", () => {
   it("a leave request is never deleted and moves only along the steps", async () => {
     await expect(db.query("delete from public.leave_requests")).rejects.toThrow();
     await expect(db.query("truncate public.leave_requests")).rejects.toThrow();
+    // A request of its own, on every date: a fresh worker, one day in January of this year
+    // (the guard checks moves, not dates), walked along the steps as the database owner to
+    // cancelled. It never moves back, nor does any decided request move backwards.
+    const worker = await addWorker();
+    const { rows } = await db.query<{ id: string }>(
+      `insert into public.leave_requests (organisation_id, worker_id, leave_type_id, leave_year,
+         start_date, end_date, days)
+       values ($1, $2, $3, $4, $5, $5, 1) returning id`,
+      [owner.orgId, worker, sick, year, `${year}-01-06`],
+    );
+    const id = rows[0]!.id;
+    await db.query("update public.leave_requests set status = 'pending_hr' where id = $1", [id]);
+    await db.query("update public.leave_requests set status = 'approved' where id = $1", [id]);
     await expect(
-      db.query("update public.leave_requests set status = 'approved' where status = 'cancelled'"),
-    ).rejects.toThrow();
+      db.query("update public.leave_requests set status = 'pending_hr' where id = $1", [id]),
+    ).rejects.toMatchObject({ code: "MLLQ4" });
+    await db.query(
+      "update public.leave_requests set status = 'cancelled', cancelled_at = now() where id = $1",
+      [id],
+    );
+    for (const back of ["approved", "pending_hr", "pending_line_manager"]) {
+      await expect(
+        db.query(
+          "update public.leave_requests set status = $2, cancelled_at = null where id = $1",
+          [id, back],
+        ),
+        back,
+      ).rejects.toMatchObject({ code: "MLLQ4" });
+    }
+    const { rows: after } = await db.query<{ status: string }>(
+      "select status from public.leave_requests where id = $1",
+      [id],
+    );
+    expect(after[0]!.status).toBe("cancelled");
   });
 
   it("the secret key can't change ledger rows", async () => {
