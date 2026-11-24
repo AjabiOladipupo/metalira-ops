@@ -477,6 +477,24 @@ async function ExplainPanel({ d, payslipId }: { d: RunDetail; payslipId: string 
   );
 }
 
+/**
+ * "Confirm with a tax adviser before the first live payroll", beside every statutory figure a
+ * manager sees on the run (Gross to net, Submit, the approval panel, a reversal), until the
+ * adviser's confirmation is recorded on the run's rule set (slice 5.8, owner decision). A run
+ * with no saved rule set yet (the starting values) shows it too. Never on the worker's payslip.
+ */
+function AdviserLine({ d }: { d: RunDetail }) {
+  if (d.ruleSet?.adviserConfirmed) return null;
+  return (
+    <p
+      className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm font-medium"
+      data-testid="adviser-line"
+    >
+      {TAX_ADVISER_LINE}
+    </p>
+  );
+}
+
 function GrossToNetStep({ d, explain }: StepProps & { explain: string | undefined }) {
   const s = d.payslips;
   const total = (pick: (p: (typeof s)[number]) => Kobo) => sumKobo(s.map(pick));
@@ -492,11 +510,7 @@ function GrossToNetStep({ d, explain }: StepProps & { explain: string | undefine
           {s.length} {s.length === 1 ? "worker" : "workers"}
         </span>
       </div>
-      {d.ruleSet && !d.ruleSet.adviserConfirmed ? (
-        <p className="m-0 rounded-lg border border-foreground bg-surface px-3 py-2.5 text-sm font-medium">
-          {TAX_ADVISER_LINE}
-        </p>
-      ) : null}
+      <AdviserLine d={d} />
       <div className="relative overflow-x-auto rounded-xl border border-line">
         <table className="w-full border-collapse text-sm" aria-label="Gross to net">
           <thead className="bg-surface">
@@ -641,6 +655,7 @@ function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
           {blocking > 0 ? ` · ${blocking} blocking` : ""}
         </dd>
       </dl>
+      <AdviserLine d={d} />
       <p className="m-0 text-sm text-fg-muted">
         Prepared by {preparer}. A different person in Finance must approve before any payment file
         is released. Metalira never holds the money: the company pays from its own bank account.
@@ -728,6 +743,7 @@ function ReversalStep({ d, canDecide }: { d: RunDetail; canDecide: boolean }) {
         <dt>Employer cost</dt>
         <dd className="m-0 text-right tabular-nums">{naira(t.employerCostKobo)}</dd>
       </dl>
+      <AdviserLine d={d} />
       <p className="m-0 text-sm text-fg-muted">
         Asked for by {requester}
         {asked ? ` · ${formatDateTime(asked.createdAt)}` : ""}
@@ -871,6 +887,7 @@ function ApprovalPanel({ d }: { d: RunDetail }) {
         payslips: they never change after, and the period&apos;s timesheets lock. Only someone who
         didn&apos;t prepare or change the run can approve it.
       </p>
+      <AdviserLine d={d} />
       {acked.length > 0 ? (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Acknowledged anomalies">
           {acked.map((a) => {

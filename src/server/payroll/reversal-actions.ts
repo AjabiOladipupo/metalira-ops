@@ -23,6 +23,7 @@ import {
 } from "./reversal";
 import type { RunFormState } from "./run-actions";
 import { PAYROLL_PREPARERS } from "./runs";
+import { errorTag } from "./error-tag";
 
 /**
  * Server Actions for payroll reversal and corrections (slice 5.7a). Each is two presses: the
@@ -50,10 +51,7 @@ function refusal(error: unknown, values?: Record<string, string>): RunFormState 
     }
   }
   const cause = error instanceof MutationError ? error.cause : error;
-  console.error(
-    "payroll_reversal.save_failed:",
-    cause instanceof Error ? `${cause.name}: ${cause.message}` : "unknown error",
-  );
+  console.error("payroll_reversal.save_failed:", errorTag(cause));
   return { ok: false, status: 500, formError: FAILED, values };
 }
 

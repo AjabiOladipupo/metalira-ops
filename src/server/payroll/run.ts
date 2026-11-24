@@ -23,7 +23,12 @@ import {
 } from "@/lib/payroll/run-format";
 import {
   canonicalJson,
+  carrySettledLater,
+  carrySettledLaterAnomalies,
   itfAppliesTo,
+  offCycleCarriedKobo,
+  refundUncollectedAnomalies,
+  refundUncollectedKobo,
   previousPeriodAnomalies,
   recurringAnomalies,
   workerHistory,
@@ -537,6 +542,52 @@ async function monthPayslips(
   return out;
 }
 
+/**
+ * Slice 5.8: workers a posted run of a later period already carried on (regular, final pay or
+ * missed worker), with that period's start, for a full-pay off-cycle run of an earlier period.
+ */
+async function laterCarrying(
+  supabase: Client,
+  organisationId: string,
+  periodStart: string,
+  workerIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (workerIds.length === 0) return new Map();
+  const { data: runs, error } = await supabase
+    .from("payroll_runs")
+    .select("id, kind, status, period_start, off_cycle_reason")
+    .eq("organisation_id", organisationId)
+    .gt("period_start", periodStart)
+    .in("status", ["approved", "released"])
+    .in("kind", ["regular", "off_cycle"])
+    .order("period_start")
+    .limit(400);
+  if (error) throw new Error(`Could not read later runs (${error.code})`);
+  const list = (runs ?? []).map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    status: r.status,
+    periodStart: r.period_start,
+    offCycleReason: r.off_cycle_reason,
+  }));
+  if (list.length === 0) return new Map();
+  const slips: { runId: string; workerId: string }[] = [];
+  for (let i = 0; i < workerIds.length; i += 200) {
+    const { data, error: slipError } = await supabase
+      .from("payslips")
+      .select("run_id, worker_id")
+      .eq("organisation_id", organisationId)
+      .in(
+        "run_id",
+        list.map((r) => r.id),
+      )
+      .in("worker_id", workerIds.slice(i, i + 200));
+    if (slipError) throw new Error(`Could not read later payslips (${slipError.code})`);
+    for (const x of data ?? []) slips.push({ runId: x.run_id, workerId: x.worker_id });
+  }
+  return carrySettledLater(periodStart, list, slips);
+}
+
 /** The company's regular runs' ITF choices, for an off-cycle run (slice 5.7b). */
 async function regularItf(
   supabase: Client,
@@ -695,7 +746,7 @@ export async function calculateRun(
       )
     : inputs.workers;
   const workerIds = runWorkers.map((w) => w.workerId);
-  const [history, bank, openDays, carried, regulars, month] = await Promise.all([
+  const [history, bank, openDays, carried, regulars, month, settledLater] = await Promise.all([
     runHistory(supabase, organisationId, period.start, workerIds, target.runId),
     checkBankDetails(organisationId, workerIds),
     options.workerIds || adjustmentsOnly
@@ -704,6 +755,10 @@ export async function calculateRun(
     carriedSeries(supabase, organisationId, target.runId),
     offCycle ? regularItf(supabase, organisationId, period.start) : Promise.resolve([]),
     monthPayslips(supabase, organisationId, target.payDate, workerIds, target.runId),
+    // Slice 5.8: only a final-pay or missed-worker run takes a carry for an earlier period.
+    fullPay
+      ? laterCarrying(supabase, organisationId, period.start, workerIds)
+      : Promise.resolve(new Map<string, string>()),
   ]);
   // Month-aggregate PAYE (owner decision, 24 Nov 2026): an off-cycle payslip always counts the
   // worker's other standing payslips of the pay date's month; a regular payslip does when an
@@ -721,11 +776,12 @@ export async function calculateRun(
   const historyOf = (workerId: string) => {
     const h = workerHistory(workerId, history.previous, history.latestPosted);
     const paidBefore = h.paidBefore || history.paidAny.has(workerId);
-    // Off-cycle: no net-change check; a correction or one-off run never takes a carried deduction.
+    // Off-cycle: no net-change check; a correction or one-off run never takes a carried deduction,
+    // nor does a full-pay run whose worker a later posted run already carried on (slice 5.8).
     if (!offCycle) return { ...h, paidBefore };
     return {
       previousNetKobo: null,
-      carriedKobo: adjustmentsOnly ? 0n : h.carriedKobo,
+      carriedKobo: offCycleCarriedKobo(h.carriedKobo, adjustmentsOnly, settledLater.get(workerId)),
       paidBefore,
     };
   };
@@ -837,6 +893,29 @@ export async function calculateRun(
         detail: { deduction_cut: true },
       });
     }
+    // Slice 5.8: a later posted run already settled this worker's carry, so none is taken here
+    // (shown), and a new carry from this run would never be read (blocks).
+    const later = settledLater.get(w.workerId);
+    if (later !== undefined) {
+      anomalies.push(
+        ...carrySettledLaterAnomalies(
+          w.workerId,
+          later,
+          workerHistory(w.workerId, history.previous, history.latestPosted).carriedKobo,
+          slip?.carriedForwardKobo ?? 0n,
+        ),
+      );
+    }
+    // Slice 5.8 (owner decision): a leave refund paying back arrears still carried is shown.
+    anomalies.push(
+      ...refundUncollectedAnomalies(
+        w.workerId,
+        refundUncollectedKobo(
+          corrections.parsed.byWorker.get(w.workerId)?.leaveRefunds ?? [],
+          historyOf(w.workerId).carriedKobo,
+        ),
+      ),
+    );
   }
   // An adjustment for a worker the inputs don't hold (left before the period, or not in a
   // one-worker preview's scope) blocks the run instead of stranding it (money review L-new-2).

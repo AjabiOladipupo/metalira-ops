@@ -593,8 +593,11 @@ describe("arrears are paid once", () => {
   });
 });
 
-describe("the audit log hides pay from admins (security review H1)", () => {
-  it("shows pay_rates audit rows to the owner only; admins keep every other entity", async () => {
+describe("the audit log hides pay from admins (security review H1; stricter in slice 5.8)", () => {
+  // Slice 5.8 (phase review, security): admins also see no row of any other payroll or statutory
+  // entity and no payroll.* event (tests/rls/payroll-fixup.test.ts checks each one); they keep
+  // the rest of the log, such as workers.
+  it("shows pay_rates audit rows to the owner only; admins keep the log's non-pay entities", async () => {
     const mine = await owner.client.from("audit_log").select("id").eq("entity", "pay_rates");
     expect((mine.data ?? []).length).toBeGreaterThan(0);
     const adminPay = await staff.admin.client

@@ -4,6 +4,7 @@
  */
 
 import { formatDate } from "@/lib/dates";
+import { formatNaira } from "@/lib/money";
 
 export interface AnomalyText {
   title: string;
@@ -50,6 +51,14 @@ export function describeAnomaly(
         body: "PAYE goes to the worker's tax state. Add it on their page, then recalculate. This blocks the run.",
       };
     case "calculation_failed":
+      if (detail.deduction_cut === true && detail.carry_settled_later === true) {
+        // Slice 5.8: a later posted run already carried this worker on, so a new carry is lost.
+        const later = str(detail, "period_start");
+        return {
+          title: `Deduction larger than the payment · ${name}`,
+          body: `A later run${later ? ` (from ${formatDate(later)})` : ""} already settled this worker's carried deductions, so nothing this run cuts can carry forward. Lower or remove the deduction so it fits what the run pays. This blocks the run.`,
+        };
+      }
       if (detail.deduction_cut === true) {
         // Slice 5.7b: a correction or one-off run can't carry a deduction to a later run.
         return {
@@ -190,6 +199,26 @@ export function describeAnomaly(
         title: `Leave correction waiting, not in this run · ${name}`,
         body: `${num(detail, "arrears")} leave arrears and ${num(detail, "refunds")} leave refunds are waiting for this worker, who isn't in this run (they left, or a final-pay or missed-worker run pays them). Settle it with a correction run, or on their final pay.`,
       };
+    case "carry_settled_later": {
+      // Slice 5.8: a full-pay off-cycle run for an earlier period than a posted run.
+      const later = str(detail, "period_start");
+      return {
+        title: `Carried deduction already taken · ${name}`,
+        body: `The run${later ? ` for the period from ${formatDate(later)}` : " of a later period"} already took this worker's carried deductions, so this run takes none.`,
+      };
+    }
+    case "refund_uncollected_carry": {
+      // Slice 5.8 (owner decision): a leave refund pays back arrears never recovered.
+      const naira = str(detail, "naira");
+      const amount =
+        naira !== null && /^\d{1,15}$/.test(naira)
+          ? BigInt(naira) * 100n + BigInt(Math.trunc(num(detail, "kobo")))
+          : null;
+      return {
+        title: `Refund includes ${amount === null ? "an amount" : formatNaira(amount)} not yet recovered from carried deductions · ${name}`,
+        body: "The leave refund pays back the arrears in full, but part of them is still in this worker's carried deductions. Check it before submitting.",
+      };
+    }
     default:
       return {
         title: `${code.replace(/_/g, " ")} · ${name}`,
