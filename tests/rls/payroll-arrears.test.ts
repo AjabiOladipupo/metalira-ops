@@ -246,6 +246,16 @@ describe("October posts with the leave approved before it", () => {
 
 describe("after posting: corrections, not MLTA5", () => {
   it("lets HR cancel Ngozi's deducted leave and approve Bayo's waiting leave", async () => {
+    // October (a regular run) paid Ngozi's leave, so 5.7b's paid-leave freeze lets the
+    // cancellation through: the next regular run refunds it (below). Leave an off-cycle run paid
+    // stays frozen (tests/rls/payroll-off-cycle.test.ts, security M3).
+    const { data: paidBy } = await admin
+      .from("payslip_sources")
+      .select("run_id")
+      .eq("source_kind", "leave_request")
+      .eq("source_id", cancelled)
+      .eq("stands", true);
+    expect(paidBy).toEqual([{ run_id: octRun }]);
     const c = await hr.client.rpc("cancel_leave_request", {
       p_organisation_id: owner.orgId,
       p_request_id: cancelled,
