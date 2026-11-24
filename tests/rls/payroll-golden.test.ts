@@ -11,7 +11,8 @@
  * - a day approved after submission changes the inputs, so approval is refused until it's gone;
  * - after posting, reopening a day in 20 Sep to 19 Oct is refused (MLTA5);
  * - a day of the posted period approved after posting is paid in November's run as arrears, once,
- *   with its source recorded (decision 10; 5.1's arrears rule now that the period posts).
+ *   with its source recorded (decision 10; 5.1's arrears rule now that the period posts); once
+ *   November is approved, December doesn't pay it again.
  *
  * Timesheet days are seeded as the database owner with triggers off for the transaction (as
  * timesheet-approval.test.ts does): the payroll path is under test here, not clock-ins.
@@ -42,6 +43,7 @@ type Role = Database["public"]["Enums"]["membership_role"];
 const OCT_START = "2026-09-20";
 const OCT_END = "2026-10-19";
 const NOV_START = "2026-10-20";
+const DEC_START = "2026-11-20";
 const kobo = (naira: number) => BigInt(Math.round(naira * 100));
 
 let admin: Client;
@@ -52,6 +54,7 @@ let finance: TestUser;
 const workers: Record<string, string> = {};
 let runId: string;
 let lateDay: string;
+let novRunId: string;
 
 async function addMember(user: TestUser, role: Role) {
   const { error } = await admin
@@ -358,5 +361,43 @@ describe("October 2026 through run and approval", () => {
       .eq("run_id", nov.runId)
       .eq("code", "arrears");
     expect(others).toHaveLength(1);
+    novRunId = nov.runId;
+  });
+
+  it("approves November with its arrears, and December never pays the Saturday again", async () => {
+    const { data: anomalies } = await admin
+      .from("payroll_anomalies")
+      .select("id, severity")
+      .eq("run_id", novRunId);
+    expect(anomalies!.filter((a) => a.severity === "blocking")).toEqual([]);
+    if (anomalies!.length > 0) {
+      const ack = await hr.client.rpc("acknowledge_payroll_anomalies", {
+        p_organisation_id: owner.orgId,
+        p_run_id: novRunId,
+        p_anomaly_ids: anomalies!.map((a) => a.id),
+      });
+      expect(ack.error).toBeNull();
+    }
+    const sub = await hr.client.rpc("submit_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: novRunId,
+    });
+    expect(sub.error).toBeNull();
+    await runMutation(ctxOf(finance, "finance"), approveRunSpec, { runId: novRunId });
+
+    const dec = await runMutation(ctxOf(hr, "hr"), createRunSpec, { periodStart: DEC_START });
+    expect(dec.calculated).toBe(true);
+    const { data: arrears } = await admin
+      .from("payslip_lines")
+      .select("payslip_id")
+      .eq("run_id", dec.runId)
+      .eq("code", "arrears");
+    expect(arrears).toEqual([]);
+    const { data: paid } = await admin
+      .from("payslip_sources")
+      .select("run_id")
+      .eq("source_id", lateDay)
+      .eq("stands", true);
+    expect(paid).toEqual([{ run_id: novRunId }]);
   });
 });

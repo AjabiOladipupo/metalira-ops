@@ -29,7 +29,15 @@ import { addDays, lagosToday } from "@/lib/dates";
 import { NTA_2025_V1, ruleSetPolicyJson, ruleSetRulesJson } from "@/lib/payroll/rule-set";
 import type { Database } from "@/types/db";
 
-import { OCT_END, seedPayrollRun, SHA, type SeededRun } from "./helpers/payroll";
+import {
+  addPayrollWorker,
+  OCT_END,
+  resultsFor,
+  saveResults,
+  seedPayrollRun,
+  SHA,
+  type SeededRun,
+} from "./helpers/payroll";
 import {
   adminClient,
   createTenantUser,
@@ -285,6 +293,83 @@ describe("approval re-checks the inputs (decision 7)", () => {
   });
 });
 
+describe("approval holds what the run pays (money review M1)", () => {
+  it("is refused when a paid day is reopened after the check", async () => {
+    const o = await createTenantUser("pappr-src", "Payroll Source Org");
+    const fin = await createTestUser("pappr-src-fin");
+    await addMember(fin, "finance", o.orgId);
+    const { workerId, payRateId } = await addPayrollWorker(admin, o.orgId);
+    const day = await addLine(o.orgId, workerId, "2026-10-03");
+    const created = await o.client.rpc("create_payroll_run", {
+      p_organisation_id: o.orgId,
+      p_period_start: "2026-09-20",
+    });
+    expect(created.error).toBeNull();
+    const runId = created.data!;
+    const saved = await saveResults(
+      admin,
+      o,
+      runId,
+      resultsFor(
+        { workerId, payRateId, adjustmentId: null },
+        {
+          anomalies: [],
+          extra: [
+            {
+              code: "off_day",
+              label: "Off-day work, 1 day",
+              amount: 600_000,
+              sources: [{ kind: "timesheet_line", id: day, from: "2026-10-03", to: "2026-10-03" }],
+            },
+          ],
+        },
+      ),
+    );
+    expect(saved.error).toBeNull();
+    expect(
+      (await o.client.rpc("submit_payroll_run", { p_organisation_id: o.orgId, p_run_id: runId }))
+        .error,
+    ).toBeNull();
+    expect((await check(o.orgId, runId, fin.id)).error).toBeNull();
+    // Reopened (as the database owner, standing in for 4.3's reopen) after the check.
+    await seedRaw("update public.timesheet_lines set status = 'pending' where id = $1", [day]);
+    const refused = await approve(fin.client, o.orgId, runId);
+    expect(refused.error?.code).toBe("MLPRF");
+    const { data: run } = await admin
+      .from("payroll_runs")
+      .select("status")
+      .eq("id", runId)
+      .single();
+    expect(run).toEqual({ status: "review" });
+  });
+
+  it("is refused when a pay rate in its scope is written after the check", async () => {
+    const o = await createTenantUser("pappr-late", "Payroll Late Rate Org");
+    const fin = await createTestUser("pappr-late-fin");
+    await addMember(fin, "finance", o.orgId);
+    const run = await seedPayrollRun(admin, o, { submit: true });
+    expect((await check(o.orgId, run.runId, fin.id)).error).toBeNull();
+    const added = await o.client.rpc("add_pay_rate", {
+      p_organisation_id: o.orgId,
+      p_worker_id: run.workerId,
+      p_rate: {
+        pay_type: "monthly",
+        basic_kobo: "6500000",
+        housing_kobo: "3600000",
+        transport_kobo: "2400000",
+        other_allowances_kobo: "0",
+        daily_rate_kobo: null,
+        hourly_rate_kobo: null,
+        effective_from: addDays(lagosToday(), 30),
+      },
+    });
+    expect(added.error).toBeNull();
+    expect((await approve(fin.client, o.orgId, run.runId)).error?.code).toBe("MLPRF");
+    // A fresh check after the change (the server would find the new hash; here the seed's) passes.
+    await approveSeeded(o, run, fin);
+  });
+});
+
 describe("posting", () => {
   let decisionId: string;
 
@@ -439,12 +524,80 @@ describe("the period lock", () => {
     await expect(
       db.query("update public.timesheet_lines set status = 'pending' where id = $1", [day]),
     ).rejects.toMatchObject({ code: "MLTA5" });
+    // ENABLE ALWAYS: replica mode doesn't skip the freeze either.
+    await db.query("begin");
+    try {
+      await db.query("set local session_replication_role = replica");
+      await expect(
+        db.query("update public.timesheet_lines set status = 'pending' where id = $1", [day]),
+      ).rejects.toMatchObject({ code: "MLTA5" });
+      await expect(
+        db.query("delete from public.timesheet_lines where id = $1", [day]),
+      ).rejects.toMatchObject({ code: "MLTA5" });
+    } finally {
+      await db.query("rollback");
+    }
     const { data: line } = await admin
       .from("timesheet_lines")
       .select("status")
       .eq("id", day)
       .single();
     expect(line).toEqual({ status: "approved" });
+  });
+});
+
+describe("leave in a posted period (money review H1)", () => {
+  const LOCKED =
+    "Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.";
+  let typeId: string;
+
+  async function leave(start: string, end: string, status: string) {
+    const id = randomUUID();
+    await seedRaw(
+      `insert into public.leave_requests (id, organisation_id, worker_id, leave_type_id, leave_year,
+         start_date, end_date, days, status, decided_at)
+       values ($1, $2, $3, $4, 2026, $5, $6, 2, $7,
+               case when $7 = 'approved' then now() end)`,
+      [id, owner.orgId, posted.workerId, typeId, start, end, status],
+    );
+    return id;
+  }
+
+  beforeAll(async () => {
+    typeId = randomUUID();
+    await seedRaw(
+      `insert into public.leave_types (id, organisation_id, code, name, counting, paid)
+       values ($1, $2, 'unpaid_test', 'Unpaid', 'working_days', false)`,
+      [typeId, owner.orgId],
+    );
+  });
+
+  it("refuses cancelling approved leave after posting", async () => {
+    const id = await leave("2026-10-12", "2026-10-13", "approved");
+    const { error } = await hr.client.rpc("cancel_leave_request", {
+      p_organisation_id: owner.orgId,
+      p_request_id: id,
+      p_reason: "Came to work after all",
+    });
+    expect(error?.code).toBe("MLTA5");
+    expect(error?.message).toBe(LOCKED);
+    const { data } = await admin.from("leave_requests").select("status").eq("id", id).single();
+    expect(data).toEqual({ status: "approved" });
+  });
+
+  it("refuses approving (or declining) leave in a posted period, even partly", async () => {
+    const id = await leave("2026-10-16", "2026-10-21", "pending_hr");
+    for (const decision of ["approved", "declined"]) {
+      const { error } = await hr.client.rpc("decide_leave_hr", {
+        p_organisation_id: owner.orgId,
+        p_request_id: id,
+        p_decision: decision,
+        p_note: "Checked",
+      });
+      expect(error?.code, decision).toBe("MLTA5");
+    }
+    const { data } = await admin.from("leave_requests").select("status").eq("id", id).single();
+    expect(data).toEqual({ status: "pending_hr" });
   });
 });
 
@@ -511,23 +664,71 @@ describe("backdated pay rates (Phase 1 decision 17)", () => {
       db.query("delete from public.pay_rates where id = $1", [usedId]),
     ).rejects.toMatchObject({ code: "MLPRG" });
     // Its end can't move back into the posted period.
+    await expect(
+      db.query("update public.pay_rates set effective_to = '2026-10-10' where id = $1", [usedId]),
+    ).rejects.toMatchObject({ code: "MLPRG" });
+  });
+
+  it("lets a backdated typo be corrected or cancelled, even in force (money review M2)", async () => {
     const { data: later } = await admin
       .from("pay_rates")
       .select("id")
       .eq("worker_id", posted.workerId)
       .gt("effective_from", OCT_END)
       .single();
-    expect(
-      (
-        await hr.client.rpc("cancel_pay_rate", {
-          p_organisation_id: owner.orgId,
-          p_pay_rate_id: later!.id,
-        })
-      ).error?.code,
-    ).toBe("MLPR1"); // in force already (20 Oct is past): kept, as Phase 1
+    // In force since 20 Oct, after the posted period, used by no posted payslip: amendable.
+    const fixed = await hr.client
+      .from("pay_rates")
+      .update({ basic_kobo: 6_400_000 })
+      .eq("id", later!.id);
+    expect(fixed.error).toBeNull();
+    const cancelled = await hr.client.rpc("cancel_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_pay_rate_id: later!.id,
+    });
+    expect(cancelled.error).toBeNull();
+    // The posted version reopens to cover the days after the posted period again.
+    const { data: rates } = await admin
+      .from("pay_rates")
+      .select("id, effective_from, effective_to")
+      .eq("worker_id", posted.workerId)
+      .order("effective_from");
+    expect(rates!.map((r) => [r.id, r.effective_to])).toEqual([[posted.payRateId, null]]);
+    // Added again from the earliest unposted day.
+    const again = await hr.client.rpc("add_pay_rate", {
+      p_organisation_id: owner.orgId,
+      p_worker_id: posted.workerId,
+      p_rate: monthly(addDays(OCT_END, 1)),
+    });
+    expect(again.error).toBeNull();
+  });
+
+  it("keeps a version that ended before today frozen (security review L2)", async () => {
+    const o = await createTenantUser("pappr-ended", "Payroll Ended Rate Org");
+    const run = await seedPayrollRun(admin, o, { submit: true });
+    const fin = await createTestUser("pappr-ended-fin");
+    await addMember(fin, "finance", o.orgId);
+    await approveSeeded(o, run, fin);
+    // A version from 20 Nov closes the posted one on 19 Nov, a day already past. Cancelling the
+    // new one would reopen the ended one: refused, ended versions stay as they are.
+    const added = await o.client.rpc("add_pay_rate", {
+      p_organisation_id: o.orgId,
+      p_worker_id: run.workerId,
+      p_rate: monthly("2026-11-20", "6600000"),
+    });
+    expect(added.error).toBeNull();
+    const { data: rows } = await admin
+      .from("pay_rates")
+      .select("id, effective_from, effective_to")
+      .eq("worker_id", run.workerId)
+      .order("effective_from");
+    expect(rows!.map((r) => r.effective_to)).toEqual(["2026-11-19", null]);
     await expect(
-      db.query("update public.pay_rates set effective_to = '2026-10-10' where id = $1", [usedId]),
-    ).rejects.toMatchObject({ code: "MLPRG" });
+      db.query("delete from public.pay_rates where id = $1", [rows![1]!.id]),
+    ).rejects.toThrow(/has ended/);
+    expect(
+      (await admin.from("pay_rates").select("id").eq("worker_id", run.workerId)).data,
+    ).toHaveLength(2);
   });
 });
 

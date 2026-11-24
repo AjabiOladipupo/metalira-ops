@@ -275,8 +275,8 @@ $$;
 
 revoke all on function private.timesheet_period_posted(uuid, date) from public, anon, authenticated;
 
--- BEFORE UPDATE on timesheet_lines: an approved or rejected day in a posted period keeps its
--- status, for every role, the secret key and the database owner (reopen and dispute refuse first
+-- BEFORE UPDATE OR DELETE on timesheet_lines: an approved or rejected day in a posted period
+-- keeps its status, date and worker and is never deleted, for every role, the secret key and the database owner (reopen and dispute refuse first
 -- with the same code). A pending day there may still be approved or rejected: an approval is paid
 -- in the next run as arrears (decision 10).
 create function private.timesheet_lines_period_lock()
@@ -286,10 +286,16 @@ security definer
 set search_path = ''
 as $$
 begin
-  if old.status in ('approved', 'rejected') and new.status is distinct from old.status
+  if old.status in ('approved', 'rejected')
+    and (tg_op = 'DELETE' or new.status is distinct from old.status
+      or new.work_date is distinct from old.work_date
+      or new.worker_id is distinct from old.worker_id)
     and private.timesheet_period_posted(old.organisation_id, old.work_date) then
     raise exception 'Payroll for this period is posted. This day can''t be reopened.'
       using errcode = 'MLTA5';
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
   end if;
   return new;
 end;
@@ -298,8 +304,12 @@ $$;
 revoke all on function private.timesheet_lines_period_lock() from public, anon, authenticated;
 
 -- Named to sort before 4.2's timesheet_lines_guard, so it fires first and says why.
-create trigger timesheet_lines_freeze_posted before update on public.timesheet_lines
+create trigger timesheet_lines_freeze_posted before update or delete on public.timesheet_lines
   for each row execute function private.timesheet_lines_period_lock();
+-- Fires whatever session_replication_role says (the database owner can't skip it). 4.2's
+-- timesheet_lines_guard stays an ordinary trigger: test and seed tooling inserts decided days with
+-- triggers off, and this freeze alone holds what posting relies on.
+alter table public.timesheet_lines enable always trigger timesheet_lines_freeze_posted;
 
 -- ---------------------------------------------------------------------------
 -- 4. Rule sets used by posted runs (5.0's hook)
@@ -436,7 +446,8 @@ revoke all on function private.tax_rule_sets_guard() from public, anon, authenti
 -- 5. Backdated pay rates (Phase 1 decision 17)
 -- ---------------------------------------------------------------------------
 
--- The last day of the latest posted pay period of the company (any posted run), or null when
+-- The last day of the latest posted pay period of the company (regular runs; an off-cycle run in
+-- 5.7 pays chosen workers and doesn't close a period), or null when
 -- nothing is posted. Readable for the company's owner, hr and finance, and for callers with no
 -- signed-in user (the secret key, the database owner); null for anyone else, so it tells another
 -- company's users nothing. Called by the pay-rate guard and add_pay_rate as the caller.
@@ -450,6 +461,7 @@ as $$
   select max(r.period_end)
   from public.payroll_runs r
   where r.organisation_id = p_organisation_id
+    and r.kind = 'regular'
     and r.status in ('approved', 'released')
     and (auth.uid() is null or private.has_role(p_organisation_id, array['owner', 'hr', 'finance']))
 $$;
@@ -540,7 +552,12 @@ grant execute on function public.pay_rate_earliest_start(uuid) to authenticated;
 -- * no version's end moves into a posted period, and a version that ended inside one never
 --   changes (MLPRG);
 -- * a version in force closes from the day before the floor at the earliest (yesterday until
---   payroll posts, as before).
+--   payroll posts, as before);
+-- * money review M2: once payroll has posted, a version starting after the posted period that no
+--   posted payslip used may have its amounts corrected or be cancelled (if it is the latest),
+--   even in force, so a backdated typo can be fixed;
+-- * a version that ended before today stays frozen as before (security review L2), except the
+--   one ending on the last posted day, which reopens when the version after it is cancelled.
 create or replace function private.pay_rates_guard()
 returns trigger
 language plpgsql
@@ -552,6 +569,7 @@ declare
   v_posted date := private.payroll_posted_through(v_org);
   v_floor date := coalesce(v_posted + 1, v_today);
   v_start date;
+  v_amendable boolean := false;
 begin
   if tg_op = 'INSERT' then
     -- Read as the caller: a worker of another organisation is invisible here and the insert
@@ -577,7 +595,8 @@ begin
     if private.pay_rate_in_posted_payslip(old.organisation_id, old.id) then
       raise exception 'Posted payroll used this pay rate, so it is kept.' using errcode = 'MLPRG';
     end if;
-    if old.effective_from <= v_today then
+    -- M2: a version after the posted period that no posted payslip used may be cancelled.
+    if old.effective_from <= v_today and not (v_posted is not null and old.effective_from > v_posted) then
       raise exception 'This pay rate is already in force and can''t be removed.' using errcode = 'MLPR1';
     end if;
     if exists (
@@ -608,8 +627,11 @@ begin
     raise exception 'Posted payroll used this pay rate, so it can''t change. Add a new version instead.'
       using errcode = 'MLPRG';
   end if;
+  v_amendable := v_posted is not null and old.effective_from > v_posted
+    and new.effective_from = old.effective_from
+    and not private.pay_rate_in_posted_payslip(old.organisation_id, old.id);
   if v_posted is not null and new.effective_to is distinct from old.effective_to then
-    if old.effective_to is not null and old.effective_to <= v_posted then
+    if old.effective_to is not null and old.effective_to < v_posted then
       raise exception 'This pay rate ended in a posted pay period and can''t change.'
         using errcode = 'MLPRG';
     end if;
@@ -639,12 +661,13 @@ begin
       old.pay_type, old.basic_kobo, old.housing_kobo, old.transport_kobo,
       old.other_allowances_kobo, old.daily_rate_kobo, old.hourly_rate_kobo, old.currency,
       old.effective_from
-    ) then
+    ) and not v_amendable then
       raise exception 'This pay rate is already in force and can''t be changed. Add a new version instead.'
         using errcode = 'MLPR1';
     end if;
     if new.effective_to is distinct from old.effective_to then
-      if old.effective_to is not null and old.effective_to < v_floor then
+      if old.effective_to is not null and old.effective_to < v_today
+        and not (v_posted is not null and old.effective_to = v_posted) then
         raise exception 'This pay rate has ended and can''t be changed.' using errcode = 'MLPR1';
       end if;
       if new.effective_to is not null and new.effective_to < v_floor - 1 then
@@ -894,6 +917,82 @@ begin
       using errcode = 'MLPRF';
   end if;
 
+  -- Money review M1: the check and this approval are separate transactions, so hold what the run
+  -- pays still (FOR SHARE: a reopen, dispute or leave cancellation waits for this transaction),
+  -- refuse if a paid source isn't approved any more, and refuse if anything in the run's scope
+  -- was decided or written after the check.
+  perform 1
+  from public.timesheet_lines l
+  join public.payslip_sources s
+    on s.organisation_id = l.organisation_id and s.source_id = l.id
+  where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+    and s.source_kind = 'timesheet_line'
+  for share of l;
+  perform 1
+  from public.leave_requests q
+  join public.payslip_sources s
+    on s.organisation_id = q.organisation_id and s.source_id = q.id
+  where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+    and s.source_kind = 'leave_request'
+  for share of q;
+  if exists (
+    select 1
+    from public.payslip_sources s
+    left join public.timesheet_lines l
+      on s.source_kind = 'timesheet_line' and l.organisation_id = s.organisation_id
+        and l.id = s.source_id
+    left join public.leave_requests q
+      on s.source_kind = 'leave_request' and q.organisation_id = s.organisation_id
+        and q.id = s.source_id
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+      and (
+        (s.source_kind = 'timesheet_line' and l.status is distinct from 'approved')
+        or (s.source_kind = 'leave_request' and q.status is distinct from 'approved')
+      )
+  ) then
+    raise exception 'Something this run was worked out from has changed since (a timesheet day, a pay rate, leave or bank details). Return it to HR to recalculate.'
+      using errcode = 'MLPRF';
+  end if;
+  if exists (
+    with scope as (
+      select s.worker_id from public.payslips s
+      where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+      union
+      select a.worker_id from public.payroll_adjustments a
+      where a.organisation_id = p_organisation_id and a.run_id = p_run_id
+    )
+    select 1
+    from public.timesheet_decisions d
+    join public.timesheet_lines l
+      on l.organisation_id = d.organisation_id and l.id = d.line_id
+    where d.organisation_id = p_organisation_id
+      and d.worker_id in (select worker_id from scope)
+      and l.work_date between v_run.period_start - 400 and v_run.period_end
+      and d.created_at > v_check.created_at
+    union all
+    select 1
+    from public.leave_decisions d
+    join public.leave_requests q on q.organisation_id = d.organisation_id and q.id = d.request_id
+    where d.organisation_id = p_organisation_id
+      and d.worker_id in (select worker_id from scope)
+      and q.start_date <= v_run.period_end and q.end_date >= v_run.period_start
+      and d.created_at > v_check.created_at
+    union all
+    select 1
+    from public.pay_rates r
+    where r.organisation_id = p_organisation_id
+      and r.worker_id in (select worker_id from scope)
+      and greatest(r.created_at, r.updated_at) > v_check.created_at
+    union all
+    select 1
+    from public.payroll_adjustments a
+    where a.organisation_id = p_organisation_id and a.run_id = p_run_id
+      and a.created_at > v_check.created_at
+  ) then
+    raise exception 'Something this run was worked out from has changed since (a timesheet day, a pay rate, leave or bank details). Return it to HR to recalculate.'
+      using errcode = 'MLPRF';
+  end if;
+
   select count(*) filter (where a.severity = 'blocking'),
          count(*) filter (where a.severity = 'warning' and a.acknowledged_at is null),
          count(*) filter (where a.acknowledged_at is not null)
@@ -965,3 +1064,485 @@ $$;
 
 revoke all on function public.approve_payroll_run(uuid, uuid) from public, anon;
 grant execute on function public.approve_payroll_run(uuid, uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 7. Leave in posted periods (money review H1): locked until 5.7's corrections
+-- ---------------------------------------------------------------------------
+
+-- True when any day from p_start to p_end falls in the period of an approved or released regular
+-- run of the company (the same runs as private.timesheet_period_posted).
+create function private.leave_in_posted_period(p_organisation_id uuid, p_start date, p_end date)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(p_organisation_id is not null and p_start is not null and exists (
+    select 1
+    from public.payroll_runs r
+    where r.organisation_id = p_organisation_id
+      and r.kind = 'regular'
+      and r.status in ('approved', 'released')
+      and daterange(r.period_start, r.period_end, '[]')
+        && daterange(p_start, coalesce(p_end, p_start), '[]')
+  ), false)
+$$;
+
+revoke all on function private.leave_in_posted_period(uuid, date, date) from public, anon, authenticated;
+
+-- private.decide_leave_line_manager: the latest version, from 4.7b (20261121210000_supervisor_team.sql), copied exactly except one check
+-- after the request is loaded: any of its days in a posted pay period refuses the change (MLTA5).
+create or replace function private.decide_leave_line_manager(
+  p_organisation_id uuid,
+  p_request_id uuid,
+  p_decision text,
+  p_note text default null,
+  p_certificate_seen boolean default false
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_request public.leave_requests%rowtype;
+  v_type public.leave_types%rowtype;
+  v_note text := private.leave_clean_text(p_note, 500);
+  v_days integer;
+  v_status text;
+  v_lock_worker uuid;
+begin
+  if private.session_uid() is null or p_organisation_id is null then
+    raise exception 'Sign in to decide leave.' using errcode = '42501';
+  end if;
+  if p_decision is null or p_decision not in ('approved', 'declined') then
+    raise exception 'Approve or decline.' using errcode = '22023';
+  end if;
+  if p_note is not null and btrim(p_note) <> '' and v_note is null then
+    raise exception 'Keep the note to 500 characters of plain text, with no web addresses or long numbers.'
+      using errcode = '22023';
+  end if;
+  if p_decision = 'declined' and v_note is null then
+    raise exception 'Say why, so the worker knows.' using errcode = '22023';
+  end if;
+
+  -- The worker's leave lock first (as decide_leave_hr, request_leave and adjust_leave_balance
+  -- take it), so a step-1 decision and a cancellation or a second decision can't interleave.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end if;
+
+  select r.* into v_request
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id
+  for update;
+  if v_request.id is null then
+    raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
+  end if;
+  -- Slice 5.3: leave in a posted pay period is locked until 5.7's corrections.
+  if private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
+    raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
+      using errcode = 'MLTA5';
+  end if;
+  if v_request.worker_id in (select private.my_worker_ids()) then
+    raise exception 'You can''t decide your own leave.' using errcode = 'MLLQ6';
+  end if;
+  if not private.leave_can_decide_step1(p_organisation_id, v_request.worker_id) then
+    raise exception 'Only the worker''s line manager decides this step.' using errcode = '42501';
+  end if;
+  if v_request.status <> 'pending_line_manager' then
+    raise exception 'This request isn''t waiting for the line manager.' using errcode = 'MLLQ4';
+  end if;
+
+  select t.* into v_type from public.leave_types t where t.id = v_request.leave_type_id;
+  v_days := v_request.days;
+  if p_decision = 'approved' then
+    select c.days into v_days
+    from private.leave_count_days(
+      p_organisation_id, v_request.worker_id, v_type.counting, v_request.start_date,
+      v_request.end_date
+    ) c;
+    if coalesce(v_days, 0) = 0 then
+      raise exception 'Those dates no longer have working days for the worker. Decline it instead.'
+        using errcode = 'MLLQ7';
+    end if;
+    v_status := 'pending_hr';
+  else
+    v_status := 'declined';
+  end if;
+
+  insert into public.leave_decisions (
+    organisation_id, request_id, worker_id, step, decision, note, certificate_seen, days, actor
+  )
+  values (
+    p_organisation_id, v_request.id, v_request.worker_id, 'line_manager', p_decision, v_note,
+    coalesce(p_certificate_seen, false) and v_type.needs_certificate, v_days, private.session_uid()
+  );
+
+  update public.leave_requests r
+  set status = v_status,
+      days = v_days,
+      certificate_seen = r.certificate_seen
+        or (coalesce(p_certificate_seen, false) and v_type.needs_certificate),
+      decided_at = case when v_status = 'declined' then now() else r.decided_at end
+  where r.id = v_request.id;
+
+  -- Written directly: log_audit_impl admits manager roles only, and a worker-supervisor (role
+  -- worker) decides step 1 too. The caller was checked above.
+  insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after, reason)
+  values (
+    p_organisation_id, private.session_uid(), 'leave.decided_line_manager', 'leave_requests',
+    v_request.id,
+    jsonb_build_object('status', v_request.status, 'days', v_request.days),
+    jsonb_build_object('status', v_status, 'days', v_days, 'decision', p_decision),
+    v_note
+  );
+
+  return jsonb_build_object(
+    'id', v_request.id, 'status', v_status, 'days', v_days, 'worker_id', v_request.worker_id
+  );
+end;
+$$;
+
+-- private.decide_leave_hr: the latest version, from 4.5 (20261121190000_leave_roster.sql), copied exactly except one check
+-- after the request is loaded: any of its days in a posted pay period refuses the change (MLTA5).
+create or replace function private.decide_leave_hr(
+  p_organisation_id uuid,
+  p_request_id uuid,
+  p_decision text,
+  p_note text default null,
+  p_certificate_seen boolean default false,
+  p_dry_run boolean default false
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  -- Slice 4.5: the shifts the approval opens, and how many it took the worker off.
+  v_open jsonb := '[]'::jsonb;
+  v_opened integer := 0;
+  v_request public.leave_requests%rowtype;
+  v_type public.leave_types%rowtype;
+  v_version public.leave_entitlements%rowtype;
+  v_note text := private.leave_clean_text(p_note, 500);
+  v_count record;
+  v_start date;
+  v_available integer;
+  v_status text;
+  v_certificate boolean;
+  v_below boolean;
+  v_pay integer;
+  v_lock_worker uuid;
+begin
+  if private.session_uid() is null or p_organisation_id is null then
+    raise exception 'Sign in to decide leave.' using errcode = '42501';
+  end if;
+  if p_decision is null or p_decision not in ('approved', 'declined') then
+    raise exception 'Approve or decline.' using errcode = '22023';
+  end if;
+  if p_note is not null and btrim(p_note) <> '' and v_note is null then
+    raise exception 'Keep the note to 500 characters of plain text, with no web addresses or long numbers.'
+      using errcode = '22023';
+  end if;
+  if p_decision = 'declined' and v_note is null then
+    raise exception 'Say why, so the worker knows.' using errcode = '22023';
+  end if;
+
+  -- The worker's leave lock first (as request_leave and adjust_leave_balance take it), so two
+  -- decisions, or a decision and a request, can't both pass the balance check.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end if;
+
+  select r.* into v_request
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id
+  for update;
+  if v_request.id is null then
+    raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
+  end if;
+  -- Slice 5.3: leave in a posted pay period is locked until 5.7's corrections.
+  if private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
+    raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
+      using errcode = 'MLTA5';
+  end if;
+  if v_request.worker_id in (select private.my_worker_ids()) then
+    raise exception 'You can''t decide your own leave.' using errcode = 'MLLQ6';
+  end if;
+  if not private.leave_can_decide_step2(p_organisation_id, v_request.worker_id) then
+    raise exception 'Only HR, an admin or the owner decides this step.' using errcode = '42501';
+  end if;
+  if v_request.status <> 'pending_hr' then
+    raise exception 'This request isn''t waiting for HR.' using errcode = 'MLLQ4';
+  end if;
+
+  select t.* into v_type from public.leave_types t where t.id = v_request.leave_type_id;
+  select w.start_date into v_start from public.workers w where w.id = v_request.worker_id;
+  v_certificate := v_request.certificate_seen
+    or (coalesce(p_certificate_seen, false) and v_type.needs_certificate);
+  select c.* into v_count
+  from private.leave_count_days(
+    p_organisation_id, v_request.worker_id, v_type.counting, v_request.start_date,
+    v_request.end_date
+  ) c;
+  v_version := private.leave_version_on(v_type.id, v_request.start_date);
+  v_below := coalesce(
+    v_version.pay_min_service_months is not null
+      and private.leave_service_months(v_start, v_request.start_date) < v_version.pay_min_service_months,
+    false
+  );
+  v_pay := case when v_type.paid then coalesce(v_version.pay_percent, 0) else 0 end;
+
+  perform private.leave_ensure_year_core(p_organisation_id, v_request.leave_year, array[v_request.worker_id]);
+  v_available := private.leave_balance(
+      p_organisation_id, v_request.worker_id, v_type.id, v_request.leave_year
+    ) - private.leave_pending_days(
+      p_organisation_id, v_request.worker_id, v_type.id, v_request.leave_year, v_request.id
+    );
+
+  if p_decision = 'approved' then
+    if coalesce(v_count.days, 0) = 0 then
+      raise exception 'Those dates no longer have working days for the worker. Decline it instead.'
+        using errcode = 'MLLQ7';
+    end if;
+    if v_type.needs_certificate and not v_certificate then
+      raise exception 'Tick Certificate seen before approving % leave.', lower(v_type.name)
+        using errcode = '22023';
+    end if;
+    if coalesce(v_version.days_per_year, 0) > 0 and v_available < v_count.days then
+      raise exception 'The worker has % % left, fewer than the % asked for.',
+        greatest(v_available, 0), case when greatest(v_available, 0) = 1 then 'day' else 'days' end,
+        v_count.days
+        using errcode = 'MLLQ2';
+    end if;
+    v_status := 'approved';
+  else
+    v_status := 'declined';
+  end if;
+
+  -- Slice 4.5: the worker's assigned shifts in the range that haven't started.
+  if v_status = 'approved' then
+    select coalesce(jsonb_agg(jsonb_build_object(
+        'assignment_id', o.assignment_id, 'shift_date', o.shift_date,
+        'starts_at', o.starts_at, 'ends_at', o.ends_at,
+        'site_id', o.site_id, 'site_name', o.site_name,
+        'post_id', o.post_id, 'post_name', o.post_name
+      ) order by o.starts_at, o.assignment_id), '[]'::jsonb)
+    into v_open
+    from private.leave_shifts_to_open(
+      p_organisation_id, v_request.worker_id, v_request.start_date, v_request.end_date
+    ) o;
+  end if;
+
+  if coalesce(p_dry_run, false) then
+    return jsonb_build_object(
+      'id', v_request.id, 'status', v_status, 'days', coalesce(v_count.days, v_request.days),
+      'worker_id', v_request.worker_id, 'dry_run', true,
+      'balance_before', v_available,
+      'balance_after', case when v_status = 'approved' then v_available - v_count.days else v_available end,
+      'shifts', coalesce(v_count.shifts, 0), 'site_names', to_jsonb(coalesce(v_count.site_names, '{}'::text[])),
+      'pay_below_service', v_below,
+      'open_shifts', v_open
+    );
+  end if;
+
+  insert into public.leave_decisions (
+    organisation_id, request_id, worker_id, step, decision, note, certificate_seen, days, actor
+  )
+  values (
+    p_organisation_id, v_request.id, v_request.worker_id, 'hr', p_decision, v_note,
+    coalesce(p_certificate_seen, false) and v_type.needs_certificate,
+    coalesce(v_count.days, 0), private.session_uid()
+  );
+
+  update public.leave_requests r
+  set status = v_status,
+      days = case when v_status = 'approved' then v_count.days else r.days end,
+      certificate_seen = v_certificate,
+      decided_at = now()
+  where r.id = v_request.id;
+
+  if v_status = 'approved' then
+    insert into public.leave_request_pay (request_id, organisation_id, pay_percent, pay_below_service)
+    values (v_request.id, p_organisation_id, v_pay, v_below);
+    insert into public.leave_ledger (
+      organisation_id, worker_id, leave_type_id, leave_year, kind, days, request_id, actor
+    )
+    values (
+      p_organisation_id, v_request.worker_id, v_type.id, v_request.leave_year, 'taken',
+      -v_count.days, v_request.id, private.session_uid()
+    );
+
+    -- Slice 4.5 (decision 8): take the worker off the shifts in the range that haven't started,
+    -- in this transaction. The guard checks each row (never a past day) and the audit trigger
+    -- records each one.
+    update public.shift_assignments a
+    set status = 'removed',
+        removed_at = now(),
+        removed_by = private.session_uid(),
+        removed_reason = 'on_leave'
+    where a.organisation_id = p_organisation_id
+      and a.worker_id = v_request.worker_id
+      and a.status = 'assigned'
+      and a.id in (select (e ->> 'assignment_id')::uuid from jsonb_array_elements(v_open) e);
+    get diagnostics v_opened = row_count;
+    if v_opened > 0 then
+      perform private.log_audit_impl(
+        p_organisation_id, 'roster.opened_by_leave', 'leave_requests', v_request.id, null,
+        jsonb_build_object(
+          'worker_id', v_request.worker_id,
+          'opened', v_opened,
+          'assignment_ids', (select coalesce(jsonb_agg(e -> 'assignment_id'), '[]'::jsonb)
+                             from jsonb_array_elements(v_open) e)
+        ),
+        null
+      );
+    end if;
+  end if;
+
+  perform private.log_audit_impl(
+    p_organisation_id, 'leave.decided_hr', 'leave_requests', v_request.id,
+    jsonb_build_object('status', v_request.status, 'days', v_request.days),
+    jsonb_build_object(
+      'status', v_status, 'days', coalesce(v_count.days, v_request.days), 'decision', p_decision,
+      'pay_below_service', v_below
+    ),
+    v_note
+  );
+
+  return jsonb_build_object(
+    'id', v_request.id, 'status', v_status, 'days', coalesce(v_count.days, v_request.days),
+    'worker_id', v_request.worker_id, 'dry_run', false,
+    'balance_before', v_available,
+    'balance_after', case when v_status = 'approved' then v_available - v_count.days else v_available end,
+    'shifts', coalesce(v_count.shifts, 0), 'site_names', to_jsonb(coalesce(v_count.site_names, '{}'::text[])),
+    'pay_below_service', v_below,
+    'open_shifts', v_open
+  );
+end;
+$$;
+
+-- private.cancel_leave_request: the latest version, from 4.4 (20261121180000_leave_requests.sql), copied exactly except one check
+-- after the request is loaded: any of its days in a posted pay period refuses the change (MLTA5).
+create or replace function private.cancel_leave_request(
+  p_organisation_id uuid,
+  p_request_id uuid,
+  p_reason text default null
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_request public.leave_requests%rowtype;
+  v_reason text := private.leave_clean_text(p_reason, 500);
+  v_own uuid;
+  v_by_worker boolean;
+  v_lock_worker uuid;
+begin
+  if private.session_uid() is null or p_organisation_id is null then
+    raise exception 'Sign in to cancel leave.' using errcode = '42501';
+  end if;
+  if p_reason is not null and btrim(p_reason) <> '' and v_reason is null then
+    raise exception 'Keep the reason to 500 characters of plain text, with no web addresses or long numbers.'
+      using errcode = '22023';
+  end if;
+
+  select m.worker_id into v_own
+  from public.memberships m
+  where m.organisation_id = p_organisation_id and m.user_id = private.session_uid()
+    and m.role = 'worker' and m.worker_id is not null;
+
+  -- The worker's leave lock first (as request_leave and adjust_leave_balance take it), so two
+  -- decisions, or a decision and a request, can't both pass the balance check.
+  select r.worker_id into v_lock_worker
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id;
+  if v_lock_worker is not null then
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end if;
+
+  select r.* into v_request
+  from public.leave_requests r
+  where r.organisation_id = p_organisation_id and r.id = p_request_id
+  for update;
+  if v_request.id is null then
+    raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
+  end if;
+  -- Slice 5.3: leave in a posted pay period is locked until 5.7's corrections.
+  if private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
+    raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
+      using errcode = 'MLTA5';
+  end if;
+
+  v_by_worker := v_own is not null and v_own = v_request.worker_id;
+  if v_by_worker then
+    perform set_config('metalira.audit_channel', 'worker_app', true);
+    if v_request.status not in ('pending_line_manager', 'pending_hr') then
+      raise exception 'This request was already decided. Ask HR to cancel approved leave.'
+        using errcode = 'MLLQ4';
+    end if;
+  else
+    if not private.leave_can_decide_step2(p_organisation_id, v_request.worker_id) then
+      if v_request.worker_id in (select private.my_worker_ids()) then
+        raise exception 'You can''t cancel your own leave here.' using errcode = 'MLLQ6';
+      end if;
+      raise exception 'Only the worker or HR can cancel leave.' using errcode = '42501';
+    end if;
+    if v_request.status not in ('pending_line_manager', 'pending_hr', 'approved') then
+      raise exception 'This request is already closed.' using errcode = 'MLLQ4';
+    end if;
+    if v_reason is null then
+      raise exception 'Say why it is cancelled, so the worker knows.' using errcode = '22023';
+    end if;
+  end if;
+
+  update public.leave_requests r
+  set status = 'cancelled',
+      cancelled_at = now(),
+      cancelled_by = private.session_uid(),
+      cancel_reason = v_reason
+  where r.id = v_request.id;
+
+  if v_request.status = 'approved' then
+    insert into public.leave_ledger (
+      organisation_id, worker_id, leave_type_id, leave_year, kind, days, request_id, reason, actor
+    )
+    values (
+      p_organisation_id, v_request.worker_id, v_request.leave_type_id, v_request.leave_year,
+      'returned', v_request.days, v_request.id, v_reason, private.session_uid()
+    );
+  end if;
+
+  if not v_by_worker then
+    perform private.log_audit_impl(
+      p_organisation_id, 'leave.cancelled', 'leave_requests', v_request.id,
+      jsonb_build_object('status', v_request.status),
+      jsonb_build_object(
+        'status', 'cancelled',
+        'returned', case when v_request.status = 'approved' then v_request.days else 0 end
+      ),
+      v_reason
+    );
+  end if;
+
+  return jsonb_build_object(
+    'id', v_request.id, 'status', 'cancelled', 'worker_id', v_request.worker_id,
+    'returned', case when v_request.status = 'approved' then v_request.days else 0 end,
+    'by_worker', v_by_worker, 'was', v_request.status
+  );
+end;
+$$;
