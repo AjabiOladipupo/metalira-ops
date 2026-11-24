@@ -507,6 +507,53 @@ begin
 end;
 $$;
 
+-- 5.7b (migration 20261122190000) freezes approved leave a posted payslip of any run pays
+-- (private.leave_requests_freeze_paid, MLTA5), standing in for 5.3's lock until these corrections
+-- land. 5.7c keeps the freeze for every change but one: cancelling it (approved -> cancelled, by
+-- cancel_leave_request, with nothing else about the request changing), which the next run refunds.
+-- Created or replaced here whichever slice merges first; the trigger is 5.7b's.
+create or replace function private.leave_requests_freeze_paid()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.status = 'approved'
+    and (
+      tg_op = 'DELETE'
+      or (
+        (new.status, new.start_date, new.end_date, new.leave_type_id, new.worker_id)
+          is distinct from (old.status, old.start_date, old.end_date, old.leave_type_id, old.worker_id)
+        -- Slice 5.7c: a cancellation is refunded in the next run.
+        and not (
+          new.status = 'cancelled'
+          and (new.start_date, new.end_date, new.leave_type_id, new.worker_id)
+            is not distinct from (old.start_date, old.end_date, old.leave_type_id, old.worker_id)
+        )
+      )
+    )
+    and exists (
+      select 1
+      from public.payslip_sources s
+      join public.payroll_runs r on r.organisation_id = s.organisation_id and r.id = s.run_id
+      where s.organisation_id = old.organisation_id
+        and s.source_kind = 'leave_request' and s.source_id = old.id
+        and s.stands
+        and r.status in ('approved', 'released')
+    ) then
+    raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
+      using errcode = 'MLTA5';
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.leave_requests_freeze_paid() from public, anon, authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 3. Leave refunds on payslips
 -- ---------------------------------------------------------------------------
