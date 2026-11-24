@@ -15,7 +15,7 @@ import type { Database } from "@/types/db";
  * `private.payroll_files_due` picks them (the secret key only; other paths in the bucket are never
  * matched); Storage refuses deletes in SQL, so removal goes through the Storage API with the secret
  * key, and each company's sweep is written to its audit log (`payroll.bank_files_swept`, the paths
- * only). Runs after each bank file is made (that company) and daily from /api/cron/import-uploads
+ * only). Runs after each bank file is made (that company) and daily from /api/cron/contract-documents (beside 5.6's receipt sweep)
  * (every company): Phase 5 adds no cron of its own. Paths are never logged; errors by name only.
  */
 
@@ -74,7 +74,7 @@ export async function sweepPayrollFiles(
   return { removed };
 }
 
-/** The daily run (Vercel Cron, through /api/cron/import-uploads). */
+/** The daily run (Vercel Cron, through /api/cron/contract-documents). */
 export async function runPayrollFileSweep(): Promise<PayrollFileSweepResult> {
   return sweepPayrollFiles(createAdminSupabase());
 }

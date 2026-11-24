@@ -305,7 +305,12 @@ export async function releaseThroughBankFile(
       .eq("id", worker_id)
       .single();
     if (!w?.bank_account_enc) {
-      await giveBankDetails(admin, owner.orgId, worker_id, w?.bank_name ? { bank_name: w.bank_name } : {});
+      await giveBankDetails(
+        admin,
+        owner.orgId,
+        worker_id,
+        w?.bank_name ? { bank_name: w.bank_name } : {},
+      );
     }
   }
   const made = await makeBatch(admin, owner.client, owner.orgId, runId);

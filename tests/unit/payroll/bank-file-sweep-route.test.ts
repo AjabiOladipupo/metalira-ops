@@ -1,24 +1,25 @@
 /**
- * Slice 5.4 (security review M2): the daily /api/cron/import-uploads run also sweeps payroll bank
- * files, and a failing bank-file sweep doesn't stop the import sweep's answer.
+ * Slice 5.4 (security review M2): the daily /api/cron/contract-documents run also sweeps payroll
+ * bank files through the Storage API, and a failing bank-file sweep doesn't stop the others.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const uploads = vi.hoisted(() => vi.fn(async () => ({ removed: 2 })));
+const receipts = vi.hoisted(() => vi.fn(async () => ({ deleted: 0 })));
 const bankFiles = vi.hoisted(() => vi.fn(async () => ({ removed: 1 })));
 
-vi.mock("@/server/people/imports/sweep", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/people/imports/sweep")>();
-  return { ...actual, runImportUploadSweep: uploads };
-});
+vi.mock("@/server/business/contract-document-sweep", () => ({
+  runContractDocumentSweep: uploads,
+}));
+vi.mock("@/server/payroll/receipt-sweep", () => ({ runReceiptSweep: receipts }));
 vi.mock("@/server/payroll/payout-sweep", () => ({ runPayrollFileSweep: bankFiles }));
 
-import { GET } from "@/app/api/cron/import-uploads/route";
+import { GET } from "@/app/api/cron/contract-documents/route";
 
 const SECRET = "a-cron-secret-of-enough-length";
 const call = () =>
   GET(
-    new Request("http://localhost/api/cron/import-uploads", {
+    new Request("http://localhost/api/cron/contract-documents", {
       headers: { authorization: `Bearer ${SECRET}` },
     }),
   );
@@ -31,10 +32,11 @@ afterEach(() => {
 });
 
 describe("the daily sweep removes bank files too", () => {
-  it("runs the bank-file sweep with the upload sweep", async () => {
+  it("runs the bank-file sweep with the document and receipt sweeps", async () => {
     vi.stubEnv("CRON_SECRET", SECRET);
     const response = await call();
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ removed: 2, bankFilesDeleted: 1 });
     expect(bankFiles).toHaveBeenCalledTimes(1);
     expect(uploads).toHaveBeenCalledTimes(1);
   });
@@ -45,14 +47,14 @@ describe("the daily sweep removes bank files too", () => {
     bankFiles.mockRejectedValueOnce(new Error("payroll-files/a/b/c.csv failed"));
     const response = await call();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ removed: 2 });
+    expect(await response.json()).toMatchObject({ removed: 2, bankFilesDeleted: null });
     expect(logged).toHaveBeenCalledWith("payroll.bank_file_sweep_failed:", "Error");
     expect(JSON.stringify(logged.mock.calls)).not.toContain("payroll-files/");
   });
 
   it("doesn't run for anyone else", async () => {
     vi.stubEnv("CRON_SECRET", SECRET);
-    await GET(new Request("http://localhost/api/cron/import-uploads"));
+    await GET(new Request("http://localhost/api/cron/contract-documents"));
     expect(bankFiles).not.toHaveBeenCalled();
   });
 });

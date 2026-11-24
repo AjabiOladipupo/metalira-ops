@@ -609,10 +609,8 @@ grant select on table public.payout_batches, public.payout_items to authenticate
 -- (5.6's schedules use the same bucket.)
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('payroll-files', 'payroll-files', false, 5242880, array['text/csv'])
-on conflict (id) do update
-set public = excluded.public,
-    file_size_limit = excluded.file_size_limit,
-    allowed_mime_types = excluded.allowed_mime_types;
+-- 5.6 (migration 20261122160000) creates it first (private, CSV): kept as it is.
+on conflict (id) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- 5. Functions
@@ -1345,7 +1343,7 @@ grant execute on function public.release_payroll_run(uuid, uuid, uuid, text) to 
 -- the file of a batch voided 7 days ago or more. Other paths in the bucket (5.6's) are never
 -- matched. The secret key only. Storage refuses deletes in SQL, so the server removes the objects
 -- through the Storage API (src/server/payroll/payout-sweep.ts: after each file it makes, for that
--- company, and daily from /api/cron/import-uploads), then records the sweep below.
+-- company, and daily from /api/cron/contract-documents), then records the sweep below.
 create function private.payroll_files_due(p_organisation_id uuid, p_limit integer)
 returns table (organisation_id uuid, path text, reason text)
 language plpgsql

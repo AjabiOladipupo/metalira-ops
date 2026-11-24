@@ -4,6 +4,7 @@ import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
+import { Button } from "@/components/ui/button";
 import { addDays, formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira } from "@/lib/money";
@@ -51,6 +52,13 @@ async function PayrollRunsPage() {
         eyebrow="Payroll"
         title="Payroll run"
         description={`${runs.length} ${runs.length === 1 ? "run" : "runs"} · pay cycle 20th to 19th, paid on the 25th. HR prepares; a different person in Finance approves.`}
+        actions={
+          runs.some((r) => r.status === "approved" || r.status === "released") ? (
+            <Button asChild variant="outline">
+              <Link href="/app/payroll/remittances">Statutory remittances</Link>
+            </Button>
+          ) : undefined
+        }
       />
 
       {canPrepare && periods.length > 0 ? (

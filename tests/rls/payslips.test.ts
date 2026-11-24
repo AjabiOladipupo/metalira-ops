@@ -20,13 +20,7 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addPayrollWorker } from "./helpers/payroll";
-import {
-  approveRun,
-  FAKE_PDF,
-  releaseRun,
-  recordDocument,
-  submitRunFor,
-} from "./helpers/payslips";
+import { approveRun, FAKE_PDF, releaseRun, recordDocument, submitRunFor } from "./helpers/payslips";
 import {
   adminClient,
   createTenantUser,
@@ -539,14 +533,12 @@ describe("year to date on the same pay date", () => {
     expect(error).toBeNull();
     const w = await addPayrollWorker(admin, o.orgId);
     const wUser = await createTestUser("pslip-tie-worker");
-    const member = await admin
-      .from("memberships")
-      .insert({
-        organisation_id: o.orgId,
-        user_id: wUser.id,
-        role: "worker",
-        worker_id: w.workerId,
-      });
+    const member = await admin.from("memberships").insert({
+      organisation_id: o.orgId,
+      user_id: wUser.id,
+      role: "worker",
+      worker_id: w.workerId,
+    });
     expect(member.error).toBeNull();
     // September pays 25 Oct; October is set to pay the same day, approved after September.
     const sep = await submitRunFor(admin, o, w, "2026-09-20");
