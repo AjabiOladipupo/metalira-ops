@@ -1391,9 +1391,18 @@ begin
     (l.after ->> 'instalment')::integer, (l.after ->> 'of')::integer,
     l.after ->> 'amount_kobo', (l.after ->> 'paid_by_run_id')::uuid, l.entity_id, l.at
   from public.audit_log l
+  join public.payroll_runs r on r.organisation_id = l.organisation_id and r.id = l.entity_id
   where l.organisation_id = p_organisation_id
     and l.action = 'payroll.instalment_not_carried'
+    and l.entity = 'payroll_runs'
     and jsonb_typeof(l.after) = 'object'
+    -- Every cast guarded: a row that isn't 5.7b's shape is skipped, never an error.
+    and coalesce(l.after ->> 'worker_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    and coalesce(l.after ->> 'series_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    and coalesce(l.after ->> 'paid_by_run_id', '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    and coalesce(l.after ->> 'instalment', '') ~ '^[0-9]{1,4}$'
+    and coalesce(l.after ->> 'of', '') ~ '^[0-9]{1,4}$'
+    and coalesce(l.after ->> 'amount_kobo', '') ~ '^[0-9]{1,15}$'
   order by l.at desc
   limit 200;
 end;
@@ -2403,6 +2412,7 @@ create table public.statutory_payment_resolutions (
   note text
     constraint statutory_payment_resolutions_note check (
       char_length(note) between 1 and 500 and note !~ '[\x01-\x1f\x7f-\x9f<>]'
+      and note !~* '(://|www\.)'
       and regexp_replace(note, '[^0-9]', '', 'g') !~ '[0-9]{10}'
     ),
   recorded_by uuid not null,
@@ -2728,6 +2738,7 @@ begin
   end if;
   v_amount := p_amount_kobo::bigint;
   if v_note is null or char_length(v_note) > 500 or v_note ~ '[\x01-\x1f\x7f-\x9f<>]'
+    or v_note ~* '(://|www\.)'
     or regexp_replace(v_note, '[^0-9]', '', 'g') ~ '[0-9]{10}' then
     raise exception 'Say why it is offset (for example, what the authority agreed), in up to 500 characters with no account numbers.'
       using errcode = '22023';
@@ -2878,5 +2889,57 @@ begin
     null
   );
   return v_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 8. Audit events used as evidence can't be written by hand (security review M1)
+-- ---------------------------------------------------------------------------
+
+-- Definer functions read these audit actions as evidence:
+--   payroll.bank_file_downloaded           5.4's make_payout_batch (MLBFB), release (MLBFD) and
+--                                          payout_file_downloads; 5.7a's reversal download check
+--   payroll.supplementary_file_downloaded  5.7c's make_payout_supplement (MLAR6), confirm (MLARA)
+--   payroll.instalment_not_carried         5.7c's payroll_instalments_not_carried (the panel)
+--   payroll.results_saved, payroll.run_created, payroll.run_submitted, payroll.adjustment_added,
+--   payroll.adjustment_removed, payroll.anomalies_acknowledged, payroll.instalment_carried
+--                                          5.2's payroll_run_touchers (rule 10)
+--   worker_auth.locked                     the PIN lockout holds (migration 20261117180000)
+--   people.bank_details_single_approver    the single-approver import check (same migration)
+-- Each is written only by its own definer function, directly or through private.log_audit_impl,
+-- which the API can't reach (the private schema isn't exposed). public.log_audit, which any
+-- manager may call with any module.event, now refuses them (42501); the definer paths keep
+-- working because they don't go through it, and no app code writes these actions.
+-- (contract.welcome_sent is read too, but the app writes it through log_audit after sending, and
+-- a forged one only holds a welcome email back.)
+create or replace function public.log_audit(
+  p_organisation_id uuid,
+  p_action text,
+  p_entity text,
+  p_entity_id uuid default null,
+  p_before jsonb default null,
+  p_after jsonb default null,
+  p_reason text default null
+)
+returns uuid
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+as $$
+begin
+  if p_action in (
+    'payroll.bank_file_downloaded', 'payroll.supplementary_file_downloaded',
+    'payroll.instalment_not_carried', 'payroll.results_saved', 'payroll.run_created',
+    'payroll.run_submitted', 'payroll.adjustment_added', 'payroll.adjustment_removed',
+    'payroll.anomalies_acknowledged', 'payroll.instalment_carried', 'worker_auth.locked',
+    'people.bank_details_single_approver'
+  ) then
+    raise exception 'That audit event is written only by the change it records.'
+      using errcode = '42501';
+  end if;
+  return private.log_audit_impl(
+    p_organisation_id, p_action, p_entity, p_entity_id, p_before, p_after, p_reason
+  );
 end;
 $$;

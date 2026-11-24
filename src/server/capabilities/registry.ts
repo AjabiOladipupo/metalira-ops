@@ -3096,7 +3096,9 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "none",
     action: null,
     read: ({ supabase, organisationId }) => loadCarriedDeductionsSummary(supabase, organisationId),
-    agent: true,
+    agent: false,
+    agentNote:
+      "Carried deductions are amounts owed by named people from their pay; a person reads them on the payroll page (security review L3).",
   },
   // -------------------------------------------------------------------------
   // Payslips: PDFs, the worker app and notices (payroll/payslip-actions.ts, slice 5.5)

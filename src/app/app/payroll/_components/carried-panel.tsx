@@ -16,7 +16,23 @@ const workers = (n: number) => `${n} ${n === 1 ? "worker" : "workers"}`;
  * taking net pay below ₦0, carried to the next run and settled there first. Each worker's running
  * balance across posted runs, newest balance first; the entries open per worker.
  */
-export function CarriedPanel({ data }: { data: CarriedDeductions }) {
+export function CarriedPanel({ data }: { data: CarriedDeductions | null }) {
+  if (data === null) {
+    return (
+      <section
+        aria-labelledby="carried"
+        className="flex flex-col gap-2 rounded-xl border border-line p-5"
+        data-testid="carried-panel-error"
+      >
+        <h2 id="carried" className="m-0 type-h3">
+          Carried deductions
+        </h2>
+        <p role="alert" className="m-0 text-sm">
+          Carried deductions couldn&apos;t be loaded just now. Reload the page in a minute.
+        </p>
+      </section>
+    );
+  }
   if (data.workers.length === 0 && data.notCarried.length === 0) return null;
   const owing = data.workers.filter((w) => w.balanceKobo > 0n);
   return (

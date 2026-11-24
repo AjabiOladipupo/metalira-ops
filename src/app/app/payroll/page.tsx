@@ -24,7 +24,13 @@ async function PayrollRunsPage() {
   const ctx = await peoplePageContext();
   const runs = await listRuns(ctx.supabase, ctx.organisationId);
   const canPrepare = canPreparePayroll(ctx.role);
-  const carried = await loadCarriedDeductions(ctx.supabase, ctx.organisationId);
+  // The panel degrades to its error state; the run list never fails because of it.
+  const carried = await loadCarriedDeductions(ctx.supabase, ctx.organisationId).catch(
+    (e: unknown) => {
+      console.error("payroll.carried_read_failed:", e instanceof Error ? e.name : "unknown");
+      return null;
+    },
+  );
 
   // The period holding today and the five before it, without a regular run yet.
   const periods: { value: string; label: string; payDate: string }[] = [];

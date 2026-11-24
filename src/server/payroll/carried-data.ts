@@ -215,8 +215,16 @@ async function loadNotCarried(
 export async function loadCarriedDeductionsSummary(
   supabase: Client,
   organisationId: string,
-): Promise<{ workersOwing: number; workersCarried: number; outstandingKobo: string }> {
-  const data = await loadCarriedDeductions(supabase, organisationId);
+): Promise<
+  { workersOwing: number; workersCarried: number; outstandingKobo: string } | { unavailable: true }
+> {
+  let data: CarriedDeductions;
+  try {
+    data = await loadCarriedDeductions(supabase, organisationId);
+  } catch (e) {
+    console.error("payroll.carried_summary_failed:", e instanceof Error ? e.name : "unknown");
+    return { unavailable: true };
+  }
   return {
     workersOwing: data.workers.filter((w) => w.balanceKobo > 0n).length,
     workersCarried: data.workers.length,
