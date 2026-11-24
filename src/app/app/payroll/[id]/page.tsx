@@ -11,6 +11,7 @@ import { formatNaira, sumKobo, toKobo, type Kobo } from "@/lib/money";
 import { describeAnomaly } from "@/lib/payroll/anomaly-text";
 import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
 import { RUN_STATUS, RUN_STEPS, runMonth, runStep, type RunStepId } from "@/lib/payroll/run-format";
+import { authorityLabel } from "@/lib/payroll/statutory";
 import { traceLess, traceNaira } from "@/lib/payroll/trace";
 import { cn } from "@/lib/utils";
 import { loadPayslipTrace, loadRunDetail, type RunDetail } from "@/server/payroll/run-data";
@@ -538,11 +539,11 @@ function GrossToNetStep({ d, explain }: StepProps & { explain: string | undefine
 function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
   const { run } = d;
   const t = run.totals;
-  const byState = new Map<string, Kobo>();
+  const byState = new Map<string | null, Kobo>();
   const pfas = new Set<string>();
   for (const p of d.payslips) {
     if (p.payeKobo > 0n) {
-      const key = p.taxState ?? "No tax state";
+      const key = p.taxState;
       byState.set(key, (byState.get(key) ?? 0n) + p.payeKobo);
     }
     if (p.pensionEmployeeKobo + p.pensionEmployerKobo > 0n && p.pfaName) pfas.add(p.pfaName);
@@ -564,8 +565,8 @@ function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
         </dt>
         <dd className="m-0 text-right font-semibold tabular-nums">{naira(t.netKobo)}</dd>
         {[...byState].map(([state, amount]) => (
-          <div key={state} className="contents">
-            <dt>PAYE to {state}</dt>
+          <div key={state ?? ""} className="contents">
+            <dt>PAYE to {authorityLabel("paye", state)}</dt>
             <dd className="m-0 text-right tabular-nums">{naira(amount)}</dd>
           </div>
         ))}
@@ -677,7 +678,10 @@ function PostedNote({ d }: { d: RunDetail }) {
         by {(run.approvedBy && d.names.get(run.approvedBy)) ?? "a manager"}
         {run.approvedAt ? ` · ${formatDateTime(run.approvedAt)}` : ""}. The payslips are posted and
         never change; timesheet days in {formatLeaveRange(run.periodStart, run.periodEnd)} are
-        locked, and days approved from now on are paid in the next run.
+        locked, and days approved from now on are paid in the next run.{" "}
+        <Link href={`/app/payroll/remittances?run=${run.id}`} className="text-signal">
+          Statutory remittances
+        </Link>
       </span>
     </p>
   );

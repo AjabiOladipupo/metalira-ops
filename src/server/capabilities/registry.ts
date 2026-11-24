@@ -246,6 +246,17 @@ import {
 import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-review-data";
 import { PAYROLL_READERS, loadPayInputsSummary } from "@/server/payroll/inputs";
 import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
+import { loadRemittanceSummary } from "@/server/payroll/remittance-data";
+import {
+  REMITTANCE_RECORDERS,
+  previewPaymentSchema,
+  receiptLinkSchema,
+  recordPaymentSpec,
+  remittanceIdSchema,
+  setDueDaysSpec,
+  startReceiptSpec,
+  voidPaymentSpec,
+} from "@/server/payroll/remittances";
 import {
   acknowledgeSpec,
   addAdjustmentSpec,
@@ -305,8 +316,10 @@ import {
   previewCreatePayrollRun,
   previewRecalculatePayrollRun,
   previewRemovePayrollAdjustment,
+  previewRecordRemittancePayment,
   previewReturnPayrollRun,
   previewSubmitPayrollRun,
+  previewVoidRemittancePayment,
 } from "./payroll-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { previewApproveClean, previewCorrection } from "./timesheet-previews";
@@ -325,6 +338,9 @@ import { fromSpec, type ActionRef, type Capability } from "./types";
 
 const NO_PAYROLL =
   "Lira never prepares, changes, submits, approves or releases payroll (docs/PHASE_5.md decision 8).";
+
+const REMITTANCE_NOTE =
+  "Recording a statutory remittance is a person's step with the bank's receipt in hand; Lira never records payments or moves money (docs/LIRA.md).";
 
 const payslipInput = z.object({ payslipId: z.uuid() });
 
@@ -2853,6 +2869,115 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Approving payroll is a second person's decision (docs/PHASE_5.md decision 8, rule 10), made on the screen; Lira never approves or releases payroll.",
+  },
+  // -------------------------------------------------------------------------
+  // Statutory remittances (payroll/remittance-actions.ts, slice 5.6)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.remittances_summary",
+    description:
+      "Counts statutory remittances paid, due, overdue and without a due date, with the total still owed.",
+    kind: "read",
+    audience: "manager",
+    roles: REMITTANCE_RECORDERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }) =>
+      loadRemittanceSummary(
+        supabase,
+        organisationId,
+        await organisationToday(supabase, organisationId),
+      ),
+    agent: true,
+  },
+  {
+    name: "payroll.preview_remittance_payment",
+    description:
+      "Works out what recording a remittance payment will do, against the amount due, without saving.",
+    kind: "read",
+    audience: "manager",
+    roles: REMITTANCE_RECORDERS,
+    input: previewPaymentSchema,
+    changes: "none",
+    action: at("payroll/remittance-actions", "previewRemittancePaymentAction"),
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.start_remittance_receipt",
+    description: "Prepares the upload of a remittance's receipt to the private evidence store.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(startReceiptSpec),
+    changes: "none",
+    action: at("payroll/remittance-actions", "startRemittanceReceiptAction"),
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.record_remittance_payment",
+    description:
+      "Records, once, that a statutory remittance was paid, with the date, amount, reference and receipt.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recordPaymentSpec),
+    changes: "many",
+    action: at("payroll/remittance-actions", "recordRemittancePaymentAction"),
+    preview: previewRecordRemittancePayment,
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.void_remittance_payment",
+    description:
+      "Voids a wrong remittance payment record with a reason, so the right one can be recorded.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(voidPaymentSpec),
+    changes: "one",
+    action: at("payroll/remittance-actions", "voidRemittancePaymentAction"),
+    preview: previewVoidRemittancePayment,
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.set_remittance_due_days",
+    description:
+      "Sets the company's own due day for PAYE, NHF, NSITF and ITF remittances, or none.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(setDueDaysSpec),
+    changes: "one",
+    action: at("payroll/remittance-actions", "setRemittanceDueDaysAction"),
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.download_schedule",
+    description:
+      "Makes a 60-second link to a remittance's schedule, with TINs or RSA PINs, and audits the download.",
+    kind: "read",
+    audience: "manager",
+    roles: REMITTANCE_RECORDERS,
+    input: remittanceIdSchema,
+    changes: "none",
+    action: at("payroll/remittance-actions", "remittanceScheduleLinkAction"),
+    agent: false,
+    agentNote:
+      "Schedules carry TINs and RSA PINs; Lira never downloads payroll files (docs/PHASE_5.md decision 8).",
+  },
+  {
+    name: "payroll.open_remittance_receipt",
+    description: "Makes a 60-second link that opens a recorded remittance payment's receipt.",
+    kind: "read",
+    audience: "manager",
+    roles: REMITTANCE_RECORDERS,
+    input: receiptLinkSchema,
+    changes: "none",
+    action: at("payroll/remittance-actions", "remittanceReceiptLinkAction"),
+    agent: false,
+    agentNote: "Opening a payroll file is a person's step on the screen; Lira never opens files.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)

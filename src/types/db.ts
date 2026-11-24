@@ -693,14 +693,14 @@ isOneToOne: false
                   ]
                 },"organisations": {
                   Row: {
-                    "address": string | null,"auto_email_receipts": boolean,"business_type": string,"company_code": string,"created_at": string,"created_by": string | null,"default_work_days": (number)[],"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"no_show_after_minutes": number,"pay_cycle_start_day": number,"pay_day": number,"payment_terms_days": number,"payroll_enabled": boolean,"people_enabled": boolean,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"shifts_enabled": boolean,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
+                    "address": string | null,"auto_email_receipts": boolean,"business_type": string,"company_code": string,"created_at": string,"created_by": string | null,"default_work_days": (number)[],"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"itf_remit_day": number | null,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"nhf_remit_day": number | null,"no_show_after_minutes": number,"nsitf_remit_day": number | null,"pay_cycle_start_day": number,"pay_day": number,"paye_remit_day": number | null,"payment_terms_days": number,"payroll_enabled": boolean,"people_enabled": boolean,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"shifts_enabled": boolean,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code": string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"no_show_after_minutes"?: number,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code": string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Update: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"no_show_after_minutes"?: number,"pay_cycle_start_day"?: number,"pay_day"?: number,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Relationships: [
                     
@@ -1420,6 +1420,96 @@ isOneToOne: false
       columns: ["organisation_id","query_id"]
 isOneToOne: false
       referencedRelation: "staff_queries"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"statutory_payments": {
+                  Row: {
+                    "created_at": string,"currency": string,"entry": string,"id": string,"organisation_id": string,"paid_amount_kobo": number | null,"paid_on": string | null,"reason": string | null,"receipt_id": string | null,"recorded_by": string,"reference": string | null,"remittance_id": string,"voids_payment_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"currency"?: string,"entry": string,"id"?: string,"organisation_id": string,"paid_amount_kobo"?: number | null,"paid_on"?: string | null,"reason"?: string | null,"receipt_id"?: string | null,"recorded_by": string,"reference"?: string | null,"remittance_id": string,"voids_payment_id"?: string | null
+                  }
+                  Update: {
+                    "created_at"?: string,"currency"?: string,"entry"?: string,"id"?: string,"organisation_id"?: string,"paid_amount_kobo"?: number | null,"paid_on"?: string | null,"reason"?: string | null,"receipt_id"?: string | null,"recorded_by"?: string,"reference"?: string | null,"remittance_id"?: string,"voids_payment_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "statutory_payments_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "statutory_payments_receipt_fkey"
+      columns: ["organisation_id","receipt_id"]
+isOneToOne: false
+      referencedRelation: "statutory_receipts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "statutory_payments_remittance_fkey"
+      columns: ["organisation_id","remittance_id"]
+isOneToOne: false
+      referencedRelation: "statutory_remittances"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "statutory_payments_voids_fkey"
+      columns: ["organisation_id","voids_payment_id"]
+isOneToOne: false
+      referencedRelation: "statutory_payments"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"statutory_receipts": {
+                  Row: {
+                    "checked_by": string,"created_at": string,"file_ext": string,"id": string,"mime_type": string,"organisation_id": string,"remittance_id": string,"sha256": string,"size_bytes": number,"storage_path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "checked_by": string,"created_at"?: string,"file_ext": string,"id": string,"mime_type": string,"organisation_id": string,"remittance_id": string,"sha256": string,"size_bytes": number,"storage_path": string
+                  }
+                  Update: {
+                    "checked_by"?: string,"created_at"?: string,"file_ext"?: string,"id"?: string,"mime_type"?: string,"organisation_id"?: string,"remittance_id"?: string,"sha256"?: string,"size_bytes"?: number,"storage_path"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "statutory_receipts_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "statutory_receipts_remittance_fkey"
+      columns: ["organisation_id","remittance_id"]
+isOneToOne: false
+      referencedRelation: "statutory_remittances"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"statutory_remittances": {
+                  Row: {
+                    "amount_kobo": number,"authority_key": string | null,"created_at": string,"currency": string,"due_date": string | null,"id": string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount_kobo": number,"authority_key"?: string | null,"created_at"?: string,"currency"?: string,"due_date"?: string | null,"id"?: string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
+                  }
+                  Update: {
+                    "amount_kobo"?: number,"authority_key"?: string | null,"created_at"?: string,"currency"?: string,"due_date"?: string | null,"id"?: string,"kind"?: string,"organisation_id"?: string,"run_id"?: string,"worker_count"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "statutory_remittances_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "statutory_remittances_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
       referencedColumns: ["organisation_id","id"]
     }
                   ]
@@ -2250,6 +2340,12 @@ isOneToOne: false
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json
                            },
+"record_statutory_payment":
+{ Args: { "p_organisation_id": string,"p_paid_amount_kobo": string,"p_paid_on": string,"p_receipt_id": string,"p_reference": string,"p_remittance_id": string }; Returns: string
+                           },
+"record_statutory_receipt":
+{ Args: { "p_actor": string,"p_file_ext": string,"p_organisation_id": string,"p_receipt_id": string,"p_remittance_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string
+                           },
 "refresh_timesheet_lines":
 { Args: { "p_from": string,"p_organisation_id": string,"p_to": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
@@ -2362,6 +2458,9 @@ isOneToOne: false
 "set_company_modules":
 { Args: { "p_organisation_id": string,"p_payroll_enabled": boolean,"p_people_enabled": boolean,"p_shifts_enabled": boolean }; Returns: Json
                            },
+"set_remittance_due_days":
+{ Args: { "p_itf"?: number,"p_nhf"?: number,"p_nsitf"?: number,"p_organisation_id": string,"p_paye"?: number }; Returns: undefined
+                           },
 "set_work_week":
 { Args: { "p_days": (number)[],"p_organisation_id": string }; Returns: (number)[]
                            },
@@ -2416,6 +2515,9 @@ isOneToOne: false
                            },
 "update_draft_contract":
 { Args: { "p_contract": Json,"p_contract_id": string,"p_organisation_id": string,"p_site_ids"?: (string)[] }; Returns: string
+                           },
+"void_statutory_payment":
+{ Args: { "p_organisation_id": string,"p_payment_id": string,"p_reason": string }; Returns: string
                            },
 "withdraw_org_bank_account":
 { Args: { "p_id": string,"p_organisation_id": string }; Returns: string

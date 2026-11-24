@@ -283,6 +283,9 @@ export const EXTRA_PAGES: readonly {
   // no payroll, PHASE_5 decision 8). Part of Payroll: hidden when the company has it off.
   { href: "/app/settings/payroll", roles: ["owner", "hr", "finance"], module: "payroll" },
   { href: "/app/settings/payroll/new", roles: ["owner", "hr"], module: "payroll" },
+  // Slice 5.6: statutory remittances (owner, hr and finance record payments and download
+  // schedules). Listed before the run's page so the static path wins the tie.
+  { href: "/app/payroll/remittances", roles: ["owner", "hr", "finance"], module: "payroll" },
   // Slice 5.2: a payroll run's page (owner, hr, finance; hr and owner prepare, finance decides).
   { href: "/app/payroll/[id]", roles: ["owner", "hr", "finance"], module: "payroll" },
   // Slice 4.4: leave balances (and HR's adjustments). Ops managers read requests' dates and type
