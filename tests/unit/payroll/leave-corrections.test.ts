@@ -306,6 +306,7 @@ describe("refunding after-tax leave arrears", () => {
             lines: [
               {
                 code: "leave_arrears",
+                wantedKobo: null,
                 label:
                   "Unpaid leave in 20 Aug to 19 Sep, approved after posting (10 to 11 Sep, 2 days)",
                 amountKobo: 1_000_000n,
@@ -426,6 +427,7 @@ describe("leave cancelled after posting: a refund in the next run", () => {
             lines: [
               {
                 code: "leave_deduction",
+                wantedKobo: null,
                 label: "x, basic",
                 amountKobo: 0n,
                 pensionable: true,
