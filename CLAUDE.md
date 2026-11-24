@@ -52,7 +52,7 @@ Owner: Meta Lira Technology LTD. Product docs live in `docs/`. Read `docs/PRODUC
 - Unit tests for any money, tax or matching logic, including the fixtures in `fixtures/` where relevant.
 - `pnpm typecheck && pnpm lint && pnpm test` green.
 - Screen matches the design system; works at 390px and 1440px.
-- Pull request description lists what changed and how to check it on the Vercel preview.
+- Pull request description lists what changed and how to check it on the Vercel preview. Previews build only for commits whose message contains `[preview]` (production always builds); push one when the slice is ready to look at.
 
 ## How to work
 

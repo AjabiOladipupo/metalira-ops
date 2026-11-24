@@ -12,10 +12,13 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   // Payslip PDFs (slice 5.5) embed Inter from src/server/payroll/fonts, read from disk wherever
-  // publishPayslips runs: the run pages, 5.4's release action and any route or job that calls
-  // it. Traced for every server route (about 1 MB).
+  // publishPayslips runs. Its only callers are server actions on the payroll pages ("Finish
+  // publishing" and 5.4's release), which run inside those routes, so only they trace the fonts
+  // (about 1 MB). Tracing them for every route bloated every deployment's function storage.
+  // A new caller outside /app/payroll must add its route here.
   outputFileTracingIncludes: {
-    "/**": ["src/server/payroll/fonts/*.ttf"],
+    "/app/payroll": ["src/server/payroll/fonts/*.ttf"],
+    "/app/payroll/**": ["src/server/payroll/fonts/*.ttf"],
   },
   async headers() {
     return [
