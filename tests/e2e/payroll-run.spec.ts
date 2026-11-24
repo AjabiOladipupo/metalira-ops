@@ -187,7 +187,11 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
   await expect(page.getByTestId("control-totals")).toContainText("Net pay to 6 workers");
   await submitAgain.getByRole("button", { name: "Submit to Finance" }).click();
   await submitAgain.getByRole("button", { name: "Confirm and submit" }).click();
-  await expect(submitAgain.getByRole("status")).toContainText("Submitted");
+  // Submitted: the run is in review, so the submit form gives way to the waiting status.
+  await expect(
+    page.getByRole("status").filter({ hasText: "Waiting for Finance approval" }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("form", { name: "Submit to Finance" })).toHaveCount(0);
   await page.reload();
   await expect(
     page.getByRole("status").filter({ hasText: "Waiting for Finance approval" }),
