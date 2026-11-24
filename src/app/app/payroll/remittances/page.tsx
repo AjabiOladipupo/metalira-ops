@@ -64,8 +64,21 @@ function RemittanceCard({
             {r.workerCount} {r.workerCount === 1 ? "worker" : "workers"} · {dueText(r)}
           </p>
         </div>
-        <Status tone={status.tone}>{status.label}</Status>
+        {r.runVoid ? (
+          <Status tone="pending">Voided</Status>
+        ) : (
+          <Status tone={status.tone}>{status.label}</Status>
+        )}
       </div>
+      {r.runVoid ? (
+        <p
+          className="m-0 rounded-lg border border-line px-3 py-2 text-sm"
+          data-testid="remittance-run-void"
+        >
+          Voided {formatDateTime(r.runVoid.voidedAt)}: the run was reversed, so nothing is owed for
+          it. {paid ? "The payment recorded stays on file for a refund or an offset." : ""}
+        </p>
+      ) : null}
       <p
         className="m-0 font-heading text-2xl font-medium tabular-nums"
         data-testid="remittance-amount"
@@ -120,7 +133,7 @@ function RemittanceCard({
         </a>
       </div>
 
-      {canRecord && !paid ? (
+      {canRecord && !paid && !r.runVoid ? (
         <details className="rounded-lg border border-line px-3 py-2.5">
           <summary className="cursor-pointer text-sm font-semibold">Record payment</summary>
           <div className="pt-3">
@@ -133,7 +146,7 @@ function RemittanceCard({
           </div>
         </details>
       ) : null}
-      {canRecord && paid ? (
+      {canRecord && paid && !r.runVoid ? (
         <details className="rounded-lg border border-line px-3 py-2.5">
           <summary className="cursor-pointer text-sm font-medium">This record is wrong</summary>
           <div className="pt-3">

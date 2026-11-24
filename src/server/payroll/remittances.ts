@@ -544,6 +544,9 @@ type SlipRecord = {
   nhf_kobo: string;
   nsitf_kobo: string;
   itf_kobo: string;
+  /** Pension only (slice 5.7a): the worker's encrypted RSA PIN as saved with the results. */
+  rsa_pin_enc?: string | null;
+  rsa_pin_snapshot?: boolean;
 };
 
 type WorkerRecord = {
@@ -601,7 +604,7 @@ export const scheduleFileSpec: MutationSpec<typeof remittanceIdSchema, ScheduleF
     const slipQuery = supabase
       .from("payslips")
       .select(
-        `id, worker_id, tax_state, pfa_name, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, nsitf_kobo::text, itf_kobo::text${kind === "paye" ? ", trace" : ""}`,
+        `id, worker_id, tax_state, pfa_name, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, nsitf_kobo::text, itf_kobo::text${kind === "paye" ? ", trace" : ""}${kind === "pension" ? ", rsa_pin_enc, rsa_pin_snapshot" : ""}`,
       )
       .eq("organisation_id", organisationId)
       .eq("run_id", r.runId);
@@ -648,9 +651,13 @@ export const scheduleFileSpec: MutationSpec<typeof remittanceIdSchema, ScheduleF
       const w = workers.get(s.worker_id);
       if (!w) throw new Error("A payslip's worker couldn't be read");
       let rsaPin: string | null = null;
-      if (kind === "pension" && w.rsa_pin_enc) {
+      // Security review L4 (slice 5.7a): the PIN as it was when the payslip's results were saved
+      // (the worker row's ciphertext, under its own context); payslips saved before the snapshot
+      // existed fall back to the PIN on file now.
+      const pinEnc = s.rsa_pin_snapshot ? (s.rsa_pin_enc ?? null) : w.rsa_pin_enc;
+      if (kind === "pension" && pinEnc) {
         try {
-          rsaPin = decryptPii(w.rsa_pin_enc, {
+          rsaPin = decryptPii(pinEnc, {
             organisationId,
             table: "workers",
             column: "rsa_pin_enc",

@@ -829,17 +829,23 @@ isOneToOne: false
                   ]
                 },"payroll_adjustments": {
                   Row: {
-                    "amount_kobo": number,"created_at": string,"created_by": string,"currency": string,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
+                    "amount_kobo": number,"corrects_payslip_id": string | null,"created_at": string,"created_by": string,"currency": string,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"created_at"?: string,"created_by": string,"currency"?: string,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind": string,"label": string,"organisation_id": string,"pensionable"?: boolean,"reason": string,"run_id": string,"series_id": string,"taxable"?: boolean,"worker_id": string
+                    "amount_kobo": number,"corrects_payslip_id"?: string | null,"created_at"?: string,"created_by": string,"currency"?: string,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind": string,"label": string,"organisation_id": string,"pensionable"?: boolean,"reason": string,"run_id": string,"series_id": string,"taxable"?: boolean,"worker_id": string
                   }
                   Update: {
-                    "amount_kobo"?: number,"created_at"?: string,"created_by"?: string,"currency"?: string,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind"?: string,"label"?: string,"organisation_id"?: string,"pensionable"?: boolean,"reason"?: string,"run_id"?: string,"series_id"?: string,"taxable"?: boolean,"worker_id"?: string
+                    "amount_kobo"?: number,"corrects_payslip_id"?: string | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind"?: string,"label"?: string,"organisation_id"?: string,"pensionable"?: boolean,"reason"?: string,"run_id"?: string,"series_id"?: string,"taxable"?: boolean,"worker_id"?: string
                   }
                   Relationships: [
                     {
+      foreignKeyName: "payroll_adjustments_corrects_fkey"
+      columns: ["organisation_id","corrects_payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
       foreignKeyName: "payroll_adjustments_organisation_id_fkey"
       columns: ["organisation_id"]
 isOneToOne: false
@@ -945,14 +951,14 @@ isOneToOne: false
                   ]
                 },"payroll_runs": {
                   Row: {
-                    "approved_at": string | null,"approved_by": string | null,"calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"released_at": string | null,"released_by": string | null,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
+                    "approved_at": string | null,"approved_by": string | null,"calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"released_at": string | null,"released_by": string | null,"reverses_run_id": string | null,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"released_at"?: string | null,"released_by"?: string | null,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"released_at"?: string | null,"released_by"?: string | null,"reverses_run_id"?: string | null,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
                   }
                   Update: {
-                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"released_at"?: string | null,"released_by"?: string | null,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"released_at"?: string | null,"released_by"?: string | null,"reverses_run_id"?: string | null,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
                   }
                   Relationships: [
                     {
@@ -960,6 +966,18 @@ isOneToOne: false
       columns: ["organisation_id"]
 isOneToOne: false
       referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_runs_reverses_fkey"
+      columns: ["organisation_id","reverses_run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_runs_reverses_run_id_fkey"
+      columns: ["reverses_run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
       referencedColumns: ["id"]
     }
                   ]
@@ -997,14 +1015,14 @@ isOneToOne: false
                   ]
                 },"payslip_lines": {
                   Row: {
-                    "amount_kobo": number,"code": string,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"taxable": boolean
+                    "amount_kobo": number,"code": string,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign": number,"taxable": boolean
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"code": string,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"taxable": boolean
+                    "amount_kobo": number,"code": string,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign"?: number,"taxable": boolean
                   }
                   Update: {
-                    "amount_kobo"?: number,"code"?: string,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"run_id"?: string,"taxable"?: boolean
+                    "amount_kobo"?: number,"code"?: string,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"run_id"?: string,"sign"?: number,"taxable"?: boolean
                   }
                   Relationships: [
                     {
@@ -1081,14 +1099,14 @@ isOneToOne: false
                   ]
                 },"payslips": {
                   Row: {
-                    "carried_forward_kobo": number,"created_at": string,"currency": string,"cycle_days": number,"employed_rostered_days": number,"employer_cost_kobo": number,"employment_type": string,"gross_kobo": number,"id": string,"itf_kobo": number,"leave_deducted_days": number,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_rate_ids": (string)[],"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"pfa_name": string | null,"rostered_days": number,"rule_set_id": string,"run_id": string,"tax_state": string | null,"trace": NonNullable<Json>,"trace_version": number,"worker_id": string
+                    "carried_forward_kobo": number,"created_at": string,"currency": string,"cycle_days": number,"employed_rostered_days": number,"employer_cost_kobo": number,"employment_type": string,"gross_kobo": number,"id": string,"itf_kobo": number,"leave_deducted_days": number,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_rate_ids": (string)[],"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"pfa_name": string | null,"reverses_payslip_id": string | null,"rostered_days": number,"rsa_pin_enc": string | null,"rsa_pin_snapshot": boolean,"rule_set_id": string,"run_id": string,"sign": number,"tax_state": string | null,"trace": NonNullable<Json>,"trace_version": number,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "carried_forward_kobo": number,"created_at"?: string,"currency"?: string,"cycle_days": number,"employed_rostered_days": number,"employer_cost_kobo": number,"employment_type": string,"gross_kobo": number,"id"?: string,"itf_kobo": number,"leave_deducted_days": number,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_rate_ids"?: (string)[],"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"pfa_name"?: string | null,"rostered_days": number,"rule_set_id": string,"run_id": string,"tax_state"?: string | null,"trace": NonNullable<Json>,"trace_version": number,"worker_id": string
+                    "carried_forward_kobo": number,"created_at"?: string,"currency"?: string,"cycle_days": number,"employed_rostered_days": number,"employer_cost_kobo": number,"employment_type": string,"gross_kobo": number,"id"?: string,"itf_kobo": number,"leave_deducted_days": number,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_rate_ids"?: (string)[],"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"pfa_name"?: string | null,"reverses_payslip_id"?: string | null,"rostered_days": number,"rsa_pin_enc"?: string | null,"rsa_pin_snapshot"?: boolean,"rule_set_id": string,"run_id": string,"sign"?: number,"tax_state"?: string | null,"trace": NonNullable<Json>,"trace_version": number,"worker_id": string
                   }
                   Update: {
-                    "carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"cycle_days"?: number,"employed_rostered_days"?: number,"employer_cost_kobo"?: number,"employment_type"?: string,"gross_kobo"?: number,"id"?: string,"itf_kobo"?: number,"leave_deducted_days"?: number,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_rate_ids"?: (string)[],"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"pfa_name"?: string | null,"rostered_days"?: number,"rule_set_id"?: string,"run_id"?: string,"tax_state"?: string | null,"trace"?: NonNullable<Json>,"trace_version"?: number,"worker_id"?: string
+                    "carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"cycle_days"?: number,"employed_rostered_days"?: number,"employer_cost_kobo"?: number,"employment_type"?: string,"gross_kobo"?: number,"id"?: string,"itf_kobo"?: number,"leave_deducted_days"?: number,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_rate_ids"?: (string)[],"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"pfa_name"?: string | null,"reverses_payslip_id"?: string | null,"rostered_days"?: number,"rsa_pin_enc"?: string | null,"rsa_pin_snapshot"?: boolean,"rule_set_id"?: string,"run_id"?: string,"sign"?: number,"tax_state"?: string | null,"trace"?: NonNullable<Json>,"trace_version"?: number,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -1097,6 +1115,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "organisations"
       referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslips_reverses_fkey"
+      columns: ["organisation_id","reverses_payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "payslips_run_fkey"
       columns: ["organisation_id","run_id"]
@@ -1627,6 +1651,38 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"statutory_remittance_voids": {
+                  Row: {
+                    "created_at": string,"id": string,"organisation_id": string,"reason": string,"remittance_id": string,"run_id": string,"voided_by": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"id"?: string,"organisation_id": string,"reason": string,"remittance_id": string,"run_id": string,"voided_by": string
+                  }
+                  Update: {
+                    "created_at"?: string,"id"?: string,"organisation_id"?: string,"reason"?: string,"remittance_id"?: string,"run_id"?: string,"voided_by"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "statutory_remittance_voids_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "statutory_remittance_voids_remittance_fkey"
+      columns: ["organisation_id","remittance_id"]
+isOneToOne: false
+      referencedRelation: "statutory_remittances"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "statutory_remittance_voids_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"statutory_remittances": {
                   Row: {
                     "amount_kobo": number,"authority_key": string | null,"authority_name": string | null,"authority_variants": (string)[],"created_at": string,"currency": string,"due_date": string | null,"id": string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
@@ -2138,6 +2194,9 @@ isOneToOne: false
 "add_payroll_adjustment":
 { Args: { "p_amount_kobo": string,"p_instalments": number,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_pensionable": boolean,"p_reason": string,"p_run_id": string,"p_taxable": boolean,"p_worker_id": string }; Returns: string
                            },
+"add_payroll_correction":
+{ Args: { "p_amount_kobo": string,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_payslip_id": string,"p_pensionable": boolean,"p_reason": string,"p_run_id": string }; Returns: string
+                           },
 "add_post":
 { Args: { "p_add_site"?: boolean,"p_band": string,"p_contract_id": string,"p_count": number,"p_days": (number)[],"p_end": string,"p_from": string,"p_note"?: string,"p_organisation_id": string,"p_post_name": string,"p_role": string,"p_site_id": string,"p_start": string,"p_unit": string }; Returns: Json
                            },
@@ -2167,6 +2226,9 @@ isOneToOne: false
                            },
 "approve_clean_timesheet_lines":
 { Args: { "p_dry_run"?: boolean,"p_line_ids": (string)[],"p_organisation_id": string }; Returns: Json
+                           },
+"approve_payroll_reversal":
+{ Args: { "p_not_uploaded"?: boolean,"p_organisation_id": string,"p_run_id": string }; Returns: string
                            },
 "approve_payroll_run":
 { Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
@@ -2588,6 +2650,9 @@ isOneToOne: false
                            },
 "return_payroll_run":
 { Args: { "p_organisation_id": string,"p_reason": string,"p_run_id": string }; Returns: string
+                           },
+"reverse_payroll_run":
+{ Args: { "p_not_uploaded"?: boolean,"p_organisation_id": string,"p_reason": string,"p_run_id": string }; Returns: string
                            },
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined

@@ -146,7 +146,7 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
   throw new Error(`Database refused the change (${error.code})`);
 }
 
-async function draftRun(
+export async function draftRun(
   supabase: Client,
   organisationId: string,
   runId: string,
@@ -159,7 +159,7 @@ async function draftRun(
   return run;
 }
 
-const targetOf = (run: PayrollRunRow) => ({
+export const targetOf = (run: PayrollRunRow) => ({
   runId: run.id,
   periodStart: run.periodStart,
   payDate: run.payDate,
@@ -414,6 +414,12 @@ export async function previewReturn(
 ): Promise<CapabilityPreview> {
   const run = await loadRun(ctx.supabase, ctx.organisationId, data.runId);
   if (!run) throw new MutationError("invalid", "That payroll run wasn't found. Reload the page.");
+  if (run.kind === "reversal") {
+    return {
+      summary: `Declines the reversal of ${formatLeaveRange(run.periodStart, run.periodEnd)}: "${data.reason}". The run stays approved; a new reversal can be asked for.`,
+      changes: [{ label: "Reversal", before: "Waiting for approval", after: "Declined" }],
+    };
+  }
   return {
     summary: `Returns ${formatLeaveRange(run.periodStart, run.periodEnd)} to HR as a draft: "${data.reason}". Nothing is paid.`,
     changes: [{ label: "Status", before: "Waiting for approval", after: "Draft" }],

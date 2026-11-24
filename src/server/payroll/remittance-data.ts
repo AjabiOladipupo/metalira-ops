@@ -63,6 +63,11 @@ export interface RemittanceRow {
   payment: RemittancePayment | null;
   /** Payments recorded before and voided, newest first. */
   voided: (RemittancePayment & { void: RemittanceVoid })[];
+  /**
+   * The remittance itself voided because its run was reversed (slice 5.7a): nothing is owed. A
+   * payment already recorded stays as evidence for a refund or an offset (slice 5.7c).
+   */
+  runVoid: { reason: string; voidedAt: string } | null;
 }
 
 export interface RemittanceRun {
@@ -132,7 +137,9 @@ export async function loadRemittances(
     .from("payroll_runs")
     .select("id, period_start, period_end, pay_date, status")
     .eq("organisation_id", organisationId)
-    .in("status", ["approved", "released"])
+    // Reversed runs too (slice 5.7a): their remittances show as voided.
+    .in("status", ["approved", "released", "reversed"])
+    .neq("kind", "reversal")
     .order("period_start", { ascending: false })
     .limit(options.allRuns ? 1000 : 12);
   if (options.runId) runQuery = runQuery.eq("id", options.runId);
@@ -151,6 +158,18 @@ export async function loadRemittances(
   if (remError) throw new Error(`Could not read remittances (${remError.code})`);
   const remRows = (rems ?? []) as unknown as RemittanceRecord[];
   const remIds = remRows.map((r) => r.id);
+  const runVoids = new Map<string, { reason: string; voidedAt: string }>();
+  if (remIds.length > 0) {
+    const { data: rvs, error: rvError } = await supabase
+      .from("statutory_remittance_voids")
+      .select("remittance_id, reason, created_at")
+      .eq("organisation_id", organisationId)
+      .in("remittance_id", remIds);
+    if (rvError) throw new Error(`Could not read remittance voids (${rvError.code})`);
+    for (const v of rvs ?? []) {
+      runVoids.set(v.remittance_id, { reason: v.reason, voidedAt: v.created_at });
+    }
+  }
 
   const payRows: PaymentRecord[] = [];
   const receiptExt = new Map<string, string>();
@@ -231,15 +250,17 @@ export async function loadRemittances(
             },
           };
         }),
+      runVoid: null,
     };
     const owed = {
       dueDate: row.dueDate,
       amountKobo: row.amountKobo,
       paidKobo: row.payment?.paidAmountKobo ?? null,
     };
+    row.runVoid = runVoids.get(r.id) ?? null;
     row.status = remittanceStatus(owed, today);
-    row.outstandingKobo = remittanceOutstanding(owed);
-    row.overdue = remittanceIsOverdue(owed, today);
+    row.outstandingKobo = row.runVoid ? 0n : remittanceOutstanding(owed);
+    row.overdue = row.runVoid ? false : remittanceIsOverdue(owed, today);
     byRun.set(r.run_id, [...(byRun.get(r.run_id) ?? []), row]);
   }
   return runs.map((run) => ({
