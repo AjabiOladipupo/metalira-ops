@@ -294,7 +294,7 @@ describe("making the file", () => {
     });
     // Never a number: no column holds more than the last 4 digits.
     expect(JSON.stringify(items)).not.toMatch(/\d{10}/);
-    expect(Object.keys(items![0]!).filter((k) => /enc|account_number/.test(k))).toEqual([]);
+    expect(Object.keys(items![0]!).filter((k) => /_enc$|account_number/.test(k))).toEqual([]);
 
     // Audited with control totals, never a number.
     const { data: audit } = await admin
@@ -525,7 +525,7 @@ describe("the bucket and downloads", () => {
       .select("actor_id, entity, entity_id, before, after")
       .eq("organisation_id", c.owner.orgId)
       .eq("action", "payroll.bank_file_downloaded")
-      .order("created_at");
+      .order("at");
     expect(audit).toEqual([
       {
         actor_id: c.finance.id,

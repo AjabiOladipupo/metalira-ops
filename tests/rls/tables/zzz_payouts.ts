@@ -3,7 +3,7 @@
  * zz_payroll_runs.ts, submitted by the side's owner) is approved by a Finance member added here
  * after the server's input check, its worker gets bank details (the secret key), and Finance makes
  * the bank file through the server's two steps (the file stored with the secret key, then
- * make_payout_batch as Finance). Signed-in roles have no write grants on either table, so every
+ * make_payout_batch as Finance); the Finance membership is then removed again. Signed-in roles have no write grants on either table, so every
  * attack is 42501.
  *
  * Named to sort after zz_payroll_runs.ts, whose seed makes the run.
@@ -51,6 +51,13 @@ export const tables: TableSpec[] = [
       await approveRun(admin, side.orgId, runId, finance);
       const made = await makeBatch(admin, finance.client, side.orgId, runId);
       if (made.error) throw new Error(`payout_batches: ${made.error.message}`);
+      // The membership checks expect only the side's owner in its company.
+      const removed = await admin
+        .from("memberships")
+        .delete()
+        .eq("organisation_id", side.orgId)
+        .eq("user_id", finance.id);
+      if (removed.error) throw new Error(`payout_batches: ${removed.error.message}`);
     },
     rowOf: ({ admin, side }) => firstId(admin, "payout_batches", side.orgId),
     attackInsert: ({ victim }) => ({
