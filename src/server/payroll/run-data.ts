@@ -15,11 +15,13 @@ import type { Database } from "@/types/db";
 
 type Client = SupabaseClient<Database>;
 
-export type RunStatus = "draft" | "review" | "approved" | "released";
+export type RunStatus = "draft" | "review" | "approved" | "released" | "reversed";
 
 export interface PayrollRunRow {
   id: string;
   kind: string;
+  /** The run a reversal run reverses (slice 5.7a); null for every other run. */
+  reversesRunId: string | null;
   status: RunStatus;
   periodStart: string;
   periodEnd: string;
@@ -42,11 +44,12 @@ export interface PayrollRunRow {
 }
 
 const RUN_COLUMNS =
-  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, released_at, released_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
+  "id, kind, reverses_run_id, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, released_at, released_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
 
 type RunRecord = {
   id: string;
   kind: string;
+  reverses_run_id: string | null;
   status: string;
   period_start: string;
   period_end: string;
@@ -83,6 +86,7 @@ function toRun(r: RunRecord): PayrollRunRow {
   return {
     id: r.id,
     kind: r.kind,
+    reversesRunId: r.reverses_run_id,
     status: r.status as RunStatus,
     periodStart: r.period_start,
     periodEnd: r.period_end,
@@ -156,6 +160,7 @@ export async function loadLastPostedRun(
     .select(RUN_COLUMNS)
     .eq("organisation_id", organisationId)
     .in("status", ["approved", "released"])
+    .neq("kind", "reversal")
     .lt("period_start", beforePeriod)
     .order("period_start", { ascending: false })
     .limit(1)
@@ -216,7 +221,7 @@ export interface AdjustmentRow {
 
 export interface DecisionRow {
   id: string;
-  decision: "submitted" | "returned" | "approved" | "released";
+  decision: "submitted" | "returned" | "approved" | "released" | "reversed";
   reason: string | null;
   actorId: string;
   actorName: string | null;
@@ -249,6 +254,26 @@ export interface RunDetail {
   /** Workers who can get an adjustment (the run's payslips, by name). */
   workers: RunWorker[];
   names: Map<string, string>;
+  /** Reversal runs that name this run (slice 5.7a), newest first. */
+  reversals: { id: string; status: RunStatus; createdAt: string }[];
+  /** For a reversal run: the run it reverses. */
+  original: PayrollRunRow | null;
+  /** Released payslips a correction in this draft may name (slice 5.7a), newest first. */
+  correctable: CorrectablePayslip[];
+  /**
+   * Whether the bank file a reversal would void was downloaded (this approved run's, or a waiting
+   * reversal's original's): the reversal then needs the statement that it wasn't uploaded.
+   */
+  activeFileDownloaded: boolean;
+}
+
+/** A released payslip of a worker in this run, which an adjustment here may correct. */
+export interface CorrectablePayslip {
+  id: string;
+  workerId: string;
+  workerName: string;
+  periodEnd: string;
+  netKobo: Kobo;
 }
 
 /** The display copy of an anomaly's detail, with its site's name (never stored). */
@@ -284,6 +309,18 @@ export async function loadRunDetail(
 ): Promise<RunDetail | null> {
   const run = await loadRun(supabase, organisationId, runId);
   if (!run) return null;
+  const [reversalRows, original] = await Promise.all([
+    supabase
+      .from("payroll_runs")
+      .select("id, status, created_at")
+      .eq("organisation_id", organisationId)
+      .eq("reverses_run_id", runId)
+      .order("created_at", { ascending: false }),
+    run.reversesRunId ? loadRun(supabase, organisationId, run.reversesRunId) : null,
+  ]);
+  if (reversalRows.error) {
+    throw new Error(`Could not read the payroll run (${reversalRows.error.code})`);
+  }
   const [ruleSet, slips, anomalies, adjustments, decisions, itemRows] = await Promise.all([
     supabase
       .from("tax_rule_sets")
@@ -456,7 +493,7 @@ export async function loadRunDetail(
     decisions: (decisions.data ?? []).map((d) => ({
       id: d.id,
       decision:
-        (["returned", "approved", "released"] as const).find((x) => x === d.decision) ??
+        (["returned", "approved", "released", "reversed"] as const).find((x) => x === d.decision) ??
         "submitted",
       reason: d.reason,
       actorId: d.actor_id,
@@ -474,7 +511,97 @@ export async function loadRunDetail(
       .sort((a, b) => a.workerName.localeCompare(b.workerName)),
     workers: payslips.map((p) => ({ id: p.workerId, name: p.workerName, staffId: p.staffId })),
     names: new Map([...names, ...[...people].map(([k, v]) => [k, v] as const)]),
+    reversals: (reversalRows.data ?? []).map((r) => ({
+      id: r.id,
+      status: r.status as RunStatus,
+      createdAt: r.created_at,
+    })),
+    original,
+    correctable:
+      run.status === "draft" && run.kind !== "reversal"
+        ? await loadCorrectable(supabase, organisationId, run.id, payslips)
+        : [],
+    activeFileDownloaded: await activeFileDownloaded(
+      supabase,
+      organisationId,
+      run.kind === "reversal" && run.status === "review"
+        ? run.reversesRunId
+        : run.kind !== "reversal" && run.status === "approved"
+          ? run.id
+          : null,
+    ),
   };
+}
+
+/** Whether the run's active bank file was downloaded (5.4's audited downloads). */
+async function activeFileDownloaded(
+  supabase: Client,
+  organisationId: string,
+  runId: string | null,
+): Promise<boolean> {
+  if (!runId) return false;
+  const [batch, downloads] = await Promise.all([
+    supabase
+      .from("payout_batches")
+      .select("id")
+      .eq("organisation_id", organisationId)
+      .eq("run_id", runId)
+      .eq("status", "active")
+      .maybeSingle(),
+    supabase.rpc("payout_file_downloads", { p_organisation_id: organisationId, p_run_id: runId }),
+  ]);
+  if (batch.error || !batch.data) return false;
+  // A role that can't see downloads (the read refuses) is never offered the reversal anyway.
+  if (downloads.error) return false;
+  return (downloads.data ?? []).some((d) => d.batch_id === batch.data!.id);
+}
+
+/**
+ * Released payslips of the run's workers from the 6 latest released runs (not this one), which
+ * a correction here may name (slice 5.7a; the database checks again: same worker, released).
+ */
+async function loadCorrectable(
+  supabase: Client,
+  organisationId: string,
+  runId: string,
+  payslips: readonly PayslipRow[],
+): Promise<CorrectablePayslip[]> {
+  if (payslips.length === 0) return [];
+  const { data: runs, error } = await supabase
+    .from("payroll_runs")
+    .select("id, period_end")
+    .eq("organisation_id", organisationId)
+    .eq("status", "released")
+    .neq("id", runId)
+    .order("period_start", { ascending: false })
+    .limit(6);
+  if (error) throw new Error(`Could not read released runs (${error.code})`);
+  if (!runs || runs.length === 0) return [];
+  const ends = new Map(runs.map((r) => [r.id, r.period_end] as const));
+  const workers = new Map(payslips.map((p) => [p.workerId, p.workerName] as const));
+  const out: CorrectablePayslip[] = [];
+  const ids = [...workers.keys()];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error: slipError } = await supabase
+      .from("payslips")
+      .select("id, worker_id, run_id, net_kobo::text")
+      .eq("organisation_id", organisationId)
+      .in("run_id", [...ends.keys()])
+      .in("worker_id", ids.slice(i, i + 200));
+    if (slipError) throw new Error(`Could not read released payslips (${slipError.code})`);
+    for (const s of data ?? []) {
+      out.push({
+        id: s.id,
+        workerId: s.worker_id,
+        workerName: workers.get(s.worker_id) ?? "A worker",
+        periodEnd: ends.get(s.run_id) ?? "",
+        netKobo: toKobo(s.net_kobo),
+      });
+    }
+  }
+  return out.sort(
+    (a, b) => b.periodEnd.localeCompare(a.periodEnd) || a.workerName.localeCompare(b.workerName),
+  );
 }
 
 export interface PayslipTrace {

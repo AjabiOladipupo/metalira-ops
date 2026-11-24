@@ -14,6 +14,14 @@ import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payr
 import { previewMakeBankFile, type makeBankFileSchema } from "@/server/payroll/payouts";
 import { previewRelease, type releaseRunSchema } from "@/server/payroll/release";
 import {
+  previewApproveReversal,
+  previewCorrection,
+  previewReverse,
+  type approveReversalSchema,
+  type correctionSchema,
+  type reverseRunSchema,
+} from "@/server/payroll/reversal";
+import {
   previewAcknowledge,
   previewAddAdjustment,
   previewApprove,
@@ -106,6 +114,17 @@ export const previewMakePayrollBankFile: PreviewFn<typeof makeBankFileSchema> = 
   previewMakeBankFile(ctx, ctx.data);
 export const previewReleasePayrollRun: PreviewFn<typeof releaseRunSchema> = (ctx) =>
   previewRelease(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// Reversal and corrections (slice 5.7a): the negative totals, or the worker's net before and after
+// ---------------------------------------------------------------------------
+
+export const previewReversePayrollRun: PreviewFn<typeof reverseRunSchema> = (ctx) =>
+  previewReverse(ctx, ctx.data);
+export const previewApprovePayrollReversal: PreviewFn<typeof approveReversalSchema> = (ctx) =>
+  previewApproveReversal(ctx, ctx.data);
+export const previewAddPayrollCorrection: PreviewFn<typeof correctionSchema> = (ctx) =>
+  previewCorrection(ctx, ctx.data);
 
 // ---------------------------------------------------------------------------
 // Statutory remittances (slice 5.6)

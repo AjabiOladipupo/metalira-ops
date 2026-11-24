@@ -28,6 +28,10 @@ export async function GET(
     if (error instanceof MutationError) {
       if (error.code === "unauthenticated") return plain("Sign in to download schedules.", 401);
       if (error.code === "forbidden") return plain(error.message, 403);
+      // A voided remittance (its run was reversed, slice 5.7a) is a refusal, not a missing page.
+      if (error.code === "invalid" && error.fieldErrors.remittance === "voided") {
+        return plain(error.message, 400);
+      }
       if (error.code === "invalid") return plain(error.message, 404);
     }
     console.error(
