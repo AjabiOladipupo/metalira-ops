@@ -246,6 +246,13 @@ import {
 import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-review-data";
 import { PAYROLL_READERS, loadPayInputsSummary } from "@/server/payroll/inputs";
 import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
+import { PAYSLIP_PUBLISHERS } from "@/server/payroll/payslip-documents";
+import {
+  askHrSchema,
+  downloadPayslipSpec,
+  payslipIdSchema,
+  publishPayslipsSpec,
+} from "@/server/payroll/payslips";
 import {
   acknowledgeSpec,
   addAdjustmentSpec,
@@ -2853,6 +2860,59 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Approving payroll is a second person's decision (docs/PHASE_5.md decision 8, rule 10), made on the screen; Lira never approves or releases payroll.",
+  },
+  // -------------------------------------------------------------------------
+  // Payslips: PDFs, the worker app and notices (payroll/payslip-actions.ts, slice 5.5)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.payslip_pdf",
+    description:
+      "Opens one payslip's PDF through a 60-second link for owner, HR or finance, and records the download.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(downloadPayslipSpec),
+    changes: "none",
+    action: at("payroll/payslip-actions", "downloadPayslipAction"),
+    agent: false,
+    agentNote:
+      "A payslip PDF holds a person's pay; it is downloaded by a person on the screen, never by Lira.",
+  },
+  {
+    name: "payroll.publish_payslips",
+    description:
+      "Makes the payslip PDFs and worker notices a released run is still missing, without repeating any.",
+    kind: "write",
+    audience: "manager",
+    roles: PAYSLIP_PUBLISHERS,
+    input: publishPayslipsSpec.schema,
+    changes: "many",
+    action: at("payroll/payslip-actions", "publishPayslipsAction"),
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "me.payslip_pdf",
+    description: "A worker downloads their own released payslip as a PDF through a 60-second link.",
+    kind: "read",
+    audience: "worker",
+    roles: [],
+    input: payslipIdSchema,
+    changes: "none",
+    action: at("payroll/payslip-actions", "downloadMyPayslipAction"),
+    agent: false,
+    agentNote: "Worker app only.",
+  },
+  {
+    name: "me.ask_hr_about_payslip",
+    description: "A worker asks HR a question about one of their payslips from the worker app.",
+    kind: "write",
+    audience: "worker",
+    roles: [],
+    input: askHrSchema,
+    changes: "one",
+    action: at("payroll/payslip-actions", "askHrAboutPayslipAction"),
+    agent: false,
+    agentNote: "A question is the worker's own words, written in the worker app.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)
