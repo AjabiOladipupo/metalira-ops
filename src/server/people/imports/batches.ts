@@ -14,7 +14,7 @@ import type { ColumnKey } from "../import/columns";
 import { IMPORT_LIMITS } from "../import/limits";
 import type { FileProblem, ImportFormat, ImportResult, RowResult } from "../import/types";
 import { validateImportRecords } from "../import/validate";
-import { PEOPLE_EDITORS } from "../workers";
+import { PEOPLE_IMPORTERS } from "@/lib/pay-access";
 import { loadImportContext } from "./context";
 import {
   buildCommitPayload,
@@ -30,7 +30,7 @@ import {
 
 /**
  * The import flow (slice 1.8): start an upload, check it, apply one-click fixes, commit,
- * cancel. Each step is a `mutate()` spec (owner, admin and hr; docs/PHASE_1.md 1.8) that
+ * cancel. Each step is a `mutate()` spec (owner and hr since 23 Nov 2026; docs/PHASE_1.md 1.8) that
  * writes with the signed-in user's own client, so RLS, grants and the tables' triggers apply.
  *
  * Every check after the first works from the stored rows, not the file: the clear cells in
@@ -373,7 +373,7 @@ export interface StartedImport {
 export const startImportSpec: MutationSpec<typeof startImportSchema, StartedImport> = {
   module: "people",
   schema: startImportSchema,
-  roles: PEOPLE_EDITORS,
+  roles: PEOPLE_IMPORTERS,
   run: async ({ supabase, organisationId, data }) => {
     const format: ImportFormat = /\.xlsx$/i.test(data.fileName) ? "xlsx" : "csv";
     const id = randomUUID();
@@ -404,7 +404,7 @@ export const checkImportSpec: MutationSpec<
 > = {
   module: "people",
   schema: z.object({ batchId: batchIdSchema }),
-  roles: PEOPLE_EDITORS,
+  roles: PEOPLE_IMPORTERS,
   run: async ({ supabase, organisationId, userId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
     if (batch.status !== "uploaded") {
@@ -486,7 +486,7 @@ export const applyImportFixSpec: MutationSpec<
 > = {
   module: "people",
   schema: applyImportFixSchema,
-  roles: PEOPLE_EDITORS,
+  roles: PEOPLE_IMPORTERS,
   run: async ({ supabase, organisationId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
     if (batch.status !== "validated" && batch.status !== "committed") {
@@ -582,7 +582,7 @@ const commitResultSchema = z.object({
 export const commitImportSpec: MutationSpec<typeof commitImportSchema, CommittedImport> = {
   module: "people",
   schema: commitImportSchema,
-  roles: PEOPLE_EDITORS,
+  roles: PEOPLE_IMPORTERS,
   // Workers, pay rates and name-only clients created here are logged as coming from an import.
   channel: "import",
   run: async ({ supabase, organisationId, userId, data }) => {
@@ -669,7 +669,7 @@ export const cancelImportSpec: MutationSpec<
 > = {
   module: "people",
   schema: z.object({ batchId: batchIdSchema }),
-  roles: PEOPLE_EDITORS,
+  roles: PEOPLE_IMPORTERS,
   run: async ({ supabase, organisationId, userId, data }) => {
     const batch = await loadBatch(supabase, organisationId, data.batchId);
     const { error } = await supabase.rpc("cancel_import_batch", {

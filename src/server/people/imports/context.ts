@@ -30,7 +30,7 @@ async function readAll<T>(
 
 /**
  * What the import validator needs to know about the organisation, read with the signed-in
- * user's own client (owner, admin or hr see all of it under RLS): existing workers with their department and current site (ended ones
+ * user's own client (owner or hr see all of it under RLS): existing workers with their department and current site (ended ones
  * too, so their staff IDs are never reused; their phones no longer count as taken), the
  * manager-app users who are not workers (by sign-in email), departments, clients, projects and
  * sites.

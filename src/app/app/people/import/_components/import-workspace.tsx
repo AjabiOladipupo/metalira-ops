@@ -3,6 +3,7 @@ import Link from "next/link";
 import { DataTable, type Column } from "@/components/data-table";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { PEOPLE_IMPORTERS } from "@/lib/pay-access";
 import { IMPORT_TEMPLATE_HREF, importProblemsHref, type ImportPath } from "@/lib/people-import";
 import { getActiveCompany } from "@/server/identity/company-data";
 import { getPageSession } from "@/server/identity/session";
@@ -28,9 +29,20 @@ export async function ImportWorkspace({
   path: ImportPath;
   batchId: string | undefined;
 }) {
-  const [view, session, company] = await Promise.all([
+  const session = await getPageSession();
+  const role = session?.active?.role;
+  // The file carries pay, so only the owner and HR import (owner decision, 23 Nov 2026). An admin
+  // on the Setup board's Employees step can still finish setup.
+  if (!role || !(PEOPLE_IMPORTERS as readonly string[]).includes(role)) {
+    return (
+      <p role="status" className="m-0 rounded-xl border border-line p-5 text-sm text-fg-muted">
+        Only the owner or HR can import employees, because the file carries pay. Ask them to
+        import your staff list, or add employees one at a time from People.
+      </p>
+    );
+  }
+  const [view, company] = await Promise.all([
     batchId ? getImportBatchView(batchId) : Promise.resolve(null),
-    getPageSession(),
     getActiveCompany(),
   ]);
   // Owner decision 20 (slice 1.11): the owner's import before setup is finished saves bank

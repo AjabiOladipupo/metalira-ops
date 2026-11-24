@@ -53,7 +53,7 @@ These are the plan's defaults. Every statutory figure below is **confirm with a 
 5. **One engine, in TypeScript.** Gross to net is a pure function in `src/lib/payroll/` with a step-by-step trace. SQL gathers inputs and checks the stored results' invariants (lines sum to totals, net = gross − deductions, nothing negative); it never recomputes tax. No SQL mirror is planned; one is added only if a later slice needs the database to work out pay on its own.
 6. **The golden fixture is the gate.** 5.0's unit test reproduces it from the engine alone; 5.3's database test reproduces it end to end (six workers, pay rates, a full cycle, run, approve); 5.6 checks its statutory totals. A slice that changes the engine must keep it green.
 7. **Stale runs can't be approved.** A run stores the SHA-256 of its canonical inputs. Approval re-gathers them and refuses (MLPR3) if anything changed since submission: a timesheet day approved, a pay rate added, leave decided, a bank change applied.
-8. **Who does what:** HR or the owner prepare and submit; Finance or the owner approve; the approver is never the preparer. Admins and ops managers see no payroll (pay rates stay as Phase 1 set them). A company with one manager can't approve payroll until a second person (finance or another owner) joins; rule 10 has no single-approver exception for payroll. Lira never prepares, approves, releases or downloads anything here (all `agent: false`).
+8. **Who does what:** HR or the owner prepare and submit; Finance or the owner approve; the approver is never the preparer. Admins and ops managers see no payroll and, since 23 Nov 2026, no pay rates (owner decision, slice 5.1: pay rates are read by owner, hr and finance, changed by owner and hr; the people import, which carries pay, is owner and hr only). A company with one manager can't approve payroll until a second person (finance or another owner) joins; rule 10 has no single-approver exception for payroll. Lira never prepares, approves, releases or downloads anything here (all `agent: false`).
 9. **Posting happens at approval.** Approval makes the payslips final, locks the pay period (`private.timesheet_period_posted` returns true for every day in a posted run's period) and opens the bank file step. **Release** is Finance or the owner confirming the file went to the bank; it publishes the payslips to workers and sends their notices.
 10. **A source is paid once.** Every approved timesheet day, leave day and adjustment that a payslip pays is recorded as a payslip source, unique while the payslip stands. A day approved after its period was posted is paid in the next run as arrears ("20 Sep–19 Oct, approved after posting"), never by reopening the posted run.
 11. **Bank details** are taken as of the moment the bank file is made (`worker_bank_details_as_of`), decrypted on the server, and refused if the decrypted number's last 4 digits don't match `bank_account_last4` (Phase 1 carry). A worker with no bank details, or details still in the 72-hour hold, is an anomaly; HR either acknowledges and leaves them out of the file (their payslip still posts, and the file shows them as "not in this file") or waits.
@@ -217,7 +217,10 @@ As in Phases 2 to 4 (docs/LIRA.md): every new Server Action goes in `src/server/
 | Payout batches and items, the bank file | owner, finance (control totals and masked last 4 also to hr) | owner, finance make the file and release; downloads audited |
 | Statutory remittances, schedules, receipts | owner, hr, finance | owner, hr, finance record a payment and upload its receipt; schedules with RSA PINs download for owner, hr, finance only, audited |
 | Payslip PDFs | the worker their own (released); owner, hr, finance | made by the server at release |
-| Line managers, ops managers, admins, client approvers | nothing in Payroll (pay rates stay as Phase 1 set them) | nothing |
+| Pay rates (`pay_rates`, the Pay section of a person's page) | owner, hr, finance; the worker their own (owner decision, 23 Nov 2026, slice 5.1) | owner, hr (dated versions, as Phase 1) |
+| The people import (its file and rows carry pay) | owner, hr | owner, hr |
+| Pay inputs (`payroll_inputs`, `payroll_period`) | owner, hr, finance, the secret key | none (a read) |
+| Line managers, ops managers, admins, client approvers | nothing in Payroll and no pay rates (owner decision, 23 Nov 2026) | nothing |
 
 ## Slices (one pull request each)
 
@@ -385,6 +388,7 @@ From earlier phases, closed in this phase:
 - `worker_bank_details_as_of` returns the bank code (Phase 2): 5.4.
 - Bank file and release decrypt each account number and refuse a last-4 mismatch, including first-import details (Phase 1): 5.4; "Not checked" details are an anomaly in 5.2.
 - Backdated pay changes (Phase 1 decision 17): 5.3.
+- Pay rates readable by admin and ops_manager (Phase 1 policy): closed in 5.1 by the owner's decision of 23 Nov 2026. Pay rates are read by owner, hr and finance (and the worker their own) and changed by owner and hr; admins add employees without pay; the people import is owner and hr only. Migration `20261122110000_pay_inputs.sql`.
 - `private.worker_has_work_records` gains payslips: 5.3.
 
 Still open for later phases (from the Phase 4 sign-off and earlier):
@@ -401,5 +405,4 @@ Still open for later phases (from the Phase 4 sign-off and earlier):
 - Supabase Pro before the first pilot (selfies, photos, and now payslip PDFs and bank files in storage).
 - A manager inbox, so payroll notices to Finance and HR don't spend email.
 - Leave attachments (medical certificates) with a private bucket and signed URLs.
-- Pay rates are readable by admin and ops_manager (Phase 1 policy); decide whether that stays once payroll exists.
 - The Phase 2 and 3 low hardening follow-ups.

@@ -17,11 +17,11 @@ import { IMPORT_PATHS, type ImportActionState, type ImportPath } from "@/lib/peo
 
 /**
  * Server Actions for the people import (/app/people/import and setup step 5). Each one goes
- * through mutate(): owner, admin or hr of the active organisation, Zod-validated, written with
+ * through mutate(): owner or hr of the active organisation (the file carries pay), Zod-validated, written with
  * the user's own client. Messages are plain English and never carry personal data.
  */
 
-const FORBIDDEN = "Only an owner, an admin or HR can import employees.";
+const FORBIDDEN = "Only an owner or HR can import employees: the file carries pay.";
 const FAILED = "That didn't work. Try again in a minute.";
 
 function refusal(error: unknown): { ok: false; message: string } {

@@ -2,11 +2,12 @@ import "server-only";
 
 import { getSession } from "@/server/identity/session";
 
-import { PEOPLE_EDITORS } from "../workers";
+import { PEOPLE_IMPORTERS } from "@/lib/pay-access";
 
 /**
  * Role check for the import download routes (Route Handlers do their own; the proxy only
- * checks that someone is signed in). Owner, admin and hr of the active organisation.
+ * checks that someone is signed in). Owner and hr of the active organisation: the import carries
+ * pay (owner decision, 23 Nov 2026).
  */
 export async function importRouteAccess(): Promise<
   { ok: true; organisationId: string } | { ok: false; response: Response }
@@ -16,10 +17,10 @@ export async function importRouteAccess(): Promise<
     return { ok: false, response: new Response("Sign in to download this file.", { status: 401 }) };
   }
   const role = session.active?.role;
-  if (!session.active || !role || !(PEOPLE_EDITORS as readonly string[]).includes(role)) {
+  if (!session.active || !role || !(PEOPLE_IMPORTERS as readonly string[]).includes(role)) {
     return {
       ok: false,
-      response: new Response("Only an owner, an admin or HR can download this file.", {
+      response: new Response("Only an owner or HR can download this file.", {
         status: 403,
       }),
     };

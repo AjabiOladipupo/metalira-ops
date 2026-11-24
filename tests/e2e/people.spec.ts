@@ -210,6 +210,8 @@ test("HR adds an employee and changes pay; other roles see masked, read-only vie
   await expect(opsPage.getByRole("button", { name: "Show account number" })).toHaveCount(0);
   await expect(opsPage.getByRole("link", { name: "Edit details" })).toHaveCount(0);
   await expect(opsPage.getByRole("form", { name: "Change pay" })).toHaveCount(0);
+  // Owner decision, 23 Nov 2026: no pay for operations managers (or admins).
+  await expect(opsPage.getByTestId("current-pay")).toHaveCount(0);
   await expect(opsPage.getByText("Personal data is masked for your role.")).toBeVisible();
   await opsPage.goto(`/app/people/${workerId}/edit`);
   await expect(opsPage).toHaveURL(/\/no-access$/, { timeout: 15_000 });

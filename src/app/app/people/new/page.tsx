@@ -20,7 +20,7 @@ async function NewWorker() {
         title="Add employee"
         description="One person at a time. To add a whole staff list, import a file instead."
       />
-      <WorkerForm mode="create" options={options} today={ctx.today} />
+      <WorkerForm mode="create" options={options} today={ctx.today} canSetPay={ctx.canEditPay} />
     </>
   );
 }

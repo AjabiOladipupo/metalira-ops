@@ -9,8 +9,8 @@ import { getPageSession } from "@/server/identity/session";
 import type { Database, Json } from "@/types/db";
 
 /**
- * Reads for the import review screen, with the signed-in user's own client (RLS: owner, admin
- * and hr). The stored rows carry no personal data (see rows.ts), and nothing here decrypts.
+ * Reads for the import review screen, with the signed-in user's own client (RLS: owner and hr;
+ * the rows carry pay). The stored rows carry no personal data (see rows.ts), and nothing here decrypts.
  */
 
 type BatchStatus = Database["public"]["Enums"]["import_batch_status"];

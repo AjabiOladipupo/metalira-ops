@@ -162,10 +162,26 @@ afterAll(async () => {
 });
 
 describe("who runs an import", () => {
-  it("lets owner, admin and hr create batches", async () => {
-    for (const by of [owner.client, people.admin.client, people.hr.client]) {
+  it("lets owner and hr create batches (the file carries pay)", async () => {
+    for (const by of [owner.client, people.hr.client]) {
       expect((await createBatch(by)).error).toBeNull();
     }
+  });
+
+  // Owner decision, 23 Nov 2026: pay for owner, hr and finance only, so admins don't import.
+  it("refuses an admin: no batch, no rows, no saved check", async () => {
+    const created = await createBatch(people.admin.client);
+    expect(created.error?.code).toBe(PERMISSION_DENIED);
+    const { id } = await createBatch();
+    expect((await saveRows(id, [rowDoc(2)])).error).toBeNull();
+    const batches = await people.admin.client.from("import_batches").select("id").eq("id", id);
+    expect(batches.data).toEqual([]);
+    const rows = await people.admin.client.from("import_rows").select("id, raw, normalised");
+    expect(rows.data).toEqual([]);
+    const fresh = await createBatch();
+    const save = await saveRows(fresh.id, [rowDoc(2)], people.admin.client);
+    expect(save.error?.code).toBe(PERMISSION_DENIED);
+    expect(await batchState(fresh.id)).toMatchObject({ status: "uploaded", rows_total: 0 });
   });
 
   it("refuses finance, ops managers and line managers", async () => {
@@ -296,10 +312,10 @@ describe("upload bucket", () => {
     expect(stray.error).not.toBeNull();
 
     // Someone else's batch, and another organisation's batch.
-    const adminsBatch = await createBatch(people.admin.client);
+    const ownersBatch = await createBatch(owner.client);
     const notMine = await people.hr.client.storage
       .from("imports")
-      .upload(adminsBatch.path, csv(), { contentType: "text/csv" });
+      .upload(ownersBatch.path, csv(), { contentType: "text/csv" });
     expect(notMine.error).not.toBeNull();
     const otherBatch = await createBatch(other.client, other.orgId);
     expect(otherBatch.error).toBeNull();
@@ -740,9 +756,9 @@ describe("batch lifecycle", () => {
     expect(again.error?.code).toBe("MLIM2");
   });
 
-  it("lets only owner, admin and hr cancel", async () => {
+  it("lets only owner and hr cancel", async () => {
     const { id } = await createBatch();
-    for (const by of [people.finance.client, people.ops.client, other.client]) {
+    for (const by of [people.admin.client, people.finance.client, people.ops.client, other.client]) {
       const { error } = await by.rpc("cancel_import_batch", {
         p_organisation_id: owner.orgId,
         p_batch_id: id,
@@ -813,9 +829,9 @@ describe("writing import rows", () => {
     expect(rows).toEqual([{ status: "ready", raw: a.raw }]);
   });
 
-  it("lets only owner, admin and hr save a check", async () => {
+  it("lets only owner and hr save a check", async () => {
     const { id } = await createBatch();
-    for (const by of [people.finance.client, people.ops.client, other.client]) {
+    for (const by of [people.admin.client, people.finance.client, people.ops.client, other.client]) {
       const { error } = await saveRows(id, [rowDoc(2)], by);
       expect(error?.code).toBe(PERMISSION_DENIED);
     }

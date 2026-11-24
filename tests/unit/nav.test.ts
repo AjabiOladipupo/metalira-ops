@@ -202,12 +202,12 @@ describe("nav by role", () => {
     }
   });
 
-  it("opens the people import to owner, admin and hr only", () => {
+  it("opens the people import to owner and hr only (the file carries pay)", () => {
     for (const path of ["/app/people/import", "/app/people/import/template"]) {
-      for (const role of ["owner", "admin", "hr"] as const) {
+      for (const role of ["owner", "hr"] as const) {
         expect(canAccessHref(role, path), `${role} ${path}`).toBe(true);
       }
-      for (const role of ["finance", "ops_manager", "line_manager", "worker"] as const) {
+      for (const role of ["admin", "finance", "ops_manager", "line_manager", "worker"] as const) {
         expect(canAccessHref(role, path), `${role} ${path}`).toBe(false);
       }
     }

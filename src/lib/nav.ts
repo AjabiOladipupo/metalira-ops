@@ -320,8 +320,9 @@ export const EXTRA_PAGES: readonly {
     roles: ["owner", "admin", "ops_manager"],
   },
   { href: "/app/people/[id]/edit", roles: ["owner", "admin", "hr"] },
-  // Slice 1.8: importing employees writes workers, pay and bank details.
-  { href: "/app/people/import", roles: ["owner", "admin", "hr"] },
+  // Slice 1.8: importing employees writes workers, pay and bank details. Owner and HR only since
+  // pay is theirs (owner decision, 23 Nov 2026).
+  { href: "/app/people/import", roles: ["owner", "hr"] },
   // Worker invites and PIN resets (slice 1.9): the roles that may create invites.
   { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
   // Bank-detail approvals (slice 1.7): finance approves too, without the People list.

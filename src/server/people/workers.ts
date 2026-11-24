@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
-import type { ManagerRole } from "@/lib/roles";
+import { PAY_EDITORS, canEditPay } from "@/lib/pay-access";
+import { isManagerRole, type ManagerRole } from "@/lib/roles";
 import { takeCheckedName } from "@/server/billing/bank-lookup";
 import { encryptPiiForDb, sealPii, type PiiContext } from "@/server/crypto/pii";
 import { MutationError, mutate, type MutationSpec } from "@/server/identity/mutate";
@@ -35,7 +36,10 @@ import { loadRetiredStaffIds } from "./staff-id-corrections";
  * personal data fields changed, never their values.
  */
 
-/** Who may add and edit workers and pay (owner, admin, hr; docs/PHASE_1.md 1.3). */
+/**
+ * Who may add and edit workers (owner, admin, hr; docs/PHASE_1.md 1.3). Pay is narrower: owner
+ * and hr only (`PAY_EDITORS`, owner decision 23 Nov 2026), so an admin adds a worker without pay.
+ */
 export const PEOPLE_EDITORS = ["owner", "admin", "hr"] as const satisfies readonly ManagerRole[];
 
 type Client = SupabaseClient<Database>;
@@ -165,7 +169,12 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
   module: "people",
   schema: createWorkerSchema,
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, role, data }) => {
+    if (data.payType && !(isManagerRole(role) && canEditPay(role))) {
+      throw new MutationError("forbidden", "Only the owner or HR can set pay.", {
+        payType: "Only the owner or HR can set pay. Leave pay blank; HR adds it later.",
+      });
+    }
     const id = randomUUID();
     const ctx = (column: string) => piiContext(organisationId, id, column);
 
@@ -434,7 +443,7 @@ export function updateWorker(input: unknown): Promise<UpdatedWorker> {
 export const addPayRateSpec: MutationSpec<typeof addPayRateSchema, { id: string }> = {
   module: "people",
   schema: addPayRateSchema,
-  roles: PEOPLE_EDITORS,
+  roles: PAY_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
     const { data: id, error } = await supabase.rpc("add_pay_rate", {
       p_organisation_id: organisationId,
@@ -461,7 +470,7 @@ export function addPayRate(input: unknown): Promise<{ id: string }> {
 export const cancelPayRateSpec: MutationSpec<typeof cancelPayRateSchema, { id: string }> = {
   module: "people",
   schema: cancelPayRateSchema,
-  roles: PEOPLE_EDITORS,
+  roles: PAY_EDITORS,
   run: async ({ supabase, organisationId, data }) => {
     const { error } = await supabase.rpc("cancel_pay_rate", {
       p_organisation_id: organisationId,

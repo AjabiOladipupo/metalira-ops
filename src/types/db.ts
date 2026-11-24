@@ -1964,6 +1964,14 @@ isOneToOne: false
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
                            },
+"payroll_inputs":
+{ Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
+                           },
+"payroll_period":
+{ Args: { "p_date": string,"p_organisation_id": string }; Returns: {
+              "pay_date": string,"period_end": string,"period_start": string
+            }[]
+                           },
 "preview_timesheet_correction":
 { Args: { "p_corrected_at"?: string,"p_kind": string,"p_line_id": string,"p_minutes"?: number,"p_organisation_id": string,"p_ot_minutes"?: number,"p_punch_id"?: string,"p_reason": string }; Returns: Json
                            },

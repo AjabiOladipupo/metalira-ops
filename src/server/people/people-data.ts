@@ -538,7 +538,7 @@ export interface WorkerProfile {
   siteNames: string[];
   projectNames: string[];
   mapped: boolean;
-  /** Pay versions, oldest first. Empty when the caller's role sees no pay. */
+  /** Pay versions, oldest first. Empty when the caller's role sees no pay (only owner, hr, finance see it). */
   payRates: PayRateVersion[];
 }
 
@@ -648,6 +648,11 @@ export interface WorkerProfileOptions {
    * and no pay history is read (the Me screen shows none).
    */
   viewer?: "manager" | "self" | "line_manager";
+  /**
+   * Whether to read the pay history (owner, hr and finance: owner decision, 23 Nov 2026). Off
+   * unless the caller passes it; RLS returns no pay rows to anyone else anyway.
+   */
+  seePay?: boolean;
 }
 
 /** One worker as the People screens show them, or null when RLS hides them or none exists. */
@@ -656,7 +661,7 @@ export async function loadWorkerProfile(
   organisationId: string,
   workerId: string,
   today: string,
-  { viewer = "manager" }: WorkerProfileOptions = {},
+  { viewer = "manager", seePay = false }: WorkerProfileOptions = {},
 ): Promise<WorkerProfile | null> {
   const limited = viewer === "line_manager";
   const read = await loadProfileRow(supabase, organisationId, workerId, limited);
@@ -682,7 +687,9 @@ export async function loadWorkerProfile(
     loadCurrentAssignments(supabase, organisationId, today, workerId),
     loadNames(supabase, "sites", organisationId),
     loadNames(supabase, "projects", organisationId),
-    viewer === "manager" ? listPayRates(supabase, organisationId, workerId) : Promise.resolve([]),
+    viewer === "manager" && seePay
+      ? listPayRates(supabase, organisationId, workerId)
+      : Promise.resolve([]),
   ]);
 
   const siteIds = unique(assignments.map((a) => a.site_id));

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { lagosToday } from "@/lib/dates";
 import { NO_ACCESS_PATH } from "@/lib/auth/routes";
+import { canEditPay, canReadPay } from "@/lib/pay-access";
 import type { ManagerRole } from "@/lib/roles";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { getPageSession } from "@/server/identity/session";
@@ -20,6 +21,10 @@ export interface PeoplePageContext {
   role: ManagerRole;
   /** Owner, admin or hr: may add and change employees. Actions check this again. */
   canEdit: boolean;
+  /** Owner, hr or finance: sees pay amounts (owner decision, 23 Nov 2026). */
+  canSeePay: boolean;
+  /** Owner or hr: adds and cancels pay versions. Actions check this again. */
+  canEditPay: boolean;
   /** Today in Lagos, `YYYY-MM-DD`. */
   today: string;
 }
@@ -39,6 +44,8 @@ export async function peoplePageContext(): Promise<PeoplePageContext> {
     organisationId,
     role,
     canEdit: (PEOPLE_EDITORS as readonly ManagerRole[]).includes(role),
+    canSeePay: canReadPay(role),
+    canEditPay: canEditPay(role),
     today: lagosToday(),
   };
 }

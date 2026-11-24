@@ -244,6 +244,7 @@ import {
   reopenLineSpec,
 } from "@/server/workforce/timesheet-approval";
 import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-review-data";
+import { PAYROLL_READERS, loadPayInputsSummary } from "@/server/payroll/inputs";
 import {
   loadTimesheetLines,
   loadTimesheetSummary,
@@ -1410,8 +1411,7 @@ export const CAPABILITIES: readonly Capability[] = [
   // -------------------------------------------------------------------------
   {
     name: "crew_team.summary",
-    description:
-      "Counts a supervisor's crew days to approve and leave requests waiting at step 1.",
+    description: "Counts a supervisor's crew days to approve and leave requests waiting at step 1.",
     kind: "read",
     audience: "worker",
     roles: [],
@@ -2653,6 +2653,31 @@ export const CAPABILITIES: readonly Capability[] = [
     agentNote: "A worker's own statement about their day, sent from their phone.",
   },
   // -------------------------------------------------------------------------
+  // Payroll inputs (payroll/inputs.ts, slice 5.1)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.inputs",
+    description:
+      "Counts a pay period's payroll inputs: workers by pay type, approved days and minutes, leave and holidays.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_READERS,
+    input: periodInput,
+    changes: "none",
+    action: null,
+    read: async ({ supabase, organisationId }, input) => {
+      const { period } = periodInput.parse(input ?? {});
+      return loadPayInputsSummary(
+        supabase,
+        organisationId,
+        period ?? (await organisationToday(supabase, organisationId)),
+      );
+    },
+    agent: false,
+    agentNote:
+      "Lira does nothing in Payroll (docs/PHASE_5.md decision 8); payroll inputs stay with owner, HR and finance.",
+  },
+  // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)
   // -------------------------------------------------------------------------
   {
@@ -2708,7 +2733,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "leave.balances",
-    description: "Shows leave balances for the year by worker and type: granted, taken, waiting and left.",
+    description:
+      "Shows leave balances for the year by worker and type: granted, taken, waiting and left.",
     kind: "read",
     audience: "manager",
     roles: BALANCE_READERS,

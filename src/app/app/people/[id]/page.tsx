@@ -194,7 +194,7 @@ function Profile({
   /** The HR file's queries, or null for roles that don't see the HR file. */
   queries: QueryView[] | null;
 }) {
-  const { today, canEdit, role } = ctx;
+  const { today, canEdit, canSeePay, canEditPay, role } = ctx;
   const active = worker.status === "active";
   // Line managers see their own reportees (slice 1.11): job, contact and sign-in, no pay.
   const limited = role === "line_manager";
@@ -330,53 +330,60 @@ function Profile({
 
       {limited ? null : (
         <>
-          <Section
-            id="pay"
-            title="Pay"
-            description="Each change is a dated version. Versions already in force are never edited."
-          >
-            {worker.payRates.length === 0 ? (
-              <p className="m-0 text-sm text-fg-muted">
-                No pay on record yet. Payroll skips this employee until pay is added.
-              </p>
-            ) : (
-              <>
-                <DetailList
-                  items={[
-                    {
-                      label: "Current pay",
-                      value: current
-                        ? `${formatNaira(payHeadline(current))} ${PAY_PERIOD[current.payType]}`
-                        : "None in force today",
-                      testId: "current-pay",
-                    },
-                    {
-                      label: "Pay type",
-                      value: current ? PAY_TYPE_LABELS[current.payType] : null,
-                    },
-                    {
-                      label: "In force since",
-                      value: current ? formatDate(current.effectiveFrom) : null,
-                    },
-                  ]}
+          {/* Owner decision, 23 Nov 2026: pay amounts for owner, hr and finance only. */}
+          {canSeePay ? (
+            <Section
+              id="pay"
+              title="Pay"
+              description="Each change is a dated version. Versions already in force are never edited."
+            >
+              {worker.payRates.length === 0 ? (
+                <p className="m-0 text-sm text-fg-muted">
+                  No pay on record yet. Payroll skips this employee until pay is added.
+                </p>
+              ) : (
+                <>
+                  <DetailList
+                    items={[
+                      {
+                        label: "Current pay",
+                        value: current
+                          ? `${formatNaira(payHeadline(current))} ${PAY_PERIOD[current.payType]}`
+                          : "None in force today",
+                        testId: "current-pay",
+                      },
+                      {
+                        label: "Pay type",
+                        value: current ? PAY_TYPE_LABELS[current.payType] : null,
+                      },
+                      {
+                        label: "In force since",
+                        value: current ? formatDate(current.effectiveFrom) : null,
+                      },
+                    ]}
+                  />
+                  <PayHistory
+                    versions={worker.payRates}
+                    today={today}
+                    canEdit={canEditPay && active}
+                  />
+                </>
+              )}
+              {canEditPay && active ? (
+                <PayChangeForm
+                  workerId={worker.id}
+                  defaultPayType={(current ?? latest)?.payType ?? "monthly"}
+                  defaultAmounts={amountsForForm(current ?? latest)}
+                  defaultFrom={
+                    worker.payRates.length === 0 && worker.startDate > today
+                      ? worker.startDate
+                      : defaultFrom
+                  }
+                  minFrom={worker.payRates.length === 0 ? worker.startDate : minFrom}
                 />
-                <PayHistory versions={worker.payRates} today={today} canEdit={canEdit && active} />
-              </>
-            )}
-            {canEdit && active ? (
-              <PayChangeForm
-                workerId={worker.id}
-                defaultPayType={(current ?? latest)?.payType ?? "monthly"}
-                defaultAmounts={amountsForForm(current ?? latest)}
-                defaultFrom={
-                  worker.payRates.length === 0 && worker.startDate > today
-                    ? worker.startDate
-                    : defaultFrom
-                }
-                minFrom={worker.payRates.length === 0 ? worker.startDate : minFrom}
-              />
-            ) : null}
-          </Section>
+              ) : null}
+            </Section>
+          ) : null}
 
           <Section
             id="bank"
@@ -522,6 +529,7 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   // A line manager loads only what their page shows: no bank, tax, pension or next of kin.
   const worker = await loadWorkerProfile(ctx.supabase, ctx.organisationId, id, ctx.today, {
     viewer: ctx.role === "line_manager" ? "line_manager" : "manager",
+    seePay: ctx.canSeePay,
   });
   if (!worker) notFound();
   const [bankChanges, viewer, changeRequests, credential, corrections] = await Promise.all([

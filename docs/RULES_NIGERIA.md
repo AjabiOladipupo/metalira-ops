@@ -43,9 +43,17 @@ These are product defaults stored per organisation (`organisations` pay settings
 - **Public holidays**: work done on a public holiday is recorded as overtime. Each organisation keeps its own public holiday list, because federal holidays are declared year by year.
 - **Daily workers** (`employment_type = daily`): paid daily rate × days worked. Overtime is allowed and paid at their normal hourly rate. No PAYE, no pension, no NSITF, no ITF, and they are left out of the employer levy base. Owner decision; **confirm with a tax adviser**.
 
+Phase 5 defaults (docs/PHASE_5.md, built in slice 5.1; owner may change; **confirm with a tax adviser**):
+
+- **Hourly-rate pay** (`pay_type` hourly): approved worked minutes × hourly rate ÷ 60, overtime minutes at the hourly rate × the overtime multiplier; statutory deductions as for monthly workers unless `employment_type` is daily (open question 11).
+- **A day that is both an off day and a public holiday** pays the larger of the two rules (one 8-hour overtime shift, or the minutes worked at the overtime rate), never both.
+- **Daily and hourly workers get no leave pay** (and no leave deduction): they are paid for days or minutes worked. Leave still counts against their balance.
+- **Public holidays are left out of an unpaid or part-paid working-day leave deduction**, as the leave counter leaves them out of a working-day request; they stay in the rostered-day base, so a monthly worker keeps the holiday's pay. Calendar-day leave (maternity) keeps them in the deduction.
+- **Holiday minutes are paid once at the overtime rate**: every minute worked on a public holiday (worked plus overtime) is paid at the overtime rate on top of normal pay; its overtime minutes are not paid again as overtime. A monthly worker rostered on a holiday who doesn't work keeps full pay (open question 1).
+
 Open points (ask before Phase 5 code depends on them):
 
-1. Public holiday work: is it paid as the hours actually worked, or as a fixed 8-hour overtime shift like off-day work? Does a monthly worker who is rostered on a public holiday but does not work still get full pay?
+1. Public holiday work: is it paid as the hours actually worked, or as a fixed 8-hour overtime shift like off-day work? Does a monthly worker who is rostered on a public holiday but does not work still get full pay? **Answered by the Phase 5 default** (above: minutes worked paid once at the overtime rate on top of normal pay; full pay kept for an unworked rostered holiday); owner may change; still to confirm with a tax adviser.
 2. Is "gross" for the hourly rate the full monthly gross (basic + housing + transport + other allowances), as recorded above? The owner said "gross base pay".
 
 ## Invoicing
