@@ -670,9 +670,9 @@ function ReversePanel({ d }: { d: RunDetail }) {
       <p className="m-0 text-sm text-fg-muted">
         Before release only: the bank file hasn&apos;t paid anyone yet. A reversal copies every
         payslip as a negative and waits for a second person in Finance. Once approved the run is
-        Reversed, its bank file and statutory remittances are voided, and{" "}
-        {formatLeaveRange(run.periodStart, run.periodEnd)} opens again so its days can be paid in a
-        new run.
+        Reversed, its bank file and statutory remittances are voided, its adjustments are carried
+        into the period&apos;s next run, and {formatLeaveRange(run.periodStart, run.periodEnd)}{" "}
+        opens again so its days can be paid in a new run.
       </p>
       <ReverseRunForm runId={run.id} downloaded={d.activeFileDownloaded} />
     </section>
@@ -734,7 +734,8 @@ function ReversalStep({ d, canDecide }: { d: RunDetail; canDecide: boolean }) {
           </h3>
           <p className="m-0 text-sm text-fg-muted">
             Approving reverses {month} in one step: its bank file and statutory remittances are
-            voided, its timesheet days, leave and adjustments become payable again, and the period
+            voided, its timesheet days and leave become payable again, its adjustments (one-offs,
+            instalments and corrections) are carried into the period&apos;s next run, and the period
             reopens for a new run. A remittance already paid stays on record for a refund or an
             offset.
           </p>

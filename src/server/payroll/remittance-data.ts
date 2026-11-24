@@ -258,7 +258,7 @@ export async function loadRemittances(
       paidKobo: row.payment?.paidAmountKobo ?? null,
     };
     row.runVoid = runVoids.get(r.id) ?? null;
-    row.status = remittanceStatus(owed, today);
+    row.status = row.runVoid ? "voided" : remittanceStatus(owed, today);
     row.outstandingKobo = row.runVoid ? 0n : remittanceOutstanding(owed);
     row.overdue = row.runVoid ? false : remittanceIsOverdue(owed, today);
     byRun.set(r.run_id, [...(byRun.get(r.run_id) ?? []), row]);
@@ -325,6 +325,8 @@ export interface RemittanceSummary {
   /** Past due with something still owed (unpaid or part paid). */
   overdue: number;
   noDueDate: number;
+  /** Voided because their run was reversed (slice 5.7a); left out of every other count. */
+  voided: number;
   /** Still owed, part payments' gaps included, in kobo as a string. */
   outstandingKobo: string;
   nextDueDate: string | null;
@@ -340,7 +342,17 @@ export async function loadRemittanceSummary(
   today: string,
 ): Promise<RemittanceSummary> {
   const runs = await loadRemittances(supabase, organisationId, today, { allRuns: true });
-  const all = runs.flatMap((r) => r.remittances);
+  return summariseRemittances(runs.flatMap((r) => r.remittances));
+}
+
+/**
+ * Counts and totals of remittances (pure). Voided ones (a reversed run's, slice 5.7a) are counted
+ * apart and left out of every other count and the amount still to pay (money review M2).
+ */
+export function summariseRemittances(
+  rows: readonly Pick<RemittanceRow, "status" | "overdue" | "outstandingKobo" | "dueDate">[],
+): RemittanceSummary {
+  const all = rows.filter((r) => r.status !== "voided");
   const owing = all.filter((r) => r.outstandingKobo > 0n);
   const dues = owing.flatMap((r) => (r.dueDate ? [r.dueDate] : [])).sort();
   return {
@@ -351,6 +363,7 @@ export async function loadRemittanceSummary(
     due: all.filter((r) => r.status === "due").length,
     overdue: all.filter((r) => r.overdue).length,
     noDueDate: all.filter((r) => r.status === "no_due_date").length,
+    voided: rows.length - all.length,
     outstandingKobo: owing.reduce((n, r) => n + r.outstandingKobo, 0n).toString(),
     nextDueDate: dues[0] ?? null,
   };

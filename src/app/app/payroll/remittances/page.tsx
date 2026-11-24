@@ -76,7 +76,13 @@ function RemittanceCard({
           data-testid="remittance-run-void"
         >
           Voided {formatDateTime(r.runVoid.voidedAt)}: the run was reversed, so nothing is owed for
-          it. {paid ? "The payment recorded stays on file for a refund or an offset." : ""}
+          it.
+          {paid ? (
+            <strong className="block font-semibold" data-testid="refund-needed">
+              Refund or offset needed: {formatNaira(paid.paidAmountKobo)} was already paid to the
+              authority. The payment record stays on file.
+            </strong>
+          ) : null}
         </p>
       ) : null}
       <p
@@ -122,16 +128,18 @@ function RemittanceCard({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-start gap-3">
-        {/* A plain link: the route streams the CSV (no-store, attachment); nothing is stored. */}
-        <a
-          href={`/app/payroll/remittances/${r.id}/schedule`}
-          aria-label={`Download schedule: ${title}`}
-          className="inline-flex h-10 items-center rounded-lg border border-line px-4 text-sm font-medium text-foreground no-underline hover:bg-surface hover:text-foreground"
-        >
-          Download schedule
-        </a>
-      </div>
+      {r.runVoid ? null : (
+        <div className="flex flex-wrap items-start gap-3">
+          {/* A plain link: the route streams the CSV (no-store, attachment); nothing is stored. */}
+          <a
+            href={`/app/payroll/remittances/${r.id}/schedule`}
+            aria-label={`Download schedule: ${title}`}
+            className="inline-flex h-10 items-center rounded-lg border border-line px-4 text-sm font-medium text-foreground no-underline hover:bg-surface hover:text-foreground"
+          >
+            Download schedule
+          </a>
+        </div>
+      )}
 
       {canRecord && !paid && !r.runVoid ? (
         <details className="rounded-lg border border-line px-3 py-2.5">

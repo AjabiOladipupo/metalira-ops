@@ -188,6 +188,17 @@ export function AddCorrectionForm({
               />
               Counts toward pension (earnings only)
             </label>
+            {errors?.repeat || valueOf(state, "repeat") === "on" ? (
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="repeat"
+                  defaultChecked={valueOf(state, "repeat") === "on"}
+                  className="mt-0.5 size-4 shrink-0 accent-foreground"
+                />
+                <span>This is a further correction of that payslip, not the same one again.</span>
+              </label>
+            ) : null}
           </>
         );
       }}

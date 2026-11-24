@@ -1015,17 +1015,23 @@ isOneToOne: false
                   ]
                 },"payslip_lines": {
                   Row: {
-                    "amount_kobo": number,"code": string,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign": number,"taxable": boolean
+                    "amount_kobo": number,"code": string,"copies_line_id": string | null,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign": number,"taxable": boolean
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"code": string,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign"?: number,"taxable": boolean
+                    "amount_kobo": number,"code": string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign"?: number,"taxable": boolean
                   }
                   Update: {
-                    "amount_kobo"?: number,"code"?: string,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"run_id"?: string,"sign"?: number,"taxable"?: boolean
+                    "amount_kobo"?: number,"code"?: string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"run_id"?: string,"sign"?: number,"taxable"?: boolean
                   }
                   Relationships: [
                     {
+      foreignKeyName: "payslip_lines_copies_fkey"
+      columns: ["organisation_id","copies_line_id"]
+isOneToOne: false
+      referencedRelation: "payslip_lines"
+      referencedColumns: ["organisation_id","id"]
+    },{
       foreignKeyName: "payslip_lines_organisation_id_fkey"
       columns: ["organisation_id"]
 isOneToOne: false
@@ -2195,7 +2201,7 @@ isOneToOne: false
 { Args: { "p_amount_kobo": string,"p_instalments": number,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_pensionable": boolean,"p_reason": string,"p_run_id": string,"p_taxable": boolean,"p_worker_id": string }; Returns: string
                            },
 "add_payroll_correction":
-{ Args: { "p_amount_kobo": string,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_payslip_id": string,"p_pensionable": boolean,"p_reason": string,"p_run_id": string }; Returns: string
+{ Args: { "p_amount_kobo": string,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_payslip_id": string,"p_pensionable": boolean,"p_reason": string,"p_repeat"?: boolean,"p_run_id": string }; Returns: string
                            },
 "add_post":
 { Args: { "p_add_site"?: boolean,"p_band": string,"p_contract_id": string,"p_count": number,"p_days": (number)[],"p_end": string,"p_from": string,"p_note"?: string,"p_organisation_id": string,"p_post_name": string,"p_role": string,"p_site_id": string,"p_start": string,"p_unit": string }; Returns: Json
@@ -2720,6 +2726,9 @@ isOneToOne: false
 { Args: { "p_organisation_id": string,"p_site_id"?: string }; Returns: {
               "area_m2": number,"boundary": Json,"centre_lat": number,"centre_lng": number,"radius_m": number,"site_id": string
             }[]
+                           },
+"statutory_schedule_check":
+{ Args: { "p_organisation_id": string,"p_remittance_id": string }; Returns: boolean
                            },
 "submit_payroll_run":
 { Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string

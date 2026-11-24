@@ -4,7 +4,7 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { formatLeaveRange } from "@/lib/leave/requests";
-import { formatNaira, parseNairaToKobo, type Kobo } from "@/lib/money";
+import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { negatedTotals } from "@/lib/payroll/reversal";
 import type { RunTotals } from "@/lib/payroll/run";
 import { runMonth } from "@/lib/payroll/run-format";
@@ -88,6 +88,8 @@ export const correctionSchema = z.object({
     }),
   pensionable: checkbox,
   reason: text(500, "Give a reason"),
+  /** A payslip already corrected in another run needs this statement (money review M4a). */
+  repeat: checkbox,
 });
 
 /** Rule 10's refusal for a reversal, as the approver reads it. */
@@ -103,7 +105,10 @@ export function fromReversalDbError(error: Pick<PostgrestError, "code" | "messag
   if (error.code === "MLRV5") {
     throw new MutationError("invalid", DOWNLOADED_MESSAGE, { notUploaded: DOWNLOADED_MESSAGE });
   }
-  if (/^MLRV[1236789A]$/.test(error.code)) throw new MutationError("invalid", error.message);
+  if (error.code === "MLRVC") {
+    throw new MutationError("invalid", error.message, { repeat: error.message });
+  }
+  if (/^MLRV[1236789AB]$/.test(error.code)) throw new MutationError("invalid", error.message);
   if (error.code === "42501") {
     throw new MutationError(
       "forbidden",
@@ -230,7 +235,7 @@ export async function previewReverse(
   const t = run.totals;
   return {
     summary:
-      `Asks to reverse ${runMonth(run.periodEnd)} (${formatLeaveRange(run.periodStart, run.periodEnd)}): a reversal of ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}, waits for a second person in Finance. Once approved the run is Reversed, its timesheet days, leave and adjustments are payable again and the period reopens. ${effectsText(effects)} Reason: "${data.reason}".`.trim(),
+      `Asks to reverse ${runMonth(run.periodEnd)} (${formatLeaveRange(run.periodStart, run.periodEnd)}): a reversal of ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}, waits for a second person in Finance. Once approved the run is Reversed, its timesheet days and leave are payable again, its adjustments (one-offs, instalments and corrections) are carried into the period's next run, and the period reopens. ${effectsText(effects)} Reason: "${data.reason}".`.trim(),
     changes: negativeChanges(t),
   };
 }
@@ -275,7 +280,7 @@ export async function previewApproveReversal(
   const t = reversal.totals;
   return {
     summary:
-      `Approves the reversal of ${runMonth(original.periodEnd)}: ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}. ${runMonth(original.periodEnd)} becomes Reversed, its timesheet days, leave and adjustments are payable again and ${formatLeaveRange(original.periodStart, original.periodEnd)} reopens for a new run. ${effectsText(effects)}`.trim(),
+      `Approves the reversal of ${runMonth(original.periodEnd)}: ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}. ${runMonth(original.periodEnd)} becomes Reversed, its timesheet days and leave are payable again, its adjustments (one-offs, instalments and corrections) are carried into the period's next run, and ${formatLeaveRange(original.periodStart, original.periodEnd)} reopens for a new run. ${effectsText(effects)}`.trim(),
     changes: negativeChanges(t),
   };
 }
@@ -297,6 +302,40 @@ export async function previewCorrection(
   const corrected = await mustLoad(ctx, slip.run_id);
   if (corrected.status !== "released" || corrected.kind === "reversal") {
     throw new MutationError("invalid", "A correction names a released payslip.");
+  }
+  // Money review M4a: the payslip's earlier corrections, with their amounts. One in this run is
+  // refused; one in another run that stands needs the explicit statement.
+  const { data: earlier, error: earlierError } = await ctx.supabase
+    .from("payroll_adjustments")
+    .select("run_id, kind, label, amount_kobo::text")
+    .eq("organisation_id", ctx.organisationId)
+    .eq("corrects_payslip_id", data.payslipId);
+  if (earlierError) fromReversalDbError(earlierError);
+  const earlierRows = (earlier ?? []) as unknown as {
+    run_id: string;
+    kind: string;
+    label: string;
+    amount_kobo: string;
+  }[];
+  if (earlierRows.some((e) => e.run_id === run.id)) {
+    throw new MutationError(
+      "invalid",
+      "This run already corrects that payslip. Remove that correction to change it.",
+    );
+  }
+  const elsewhere: typeof earlierRows = [];
+  for (const e of earlierRows) {
+    const r = await loadRun(ctx.supabase, ctx.organisationId, e.run_id);
+    if (r && r.status !== "reversed") elsewhere.push(e);
+  }
+  if (elsewhere.length > 0 && !data.repeat) {
+    const listed = elsewhere
+      .map(
+        (e) => `${e.label} (${e.kind === "deduction" ? "-" : ""}${money(toKobo(e.amount_kobo))})`,
+      )
+      .join(", ");
+    const message = `That payslip was already corrected: ${listed}. Tick the box to confirm this is a further correction.`;
+    throw new MutationError("invalid", message, { repeat: message });
   }
   const options = { workerIds: [slip.worker_id], itfApplies: run.itfApplies };
   const extra = {
@@ -323,13 +362,17 @@ export async function previewCorrection(
   const a = net(after);
   const what = data.kind === "earning" ? "an earning" : "a deduction";
   return {
-    summary: `Adds ${what} of ${money(data.amount)} (${data.label}) correcting the ${runMonth(corrected.periodEnd)} payslip: this worker's net pay ${b === null ? "can't be worked out yet" : money(b)} becomes ${a === null ? "something that can't be worked out" : money(a)}. The posted payslip stays as it is; the run is recalculated.`,
+    summary: `Adds ${what} of ${money(data.amount)} (${data.label}) correcting the ${runMonth(corrected.periodEnd)} payslip: this worker's net pay ${b === null ? "can't be worked out yet" : money(b)} becomes ${a === null ? "something that can't be worked out" : money(a)}. The posted payslip stays as it is; the run is recalculated. An earning is taxed in the month it is paid.`,
     changes: [
       {
         label: "Net pay",
         ...(b !== null ? { before: money(b) } : {}),
         after: a === null ? "Can't be worked out" : money(a),
       },
+      ...elsewhere.map((e) => ({
+        label: `Earlier correction: ${e.label}`,
+        after: `${e.kind === "deduction" ? "-" : ""}${money(toKobo(e.amount_kobo))}`,
+      })),
     ],
   };
 }
@@ -392,6 +435,7 @@ export const addCorrectionSpec: MutationSpec<typeof correctionSchema, { runId: s
       p_amount_kobo: d.amount.toString(),
       p_pensionable: d.kind === "earning" && d.pensionable,
       p_reason: d.reason,
+      p_repeat: d.repeat,
     });
     if (error) fromReversalDbError(error);
     const run = await draftRun(ctx.supabase, ctx.organisationId, d.runId);

@@ -63,6 +63,8 @@ const MONEY = [
 
 let admin: Client;
 let db: pg.Client;
+/** A payslip of the first company, which another company's correction may not name. */
+let foreignPayslipId: string;
 
 async function addMember(user: TestUser, role: Role, orgId: string) {
   const { error } = await admin
@@ -279,11 +281,16 @@ describe("reversing an approved run before release", () => {
     }
     const { data: lines } = await admin
       .from("payslip_lines")
-      .select("sign, amount_kobo")
+      .select("id, sign, amount_kobo, copies_line_id, run_id")
       .in("run_id", [run.runId, reversalId]);
     const lineSum = lines!.reduce((n, l) => n + BigInt(l.sign) * BigInt(l.amount_kobo), 0n);
     expect(lineSum).toBe(0n);
-    expect(lines!.filter((l) => l.sign === -1)).toHaveLength(lines!.length / 2);
+    const copied = lines!.filter((l) => l.sign === -1);
+    const originals = lines!.filter((l) => l.sign === 1);
+    expect(copied).toHaveLength(originals.length);
+    // One to one: every original line is copied exactly once.
+    expect(copied.map((l) => l.copies_line_id).sort()).toEqual(originals.map((l) => l.id).sort());
+    foreignPayslipId = run.workers[0]!.payslipId;
   });
 
   it("allows one waiting reversal per run", async () => {
@@ -294,6 +301,22 @@ describe("reversing an approved run before release", () => {
   it("keeps the run from being released while its reversal waits", async () => {
     const { error } = await release(c.finance.client, c.owner.orgId, run.runId, batchId);
     expect(error?.code).toBe("MLRV9");
+  });
+
+  it("hands out and makes no bank file while its reversal waits", async () => {
+    const got = await download(c.owner.client, c.owner.orgId, batchId);
+    expect(got.error?.code).toBe("MLRV9");
+    const made = await makeBatch(admin, c.owner.client, c.owner.orgId, run.runId, {
+      voidReason: "Replaced while a reversal waits",
+      notUploaded: true,
+    });
+    expect(made.error?.code).toBe("MLRV9");
+    const { data: active } = await admin
+      .from("payout_batches")
+      .select("id")
+      .eq("run_id", run.runId)
+      .eq("status", "active");
+    expect(active!.map((b) => b.id)).toEqual([batchId]);
   });
 
   it("needs a second person, and 5.3's approval can't approve a reversal", async () => {
@@ -418,6 +441,36 @@ describe("reversing an approved run before release", () => {
     expect(reopen.error?.code).not.toBe("MLTA5");
   });
 
+  it("gives a voided remittance no schedule and its payment no void", async () => {
+    const { data: rems } = await admin
+      .from("statutory_remittances")
+      .select("id, kind")
+      .eq("run_id", run.runId);
+    for (const r of rems!) {
+      const { error } = await c.finance.client.rpc("statutory_schedule_check", {
+        p_organisation_id: c.owner.orgId,
+        p_remittance_id: r.id,
+      });
+      expect(error?.code, r.kind).toBe("MLRVB");
+    }
+    const lm = await c.lineManager.client.rpc("statutory_schedule_check", {
+      p_organisation_id: c.owner.orgId,
+      p_remittance_id: rems![0]!.id,
+    });
+    expect(lm.error?.code).toBe(DENIED);
+    const voided = await c.finance.client.rpc("void_statutory_payment", {
+      p_organisation_id: c.owner.orgId,
+      p_payment_id: paymentId,
+      p_reason: "Wrong amount",
+    });
+    expect(voided.error?.code).toBe("MLRVB");
+  });
+
+  it("never reverses a reversal", async () => {
+    const { error } = await reverse(c.finance.client, c.owner.orgId, reversalId, "Undo", true);
+    expect(error?.code).toBe("MLRV2");
+  });
+
   it("refuses a payment on a reversed run's remittance", async () => {
     const { data: nsitf } = await admin
       .from("statutory_remittances")
@@ -524,6 +577,21 @@ describe("what can't be reversed, and corrections after release", () => {
     await releaseThroughBankFile(admin, c.owner, run.runId, c.finance);
   });
 
+  it("opens a posted run's schedule", async () => {
+    const { data: rem } = await admin
+      .from("statutory_remittances")
+      .select("id")
+      .eq("run_id", run.runId)
+      .eq("kind", "paye")
+      .single();
+    const { data, error } = await c.hr.client.rpc("statutory_schedule_check", {
+      p_organisation_id: c.owner.orgId,
+      p_remittance_id: rem!.id,
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(true);
+  });
+
   it("refuses a released run: the money has gone", async () => {
     const { error } = await reverse(c.finance.client, c.owner.orgId, run.runId, "Too late", true);
     expect(error?.code).toBe("MLRV1");
@@ -588,6 +656,46 @@ describe("what can't be reversed, and corrections after release", () => {
       [c.owner.orgId, nov!.id, other.workerId, c.owner.id, run.workers[0]!.payslipId],
     );
     expect(forged.error?.code).toBe("MLRV8");
+    // Security review L3: a payslip of another company, even naming this run's worker.
+    const foreign = await asDbOwner(
+      `insert into public.payroll_adjustments (organisation_id, run_id, worker_id, kind, label,
+         amount_kobo, series_id, reason, created_by, corrects_payslip_id)
+       values ($1, $2, $3, 'earning', 'Forged', 100, gen_random_uuid(), 'Forged', $4, $5)`,
+      [c.owner.orgId, nov!.id, run.workers[0]!.workerId, c.owner.id, foreignPayslipId],
+    );
+    expect(foreign.error?.code).toBe("MLRV8");
+  });
+
+  it("corrects a payslip once per run, and again elsewhere only when confirmed", async () => {
+    const { data: nov } = await admin
+      .from("payroll_runs")
+      .select("id")
+      .eq("organisation_id", c.owner.orgId)
+      .eq("period_start", "2026-10-20")
+      .single();
+    const correct = (runId: string, repeat?: boolean) =>
+      c.hr.client.rpc("add_payroll_correction", {
+        p_organisation_id: c.owner.orgId,
+        p_run_id: runId,
+        p_payslip_id: run.workers[0]!.payslipId,
+        p_kind: "earning",
+        p_label: "October overtime underpaid",
+        p_amount_kobo: "450000",
+        p_pensionable: false,
+        p_reason: "Again",
+        ...(repeat ? { p_repeat: true } : {}),
+      });
+    const twice = await correct(nov!.id, true);
+    expect(twice.error?.code).toBe("MLRVC");
+    const dec = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: "2026-11-20",
+    });
+    expect(dec.error).toBeNull();
+    const unconfirmed = await correct(dec.data!);
+    expect(unconfirmed.error?.code).toBe("MLRVC");
+    const confirmed = await correct(dec.data!, true);
+    expect(confirmed.error).toBeNull();
   });
 });
 
@@ -665,6 +773,173 @@ describe("a declined reversal, and the guards on a standing run", () => {
     const second = await reverse(c.finance.client, c.owner.orgId, run.runId, "Check again");
     expect(second.error).toBeNull();
     expect(second.data).not.toBe(first);
+    const declinedAgain = await c.finance2.client.rpc("return_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: second.data!,
+      p_reason: "Still right",
+    });
+    expect(declinedAgain.error).toBeNull();
+  });
+
+  it("keeps declined reversals out of the worker's payslips and year to date", async () => {
+    await releaseThroughBankFile(admin, c.owner, run.runId, c.finance);
+    const workerUser = await createTestUser("prev-declined-worker");
+    const member = await admin.from("memberships").insert({
+      organisation_id: c.owner.orgId,
+      user_id: workerUser.id,
+      role: "worker",
+      worker_id: run.workers[0]!.workerId,
+    });
+    expect(member.error).toBeNull();
+    const { data, error } = await workerUser.client.rpc("my_payslips", {
+      p_organisation_id: c.owner.orgId,
+    });
+    expect(error).toBeNull();
+    const list = data as unknown as {
+      run_id: string;
+      year_to_date: { payslips: number; gross_kobo: string };
+    }[];
+    expect(list.map((v) => v.run_id)).toEqual([run.runId]);
+    expect(list[0]!.year_to_date).toMatchObject({ payslips: 1, gross_kobo: "12000000" });
+  });
+});
+
+describe("adjustments survive a reversal and the series carries on", () => {
+  /** Results for one worker paying a one-off allowance and a recurring deduction instalment. */
+  function withAdjustments(
+    w: { workerId: string; payRateId: string },
+    allowanceId: string,
+    deductionId: string,
+    label: string,
+    period: { start: string; end: string },
+  ) {
+    return resultsFor(
+      { ...w, adjustmentId: allowanceId },
+      {
+        anomalies: [],
+        period,
+        mutate: (doc) => {
+          const slip = (doc.payslips as Record<string, unknown>[])[0]!;
+          const lines = slip.lines as Record<string, unknown>[];
+          lines.push({
+            code: "deduction",
+            kind: "deduction",
+            label,
+            amount_kobo: "1000000",
+            pensionable: false,
+            taxable: false,
+            sources: [{ kind: "adjustment", id: deductionId, from: period.start, to: period.end }],
+          });
+          const net = String(BigInt(slip.net_kobo as string) - 1_000_000n);
+          slip.other_deductions_kobo = "1000000";
+          slip.net_kobo = net;
+          const totals = doc.totals as Record<string, string | number>;
+          totals.other_deductions_kobo = "1000000";
+          totals.net_kobo = net;
+        },
+      },
+    );
+  }
+
+  async function adjustmentsOf(runId: string) {
+    const { data, error } = await admin
+      .from("payroll_adjustments")
+      .select("id, series_id, instalment_number, instalment_count, kind, label, amount_kobo")
+      .eq("run_id", runId)
+      .order("kind");
+    expect(error).toBeNull();
+    return data!;
+  }
+
+  async function submitAndApprove(o: TenantUser, runId: string, approver: TestUser) {
+    const submitted = await o.client.rpc("submit_payroll_run", {
+      p_organisation_id: o.orgId,
+      p_run_id: runId,
+    });
+    expect(submitted.error).toBeNull();
+    await approveRun(admin, o.orgId, runId, approver);
+  }
+
+  it("carries a one-off and a recurring instalment into the re-run, then on to November", async () => {
+    const c = await company("adjust");
+    const w = await addPayrollWorker(admin, c.owner.orgId);
+    const oct = { start: "2026-09-20", end: "2026-10-19" };
+    const created = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: oct.start,
+    });
+    expect(created.error).toBeNull();
+    const octRun = created.data!;
+    const add = (runId: string, kind: string, label: string, amount: string, instalments: number) =>
+      c.owner.client.rpc("add_payroll_adjustment", {
+        p_organisation_id: c.owner.orgId,
+        p_run_id: runId,
+        p_worker_id: w.workerId,
+        p_kind: kind,
+        p_label: label,
+        p_amount_kobo: amount,
+        p_pensionable: false,
+        p_taxable: kind === "earning",
+        p_instalments: instalments,
+        p_reason: "Agreed with the worker",
+      });
+    const allowance = await add(octRun, "earning", "Supervisor allowance", "1500000", 1);
+    expect(allowance.error).toBeNull();
+    const advance = await add(octRun, "deduction", "Salary advance", "1000000", 3);
+    expect(advance.error).toBeNull();
+    const saved = await saveResults(
+      admin,
+      c.owner,
+      octRun,
+      withAdjustments(w, allowance.data!, advance.data!, "Salary advance, 1 of 3", oct),
+    );
+    expect(saved.error).toBeNull();
+    await submitAndApprove(c.owner, octRun, c.finance);
+    const before = await adjustmentsOf(octRun);
+
+    // Reversed: finance asks, a second finance member approves.
+    const asked = await reverse(c.finance.client, c.owner.orgId, octRun, "Wrong allowance month");
+    expect(asked.error).toBeNull();
+    const approved = await approveReversal(c.finance2.client, c.owner.orgId, asked.data!);
+    expect(approved.error).toBeNull();
+
+    // The re-run carries both, with the same series and instalment numbers.
+    const rerun = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: oct.start,
+    });
+    expect(rerun.error).toBeNull();
+    const carried = await adjustmentsOf(rerun.data!);
+    expect(
+      carried.map((a) => [a.series_id, a.instalment_number, a.instalment_count, a.amount_kobo]),
+    ).toEqual(
+      before.map((a) => [a.series_id, a.instalment_number, a.instalment_count, a.amount_kobo]),
+    );
+    const allowanceAgain = carried.find((a) => a.kind === "earning")!;
+    const advanceAgain = carried.find((a) => a.kind === "deduction")!;
+    const resaved = await saveResults(
+      admin,
+      c.owner,
+      rerun.data!,
+      withAdjustments(w, allowanceAgain.id, advanceAgain.id, "Salary advance, 1 of 3", oct),
+    );
+    expect(resaved.error).toBeNull();
+    await submitAndApprove(c.owner, rerun.data!, c.finance);
+
+    // November carries the series on: instalment 2 of 3, once.
+    const nov = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: "2026-10-20",
+    });
+    expect(nov.error).toBeNull();
+    const novAdj = await adjustmentsOf(nov.data!);
+    expect(novAdj).toEqual([
+      expect.objectContaining({
+        series_id: advanceAgain.series_id,
+        instalment_number: 2,
+        instalment_count: 3,
+      }),
+    ]);
   });
 });
 

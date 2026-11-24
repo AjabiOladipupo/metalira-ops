@@ -599,7 +599,34 @@ export const scheduleFileSpec: MutationSpec<typeof remittanceIdSchema, ScheduleF
   schema: remittanceIdSchema,
   roles: REMITTANCE_RECORDERS,
   run: async ({ supabase, organisationId, data }) => {
+    // Security review M1 (slice 5.7a): a voided remittance, or one of a run that isn't posted, has
+    // no schedule. The database says so before anything is read or decrypted.
+    const { error: checkError } = await supabase.rpc("statutory_schedule_check", {
+      p_organisation_id: organisationId,
+      p_remittance_id: data.remittanceId,
+    });
+    if (checkError) {
+      if (checkError.code === "MLRVB") {
+        throw new MutationError("invalid", checkError.message, { remittance: "voided" });
+      }
+      if (checkError.code === "42501") {
+        throw new MutationError("forbidden", "Only an owner, HR or Finance downloads a schedule.");
+      }
+      if (checkError.code === "P0002") {
+        throw new MutationError("invalid", "That remittance wasn't found. Reload the page.");
+      }
+      throw new Error(`Could not check the remittance (${checkError.code})`);
+    }
     const r = await readRemittance(supabase, organisationId, data.remittanceId);
+    if (r.runStatus !== "approved" && r.runStatus !== "released") {
+      throw new MutationError(
+        "invalid",
+        "This remittance's run isn't posted, so it has no schedule.",
+        {
+          remittance: "voided",
+        },
+      );
+    }
     const kind = r.kind;
     const slipQuery = supabase
       .from("payslips")

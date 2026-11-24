@@ -52,7 +52,10 @@
 --    rsa_pin_snapshot says the payslip has one (payslips saved before this slice don't). 5.6's
 --    pension schedule reads the snapshot first.
 -- 8. create_payroll_run (5.2's, unchanged but this) lets a new regular run start for a period
---    whose run was reversed.
+--    whose run was reversed, and carries a recurring instalment that only a reversed run paid.
+-- 9. Review fixes (section 10): the schedule check, payout_file_download FOR SHARE, no payment
+--    entry on a voided remittance, the correction check on update, and series instalments unique
+--    only among runs that aren't reversed (carry_payroll_instalment ignores reversed runs).
 --
 -- Refusals (SQLSTATE), new here:
 --   MLRV1 a released run can't be reversed (the money has gone)
@@ -67,6 +70,8 @@
 --   MLRV8 a correction must name a released payslip of the same worker
 --   MLRV9 the run has a reversal waiting: decide it before releasing
 --   MLRVA remittance voids are kept as written, and only a reversed run's remittances are voided
+--   MLRVB a voided remittance has no schedule and takes no payment entry (security review M1, L2)
+--   MLRVC a payslip corrected twice in one run, or again elsewhere without confirming (money M4a)
 -- Reused: MLPRD (state), 42501, 22023, P0002.
 -- No money maths beyond copies, equality checks and sums.
 
@@ -146,7 +151,15 @@ comment on column public.payslips.rsa_pin_enc is
 
 alter table public.payslip_lines
   add column sign smallint not null default 1
-    constraint payslip_lines_sign_value check (sign in (1, -1));
+    constraint payslip_lines_sign_value check (sign in (1, -1)),
+  -- Money review L1: a reversal's line names the one line it copies, once.
+  add column copies_line_id uuid,
+  add constraint payslip_lines_copies_fkey foreign key (organisation_id, copies_line_id)
+    references public.payslip_lines (organisation_id, id),
+  add constraint payslip_lines_sign_copies check ((sign = -1) = (copies_line_id is not null));
+
+create unique index payslip_lines_copies_key on public.payslip_lines (copies_line_id)
+  where copies_line_id is not null;
 
 -- BEFORE INSERT OR DELETE on payslips (ENABLE ALWAYS): a reversal run's payslips are copies of
 -- its original's (same worker, every amount and snapshot, sign -1) and never go; other runs'
@@ -272,7 +285,8 @@ begin
   end if;
   if v_slip.sign = -1 and not exists (
     select 1 from public.payslip_lines l
-    where l.organisation_id = new.organisation_id and l.payslip_id = v_slip.reverses_payslip_id
+    where l.organisation_id = new.organisation_id and l.id = new.copies_line_id
+      and l.payslip_id = v_slip.reverses_payslip_id
       and l.position = new.position and l.code = new.code and l.kind = new.kind
       and l.label = new.label and l.amount_kobo = new.amount_kobo and l.currency = new.currency
       and l.pensionable = new.pensionable and l.taxable = new.taxable and l.sign = 1
@@ -542,6 +556,28 @@ $$;
 
 revoke all on function private.payroll_not_for_reversal() from public, anon, authenticated;
 
+-- Money review M3: no new bank file while a reversal of the run waits for approval.
+create function private.payout_batches_no_waiting_reversal()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if private.payroll_reversal_waiting(new.organisation_id, new.run_id) is not null then
+    raise exception 'A reversal of this run is waiting for approval. Decide it before making a bank file.'
+      using errcode = 'MLRV9';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payout_batches_no_waiting_reversal() from public, anon, authenticated;
+
+create trigger payout_batches_no_waiting_reversal before insert on public.payout_batches
+  for each row execute function private.payout_batches_no_waiting_reversal();
+alter table public.payout_batches enable always trigger payout_batches_no_waiting_reversal;
+
 create trigger payout_batches_not_for_reversal before insert on public.payout_batches
   for each row execute function private.payroll_not_for_reversal();
 alter table public.payout_batches enable always trigger payout_batches_not_for_reversal;
@@ -727,15 +763,33 @@ begin
   ) then
     raise exception 'A reversal run takes no adjustments.' using errcode = 'MLRV7';
   end if;
-  if new.corrects_payslip_id is not null and not exists (
+  if new.corrects_payslip_id is null then
+    return new;
+  end if;
+  -- A released payslip of the same worker, of a run that isn't a reversal, from an earlier period
+  -- than the correcting run (money review M4b; an off-cycle run may correct its own period).
+  if not exists (
     select 1
     from public.payslips s
     join public.payroll_runs r on r.organisation_id = s.organisation_id and r.id = s.run_id
+    join public.payroll_runs c on c.organisation_id = new.organisation_id and c.id = new.run_id
     where s.organisation_id = new.organisation_id and s.id = new.corrects_payslip_id
       and s.worker_id = new.worker_id and r.status = 'released' and r.kind <> 'reversal'
       and r.id <> new.run_id
+      and (c.period_start > r.period_start
+        or (c.kind = 'off_cycle' and c.period_start >= r.period_start))
   ) then
-    raise exception 'A correction names a released payslip of the same worker.' using errcode = 'MLRV8';
+    raise exception 'A correction names a released payslip of the same worker from an earlier period.'
+      using errcode = 'MLRV8';
+  end if;
+  -- Money review M4a: one correction of a payslip per run.
+  if exists (
+    select 1 from public.payroll_adjustments a
+    where a.organisation_id = new.organisation_id and a.run_id = new.run_id
+      and a.corrects_payslip_id = new.corrects_payslip_id and a.id <> new.id
+  ) then
+    raise exception 'This run already corrects that payslip. Remove that correction to change it.'
+      using errcode = 'MLRVC';
   end if;
   return new;
 end;
@@ -758,7 +812,8 @@ create function private.add_payroll_correction(
   p_label text,
   p_amount_kobo text,
   p_pensionable boolean,
-  p_reason text
+  p_reason text,
+  p_repeat boolean default false
 )
 returns uuid
 language plpgsql
@@ -809,6 +864,18 @@ begin
   ) then
     raise exception 'That worker isn''t employed in this pay period.' using errcode = '22023';
   end if;
+  -- Money review M4a: a payslip already corrected in another run that stands needs the explicit
+  -- statement that this is a further correction, not the same one twice.
+  if not coalesce(p_repeat, false) and exists (
+    select 1
+    from public.payroll_adjustments a
+    join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+    where a.organisation_id = p_organisation_id and a.corrects_payslip_id = p_payslip_id
+      and a.run_id <> p_run_id and r.status <> 'reversed'
+  ) then
+    raise exception 'That payslip was already corrected in another run. Confirm this is a further correction.'
+      using errcode = 'MLRVC';
+  end if;
 
   insert into public.payroll_adjustments (
     id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
@@ -824,7 +891,8 @@ begin
     p_organisation_id, 'payroll.correction_added', 'payroll_runs', p_run_id, null,
     jsonb_build_object(
       'adjustment_id', v_id, 'worker_id', v_worker, 'kind', p_kind, 'label', v_label,
-      'amount_kobo', v_amount::text, 'corrects_payslip_id', p_payslip_id
+      'amount_kobo', v_amount::text, 'corrects_payslip_id', p_payslip_id,
+      'further_correction', coalesce(p_repeat, false)
     ),
     v_reason
   );
@@ -832,9 +900,9 @@ begin
 end;
 $$;
 
-revoke all on function private.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text)
+revoke all on function private.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text, boolean)
   from public, anon;
-grant execute on function private.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text)
+grant execute on function private.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text, boolean)
   to authenticated;
 
 create function public.add_payroll_correction(
@@ -845,7 +913,8 @@ create function public.add_payroll_correction(
   p_label text,
   p_amount_kobo text,
   p_pensionable boolean,
-  p_reason text
+  p_reason text,
+  p_repeat boolean default false
 )
 returns uuid
 language sql
@@ -855,13 +924,13 @@ set search_path = ''
 as $$
   select private.add_payroll_correction(
     p_organisation_id, p_run_id, p_payslip_id, p_kind, p_label, p_amount_kobo, p_pensionable,
-    p_reason
+    p_reason, p_repeat
   )
 $$;
 
-revoke all on function public.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text)
+revoke all on function public.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text, boolean)
   from public, anon;
-grant execute on function public.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text)
+grant execute on function public.add_payroll_correction(uuid, uuid, uuid, text, text, text, boolean, text, boolean)
   to authenticated;
 
 -- ---------------------------------------------------------------------------
@@ -889,6 +958,7 @@ declare
   v_rule_set uuid;
   v_id uuid;
   v_carried integer;
+  v_from_reversed integer;
 begin
   if p_period_start is null then
     raise exception 'Choose the pay period.' using errcode = '22023';
@@ -924,6 +994,32 @@ begin
   values (p_organisation_id, 'regular', v_start, v_end, v_pay, v_rule_set, v_uid)
   returning id into v_id;
 
+  -- Money review H1 (slice 5.7a): the period's latest reversed regular run's adjustments come
+  -- across as they were (one-offs, recurring instalments with the same series and number, and
+  -- corrections naming the same payslip), for workers employed in the period. The reversed run's
+  -- rows no longer hold their instalment numbers (payroll_adjustments_series_once).
+  with reversed as (
+    select r.id from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.kind = 'regular'
+      and r.period_start = v_start and r.status = 'reversed'
+    order by r.created_at desc
+    limit 1
+  )
+  insert into public.payroll_adjustments (
+    organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
+    series_id, instalment_number, instalment_count, reason, created_by, corrects_payslip_id
+  )
+  select a.organisation_id, v_id, a.worker_id, a.kind, a.label, a.amount_kobo, a.pensionable,
+    a.taxable, a.series_id, a.instalment_number, a.instalment_count, a.reason, v_uid,
+    a.corrects_payslip_id
+  from public.payroll_adjustments a
+  join reversed x on x.id = a.run_id
+  join public.workers w on w.organisation_id = a.organisation_id and w.id = a.worker_id
+  where a.organisation_id = p_organisation_id
+    and w.start_date <= v_end and (w.end_date is null or w.end_date >= v_start)
+  order by a.created_at, a.id;
+  get diagnostics v_from_reversed = row_count;
+
   -- Recurring adjustments: the next instalment of each series whose latest instalment was paid
   -- in a posted run of an earlier period.
   with latest as (
@@ -946,8 +1042,11 @@ begin
   where l.instalment_number < l.instalment_count
     and (w.end_date is null or w.end_date >= v_start)
     and not exists (
-      select 1 from public.payroll_adjustments x
+      select 1
+      from public.payroll_adjustments x
+      join public.payroll_runs xr on xr.organisation_id = x.organisation_id and xr.id = x.run_id
       where x.series_id = l.series_id and x.instalment_number = l.instalment_number + 1
+        and xr.status <> 'reversed'
     );
   get diagnostics v_carried = row_count;
 
@@ -955,7 +1054,8 @@ begin
     p_organisation_id, 'payroll.run_created', 'payroll_runs', v_id, null,
     jsonb_build_object(
       'period_start', v_start, 'period_end', v_end, 'pay_date', v_pay,
-      'rule_set_id', v_rule_set, 'recurring_adjustments', v_carried
+      'rule_set_id', v_rule_set, 'recurring_adjustments', v_carried,
+      'from_reversed_run', v_from_reversed
     ),
     null
   );
@@ -1072,10 +1172,10 @@ begin
 
   insert into public.payslip_lines (
     organisation_id, payslip_id, run_id, position, code, kind, label, amount_kobo, currency,
-    pensionable, taxable, sign
+    pensionable, taxable, sign, copies_line_id
   )
   select l.organisation_id, c.id, v_id, l.position, l.code, l.kind, l.label, l.amount_kobo,
-    l.currency, l.pensionable, l.taxable, -1
+    l.currency, l.pensionable, l.taxable, -1, l.id
   from public.payslip_lines l
   join public.payslips c
     on c.organisation_id = l.organisation_id and c.run_id = v_id and c.reverses_payslip_id = l.payslip_id
@@ -1348,3 +1448,261 @@ $$;
 
 revoke all on function public.approve_payroll_reversal(uuid, uuid, boolean) from public, anon;
 grant execute on function public.approve_payroll_reversal(uuid, uuid, boolean) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 10. Security and money review fixes (24 Nov 2026)
+-- ---------------------------------------------------------------------------
+
+-- M1: a pension schedule (RSA PINs) opens only for a posted run's remittance that isn't voided.
+-- The server calls this as the signed-in user before it decrypts anything (owner, hr, finance).
+create function private.statutory_schedule_check(p_organisation_id uuid, p_remittance_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_status text;
+begin
+  if private.session_uid() is null
+    or not private.has_role(p_organisation_id, array['owner', 'hr', 'finance']) then
+    raise exception 'Only an owner, HR or Finance downloads a schedule.' using errcode = '42501';
+  end if;
+  select r.status into v_status
+  from public.statutory_remittances m
+  join public.payroll_runs r on r.organisation_id = m.organisation_id and r.id = m.run_id
+  where m.organisation_id = p_organisation_id and m.id = p_remittance_id;
+  if v_status is null then
+    raise exception 'That remittance wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_status not in ('approved', 'released') or exists (
+    select 1 from public.statutory_remittance_voids v
+    where v.organisation_id = p_organisation_id and v.remittance_id = p_remittance_id
+  ) then
+    raise exception 'This remittance was voided because its run was reversed, so it has no schedule.'
+      using errcode = 'MLRVB';
+  end if;
+  return true;
+end;
+$$;
+
+revoke all on function private.statutory_schedule_check(uuid, uuid) from public, anon;
+grant execute on function private.statutory_schedule_check(uuid, uuid) to authenticated;
+
+create function public.statutory_schedule_check(p_organisation_id uuid, p_remittance_id uuid)
+returns boolean
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select private.statutory_schedule_check(p_organisation_id, p_remittance_id)
+$$;
+
+revoke all on function public.statutory_schedule_check(uuid, uuid) from public, anon;
+grant execute on function public.statutory_schedule_check(uuid, uuid) to authenticated;
+
+-- L1: 5.4's payout_file_download, unchanged but that it reads the batch FOR SHARE, so a download
+-- waits behind approve_payroll_reversal (which voids the batch FOR UPDATE) and then sees it voided.
+create or replace function private.payout_file_download(
+  p_organisation_id uuid,
+  p_batch_id uuid,
+  p_reason text
+)
+returns text
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_payout_maker(p_organisation_id);
+  v_batch public.payout_batches%rowtype;
+  v_reason text := nullif(btrim(coalesce(p_reason, '')), '');
+begin
+  select b.* into v_batch
+  from public.payout_batches b
+  where b.organisation_id = p_organisation_id and b.id = p_batch_id
+  for share;
+  if v_batch.id is null then
+    raise exception 'That bank file wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v_batch.status <> 'active' then
+    raise exception 'This file was replaced. Download the current one.' using errcode = 'MLBF5';
+  end if;
+  -- Money review M3: a file a waiting reversal will void isn't handed out.
+  if private.payroll_reversal_waiting(p_organisation_id, v_batch.run_id) is not null then
+    raise exception 'A reversal of this run is waiting for approval. Decide it before downloading the bank file.'
+      using errcode = 'MLRV9';
+  end if;
+  if v_reason is not null and (
+    char_length(v_reason) > 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]'
+    or v_reason ~* '(://|www\.)' or regexp_replace(v_reason, '[^0-9]', '', 'g') ~ '[0-9]{10}'
+  ) then
+    raise exception 'Say why in up to 500 characters, with no web addresses or account numbers.'
+      using errcode = '22023';
+  end if;
+  if private.payroll_run_status(p_organisation_id, v_batch.run_id) = 'released' and v_reason is null then
+    raise exception 'This file is already paid. Say why you need it again; never upload it to the bank again.'
+      using errcode = 'MLBFE';
+  end if;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.bank_file_downloaded', 'payout_batches', v_batch.id, null,
+    jsonb_build_object('batch_id', v_batch.id), v_reason
+  );
+  return v_batch.file_path;
+end;
+$$;
+
+-- L2: no payment entry (a payment or a void) on a voided remittance or a reversed run's: the
+-- payment already recorded stays as evidence, and slice 5.7c refunds or offsets it.
+create function private.statutory_payments_not_voided()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if exists (
+    select 1 from public.statutory_remittance_voids v
+    where v.organisation_id = new.organisation_id and v.remittance_id = new.remittance_id
+  ) or exists (
+    select 1
+    from public.statutory_remittances m
+    join public.payroll_runs r on r.organisation_id = m.organisation_id and r.id = m.run_id
+    where m.organisation_id = new.organisation_id and m.id = new.remittance_id
+      and r.status = 'reversed'
+  ) then
+    raise exception 'This remittance was voided because its run was reversed; its payment record stays as it is.'
+      using errcode = 'MLRVB';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.statutory_payments_not_voided() from public, anon, authenticated;
+
+create trigger statutory_payments_not_voided before insert on public.statutory_payments
+  for each row execute function private.statutory_payments_not_voided();
+alter table public.statutory_payments enable always trigger statutory_payments_not_voided;
+
+-- L3: the correction check also fires on a change of the worker, the payslip or the run (5.2's
+-- guard refuses every update anyway; this keeps the check whole on its own).
+drop trigger payroll_adjustments_correction_check on public.payroll_adjustments;
+create trigger payroll_adjustments_correction_check
+  before insert or update of worker_id, corrects_payslip_id, run_id on public.payroll_adjustments
+  for each row execute function private.payroll_adjustments_correction_check();
+alter table public.payroll_adjustments enable always trigger payroll_adjustments_correction_check;
+
+-- L4: a recurring instalment paid in a reversed run doesn't hold its number. The series' unique key
+-- becomes per run, and a trigger keeps one instalment n per series among runs that aren't reversed
+-- (under the series' advisory lock, as carry_payroll_instalment takes it).
+alter table public.payroll_adjustments drop constraint payroll_adjustments_series_key;
+alter table public.payroll_adjustments
+  add constraint payroll_adjustments_series_key unique (series_id, instalment_number, run_id);
+
+create function private.payroll_adjustments_series_once()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtextextended('payroll_series:' || new.series_id::text, 0));
+  if exists (
+    select 1
+    from public.payroll_adjustments a
+    join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+    where a.series_id = new.series_id and a.instalment_number = new.instalment_number
+      and r.status <> 'reversed'
+  ) then
+    raise exception 'That instalment is already on a run.' using errcode = 'MLPRD';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payroll_adjustments_series_once() from public, anon, authenticated;
+
+create trigger payroll_adjustments_series_once before insert on public.payroll_adjustments
+  for each row execute function private.payroll_adjustments_series_once();
+alter table public.payroll_adjustments enable always trigger payroll_adjustments_series_once;
+
+-- create_payroll_run (section 8) carries the next instalment unless it is on a run that isn't
+-- reversed; carry_payroll_instalment (5.2's, unchanged but this) likewise ignores reversed runs,
+-- both for the series' latest instalment and for the instalment already being on a run.
+create or replace function private.carry_payroll_instalment(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_series_id uuid
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_payroll_preparer(p_organisation_id);
+  v_run public.payroll_runs%rowtype;
+  v_last public.payroll_adjustments%rowtype;
+  v_id uuid := gen_random_uuid();
+begin
+  v_run := private.payroll_lock_run(p_organisation_id, p_run_id);
+  if v_run.status <> 'draft' then
+    raise exception 'Adjustments change only while the run is a draft.' using errcode = 'MLPRD';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('payroll_series:' || coalesce(p_series_id::text, ''), 0));
+  select a.* into v_last
+  from public.payroll_adjustments a
+  join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+  where a.organisation_id = p_organisation_id and a.series_id = p_series_id
+    and r.period_start < v_run.period_start and r.status <> 'reversed'
+  order by a.instalment_number desc
+  limit 1;
+  if v_last.id is null then
+    raise exception 'That recurring item wasn''t found in an earlier run.' using errcode = 'P0002';
+  end if;
+  if v_last.instalment_number >= v_last.instalment_count then
+    raise exception 'Every instalment of that item is already paid.' using errcode = 'MLPRD';
+  end if;
+  if exists (
+    select 1
+    from public.payroll_adjustments a
+    join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+    where a.series_id = p_series_id and a.instalment_number = v_last.instalment_number + 1
+      and r.status <> 'reversed'
+  ) then
+    raise exception 'That instalment is already on a run.' using errcode = 'MLPRD';
+  end if;
+  if not exists (
+    select 1 from public.workers w
+    where w.organisation_id = p_organisation_id and w.id = v_last.worker_id
+      and w.start_date <= v_run.period_end
+      and (w.end_date is null or w.end_date >= v_run.period_start)
+  ) then
+    raise exception 'That worker isn''t employed in this pay period.' using errcode = '22023';
+  end if;
+  insert into public.payroll_adjustments (
+    id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
+    series_id, instalment_number, instalment_count, reason, created_by
+  )
+  values (
+    v_id, p_organisation_id, p_run_id, v_last.worker_id, v_last.kind, v_last.label,
+    v_last.amount_kobo, v_last.pensionable, v_last.taxable, p_series_id,
+    v_last.instalment_number + 1, v_last.instalment_count, v_last.reason, v_uid
+  );
+  update public.payroll_runs r set needs_recalculation = true where r.id = p_run_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.instalment_carried', 'payroll_runs', p_run_id, null,
+    jsonb_build_object(
+      'adjustment_id', v_id, 'series_id', p_series_id, 'worker_id', v_last.worker_id,
+      'instalment', v_last.instalment_number + 1, 'of', v_last.instalment_count,
+      'amount_kobo', v_last.amount_kobo::text
+    ),
+    null
+  );
+  return v_id;
+end;
+$$;
