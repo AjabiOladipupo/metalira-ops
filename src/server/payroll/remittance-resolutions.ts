@@ -37,7 +37,7 @@ import { REMITTANCE_RECORDERS, fromRemittanceDbError, type StartedReceipt } from
  * token for one path in the private payroll-evidence bucket, the bytes checked on the server and
  * recorded with the secret key, then `record_remittance_refund` as the user) or an offset against
  * a later standing remittance to the same authority (`record_remittance_offset`). No rule decides
- * which an authority allows (RULES_NIGERIA open point 6): it is the person's choice, audited.
+ * which an authority allows (RULES_NIGERIA open point 8): it is the person's choice, audited.
  * Each write has a preview. Nothing here logs a file, a path or a link.
  */
 

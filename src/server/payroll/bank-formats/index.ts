@@ -38,8 +38,12 @@ const SHORT_MONTHS = [
   "Dec",
 ] as const;
 
-/** "Salary Oct 2026 MLS-0001", from the run's period end (its month) and the staff ID. */
-export function salaryNarration(periodEnd: string, staffId: string): string {
+/**
+ * "Salary Oct 2026 MLS-0001", from the run's period end (its month) and the staff ID; an
+ * off-cycle run's file says "Off-cycle Oct 2026 MLS-0001" (slice 5.7b).
+ */
+export function salaryNarration(periodEnd: string, staffId: string, offCycle = false): string {
   const [year, month] = periodEnd.split("-").map(Number);
-  return `Salary ${SHORT_MONTHS[(month ?? 1) - 1]} ${year} ${staffId}`.trim();
+  const what = offCycle ? "Off-cycle" : "Salary";
+  return `${what} ${SHORT_MONTHS[(month ?? 1) - 1]} ${year} ${staffId}`.trim();
 }

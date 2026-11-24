@@ -58,7 +58,7 @@ export async function loadCarriedDeductions(
 ): Promise<CarriedDeductions> {
   const { data: runs, error } = await supabase
     .from("payroll_runs")
-    .select("id, period_start, period_end, pay_date, approved_at")
+    .select("id, kind, off_cycle_reason, period_start, period_end, pay_date, approved_at")
     .eq("organisation_id", organisationId)
     .in("status", POSTED)
     // A reversal run's payslips are signed copies (slice 5.7a), not pay.
@@ -66,7 +66,18 @@ export async function loadCarriedDeductions(
     .order("pay_date", { ascending: false })
     .limit(120);
   if (error) throw new Error(`Could not read posted runs (${error.code})`);
-  const runById = new Map((runs ?? []).map((r) => [r.id, r] as const));
+  // 5.7b's correction and one-off runs never take or settle a carried deduction (their payslips
+  // carry nothing forward), so they're left out of the running balance; a final-pay or
+  // missed-worker run takes it, as a regular run does.
+  const runById = new Map(
+    (runs ?? [])
+      .filter(
+        (r) =>
+          r.kind !== "off_cycle" ||
+          (r.off_cycle_reason !== "correction" && r.off_cycle_reason !== "one_off"),
+      )
+      .map((r) => [r.id, r] as const),
+  );
   const runIds = [...runById.keys()];
   const notCarried = await loadNotCarried(supabase, organisationId);
   if (runIds.length === 0) return { workers: [], outstandingKobo: 0n, notCarried };

@@ -2351,7 +2351,7 @@ $$;
 -- 5.7a (migration 20261122180000) voids a reversed run's remittances (statutory_remittance_voids)
 -- and leaves a payment already recorded against one standing, as evidence. That money is with
 -- the authority; the person resolves it in one of two ways (no rule decides which an authority
--- allows; RULES_NIGERIA open point 6, confirm with a tax adviser):
+-- allows; RULES_NIGERIA open point 8, confirm with a tax adviser):
 --   refund  a refund received from the authority, with its receipt (5.6's private
 --           payroll-evidence bucket and receipt check), the date and amount received;
 --   offset  set against a later standing remittance to the same authority (the same kind and

@@ -14,7 +14,8 @@
  * - Bayo's Saturday 10 Oct waits for his manager at October's run and is approved after posting;
  *   his pay rises to ₦150,000 from 20 Oct. November pays the Saturday as arrears at the rate in
  *   force that day (8 hours at ₦750, not ₦937.50), once; December doesn't pay it again.
- * Off-cycle runs in between (slice 5.7b) are tested once 5.7b is on main.
+ * - A one-off off-cycle run for Ngozi in between (slice 5.7b) takes none of these corrections:
+ *   only the next regular run pays them, once.
  */
 import { randomUUID } from "node:crypto";
 
@@ -23,7 +24,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { roundHalfUp } from "@/lib/money";
 import { runMutation } from "@/server/identity/mutate";
-import { approveRunSpec, createRunSpec } from "@/server/payroll/runs";
+import {
+  addAdjustmentSpec,
+  approveRunSpec,
+  createOffCycleRunSpec,
+  createRunSpec,
+  recalculateRunSpec,
+} from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
 import {
@@ -296,6 +303,41 @@ describe("after posting: corrections, not MLTA5", () => {
     const workers = (data as { workers: { worker_id: string }[] }).workers;
     expect(workers.map((w) => w.worker_id).sort()).toEqual([ngozi, bayo].sort());
     expect((await read(lineManager.client)).error?.code).toBe("42501");
+  });
+});
+
+describe("an off-cycle run in between (slice 5.7b)", () => {
+  it("takes no leave correction or arrears: a one-off run pays its own item only", async () => {
+    const off = await runMutation(ctxOf(hr, "hr"), createOffCycleRunSpec, {
+      periodStart: NOV_START,
+      payDate: "2026-10-30",
+      reason: "one_off",
+      note: "Long-service bonus",
+      workerIds: [ngozi],
+    });
+    await runMutation(ctxOf(hr, "hr"), addAdjustmentSpec, {
+      runId: off.runId,
+      workerId: ngozi,
+      kind: "earning",
+      label: "Long-service bonus",
+      amount: "5000",
+      instalments: "1",
+      reason: "Ten years with the company",
+    });
+    await runMutation(ctxOf(hr, "hr"), recalculateRunSpec, { runId: off.runId });
+    const { data: lines } = await admin
+      .from("payslip_lines")
+      .select("code")
+      .eq("run_id", off.runId)
+      .eq("kind", "earning");
+    expect(lines!.map((l) => l.code)).toEqual(["adjustment_earning"]);
+    await submitAndApprove(off.runId);
+    const { data: run } = await admin
+      .from("payroll_runs")
+      .select("status")
+      .eq("id", off.runId)
+      .single();
+    expect(run).toEqual({ status: "approved" });
   });
 });
 

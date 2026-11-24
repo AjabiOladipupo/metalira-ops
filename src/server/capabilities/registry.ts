@@ -290,7 +290,9 @@ import {
   addAdjustmentSpec,
   approveRunSpec,
   carryInstalmentSpec,
+  createOffCycleRunSpec,
   createRunSpec,
+  discardOffCycleRunSpec,
   recalculateRunSpec,
   removeAdjustmentSpec,
   returnRunSpec,
@@ -345,7 +347,9 @@ import {
   previewApprovePayrollRun,
   previewCarryPayrollInstalment,
   previewConfirmPayrollSupplement,
+  previewCreateOffCyclePayrollRun,
   previewCreatePayrollRun,
+  previewDiscardOffCyclePayrollRun,
   previewMakePayrollBankFile,
   previewMakePayrollSupplement,
   previewRecalculatePayrollRun,
@@ -2802,6 +2806,33 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: NO_PAYROLL,
   },
+  // Off-cycle runs (payroll/run-actions.ts, slice 5.7b)
+  {
+    name: "payroll.create_off_cycle_run",
+    description:
+      "Prepares an off-cycle run for chosen workers (final pay, missed worker, correction or one-off) and works it out.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(createOffCycleRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "createOffCycleRunAction"),
+    preview: previewCreateOffCyclePayrollRun,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.discard_off_cycle_run",
+    description:
+      "Discards an off-cycle draft with a reason: its draft payslips and one-off items are removed and nobody is paid by it.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(discardOffCycleRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "discardOffCycleRunAction"),
+    preview: previewDiscardOffCyclePayrollRun,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
   {
     name: "payroll.recalculate_run",
     description:
@@ -3271,7 +3302,7 @@ export const CAPABILITIES: readonly Capability[] = [
     preview: previewRemittanceOffset,
     agent: false,
     agentNote:
-      "Whether an authority accepts an offset is a person's call with the adviser (RULES_NIGERIA open point 6); Lira never records payments or offsets.",
+      "Whether an authority accepts an offset is a person's call with the adviser (RULES_NIGERIA open point 8); Lira never records payments or offsets.",
   },
   {
     name: "payroll.open_remittance_receipt",

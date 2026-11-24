@@ -20,6 +20,7 @@ import type {
   DeductionLine,
   EarningLine,
   EmploymentType,
+  MonthToDate,
   PaySourceRef,
   PayslipResult,
 } from "./contract";
@@ -91,6 +92,8 @@ export interface WorkerPayslipInput {
   annualRentKobo: Kobo;
   /** Outstanding from the worker's latest posted payslip (open question 6). */
   carriedDeductionKobo: Kobo;
+  /** The month's other standing payslips, for month-aggregate PAYE (slice 5.7b). */
+  monthToDate?: MonthToDate;
 }
 
 export interface WorkerPayslipOptions {
@@ -127,7 +130,12 @@ export function workerPayslip(
       carriedDeductionKobo: input.carriedDeductionKobo,
     },
     rules,
-    { itfApplies: options.itfApplies, ruleSetId: options.ruleSetId, priorTrace },
+    {
+      itfApplies: options.itfApplies,
+      ruleSetId: options.ruleSetId,
+      priorTrace,
+      ...(input.monthToDate ? { monthToDate: input.monthToDate } : {}),
+    },
   );
 }
 
@@ -172,7 +180,8 @@ export type AnomalyCode =
   | "net_change"
   | "deduction_cut"
   | "no_pension_details"
-  | "recurring_not_carried";
+  | "recurring_not_carried"
+  | "on_off_cycle_run";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -197,6 +206,7 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   deduction_cut: "warning",
   no_pension_details: "warning",
   recurring_not_carried: "warning",
+  on_off_cycle_run: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;

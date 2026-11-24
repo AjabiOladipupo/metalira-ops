@@ -73,11 +73,13 @@ export interface PublishResult {
 }
 
 /** The release notice: no amounts (open question 7), plain text inside the inbox rules. */
-export function payslipNotice(month: string, payDate: string): InboxMessage {
+export function payslipNotice(month: string, payDate: string, offCycle = false): InboxMessage {
+  // An off-cycle run (slice 5.7b) has its own payslip beside the month's regular one.
+  const what = offCycle ? `${month} off-cycle payslip` : `${month} payslip`;
   return {
     kind: "payslip",
-    title: `Your ${month} payslip is ready`,
-    body: `Your payslip for ${month} (pay date ${formatDate(payDate)}) is in the app. Open Payslips to see it and download the PDF.`,
+    title: `Your ${what} is ready`,
+    body: `Your ${offCycle ? `off-cycle payslip for ${month}` : `payslip for ${month}`} (pay date ${formatDate(payDate)}) is in the app. Open Payslips to see it and download the PDF.`,
     link: "/m/payslips",
   };
 }
@@ -193,7 +195,7 @@ export async function publishPayslips(
 
   const { data: run, error: runError } = await admin
     .from("payroll_runs")
-    .select("id, status, period_end, pay_date")
+    .select("id, kind, status, period_end, pay_date")
     .eq("organisation_id", ids.organisationId)
     .eq("id", ids.runId)
     .maybeSingle();
@@ -306,7 +308,7 @@ export async function publishPayslips(
     if (error) throw new Error(`Could not read notices (${error.code})`);
     for (const row of data ?? []) if (row.payslip_id) notified.add(row.payslip_id);
   }
-  const message = payslipNotice(runMonth(run.period_end), run.pay_date);
+  const message = payslipNotice(runMonth(run.period_end), run.pay_date, run.kind === "off_cycle");
   for (const slip of slips) {
     if (!documented.has(slip.id) || notified.has(slip.id)) continue;
     try {
