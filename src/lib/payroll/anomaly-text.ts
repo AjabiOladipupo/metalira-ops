@@ -50,6 +50,13 @@ export function describeAnomaly(
         body: "PAYE goes to the worker's tax state. Add it on their page, then recalculate. This blocks the run.",
       };
     case "calculation_failed":
+      if (detail.deduction_cut === true) {
+        // Slice 5.7b: a correction or one-off run can't carry a deduction to a later run.
+        return {
+          title: `Deduction larger than the payment · ${name}`,
+          body: "On a correction or one-off run, deductions must fit what the run pays: nothing is carried to a later run. Lower or remove the deduction, or take it in the regular run. This blocks the run.",
+        };
+      }
       return {
         title: `Pay can't be worked out · ${name}`,
         body: "A leave deduction or a statutory deduction is larger than their pay. Check their leave and pay rate, then recalculate. This blocks the run.",

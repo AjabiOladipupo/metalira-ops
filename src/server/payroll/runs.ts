@@ -8,6 +8,7 @@ import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { PAYROLL_READERS } from "@/lib/pay-access";
 import type { RunTotals } from "@/lib/payroll/run";
+import { OFF_CYCLE_REASONS, runTitle, type OffCycleReason } from "@/lib/payroll/run-format";
 import type { ManagerRole } from "@/lib/roles";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
@@ -98,6 +99,29 @@ export const adjustmentSchema = z.object({
   reason: text(500, "Give a reason"),
 });
 
+const OFF_CYCLE_REASON_IDS = Object.keys(OFF_CYCLE_REASONS) as [
+  OffCycleReason,
+  ...OffCycleReason[],
+];
+
+/** "New off-cycle run" (slice 5.7b): chosen workers, a reason, a period and a pay date. */
+export const createOffCycleRunSchema = z.object({
+  periodStart: isoDate,
+  payDate: isoDate,
+  reason: z.enum(OFF_CYCLE_REASON_IDS, "Choose why this run is off-cycle"),
+  note: text(500, "Give a reason"),
+  workerIds: z
+    .array(z.uuid("Choose workers from the list"), "Choose at least one worker")
+    .min(1, "Choose at least one worker")
+    .max(200, "Choose 200 workers or fewer")
+    .transform((ids) => [...new Set(ids)].sort()),
+});
+
+export const discardOffCycleRunSchema = z.object({
+  runId: z.uuid(reload),
+  reason: text(500, "Give a reason"),
+});
+
 export const carryInstalmentSchema = z.object({
   runId: z.uuid(reload),
   seriesId: z.uuid(reload),
@@ -140,7 +164,11 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
   }
   if (error.code === "P0002")
     throw new MutationError("invalid", `${error.message} Reload the page.`);
-  if (/^MLPR[46ABCDF]$/.test(error.code) || error.code === "22023") {
+  if (
+    /^MLPR[46ABCDF]$/.test(error.code) ||
+    /^MLOC[1-8]$/.test(error.code) ||
+    error.code === "22023"
+  ) {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code})`);
@@ -155,6 +183,9 @@ async function draftRun(
   if (!run) throw new MutationError("invalid", "That payroll run wasn't found. Reload the page.");
   if (run.status !== "draft") {
     throw new MutationError("invalid", "This run isn't a draft, so it can't change.");
+  }
+  if (run.discardedAt) {
+    throw new MutationError("invalid", "This off-cycle run was discarded, so it can't change.");
   }
   return run;
 }
@@ -176,7 +207,14 @@ export async function recalculateAndSave(
     await saveCalculation(ctx.organisationId, run.id, ctx.userId, calc);
   } catch (error) {
     const e = error as { code?: string; detail?: string };
-    if (e.code && /^MLPR[CD]$/.test(e.code)) {
+    if (e.code === "MLPRC" && run.kind === "off_cycle") {
+      // Slice 5.7b: the regular draft of the period still holds the worker's days.
+      throw new MutationError(
+        "invalid",
+        "Another payslip already pays some of these days. If the worker is on this period's regular run, recalculate that run first (it then leaves them out), then recalculate this one.",
+      );
+    }
+    if (e.code && (/^MLPR[CD]$/.test(e.code) || /^MLOC[5-7]$/.test(e.code))) {
       throw new MutationError("invalid", e.detail ?? "The run changed. Reload the page.");
     }
     if (e.code === "MLPR6") {
@@ -245,6 +283,58 @@ export async function previewCreateRun(
   return {
     summary: `Prepares ${range} for ${calc.totals.workerCount} ${calc.totals.workerCount === 1 ? "worker" : "workers"}, paid ${formatDate(payDate)}, with ${calc.ruleSet.name}: net pay ${money(calc.totals.netKobo)}, ${calc.anomalies.length} anomalies (${blockingOf(calc)} blocking). ${last ? `Compared with ${formatLeaveRange(last.periodStart, last.periodEnd)}.` : "No earlier posted run to compare with."}`,
     changes: totalsChanges(last?.totals ?? null, calc.totals),
+  };
+}
+
+/** "New off-cycle run": the run worked out for the chosen workers, nothing saved. */
+export async function previewCreateOffCycleRun(
+  ctx: Pick<MutationContext, "supabase" | "organisationId">,
+  data: z.output<typeof createOffCycleRunSchema>,
+): Promise<CapabilityPreview> {
+  const { data: period, error } = await ctx.supabase.rpc("payroll_period", {
+    p_organisation_id: ctx.organisationId,
+    p_date: data.periodStart,
+  });
+  if (error) fromPayrollRunDbError(error);
+  const p = period?.[0];
+  if (!p || p.period_start !== data.periodStart) {
+    throw new MutationError("invalid", "Choose a pay period by its first day.");
+  }
+  const calc = await calculateRun(ctx.supabase, ctx.organisationId, {
+    runId: null,
+    periodStart: p.period_start,
+    payDate: data.payDate,
+    ruleSetId: null,
+    offCycle: { reason: data.reason, workerIds: data.workerIds },
+  });
+  const what = OFF_CYCLE_REASONS[data.reason];
+  const chosen = data.workerIds.length;
+  const range = formatLeaveRange(p.period_start, p.period_end);
+  const body = what.fullPay
+    ? `net pay ${money(calc.totals.netKobo)} for ${calc.totals.workerCount} of ${chosen} ${chosen === 1 ? "worker" : "workers"}, ${calc.anomalies.length} anomalies (${blockingOf(calc)} blocking)`
+    : `nothing is paid until you add the one-off earnings, each with a reason, on the Earnings step`;
+  return {
+    summary: `Prepares an off-cycle run (${what.label.toLowerCase()}) for ${range}, paid ${formatDate(data.payDate)}, with ${calc.ruleSet.name}: ${body}. It has its own payslips and bank file, and a different person in Finance must approve it.`,
+    changes: totalsChanges(null, calc.totals),
+  };
+}
+
+/** "Discard": what the draft would have paid, which nobody is paid. */
+export async function previewDiscardOffCycleRun(
+  ctx: Pick<MutationContext, "supabase" | "organisationId">,
+  data: z.output<typeof discardOffCycleRunSchema>,
+): Promise<CapabilityPreview> {
+  const run = await draftRun(ctx.supabase, ctx.organisationId, data.runId);
+  if (run.kind !== "off_cycle") {
+    throw new MutationError("invalid", "Only an off-cycle run is discarded.");
+  }
+  const t = run.totals;
+  return {
+    summary: `Discards ${runTitle(run)}: its draft payslips (net pay ${money(t.netKobo)} to ${t.workerCount} ${t.workerCount === 1 ? "worker" : "workers"}) and one-off items are removed and nobody is paid by it. The run stays listed as discarded, with your reason.`,
+    changes: [
+      { label: "Net pay", before: money(t.netKobo), after: money(0n) },
+      { label: "Status", before: "Draft", after: "Discarded" },
+    ],
   };
 }
 
@@ -397,7 +487,7 @@ export async function previewSubmit(
   const acked = all.filter((a) => a.acknowledged_at !== null).length;
   const t = run.totals;
   return {
-    summary: `Submits ${formatLeaveRange(run.periodStart, run.periodEnd)} to Finance: net pay ${money(t.netKobo)} to ${t.workerCount} workers; ${acked} of ${all.length} anomalies acknowledged${blocking > 0 ? `, ${blocking} blocking` : ""}. A different person in Finance must approve before any payment file is released.`,
+    summary: `Submits ${run.kind === "off_cycle" ? `${runTitle(run)}, ` : ""}${formatLeaveRange(run.periodStart, run.periodEnd)} to Finance: net pay ${money(t.netKobo)} to ${t.workerCount} workers; ${acked} of ${all.length} anomalies acknowledged${blocking > 0 ? `, ${blocking} blocking` : ""}. A different person in Finance must approve before any payment file is released.`,
     changes: [
       { label: "Net pay", after: money(t.netKobo) },
       { label: "PAYE", after: money(t.payeKobo) },
@@ -510,7 +600,7 @@ export async function previewApprove(
   const workers = `${t.workerCount} ${t.workerCount === 1 ? "worker" : "workers"}`;
   const ackText = `${acked.length} ${acked.length === 1 ? "anomaly was" : "anomalies were"} acknowledged by HR`;
   return {
-    summary: `Approves ${formatLeaveRange(run.periodStart, run.periodEnd)}: net pay ${money(t.netKobo)} to ${workers}, paid ${formatDate(run.payDate)}. Nothing it was worked out from has changed. ${ackText}. Approving posts the payslips (they never change after) and locks the period's timesheets.`,
+    summary: `Approves ${run.kind === "off_cycle" ? `${runTitle(run)}, ` : ""}${formatLeaveRange(run.periodStart, run.periodEnd)}: net pay ${money(t.netKobo)} to ${workers}, paid ${formatDate(run.payDate)}. Nothing it was worked out from has changed. ${ackText}. ${run.kind === "off_cycle" ? "Approving posts these payslips (they never change after) and holds the timesheet days they pay; the period stays open for the regular run." : "Approving posts the payslips (they never change after) and locks the period's timesheets."}`,
     changes: [
       { label: "Workers", after: String(t.workerCount) },
       { label: "Gross pay", after: money(t.grossKobo) },
@@ -571,6 +661,54 @@ export const createRunSpec: MutationSpec<typeof createRunSchema, CreatedRun> = {
       console.error("payroll.first_calculation_failed:", e instanceof Error ? e.name : "unknown");
       return { runId: run.id, calculated: false };
     }
+  },
+};
+
+/** Creates an off-cycle run for chosen workers and calculates it (slice 5.7b). */
+export const createOffCycleRunSpec: MutationSpec<typeof createOffCycleRunSchema, CreatedRun> = {
+  module: "payroll",
+  schema: createOffCycleRunSchema,
+  roles: PAYROLL_PREPARERS,
+  run: async (ctx) => {
+    const d = ctx.data;
+    const { data: runId, error } = await ctx.supabase.rpc("create_off_cycle_run", {
+      p_organisation_id: ctx.organisationId,
+      p_period_start: d.periodStart,
+      p_pay_date: d.payDate,
+      p_reason: d.reason,
+      p_note: d.note,
+      p_worker_ids: d.workerIds,
+    });
+    if (error) fromPayrollRunDbError(error);
+    const run = await loadRun(ctx.supabase, ctx.organisationId, runId!);
+    if (!run) return { runId: runId!, calculated: false };
+    try {
+      await recalculateAndSave(ctx, run);
+      return { runId: run.id, calculated: true };
+    } catch (e) {
+      // The run exists, empty and marked for recalculation; the screen offers Recalculate.
+      console.error("payroll.first_calculation_failed:", e instanceof Error ? e.name : "unknown");
+      return { runId: run.id, calculated: false };
+    }
+  },
+};
+
+/** Discards an off-cycle draft with a reason (slice 5.7b): nothing of it is paid. */
+export const discardOffCycleRunSpec: MutationSpec<
+  typeof discardOffCycleRunSchema,
+  { runId: string }
+> = {
+  module: "payroll",
+  schema: discardOffCycleRunSchema,
+  roles: PAYROLL_PREPARERS,
+  run: async ({ supabase, organisationId, data }) => {
+    const { error } = await supabase.rpc("discard_off_cycle_run", {
+      p_organisation_id: organisationId,
+      p_run_id: data.runId,
+      p_reason: data.reason,
+    });
+    if (error) fromPayrollRunDbError(error);
+    return { runId: data.runId };
   },
 };
 

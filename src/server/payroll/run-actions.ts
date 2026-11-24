@@ -20,14 +20,20 @@ import {
   approveRunSpec,
   carryInstalmentSchema,
   carryInstalmentSpec,
+  createOffCycleRunSchema,
+  createOffCycleRunSpec,
   createRunSchema,
   createRunSpec,
+  discardOffCycleRunSchema,
+  discardOffCycleRunSpec,
   PAYROLL_APPROVERS,
   PAYROLL_PREPARERS,
   previewAddAdjustment,
   previewApprove,
   previewCarryInstalment,
+  previewCreateOffCycleRun,
   previewCreateRun,
+  previewDiscardOffCycleRun,
   previewRecalculate,
   previewRemoveAdjustment,
   previewReturn,
@@ -94,6 +100,16 @@ function previewSpec<S extends z.ZodType>(
 
 const previewCreateSpec = previewSpec(createRunSchema, PAYROLL_PREPARERS, previewCreateRun);
 const previewRecalculateSpec = previewSpec(runIdSchema, PAYROLL_PREPARERS, previewRecalculate);
+const previewCreateOffCycleSpec = previewSpec(
+  createOffCycleRunSchema,
+  PAYROLL_PREPARERS,
+  previewCreateOffCycleRun,
+);
+const previewDiscardOffCycleSpec = previewSpec(
+  discardOffCycleRunSchema,
+  PAYROLL_PREPARERS,
+  previewDiscardOffCycleRun,
+);
 const previewAddSpec = previewSpec(adjustmentSchema, PAYROLL_PREPARERS, previewAddAdjustment);
 const previewRemoveSpec = previewSpec(
   removeAdjustmentSchema,
@@ -147,6 +163,51 @@ export async function createRunAction(
     (created) => {
       revalidatePath(PAYROLL_PATH);
       redirect(`${PAYROLL_PATH}/${created.runId}?step=gross-to-net`);
+    },
+  );
+}
+
+/**
+ * "New off-cycle run" (slice 5.7b): preview (the chosen workers' run worked out), then create and
+ * calculate. The ticked workers come as repeated `workerIds` fields; the form gets them back
+ * joined with commas so the confirm press sends what the preview showed.
+ */
+export async function createOffCycleRunAction(
+  _prev: RunFormState,
+  formData: FormData,
+): Promise<RunFormState> {
+  const workerIds = formData
+    .getAll("workerIds")
+    .filter((v): v is string => typeof v === "string" && v !== "");
+  const input = { ...formFields(formData), workerIds };
+  const state = await twoStep(
+    formData,
+    input,
+    previewCreateOffCycleSpec as MutationSpec<z.ZodType, CapabilityPreview>,
+    createOffCycleRunSpec as MutationSpec<z.ZodType, { runId: string; calculated: boolean }>,
+    (created) => {
+      revalidatePath(PAYROLL_PATH);
+      redirect(`${PAYROLL_PATH}/${created.runId}?step=earnings`);
+    },
+  );
+  return state ? { ...state, values: { ...state.values, workerIds: workerIds.join(",") } } : state;
+}
+
+/** "Discard this off-cycle run" (slice 5.7b): preview, then discard with a reason. */
+export async function discardOffCycleRunAction(
+  _prev: RunFormState,
+  formData: FormData,
+): Promise<RunFormState> {
+  const input = formFields(formData);
+  return twoStep(
+    formData,
+    input,
+    previewDiscardOffCycleSpec as MutationSpec<z.ZodType, CapabilityPreview>,
+    discardOffCycleRunSpec as MutationSpec<z.ZodType, { runId: string }>,
+    (r) => {
+      revalidatePath(PAYROLL_PATH);
+      revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
+      return { ok: true, status: 200, message: "Discarded. Nothing on this run is paid." };
     },
   );
 }

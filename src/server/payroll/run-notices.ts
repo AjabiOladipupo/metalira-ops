@@ -57,7 +57,7 @@ export async function notifyRunSubmitted(
     const [run, org, members, preparer] = await Promise.all([
       admin
         .from("payroll_runs")
-        .select("id, status, period_start, period_end, pay_date")
+        .select("id, kind, status, period_start, period_end, pay_date")
         .eq("organisation_id", organisationId)
         .eq("id", decision.run_id)
         .maybeSingle(),
@@ -99,7 +99,8 @@ export async function notifyRunSubmitted(
     if (!claim.data) return 0;
 
     const appUrl = emailAppUrl();
-    const period = formatLeaveRange(run.data.period_start, run.data.period_end);
+    // An off-cycle run (slice 5.7b) says so; the email carries no amounts either way.
+    const period = `${formatLeaveRange(run.data.period_start, run.data.period_end)}${run.data.kind === "off_cycle" ? " (off-cycle)" : ""}`;
     let sent = 0;
     for (const [i, to] of addresses.entries()) {
       try {
@@ -159,7 +160,7 @@ export async function notifyRunDecided(
     const [run, org, decider, submitted] = await Promise.all([
       admin
         .from("payroll_runs")
-        .select("id, status, period_start, period_end, pay_date, prepared_by")
+        .select("id, kind, status, period_start, period_end, pay_date, prepared_by")
         .eq("organisation_id", organisationId)
         .eq("id", decision.run_id)
         .maybeSingle(),
@@ -219,7 +220,8 @@ export async function notifyRunDecided(
     if (!claim.data) return 0;
 
     const appUrl = emailAppUrl();
-    const period = formatLeaveRange(run.data.period_start, run.data.period_end);
+    // An off-cycle run (slice 5.7b) says so; the email carries no amounts either way.
+    const period = `${formatLeaveRange(run.data.period_start, run.data.period_end)}${run.data.kind === "off_cycle" ? " (off-cycle)" : ""}`;
     let sent = 0;
     for (const [i, to] of addresses.entries()) {
       try {

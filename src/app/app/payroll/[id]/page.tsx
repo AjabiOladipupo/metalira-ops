@@ -10,7 +10,14 @@ import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, sumKobo, toKobo, type Kobo } from "@/lib/money";
 import { describeAnomaly } from "@/lib/payroll/anomaly-text";
 import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
-import { RUN_STATUS, RUN_STEPS, runMonth, runStep, type RunStepId } from "@/lib/payroll/run-format";
+import {
+  OFF_CYCLE_REASONS,
+  RUN_STATUS,
+  RUN_STEPS,
+  runStep,
+  runTitle,
+  type RunStepId,
+} from "@/lib/payroll/run-format";
 import { authorityLabel } from "@/lib/payroll/statutory";
 import { traceLess, traceNaira } from "@/lib/payroll/trace";
 import { cn } from "@/lib/utils";
@@ -25,6 +32,7 @@ import {
   AddAdjustmentForm,
   ApproveRunForm,
   CarryInstalmentForm,
+  DiscardOffCycleForm,
   RecalculateForm,
   RemoveAdjustmentForm,
   ReturnRunForm,
@@ -109,6 +117,7 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
           testId="workers-in-run"
         />
       </div>
+      {run.kind === "off_cycle" ? <OffCyclePanel d={d} canPrepare={canPrepare} /> : null}
       <p className="m-0 text-sm text-fg-muted">
         Rule set {d.ruleSet?.name ?? "not found"}
         {d.ruleSet ? `, in force from ${formatDate(d.ruleSet.effectiveFrom)}` : ""}: the version in
@@ -128,7 +137,7 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
         </div>
       ) : null}
       {run.status === "approved" || run.status === "released" ? <PostedNote d={d} /> : null}
-      {run.status === "draft" && canPrepare ? (
+      {run.status === "draft" && canPrepare && !run.discardedAt ? (
         <div className="flex flex-col gap-2 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">Recalculate</h3>
           <p className="m-0 text-sm text-fg-muted">
@@ -226,7 +235,8 @@ function TimesheetsStep({ d }: StepProps) {
 }
 
 function EarningsStep({ d, canPrepare }: StepProps) {
-  const draft = d.run.status === "draft";
+  const draft = d.run.status === "draft" && !d.run.discardedAt;
+  const offCycle = d.run.kind === "off_cycle";
   return (
     <section aria-labelledby="earnings" className="flex flex-col gap-3">
       <h2 id="earnings" className="m-0 type-h2">
@@ -296,8 +306,17 @@ function EarningsStep({ d, canPrepare }: StepProps) {
       </p>
       {draft && canPrepare ? (
         <div className="flex flex-col gap-3 rounded-xl border border-line p-5">
-          <h3 className="m-0 type-h3">Add an earning or deduction</h3>
-          <AddAdjustmentForm runId={d.run.id} workers={d.workers} />
+          <h3 className="m-0 type-h3">
+            {offCycle ? "Add a one-off earning or deduction" : "Add an earning or deduction"}
+          </h3>
+          {offCycle ? (
+            <p className="m-0 text-sm text-fg-muted" data-testid="off-cycle-earnings-hint">
+              Off-cycle items are one-off, for the workers on this run. Leave encashment and
+              terminal benefits have no rule in the app yet: add each as an earning with a reason,
+              and confirm the amount and its tax with your tax adviser.
+            </p>
+          ) : null}
+          <AddAdjustmentForm runId={d.run.id} workers={d.workers} oneOffOnly={offCycle} />
         </div>
       ) : null}
     </section>
@@ -596,7 +615,9 @@ function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
         Prepared by {preparer}. A different person in Finance must approve before any payment file
         is released. Metalira never holds the money: the company pays from its own bank account.
       </p>
-      {run.status === "draft" && canPrepare ? <SubmitRunForm runId={run.id} /> : null}
+      {run.status === "draft" && canPrepare && !run.discardedAt ? (
+        <SubmitRunForm runId={run.id} />
+      ) : null}
       {run.status === "review" ? (
         <p role="status" className="m-0 flex items-center gap-2 font-semibold">
           <Status tone="action">Waiting for Finance approval</Status>
@@ -666,6 +687,49 @@ function ApprovalPanel({ d }: { d: RunDetail }) {
   );
 }
 
+/** An off-cycle run (slice 5.7b): why, for whom, and Discard while it is a draft. */
+function OffCyclePanel({ d, canPrepare }: { d: RunDetail; canPrepare: boolean }) {
+  const { run } = d;
+  const reason = run.offCycleReason ? OFF_CYCLE_REASONS[run.offCycleReason] : null;
+  return (
+    <section
+      aria-labelledby="off-cycle"
+      data-testid="off-cycle-panel"
+      className="flex flex-col gap-3 rounded-xl border border-line p-5"
+    >
+      <h3 id="off-cycle" className="m-0 type-h3">
+        Off-cycle: {reason?.label ?? "off-cycle run"}
+      </h3>
+      {run.offCycleNote ? <p className="m-0 text-[15px]">{run.offCycleNote}</p> : null}
+      <p className="m-0 text-sm text-fg-muted">
+        {reason?.hint} Its own payslips, bank file and remittances; it doesn&apos;t lock the period
+        for the regular run.
+      </p>
+      <p className="m-0 text-sm">
+        {d.offCycleWorkers.length} {d.offCycleWorkers.length === 1 ? "worker" : "workers"}:{" "}
+        {d.offCycleWorkers.map((w) => (w.staffId ? `${w.name} (${w.staffId})` : w.name)).join(", ")}
+      </p>
+      {run.discardedAt ? (
+        <p role="status" className="m-0 text-sm" data-testid="discarded-note">
+          <Status tone="partial">Discarded</Status> by{" "}
+          {(run.discardedBy && d.names.get(run.discardedBy)) ?? "a manager"} ·{" "}
+          {formatDateTime(run.discardedAt)}: {run.discardReason}. Nothing on this run is paid.
+        </p>
+      ) : null}
+      {run.status === "draft" && !run.discardedAt && canPrepare ? (
+        <details className="rounded-lg border border-line p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            Discard this off-cycle run
+          </summary>
+          <div className="pt-3">
+            <DiscardOffCycleForm runId={run.id} />
+          </div>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
 /** A posted run: who approved it and what that means. */
 function PostedNote({ d }: { d: RunDetail }) {
   const { run } = d;
@@ -679,8 +743,10 @@ function PostedNote({ d }: { d: RunDetail }) {
       <span>
         by {(run.approvedBy && d.names.get(run.approvedBy)) ?? "a manager"}
         {run.approvedAt ? ` · ${formatDateTime(run.approvedAt)}` : ""}. The payslips are posted and
-        never change; timesheet days in {formatLeaveRange(run.periodStart, run.periodEnd)} are
-        locked, and days approved from now on are paid in the next run.{" "}
+        never change;{" "}
+        {run.kind === "off_cycle"
+          ? "the timesheet days they pay are held, and the period stays open for the regular run."
+          : `timesheet days in ${formatLeaveRange(run.periodStart, run.periodEnd)} are locked, and days approved from now on are paid in the next run.`}{" "}
         <Link href={`/app/payroll/remittances?run=${run.id}`} className="text-signal">
           Statutory remittances
         </Link>
@@ -719,16 +785,31 @@ async function RunPage({
   const index = RUN_STEPS.findIndex((s) => s.id === step);
   const prev = RUN_STEPS[index - 1];
   const next = RUN_STEPS[index + 1];
-  const status = RUN_STATUS[d.run.status];
+  const status = d.run.discardedAt
+    ? ({ label: "Discarded", tone: "partial" } as const)
+    : RUN_STATUS[d.run.status];
+  const offCycle = d.run.kind === "off_cycle";
 
   return (
     <>
       <PageHeader
         back={{ href: "/app/payroll", label: "Payroll run" }}
         eyebrow={`${formatLeaveRange(d.run.periodStart, d.run.periodEnd)} · pay date ${formatDate(d.run.payDate)}`}
-        title={`Run ${runMonth(d.run.periodEnd)} payroll`}
+        title={offCycle ? runTitle(d.run) : `Run ${runTitle(d.run)} payroll`}
         description={`${d.run.totals.workerCount} workers · net pay ${naira(d.run.totals.netKobo)} · rule set ${d.ruleSet?.name ?? ""}${d.ruleSet ? ` · effective ${formatDate(d.ruleSet.effectiveFrom)}` : ""}`}
-        actions={<Status tone={status.tone}>{status.label}</Status>}
+        actions={
+          <span className="flex flex-wrap items-center gap-2">
+            {offCycle ? (
+              <span
+                data-testid="off-cycle-label"
+                className="rounded-md border border-line px-2 py-0.5 text-xs font-medium"
+              >
+                Off-cycle
+              </span>
+            ) : null}
+            <Status tone={status.tone}>{status.label}</Status>
+          </span>
+        }
       />
       <StepNav runId={d.run.id} step={step} />
       {step === "period" ? <PeriodStep {...props} /> : null}

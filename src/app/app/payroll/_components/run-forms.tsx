@@ -9,7 +9,9 @@ import {
   addAdjustmentAction,
   approveRunAction,
   carryInstalmentAction,
+  createOffCycleRunAction,
   createRunAction,
+  discardOffCycleRunAction,
   recalculateRunAction,
   removeAdjustmentAction,
   returnRunAction,
@@ -162,9 +164,12 @@ export function RecalculateForm({ runId }: { runId: string }) {
 export function AddAdjustmentForm({
   runId,
   workers,
+  oneOffOnly = false,
 }: {
   runId: string;
   workers: { id: string; name: string; staffId: string }[];
+  /** An off-cycle run (slice 5.7b) takes one-off items only. */
+  oneOffOnly?: boolean;
 }) {
   return (
     <TwoStepForm
@@ -221,16 +226,20 @@ export function AddAdjustmentForm({
                 defaultValue={valueOf(state, "amount")}
                 error={errors?.amount}
               />
-              <Field
-                label="Instalments"
-                name="instalments"
-                type="number"
-                min={1}
-                max={60}
-                defaultValue={valueOf(state, "instalments", "1")}
-                hint="1 for a one-off; 3 for a repayment over 3 runs."
-                error={errors?.instalments}
-              />
+              {oneOffOnly ? (
+                <input type="hidden" name="instalments" value="1" />
+              ) : (
+                <Field
+                  label="Instalments"
+                  name="instalments"
+                  type="number"
+                  min={1}
+                  max={60}
+                  defaultValue={valueOf(state, "instalments", "1")}
+                  hint="1 for a one-off; 3 for a repayment over 3 runs."
+                  error={errors?.instalments}
+                />
+              )}
             </div>
             <Field
               label="Reason"
@@ -430,5 +439,168 @@ export function ApproveRunForm({ runId }: { runId: string }) {
       confirmLabel="Confirm and approve"
       pendingLabel="Checking the inputs…"
     />
+  );
+}
+
+export interface OffCycleWorkerOption {
+  id: string;
+  name: string;
+  staffId: string;
+  /** "Last day 5 Oct 2026", "Started 1 Oct 2026", or null. */
+  note: string | null;
+}
+
+/**
+ * "New off-cycle run" (slice 5.7b): why, the pay period and pay date, the workers (ticked from a
+ * list you can filter by name or staff ID) and HR's reason. Two presses: the preview works the run
+ * out for the ticked workers; the second creates it.
+ */
+export function OffCycleRunForm({
+  periods,
+  reasons,
+  workers,
+  defaultPayDate,
+}: {
+  periods: { value: string; label: string }[];
+  reasons: { value: string; label: string; hint: string }[];
+  workers: OffCycleWorkerOption[];
+  defaultPayDate: string;
+}) {
+  const [filter, setFilter] = useState("");
+  const [reason, setReason] = useState(reasons[0]?.value ?? "");
+  const needle = filter.trim().toLowerCase();
+  return (
+    <TwoStepForm
+      action={createOffCycleRunAction}
+      hidden={{}}
+      label="New off-cycle run"
+      previewLabel="Preview the off-cycle run"
+      confirmLabel="Prepare the off-cycle run"
+      pendingLabel="Working it out…"
+    >
+      {(state) => {
+        const errors = state && !state.ok ? state.fieldErrors : undefined;
+        const ticked = new Set(valueOf(state, "workerIds").split(",").filter(Boolean));
+        const chosenReason = valueOf(state, "reason", reason);
+        return (
+          <>
+            <div className={GRID}>
+              <SelectField
+                label="Why off-cycle"
+                name="reason"
+                required
+                defaultValue={chosenReason}
+                onChange={(e) => setReason(e.currentTarget.value)}
+                options={reasons.map((r) => ({ value: r.value, label: r.label }))}
+                hint={reasons.find((r) => r.value === reason)?.hint}
+                error={errors?.reason}
+              />
+              <SelectField
+                label="Pay period"
+                name="periodStart"
+                required
+                defaultValue={valueOf(state, "periodStart", periods[0]?.value ?? "")}
+                options={periods}
+                hint="For a final pay, the period holding the worker's last day."
+                error={errors?.periodStart}
+              />
+              <Field
+                label="Pay date"
+                name="payDate"
+                type="date"
+                required
+                defaultValue={valueOf(state, "payDate", defaultPayDate)}
+                hint="In the period, or up to 45 days after it."
+                error={errors?.payDate}
+              />
+            </div>
+            <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+              <legend className="mb-1.5 text-[13px] font-medium">Workers</legend>
+              <input
+                type="search"
+                aria-label="Filter workers by name or staff ID"
+                placeholder="Filter by name or staff ID"
+                value={filter}
+                onChange={(e) => setFilter(e.currentTarget.value)}
+                className="h-11 w-full rounded-lg border border-line bg-background px-3 text-[15px]"
+              />
+              <ul
+                data-testid="off-cycle-workers"
+                className="m-0 flex max-h-72 list-none flex-col overflow-y-auto rounded-lg border border-line p-0"
+              >
+                {workers.map((w) => {
+                  const shown =
+                    needle === "" ||
+                    w.name.toLowerCase().includes(needle) ||
+                    w.staffId.toLowerCase().includes(needle);
+                  return (
+                    <li
+                      key={w.id}
+                      className={shown ? "border-b border-line last:border-b-0" : "hidden"}
+                    >
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          name="workerIds"
+                          value={w.id}
+                          defaultChecked={ticked.has(w.id)}
+                          className="size-[18px] shrink-0 accent-foreground"
+                        />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="font-medium">
+                            {w.name}
+                            {w.staffId ? (
+                              <span className="text-fg-muted"> · {w.staffId}</span>
+                            ) : null}
+                          </span>
+                          {w.note ? <span className="text-xs text-fg-muted">{w.note}</span> : null}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              {errors?.workerIds ? (
+                <p className="m-0 text-xs font-medium">{errors.workerIds}</p>
+              ) : null}
+            </fieldset>
+            <Field
+              label="Reason"
+              name="note"
+              required
+              maxLength={500}
+              placeholder="Resigned, last day 5 October"
+              defaultValue={valueOf(state, "note")}
+              error={errors?.note}
+            />
+          </>
+        );
+      }}
+    </TwoStepForm>
+  );
+}
+
+export function DiscardOffCycleForm({ runId }: { runId: string }) {
+  return (
+    <TwoStepForm
+      action={discardOffCycleRunAction}
+      hidden={{ runId }}
+      label="Discard this off-cycle run"
+      previewLabel="Discard"
+      confirmLabel="Confirm and discard"
+      pendingLabel="Discarding…"
+    >
+      {(state) => (
+        <Field
+          label="Reason"
+          name="reason"
+          required
+          maxLength={500}
+          placeholder="Paid in the regular run instead"
+          defaultValue={valueOf(state, "reason")}
+          error={state && !state.ok ? state.fieldErrors?.reason : undefined}
+        />
+      )}
+    </TwoStepForm>
   );
 }

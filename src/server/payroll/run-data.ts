@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { toKobo, type Kobo } from "@/lib/money";
 import type { StoredTrace } from "@/lib/payroll/trace";
 import type { RunTotals } from "@/lib/payroll/run";
+import { isOffCycleReason, type OffCycleReason } from "@/lib/payroll/run-format";
 import type { Database } from "@/types/db";
 
 /**
@@ -38,11 +39,18 @@ export interface PayrollRunRow {
   releasedAt: string | null;
   releasedBy: string | null;
   createdAt: string;
+  /** Off-cycle runs only (slice 5.7b). */
+  offCycleReason: OffCycleReason | null;
+  offCycleNote: string | null;
+  /** An off-cycle draft discarded with a reason (slice 5.7b): it pays nothing. */
+  discardedAt: string | null;
+  discardedBy: string | null;
+  discardReason: string | null;
   totals: RunTotals;
 }
 
 const RUN_COLUMNS =
-  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, released_at, released_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
+  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, released_at, released_by, created_at, off_cycle_reason, off_cycle_note, discarded_at, discarded_by, discard_reason, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
 
 type RunRecord = {
   id: string;
@@ -65,6 +73,11 @@ type RunRecord = {
   released_at: string | null;
   released_by: string | null;
   created_at: string;
+  off_cycle_reason: string | null;
+  off_cycle_note: string | null;
+  discarded_at: string | null;
+  discarded_by: string | null;
+  discard_reason: string | null;
   worker_count: number;
   gross_kobo: string;
   paye_kobo: string;
@@ -101,6 +114,11 @@ function toRun(r: RunRecord): PayrollRunRow {
     releasedAt: r.released_at,
     releasedBy: r.released_by,
     createdAt: r.created_at,
+    offCycleReason: isOffCycleReason(r.off_cycle_reason) ? r.off_cycle_reason : null,
+    offCycleNote: r.off_cycle_note,
+    discardedAt: r.discarded_at,
+    discardedBy: r.discarded_by,
+    discardReason: r.discard_reason,
     totals: {
       grossKobo: toKobo(r.gross_kobo),
       payeKobo: toKobo(r.paye_kobo),
@@ -156,6 +174,7 @@ export async function loadLastPostedRun(
     .select(RUN_COLUMNS)
     .eq("organisation_id", organisationId)
     .in("status", ["approved", "released"])
+    .eq("kind", "regular")
     .lt("period_start", beforePeriod)
     .order("period_start", { ascending: false })
     .limit(1)
@@ -246,8 +265,13 @@ export interface RunDetail {
   adjustments: AdjustmentRow[];
   decisions: DecisionRow[];
   items: EarningItem[];
-  /** Workers who can get an adjustment (the run's payslips, by name). */
+  /**
+   * Workers who can get an adjustment: the run's payslips, by name, or an off-cycle run's chosen
+   * workers (slice 5.7b).
+   */
   workers: RunWorker[];
+  /** An off-cycle run's chosen workers (slice 5.7b); empty for a regular run. */
+  offCycleWorkers: RunWorker[];
   names: Map<string, string>;
 }
 
@@ -284,7 +308,7 @@ export async function loadRunDetail(
 ): Promise<RunDetail | null> {
   const run = await loadRun(supabase, organisationId, runId);
   if (!run) return null;
-  const [ruleSet, slips, anomalies, adjustments, decisions, itemRows] = await Promise.all([
+  const [ruleSet, slips, anomalies, adjustments, decisions, itemRows, chosen] = await Promise.all([
     supabase
       .from("tax_rule_sets")
       .select("name, effective_from, adviser_confirmed_at")
@@ -336,8 +360,14 @@ export async function loadRunDetail(
       ])
       .order("position")
       .limit(5000),
+    supabase
+      .from("payroll_run_workers")
+      .select("worker_id")
+      .eq("organisation_id", organisationId)
+      .eq("run_id", runId)
+      .limit(500),
   ]);
-  for (const r of [slips, anomalies, adjustments, decisions, itemRows]) {
+  for (const r of [slips, anomalies, adjustments, decisions, itemRows, chosen]) {
     if (r.error) throw new Error(`Could not read the payroll run (${r.error.code})`);
   }
 
@@ -345,6 +375,7 @@ export async function loadRunDetail(
   for (const s of slips.data ?? []) workerIds.add(s.worker_id);
   for (const a of anomalies.data ?? []) if (a.worker_id) workerIds.add(a.worker_id);
   for (const a of adjustments.data ?? []) workerIds.add(a.worker_id);
+  for (const c of chosen.data ?? []) workerIds.add(c.worker_id);
   for (const a of anomalies.data ?? []) {
     const ids = (a.detail as { worker_ids?: unknown } | null)?.worker_ids;
     if (Array.isArray(ids)) for (const id of ids) if (typeof id === "string") workerIds.add(id);
@@ -385,6 +416,7 @@ export async function loadRunDetail(
     run.preparedBy,
     ...(run.submittedBy ? [run.submittedBy] : []),
     ...(run.approvedBy ? [run.approvedBy] : []),
+    ...(run.discardedBy ? [run.discardedBy] : []),
     ...(adjustments.data ?? []).map((a) => a.created_by),
     ...(anomalies.data ?? []).flatMap((a) => (a.acknowledged_by ? [a.acknowledged_by] : [])),
     ...(decisions.data ?? []).map((d) => d.actor_id),
@@ -416,6 +448,12 @@ export async function loadRunDetail(
       };
     })
     .sort((a, b) => a.workerName.localeCompare(b.workerName));
+  const offCycleWorkers: RunWorker[] = (chosen.data ?? [])
+    .map((c) => {
+      const w = workerRows.get(c.worker_id);
+      return { id: c.worker_id, name: w?.name ?? "A worker", staffId: w?.staffId ?? "" };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return {
     run,
@@ -472,7 +510,11 @@ export async function loadRunDetail(
         amountKobo: toKobo(l.amount_kobo),
       }))
       .sort((a, b) => a.workerName.localeCompare(b.workerName)),
-    workers: payslips.map((p) => ({ id: p.workerId, name: p.workerName, staffId: p.staffId })),
+    workers:
+      run.kind === "off_cycle"
+        ? offCycleWorkers
+        : payslips.map((p) => ({ id: p.workerId, name: p.workerName, staffId: p.staffId })),
+    offCycleWorkers,
     names: new Map([...names, ...[...people].map(([k, v]) => [k, v] as const)]),
   };
 }
@@ -531,6 +573,8 @@ export async function loadPayslipTrace(
 
 export interface RunSummary {
   runs: number;
+  /** Off-cycle runs (slice 5.7b) not yet posted or discarded: counts and totals only. */
+  offCycleOpen: { runs: number; workers: number; netKobo: string };
   latest: {
     periodStart: string;
     periodEnd: string;
@@ -549,8 +593,18 @@ export async function loadRunSummary(
   organisationId: string,
 ): Promise<RunSummary> {
   const runs = await listRuns(supabase, organisationId);
-  const latest = runs[0];
-  if (!latest) return { runs: 0, latest: null };
+  const open = runs.filter(
+    (r) =>
+      r.kind === "off_cycle" && r.discardedAt === null && ["draft", "review"].includes(r.status),
+  );
+  const offCycleOpen = {
+    runs: open.length,
+    workers: open.reduce((n, r) => n + r.totals.workerCount, 0),
+    netKobo: open.reduce((n, r) => n + r.totals.netKobo, 0n).toString(),
+  };
+  // The latest regular run; off-cycle runs are counted above.
+  const latest = runs.find((r) => r.kind === "regular");
+  if (!latest) return { runs: runs.length, offCycleOpen, latest: null };
   const { count, error } = await supabase
     .from("payroll_anomalies")
     .select("id", { count: "exact", head: true })
@@ -560,6 +614,7 @@ export async function loadRunSummary(
   if (error) throw new Error(`Could not count anomalies (${error.code})`);
   return {
     runs: runs.length,
+    offCycleOpen,
     latest: {
       periodStart: latest.periodStart,
       periodEnd: latest.periodEnd,

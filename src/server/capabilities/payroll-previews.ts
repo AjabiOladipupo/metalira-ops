@@ -18,7 +18,9 @@ import {
   previewAddAdjustment,
   previewApprove,
   previewCarryInstalment,
+  previewCreateOffCycleRun,
   previewCreateRun,
+  previewDiscardOffCycleRun,
   previewRecalculate,
   previewRemoveAdjustment,
   previewReturn,
@@ -26,7 +28,9 @@ import {
   type acknowledgeSchema,
   type adjustmentSchema,
   type carryInstalmentSchema,
+  type createOffCycleRunSchema,
   type createRunSchema,
+  type discardOffCycleRunSchema,
   type removeAdjustmentSchema,
   type returnRunSchema,
   type runIdSchema,
@@ -81,6 +85,10 @@ export const previewAddRuleSetVersion: PreviewFn<typeof ruleSetVersionSchema> = 
 
 export const previewCreatePayrollRun: PreviewFn<typeof createRunSchema> = (ctx) =>
   previewCreateRun(ctx, ctx.data);
+export const previewCreateOffCyclePayrollRun: PreviewFn<typeof createOffCycleRunSchema> = (ctx) =>
+  previewCreateOffCycleRun(ctx, ctx.data);
+export const previewDiscardOffCyclePayrollRun: PreviewFn<typeof discardOffCycleRunSchema> = (ctx) =>
+  previewDiscardOffCycleRun(ctx, ctx.data);
 export const previewRecalculatePayrollRun: PreviewFn<typeof runIdSchema> = (ctx) =>
   previewRecalculate(ctx, ctx.data);
 export const previewAddPayrollAdjustment: PreviewFn<typeof adjustmentSchema> = (ctx) =>

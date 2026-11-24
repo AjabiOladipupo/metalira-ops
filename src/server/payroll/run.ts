@@ -8,7 +8,13 @@ import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
 import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
 import { parsePayrollInputs, type PayrollInputs } from "@/lib/payroll/inputs";
+import { adjustmentsOnlyEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
 import { NTA_2025_V1, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set";
+import {
+  isOffCycleReason,
+  offCyclePaysFullPeriod,
+  type OffCycleReason,
+} from "@/lib/payroll/run-format";
 import {
   canonicalJson,
   itfAppliesTo,
@@ -52,6 +58,12 @@ import { payPolicyFor } from "./inputs";
  * only), naming the signed-in user as the actor; the database checks every invariant again and
  * replaces the draft's payslips in one transaction.
  *
+ * Off-cycle runs (slice 5.7b) use the same path: the run's chosen workers only; a final-pay or
+ * missed-worker run pays their full period, a correction or one-off run only its adjustments; no
+ * recurring-instalment or net-change checks; ITF follows the period's regular run. A regular run
+ * leaves out workers a final-pay or missed-worker run of its period pays, so nobody is paid twice
+ * (the database refuses a source paid twice either way, MLPRC).
+ *
  * Nothing here logs pay, names or bank details; errors carry database codes only.
  */
 
@@ -64,6 +76,17 @@ export interface RunTarget {
   payDate: string;
   /** The run's snapshotted rule set; null before the run exists (the one on the pay date). */
   ruleSetId: string | null;
+  /**
+   * An off-cycle run not created yet (the preview of "New off-cycle run"). For a saved run the
+   * kind, reason and workers are read from the database instead.
+   */
+  offCycle?: OffCycleScope | null;
+}
+
+/** What an off-cycle run pays (slice 5.7b). */
+export interface OffCycleScope {
+  reason: OffCycleReason;
+  workerIds: readonly string[];
 }
 
 export interface CalculateOptions {
@@ -155,6 +178,8 @@ interface History {
   previous: PreviousPeriodRun | null;
   previousRunId: string | null;
   latestPosted: Map<string, PostedSlip>;
+  /** Workers with any posted payslip (a one-off run's included), for "first pay". */
+  paidAny: Set<string>;
   /** Recurring series of the period before (to flag instalments not carried). */
   previousSeries: RecurringSeries[];
 }
@@ -176,11 +201,12 @@ async function runHistory(
     previous: null,
     previousRunId: null,
     latestPosted: new Map(),
+    paidAny: new Set(),
     previousSeries: [],
   };
   const { data: runs, error } = await supabase
     .from("payroll_runs")
-    .select("id, kind, status, period_start, period_end")
+    .select("id, kind, status, period_start, period_end, off_cycle_reason")
     .eq("organisation_id", organisationId)
     .lt("period_start", periodStart)
     .order("period_start", { ascending: false })
@@ -190,7 +216,17 @@ async function runHistory(
   // The latest regular run of an earlier period, whatever its exact end (money review L-new-3).
   const prev = all.find((r) => r.kind === "regular");
   const posted = all.filter((r) => POSTED.has(r.status));
-  const order = new Map(posted.map((r, i) => [r.id, i] as const));
+  const postedIds = new Set(posted.map((r) => r.id));
+  // The carried deduction comes from runs that pay a worker's period (regular, final pay, missed
+  // worker): a correction or one-off run never takes or settles one (slice 5.7b).
+  const carrying = posted.filter(
+    (r) =>
+      r.kind === "regular" ||
+      (r.kind === "off_cycle" &&
+        isOffCycleReason(r.off_cycle_reason) &&
+        offCyclePaysFullPeriod(r.off_cycle_reason)),
+  );
+  const order = new Map(carrying.map((r, i) => [r.id, i] as const));
   const prevSlips = new Map<string, PostedSlip>();
   const ranks = new Map<string, number>();
 
@@ -211,6 +247,7 @@ async function runHistory(
           carriedForwardKobo: toKobo(s.carried_forward_kobo),
         };
         if (prev && s.run_id === prev.id) prevSlips.set(s.worker_id, slip);
+        if (postedIds.has(s.run_id)) history.paidAny.add(s.worker_id);
         const rank = order.get(s.run_id);
         if (rank === undefined) continue;
         if (rank < (ranks.get(s.worker_id) ?? Infinity)) {
@@ -265,15 +302,18 @@ async function openDaysBySite(
   supabase: Client,
   organisationId: string,
   period: { start: string; end: string },
+  workerIds: readonly string[] | null = null,
 ): Promise<OpenDaysAtSite[]> {
-  const { data, error } = await supabase
+  if (workerIds !== null && workerIds.length === 0) return [];
+  let query = supabase
     .from("timesheet_lines")
     .select("site_id, exceptions")
     .eq("organisation_id", organisationId)
     .gte("work_date", period.start)
     .lte("work_date", period.end)
-    .in("status", ["pending", "disputed"])
-    .limit(20000);
+    .in("status", ["pending", "disputed"]);
+  if (workerIds !== null) query = query.in("worker_id", [...workerIds]);
+  const { data, error } = await query.limit(20000);
   if (error) throw new Error(`Could not read open timesheet days (${error.code})`);
   const bySite = new Map<string, { days: number; reasons: Set<string> }>();
   for (const l of data ?? []) {
@@ -290,6 +330,92 @@ async function openDaysBySite(
   }));
 }
 
+/** A saved run's kind and, for an off-cycle run, its reason and workers (slice 5.7b). */
+async function runScope(
+  supabase: Client,
+  organisationId: string,
+  target: RunTarget,
+): Promise<OffCycleScope | null> {
+  if (!target.runId) return target.offCycle ?? null;
+  const { data: run, error } = await supabase
+    .from("payroll_runs")
+    .select("kind, off_cycle_reason")
+    .eq("organisation_id", organisationId)
+    .eq("id", target.runId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the run (${error.code})`);
+  if (!run) throw new Error("The run wasn't found");
+  if (run.kind !== "off_cycle") return null;
+  if (!isOffCycleReason(run.off_cycle_reason)) throw new Error("The off-cycle run has no reason");
+  const { data: rows, error: workerError } = await supabase
+    .from("payroll_run_workers")
+    .select("worker_id")
+    .eq("organisation_id", organisationId)
+    .eq("run_id", target.runId)
+    .order("worker_id")
+    .limit(500);
+  if (workerError) throw new Error(`Could not read the run's workers (${workerError.code})`);
+  return { reason: run.off_cycle_reason, workerIds: (rows ?? []).map((r) => r.worker_id) };
+}
+
+/**
+ * Workers a final-pay or missed-worker run of this period pays (not discarded, not reversed): a
+ * regular run leaves them out, so their period is paid once (slice 5.7b).
+ */
+async function paidOffCycle(
+  supabase: Client,
+  organisationId: string,
+  periodStart: string,
+): Promise<string[]> {
+  const { data: runs, error } = await supabase
+    .from("payroll_runs")
+    .select("id, status, off_cycle_reason, discarded_at")
+    .eq("organisation_id", organisationId)
+    .eq("kind", "off_cycle")
+    .eq("period_start", periodStart);
+  if (error) throw new Error(`Could not read off-cycle runs (${error.code})`);
+  const ids = (runs ?? [])
+    .filter(
+      (r) =>
+        r.discarded_at === null &&
+        r.status !== "reversed" &&
+        isOffCycleReason(r.off_cycle_reason) &&
+        offCyclePaysFullPeriod(r.off_cycle_reason),
+    )
+    .map((r) => r.id);
+  if (ids.length === 0) return [];
+  const { data: rows, error: workerError } = await supabase
+    .from("payroll_run_workers")
+    .select("worker_id")
+    .eq("organisation_id", organisationId)
+    .in("run_id", ids)
+    .limit(5000);
+  if (workerError) throw new Error(`Could not read off-cycle workers (${workerError.code})`);
+  return [...new Set((rows ?? []).map((r) => r.worker_id))].sort();
+}
+
+/** The company's regular runs' ITF choices, for an off-cycle run (slice 5.7b). */
+async function regularItf(
+  supabase: Client,
+  organisationId: string,
+  periodStart: string,
+): Promise<{ periodStart: string; itfApplies: boolean; calculated: boolean }[]> {
+  const { data, error } = await supabase
+    .from("payroll_runs")
+    .select("period_start, itf_applies, calculated_at")
+    .eq("organisation_id", organisationId)
+    .eq("kind", "regular")
+    .lte("period_start", periodStart)
+    .order("period_start", { ascending: false })
+    .limit(24);
+  if (error) throw new Error(`Could not read regular runs (${error.code})`);
+  return (data ?? []).map((r) => ({
+    periodStart: r.period_start,
+    itfApplies: r.itf_applies,
+    calculated: r.calculated_at !== null,
+  }));
+}
+
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
@@ -301,22 +427,42 @@ export async function calculateRun(
   target: RunTarget,
   options: CalculateOptions = {},
 ): Promise<RunCalculation> {
-  const workerArg = options.workerIds ? { p_worker_ids: [...options.workerIds] } : {};
-  const { data: raw, error } = target.runId
-    ? await supabase.rpc("payroll_run_inputs", {
-        p_organisation_id: organisationId,
-        p_period_start: target.periodStart,
-        p_run_id: target.runId,
-        ...workerArg,
-      })
-    : await supabase.rpc("payroll_inputs", {
-        p_organisation_id: organisationId,
-        p_period_start: target.periodStart,
-        ...workerArg,
-      });
+  const offCycle = await runScope(supabase, organisationId, target);
+  const fullPay = offCycle !== null && offCyclePaysFullPeriod(offCycle.reason);
+  const adjustmentsOnly = offCycle !== null && !fullPay;
+  // An off-cycle run reads its chosen workers only (and a preview's worker within them).
+  const scopedWorkers = offCycle
+    ? options.workerIds
+      ? options.workerIds.filter((id) => offCycle.workerIds.includes(id))
+      : [...offCycle.workerIds]
+    : options.workerIds
+      ? [...options.workerIds]
+      : null;
+  const workerArg = scopedWorkers ? { p_worker_ids: scopedWorkers } : {};
+  const [{ data: raw, error }, excluded] = await Promise.all([
+    target.runId
+      ? supabase.rpc("payroll_run_inputs", {
+          p_organisation_id: organisationId,
+          p_period_start: target.periodStart,
+          p_run_id: target.runId,
+          ...workerArg,
+        })
+      : supabase.rpc("payroll_inputs", {
+          p_organisation_id: organisationId,
+          p_period_start: target.periodStart,
+          ...workerArg,
+        }),
+    offCycle ? Promise.resolve([]) : paidOffCycle(supabase, organisationId, target.periodStart),
+  ]);
   // The code only: the message can name the period or the company.
   if (error) throw new Error(`Could not read pay inputs (${error.code})`);
-  const inputs: PayrollInputs = parsePayrollInputs(raw);
+  const parsed: PayrollInputs = parsePayrollInputs(raw);
+  // A regular run leaves out workers a final-pay or missed-worker run of the period pays.
+  const leftOut = new Set(excluded);
+  const inputs: PayrollInputs =
+    leftOut.size > 0
+      ? { ...parsed, workers: parsed.workers.filter((w) => !leftOut.has(w.workerId)) }
+      : parsed;
   const period = inputs.period;
 
   // Decision 15: one rule set for the whole run, the version in force on the pay date.
@@ -348,37 +494,52 @@ export async function calculateRun(
     ...(options.extraAdjustments ?? []),
   ].filter((a) => !removed.has(a.id));
 
-  const workerIds = inputs.workers.map((w) => w.workerId);
-  const [history, bank, openDays, carried] = await Promise.all([
+  // A correction or one-off run pays only workers with an item on it.
+  const withItems = new Set(adjustments.map((a) => a.workerId));
+  const runWorkers = adjustmentsOnly
+    ? inputs.workers.filter((w) => withItems.has(w.workerId))
+    : inputs.workers;
+  const workerIds = runWorkers.map((w) => w.workerId);
+  const [history, bank, openDays, carried, regulars] = await Promise.all([
     runHistory(supabase, organisationId, period.start, workerIds),
     checkBankDetails(organisationId, workerIds),
-    options.workerIds ? Promise.resolve([]) : openDaysBySite(supabase, organisationId, period),
+    options.workerIds || adjustmentsOnly
+      ? Promise.resolve([])
+      : openDaysBySite(supabase, organisationId, period, offCycle ? workerIds : null),
     carriedSeries(supabase, organisationId, target.runId),
+    offCycle ? regularItf(supabase, organisationId, period.start) : Promise.resolve([]),
   ]);
-  const historyOf = (workerId: string) =>
-    workerHistory(workerId, history.previous, history.latestPosted);
+  const historyOf = (workerId: string) => {
+    const h = workerHistory(workerId, history.previous, history.latestPosted);
+    const paidBefore = h.paidBefore || history.paidAny.has(workerId);
+    // Off-cycle: no net-change check; a correction or one-off run never takes a carried deduction.
+    if (!offCycle) return { ...h, paidBefore };
+    return {
+      previousNetKobo: null,
+      carriedKobo: adjustmentsOnly ? 0n : h.carriedKobo,
+      paidBefore,
+    };
+  };
 
   // Earnings for everyone first; ITF depends on the run's levy base.
   const earnings = new Map<string, EarningsResult>();
-  for (const w of inputs.workers) {
-    earnings.set(
-      w.workerId,
-      computeEarnings(
-        {
-          period,
-          holidays: inputs.holidays,
-          defaultWorkDays: inputs.organisation.defaultWorkDays,
-          worker: w,
-          policyOn,
-        },
-        policy,
-      ),
+  for (const w of runWorkers) {
+    const e = computeEarnings(
+      {
+        period,
+        holidays: inputs.holidays,
+        defaultWorkDays: inputs.organisation.defaultWorkDays,
+        worker: w,
+        policyOn,
+      },
+      policy,
     );
+    earnings.set(w.workerId, adjustmentsOnly ? adjustmentsOnlyEarnings(e) : e);
   }
 
   const compute = (itfApplies: boolean) => {
     const out = new Map<string, PayslipResult | null>();
-    for (const w of inputs.workers) {
+    for (const w of runWorkers) {
       try {
         out.set(
           w.workerId,
@@ -404,21 +565,22 @@ export async function calculateRun(
   };
 
   let slips = compute(false);
-  const itfApplies =
-    options.itfApplies ??
-    itfAppliesTo(
-      inputs.workers.flatMap((w) => {
-        const s = slips.get(w.workerId);
-        return s ? [{ employmentType: w.employmentType, grossKobo: s.grossKobo }] : [];
-      }),
-      rules,
-    );
+  const ownItf = itfAppliesTo(
+    runWorkers.flatMap((w) => {
+      const s = slips.get(w.workerId);
+      return s ? [{ employmentType: w.employmentType, grossKobo: s.grossKobo }] : [];
+    }),
+    rules,
+  );
+  // An off-cycle run follows the ITF choice of the period's regular run (slice 5.7b).
+  const itfFrom = offCycle ? offCycleItf(regulars, period.start, ownItf) : null;
+  const itfApplies = options.itfApplies ?? itfFrom?.itfApplies ?? ownItf;
   if (itfApplies) slips = compute(true);
 
   const workers: WorkerResult[] = [];
   const failed: string[] = [];
   const anomalies: RunAnomaly[] = [];
-  for (const w of inputs.workers) {
+  for (const w of runWorkers) {
     const slip = slips.get(w.workerId) ?? null;
     const e = earnings.get(w.workerId)!;
     if (slip) {
@@ -452,6 +614,16 @@ export async function calculateRun(
         rules,
       }),
     );
+    // A correction or one-off run can't carry a deduction to a later run: what it deducts must
+    // fit what it pays (slice 5.7b).
+    if (adjustmentsOnly && slip && slip.carriedForwardKobo > 0n) {
+      anomalies.push({
+        workerId: w.workerId,
+        code: "calculation_failed",
+        severity: "blocking",
+        detail: { deduction_cut: true },
+      });
+    }
   }
   // An adjustment for a worker the inputs don't hold (left before the period, or not in a
   // one-worker preview's scope) blocks the run instead of stranding it (money review L-new-2).
@@ -468,13 +640,17 @@ export async function calculateRun(
   }
   anomalies.push(...runAnomalies(openDays, bank.shared));
   if (!options.workerIds) {
-    anomalies.push(...previousPeriodAnomalies(history.previous));
-    anomalies.push(
-      ...recurringAnomalies(
-        history.previousSeries.filter((x) => workerIds.includes(x.workerId)),
-        carried,
-      ),
-    );
+    // A correction or one-off run carries nothing from the period before.
+    if (!adjustmentsOnly) anomalies.push(...previousPeriodAnomalies(history.previous));
+    // Recurring instalments belong to the regular run.
+    if (!offCycle) {
+      anomalies.push(
+        ...recurringAnomalies(
+          history.previousSeries.filter((x) => workerIds.includes(x.workerId)),
+          carried,
+        ),
+      );
+    }
   }
   if (!bank.sharedCheck && workerIds.length > 0) {
     anomalies.push({
@@ -503,6 +679,16 @@ export async function calculateRun(
       })),
       inputs: raw,
       adjustments: [...adjustments].sort((a, b) => a.id.localeCompare(b.id)),
+      ...(excluded.length > 0 ? { paid_off_cycle: excluded } : {}),
+      ...(offCycle
+        ? {
+            off_cycle: {
+              reason: offCycle.reason,
+              workers: [...offCycle.workerIds].sort(),
+              itf: itfFrom,
+            },
+          }
+        : {}),
       bank: bank.fingerprint,
       previous: {
         run: history.previousRunId,

@@ -8,13 +8,13 @@ import { Button } from "@/components/ui/button";
 import { addDays, formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira } from "@/lib/money";
-import { RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
+import { OFF_CYCLE_REASONS, RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
 import { listRuns } from "@/server/payroll/run-data";
 import { canPreparePayroll } from "@/server/payroll/runs";
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../_shell/slots";
-import { CreateRunForm } from "./_components/run-forms";
+import { CreateRunForm, OffCycleRunForm, type OffCycleWorkerOption } from "./_components/run-forms";
 
 export const metadata: Metadata = { title: "Payroll run" };
 
@@ -25,6 +25,8 @@ async function PayrollRunsPage() {
 
   // The period holding today and the five before it, without a run yet.
   const periods: { value: string; label: string; payDate: string }[] = [];
+  // Off-cycle runs (slice 5.7b) may share a period with the regular run and with each other.
+  const offCyclePeriods: { value: string; label: string }[] = [];
   if (canPrepare) {
     let date = ctx.today;
     for (let i = 0; i < 6; i += 1) {
@@ -34,6 +36,10 @@ async function PayrollRunsPage() {
       });
       const p = data?.[0];
       if (!p) break;
+      offCyclePeriods.push({
+        value: p.period_start,
+        label: `${runMonth(p.period_end)}: ${formatLeaveRange(p.period_start, p.period_end)}`,
+      });
       if (!runs.some((r) => r.kind === "regular" && r.periodStart === p.period_start)) {
         periods.push({
           value: p.period_start,
@@ -42,6 +48,33 @@ async function PayrollRunsPage() {
         });
       }
       date = addDays(p.period_start, -1);
+    }
+  }
+
+  // Workers for the off-cycle picker: employed on some day of those periods.
+  const offCycleWorkers: OffCycleWorkerOption[] = [];
+  const earliest = offCyclePeriods.at(-1)?.value;
+  if (canPrepare && earliest) {
+    const { data, error } = await ctx.supabase
+      .from("workers")
+      .select("id, first_name, last_name, staff_id, start_date, end_date")
+      .eq("organisation_id", ctx.organisationId)
+      .or(`end_date.is.null,end_date.gte.${earliest}`)
+      .order("first_name")
+      .order("last_name")
+      .limit(1000);
+    if (error) throw new Error(`Could not read workers (${error.code})`);
+    for (const w of data ?? []) {
+      offCycleWorkers.push({
+        id: w.id,
+        name: `${w.first_name} ${w.last_name}`.trim(),
+        staffId: w.staff_id,
+        note: w.end_date
+          ? `Last day ${formatDate(w.end_date)}`
+          : w.start_date >= earliest
+            ? `Started ${formatDate(w.start_date)}`
+            : null,
+      });
     }
   }
 
@@ -79,6 +112,34 @@ async function PayrollRunsPage() {
         </section>
       ) : null}
 
+      {canPrepare && offCyclePeriods.length > 0 && offCycleWorkers.length > 0 ? (
+        <details
+          data-testid="new-off-cycle"
+          className="group flex flex-col gap-4 rounded-xl border border-line p-5"
+        >
+          <summary className="cursor-pointer list-none type-h3 marker:hidden">
+            New off-cycle run
+            <span className="mt-1 block text-sm font-normal text-fg-muted">
+              A leaver&apos;s final pay, a worker the regular run missed, a correction or a one-off
+              payment. It has its own payslips and bank file, and a different person in Finance
+              approves it.
+            </span>
+          </summary>
+          <div className="mt-4">
+            <OffCycleRunForm
+              periods={offCyclePeriods}
+              reasons={Object.entries(OFF_CYCLE_REASONS).map(([value, r]) => ({
+                value,
+                label: r.label,
+                hint: r.hint,
+              }))}
+              workers={offCycleWorkers}
+              defaultPayDate={ctx.today}
+            />
+          </div>
+        </details>
+      ) : null}
+
       {runs.length === 0 ? (
         <EmptyState message="No payroll runs yet. Approve timesheets to prepare the first run." />
       ) : (
@@ -110,8 +171,17 @@ async function PayrollRunsPage() {
                     <Link href={`/app/payroll/${r.id}`} className="font-semibold text-signal">
                       {runMonth(r.periodEnd)}
                     </Link>
+                    {r.kind === "off_cycle" ? (
+                      <span
+                        data-testid="off-cycle-label"
+                        className="ml-2 rounded-md border border-line px-1.5 py-0.5 text-xs font-medium"
+                      >
+                        Off-cycle
+                      </span>
+                    ) : null}
                     <span className="block text-xs text-fg-muted">
                       {formatLeaveRange(r.periodStart, r.periodEnd)}
+                      {r.offCycleReason ? ` · ${OFF_CYCLE_REASONS[r.offCycleReason].label}` : ""}
                     </span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.payDate)}</td>
@@ -120,7 +190,11 @@ async function PayrollRunsPage() {
                     {formatNaira(r.totals.netKobo, { whole: true })}
                   </td>
                   <td className="px-4 py-3">
-                    <Status tone={RUN_STATUS[r.status].tone}>{RUN_STATUS[r.status].label}</Status>
+                    {r.discardedAt ? (
+                      <Status tone="partial">Discarded</Status>
+                    ) : (
+                      <Status tone={RUN_STATUS[r.status].tone}>{RUN_STATUS[r.status].label}</Status>
+                    )}
                   </td>
                 </tr>
               ))}

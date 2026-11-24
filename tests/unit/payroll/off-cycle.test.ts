@@ -1,0 +1,247 @@
+/**
+ * Slice 5.7b: off-cycle runs (docs/PHASE_5.md "As built in 5.7b"). An off-cycle run uses the same
+ * engine as a regular run: a leaver's final pay is the earnings stage with the worker's end date
+ * (the pay policy's proration) and gross to net with the run's one rule set. A correction or
+ * one-off run empties the earnings stage and pays only HR's one-off items. ITF follows the
+ * period's regular run.
+ *
+ * The worker is Musa Ibrahim from fixtures/october-2026-golden.json (₦120,000 a month, split
+ * ₦60,000 / ₦36,000 / ₦24,000, rent ₦360,000 a year) in the October 2026 cycle (Sunday 20 Sep
+ * to Monday 19 Oct, 21 Monday-to-Friday days).
+ */
+import { randomUUID } from "node:crypto";
+
+import { describe, expect, it } from "vitest";
+
+import golden from "../../../fixtures/october-2026-golden.json";
+import { allocateKobo, parseNairaToKobo, sumKobo, type Kobo } from "@/lib/money";
+import { computeEarnings, POLICY_DEFAULTS, type EarningsWorker } from "@/lib/payroll/earnings";
+import { adjustmentsOnlyEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
+import { workerPayslip, type RunAdjustment } from "@/lib/payroll/run";
+import {
+  OFF_CYCLE_REASONS,
+  isOffCycleReason,
+  offCyclePaysFullPeriod,
+  runTitle,
+} from "@/lib/payroll/run-format";
+import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
+import { payslipNotice } from "@/server/payroll/payslip-documents";
+
+const OCT = { start: "2026-09-20", end: "2026-10-19" };
+const kobo = (naira: number): Kobo => parseNairaToKobo(String(naira));
+const musa = golden.workers.find((w) => w.name === "Musa Ibrahim")!;
+
+function worker(over: Partial<EarningsWorker> = {}): EarningsWorker {
+  const [basic, housing, transport] = allocateKobo(kobo(musa.gross), [5n, 3n, 2n]);
+  return {
+    workerId: randomUUID(),
+    employmentType: "permanent",
+    startDate: "2025-01-06",
+    endDate: null,
+    usualWorkDays: null,
+    payRates: [
+      {
+        id: randomUUID(),
+        payType: "monthly",
+        basic: basic!,
+        housing: housing!,
+        transport: transport!,
+        otherAllowances: 0n,
+        dailyRate: 0n,
+        hourlyRate: 0n,
+        effectiveFrom: "2025-01-01",
+        effectiveTo: null,
+      },
+    ],
+    shifts: [],
+    lastRostered: null,
+    lines: [],
+    arrears: [],
+    leave: [],
+    noShowDates: [],
+    openLineCount: 0,
+    ...over,
+  };
+}
+
+function earnings(w: EarningsWorker) {
+  return computeEarnings(
+    { period: OCT, holidays: [], defaultWorkDays: [1, 2, 3, 4, 5], worker: w },
+    {
+      standardShiftMinutes: 480,
+      hourlyRateDivisorDays: 20,
+      workDaysPerWeek: 5,
+      ...POLICY_DEFAULTS,
+    },
+  );
+}
+
+function payslip(
+  e: ReturnType<typeof earnings>,
+  adjustments: RunAdjustment[] = [],
+  itfApplies = true,
+) {
+  return workerPayslip(
+    {
+      employmentType: "permanent",
+      earnings: e,
+      adjustments,
+      nhfOptIn: false,
+      annualRentKobo: kobo(musa.annual_rent),
+      carriedDeductionKobo: 0n,
+    },
+    NTA_2025_V1,
+    { itfApplies, ruleSetId: "rule-set" },
+  );
+}
+
+function oneOff(workerId: string, amountKobo: Kobo, kind: "earning" | "deduction" = "earning") {
+  return {
+    id: randomUUID(),
+    workerId,
+    kind,
+    label: kind === "earning" ? "Leave encashment" : "Salary advance",
+    amountKobo,
+    pensionable: false,
+    taxable: kind === "earning",
+    instalmentNumber: 1,
+    instalmentCount: 1,
+  } satisfies RunAdjustment;
+}
+
+describe("off-cycle final pay (the same engine as a regular run)", () => {
+  it("reproduces the golden figures for the full cycle, so the off-cycle path changes nothing", () => {
+    const slip = payslip(earnings(worker()));
+    expect(slip.grossKobo).toBe(kobo(musa.gross));
+    expect(slip.payeKobo).toBe(kobo(musa.paye));
+    expect(slip.pensionEmployeeKobo).toBe(kobo(musa.pension_employee));
+    expect(slip.netKobo).toBe(kobo(musa.net));
+  });
+
+  it("prorates a leaver on Monday 5 Oct to 11 of 21 rostered days, rounded once", () => {
+    const e = earnings(worker({ endDate: "2026-10-05" }));
+    expect(e.days).toMatchObject({ rostered: 21, employedRostered: 11 });
+    // ₦120,000 × 11 ÷ 21 = ₦62,857.142857…, rounded half up once to ₦62,857.14.
+    expect(sumKobo(e.lines.map((l) => l.amountKobo))).toBe(6_285_714n);
+
+    const slip = payslip(e);
+    expect(slip.grossKobo).toBe(6_285_714n);
+    // Pension 8% of ₦62,857.14 = ₦5,028.5712, rounded once to ₦5,028.57.
+    expect(slip.pensionEmployeeKobo).toBe(502_857n);
+    // Annualised taxable (12 × (₦62,857.14 − ₦5,028.57) − ₦72,000 rent relief) is under the
+    // ₦800,000 nil band, so PAYE is ₦0 (the engine's annualised method, RULES_NIGERIA PAYE).
+    expect(slip.payeKobo).toBe(0n);
+    expect(slip.netKobo).toBe(6_285_714n - 502_857n);
+    // Employer pension 10%, NSITF 1% and ITF 1%, each rounded once.
+    expect(slip.pensionEmployerKobo).toBe(628_571n);
+    expect(slip.nsitfKobo).toBe(62_857n);
+    expect(slip.itfKobo).toBe(62_857n);
+    expect(slip.employerCostKobo).toBe(6_285_714n + 628_571n + 62_857n + 62_857n);
+  });
+
+  it("adds a manual one-off earning (leave encashment) to the final pay, taxed and not pensionable", () => {
+    const w = worker({ endDate: "2026-10-05" });
+    const e = earnings(w);
+    const slip = payslip(e, [oneOff(w.workerId, 4_000_000n)]);
+    expect(slip.grossKobo).toBe(6_285_714n + 4_000_000n);
+    // Not pensionable: pension stays on the prorated salary.
+    expect(slip.pensionEmployeeKobo).toBe(502_857n);
+    const line = slip.lines.find((l) => l.code === "adjustment_earning");
+    expect(line?.amountKobo).toBe(4_000_000n);
+    expect(slip.netKobo).toBe(
+      slip.grossKobo - slip.payeKobo - slip.pensionEmployeeKobo - slip.nhfKobo,
+    );
+  });
+});
+
+describe("correction and one-off runs (adjustments only)", () => {
+  it("empties the earnings stage: no salary, timesheet or leave line and no pay version", () => {
+    const e = adjustmentsOnlyEarnings(earnings(worker()));
+    expect(e.lines).toEqual([]);
+    expect(e.payRateIds).toEqual([]);
+    expect(e.flags).toEqual([]);
+    expect(e.days).toMatchObject({ cycle: 30, rostered: 21, leaveDeducted: 0 });
+    expect(e.trace.map((t) => t.step)).toEqual(["off_cycle"]);
+  });
+
+  it("pays only the one-off item, every source an adjustment", () => {
+    const w = worker();
+    const bonus = oneOff(w.workerId, 5_000_000n);
+    const slip = payslip(adjustmentsOnlyEarnings(earnings(w)), [bonus], false);
+    expect(slip.grossKobo).toBe(5_000_000n);
+    expect(slip.pensionEmployeeKobo).toBe(0n);
+    const sources = slip.lines.flatMap((l) => l.sources);
+    expect(sources.every((s) => s.kind === "adjustment" && s.id === bonus.id)).toBe(true);
+    expect(slip.itfKobo).toBe(0n);
+    expect(slip.nsitfKobo).toBe(50_000n);
+  });
+
+  it("carries a deduction larger than the payment forward, which the run then blocks", () => {
+    const w = worker();
+    const slip = payslip(
+      adjustmentsOnlyEarnings(earnings(w)),
+      [oneOff(w.workerId, 1_000_000n), oneOff(w.workerId, 3_000_000n, "deduction")],
+      false,
+    );
+    expect(slip.netKobo).toBe(0n);
+    expect(slip.carriedForwardKobo).toBeGreaterThan(0n);
+  });
+});
+
+describe("ITF on an off-cycle run", () => {
+  const runs = [
+    { periodStart: "2026-08-20", itfApplies: false, calculated: true },
+    { periodStart: "2026-09-20", itfApplies: true, calculated: true },
+    { periodStart: "2026-10-20", itfApplies: false, calculated: false },
+  ];
+
+  it("follows the regular run of the same period once it is worked out", () => {
+    expect(offCycleItf(runs, "2026-09-20", false)).toEqual({
+      itfApplies: true,
+      fromPeriod: "2026-09-20",
+    });
+  });
+
+  it("falls back to the latest regular run worked out before it", () => {
+    expect(offCycleItf(runs, "2026-10-20", false)).toEqual({
+      itfApplies: true,
+      fromPeriod: "2026-09-20",
+    });
+  });
+
+  it("uses the run's own count when no regular run is worked out", () => {
+    expect(offCycleItf([], "2026-10-20", true)).toEqual({ itfApplies: true, fromPeriod: null });
+  });
+});
+
+describe("off-cycle reasons and names", () => {
+  it("pays the full period only for a final pay or a missed worker", () => {
+    expect(offCyclePaysFullPeriod("final_pay")).toBe(true);
+    expect(offCyclePaysFullPeriod("missed_worker")).toBe(true);
+    expect(offCyclePaysFullPeriod("correction")).toBe(false);
+    expect(offCyclePaysFullPeriod("one_off")).toBe(false);
+    expect(offCyclePaysFullPeriod(null)).toBe(false);
+    expect(isOffCycleReason("bonus")).toBe(false);
+    expect(Object.keys(OFF_CYCLE_REASONS).sort()).toEqual(
+      ["correction", "final_pay", "missed_worker", "one_off"].sort(),
+    );
+  });
+
+  it("names the run by its month and reason", () => {
+    expect(
+      runTitle({ kind: "off_cycle", periodEnd: "2026-10-19", offCycleReason: "final_pay" }),
+    ).toBe("October 2026 off-cycle: Final pay for a leaver");
+    expect(runTitle({ kind: "regular", periodEnd: "2026-10-19", offCycleReason: null })).toBe(
+      "October 2026",
+    );
+  });
+});
+
+describe("the worker's notice", () => {
+  it("names an off-cycle payslip, with no amounts", () => {
+    const notice = payslipNotice("October 2026", "2026-10-16", true);
+    expect(notice.title).toBe("Your October 2026 off-cycle payslip is ready");
+    expect(notice.body).toContain("off-cycle payslip for October 2026 (pay date 16 Oct 2026)");
+    expect(`${notice.title} ${notice.body}`).not.toMatch(/₦|NGN|kobo/);
+  });
+});
