@@ -40,6 +40,7 @@ export const RUN_STEPS = [
   { id: "anomalies", label: "Anomalies" },
   { id: "gross-to-net", label: "Gross to net" },
   { id: "submit", label: "Submit" },
+  { id: "pay", label: "Pay" },
 ] as const;
 
 export type RunStepId = (typeof RUN_STEPS)[number]["id"];

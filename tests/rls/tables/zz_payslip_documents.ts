@@ -1,7 +1,7 @@
 /**
  * Isolation registry for slice 5.5: payslip_documents and payslip_snapshots. Each side gets a June 2026 run for a new
- * worker, posted through the functions and approved by a Finance member made for the seed, marked
- * released (TODO(5.4): release_payroll_run), with one PDF uploaded and recorded with the secret
+ * worker, posted through the functions and approved by a Finance member made for the seed, released
+ * through 5.4's release_payroll_run (the owner makes the bank file, Finance releases), with one PDF uploaded and recorded with the secret
  * key. Signed-in roles have no write grant on the table, so every attack is refused.
  *
  * Named to sort after zz_payroll_runs.ts, whose seeds pick a company's first run in review.
@@ -12,7 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { TableSpec } from "../helpers/registry";
 import { addPayrollWorker } from "../helpers/payroll";
-import { approveRun, markReleased, recordDocument, submitRunFor } from "../helpers/payslips";
+import { approveRun, recordDocument, releaseRun, submitRunFor } from "../helpers/payslips";
 import { createTestUser, pgClient, type Client } from "../helpers/supabase";
 
 async function firstId(admin: Client, table: string, orgId: string): Promise<string> {
@@ -41,9 +41,10 @@ export const tables: TableSpec[] = [
       if (member.error) throw new Error(`payslip_documents: ${member.error.message}`);
       const runId = await submitRunFor(admin, side, worker, "2026-05-20");
       await approveRun(admin, side.orgId, runId, finance);
+      // The side's owner (the preparer) makes the bank file; Finance releases (slice 5.4).
+      await releaseRun(admin, side, runId, finance);
       const db = await pgClient();
       try {
-        await markReleased(db, runId, finance.id);
         // The side keeps only its owner as a member (isolation.test.ts checks the memberships).
         await db.query(
           "delete from public.memberships where organisation_id = $1 and user_id = $2",

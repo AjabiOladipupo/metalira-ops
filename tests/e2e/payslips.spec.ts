@@ -6,10 +6,10 @@
  *
  * The run is Musa's golden October payslip worked out by the engine and saved with the secret
  * key as the server does, submitted by the owner and approved by Finance through the real
- * functions. Release (slice 5.4's release_payroll_run) isn't on main yet, so the run is marked
- * released as the database owner with its guard off for that one update. TODO(5.4): release
- * through the Pay step instead, which then publishes the payslips on its own.
+ * functions, then released through slice 5.4's release_payroll_run (the owner makes and downloads
+ * the bank file, Finance releases).
  */
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { expect, test, type Page } from "@playwright/test";
@@ -22,7 +22,7 @@ import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
 import { storedTrace } from "@/lib/payroll/trace";
 import type { Json } from "@/types/db";
 
-import { adminClient, anonClient, pgClient } from "../rls/helpers/supabase";
+import { adminClient, anonClient } from "../rls/helpers/supabase";
 import {
   NEEDS_SUPABASE,
   addMembership,
@@ -156,6 +156,12 @@ test("after release Musa Ibrahim reads his October payslip on the phone and down
       tax_state: "Lagos",
       pfa_name: "Stanbic IBTC Pension",
       annual_rent_declared_kobo: 36_000_000,
+      // Bank details on file (the secret key, as after an applied change) for the bank file.
+      bank_name: "GTBank",
+      account_name: "MUSA IBRAHIM",
+      bank_code: "058",
+      bank_account_last4: "6789",
+      bank_account_enc: `\\x${randomBytes(48).toString("hex")}`,
     })
     .select("id")
     .single();
@@ -227,32 +233,58 @@ test("after release Musa Ibrahim reads his October payslip on the phone and down
     ).error,
   ).toBeNull();
 
-  // Released (TODO(5.4): the Pay step's "I uploaded it to the bank").
-  const db = await pgClient();
-  try {
-    const { rows } = await db.query<{ column_name: string }>(
-      `select column_name from information_schema.columns
-       where table_schema = 'public' and table_name = 'payroll_runs'
-         and column_name in ('released_at', 'released_by')`,
-    );
-    await db.query("begin");
-    await db.query("alter table public.payroll_runs disable trigger payroll_runs_guard");
-    if (rows.length === 2) {
-      await db.query(
-        "update public.payroll_runs set status = 'released', released_at = now(), released_by = $2 where id = $1",
-        [runId, finance.userId],
-      );
-    } else {
-      await db.query("update public.payroll_runs set status = 'released' where id = $1", [runId]);
-    }
-    await db.query("alter table public.payroll_runs enable always trigger payroll_runs_guard");
-    await db.query("commit");
-  } catch (error) {
-    await db.query("rollback");
-    throw error;
-  } finally {
-    await db.end();
-  }
+  // Released through slice 5.4's functions, the two-person way: the owner (who prepared the run)
+  // makes the bank file, stored as the server stores it, and downloads it; Finance releases. (The
+  // browser path, with the file's bytes and publication, is tests/e2e/payroll-pay.spec.ts.)
+  const plan = await ownerClient.rpc("payout_plan", {
+    p_organisation_id: owner.orgId,
+    p_run_id: runId,
+  });
+  expect(plan.error).toBeNull();
+  const batchId = randomUUID();
+  const body = Buffer.from("Beneficiary name,Account number\r\nMUSA IBRAHIM,0123456789\r\n");
+  const stored = await admin.storage
+    .from("payroll-files")
+    .upload(`${owner.orgId}/${runId}/${batchId}.csv`, body, { contentType: "text/csv" });
+  expect(stored.error).toBeNull();
+  const made = await ownerClient.rpc("make_payout_batch", {
+    p_organisation_id: owner.orgId,
+    p_run_id: runId,
+    p_batch_id: batchId,
+    p_bank_format: "generic-csv",
+    p_file_sha256: "c".repeat(64),
+    p_file_bytes: body.byteLength,
+    p_items: (plan.data ?? []).map((r, i) => ({
+      payslip_id: r.payslip_id,
+      position: i + 1,
+      status: "pending",
+      bank_name: r.bank_name,
+      bank_code: r.bank_code,
+      account_name: r.account_name,
+      bank_account_last4: r.bank_account_last4,
+      bank_detail_change_id: r.bank_detail_change_id,
+      amount_kobo: r.net_kobo,
+    })) as unknown as Json,
+  });
+  expect(made.error).toBeNull();
+  expect(
+    (
+      await ownerClient.rpc("payout_file_download", {
+        p_organisation_id: owner.orgId,
+        p_batch_id: batchId,
+      })
+    ).error,
+  ).toBeNull();
+  expect(
+    (
+      await financeClient.rpc("release_payroll_run", {
+        p_organisation_id: owner.orgId,
+        p_run_id: runId,
+        p_batch_id: batchId,
+        p_file_sha256: "c".repeat(64),
+      })
+    ).error,
+  ).toBeNull();
 
   const invite = await ownerClient.rpc("create_worker_invites", {
     p_organisation_id: owner.orgId,

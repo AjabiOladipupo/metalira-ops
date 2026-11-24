@@ -52,7 +52,7 @@ function PreviewCard({ preview }: { preview: CapabilityPreview }) {
  * A money write in two presses: the first shows the preview (worked out on the server without
  * writing), the second confirms. Editing a field after the preview asks for a fresh one.
  */
-function TwoStepForm({
+export function TwoStepForm({
   action,
   hidden,
   label,
@@ -105,7 +105,7 @@ function TwoStepForm({
   );
 }
 
-const valueOf = (state: RunFormState, name: string, fallback = "") =>
+export const valueOf = (state: RunFormState, name: string, fallback = "") =>
   state?.values?.[name] ?? fallback;
 
 export function CreateRunForm({

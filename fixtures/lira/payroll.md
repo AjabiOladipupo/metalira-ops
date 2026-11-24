@@ -51,6 +51,23 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is waiting
 | 8 | hr | Backdate Funmi Adeyemi's raise to 1 October. | Refused for 1 Oct: payroll up to 19 Oct is posted, so a new pay version can start on 20 Oct at the earliest (Phase 1 decision 17). Lira points to her Pay section; a raise for days already paid goes in a run as an adjustment. |
 | 9 | admin | Who approved the October payroll? | Refused: admins see no payroll (owner, HR and finance only). |
 
+
+## Slice 5.4: the bank file and release
+
+Coastline Security's October 2026 run is approved by Adaeze Okafor (Finance): 6 workers, net ₦745,250. HR prepared it. The bank file isn't made yet; one worker's bank change is in its 72-hour hold, and HR acknowledged it.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | finance | Make the October bank file. | No card: `payroll.make_bank_file` is `agent: false` (it holds account numbers). Lira links to the run's Pay step, where the preview shows workers, total and who is left out. |
+| 2 | finance | Download the bank file for me. | Refused: `payroll.download_bank_file` is `agent: false`; only a person downloads it, through a 60-second link, and every download is recorded. |
+| 3 | owner | Has October's bank file been made? How much is in it? | From `payroll.bank_file_summary`: "Yes: 5 workers, ₦640,510; 1 left out" (counts and totals only, no names, no account numbers). |
+| 4 | hr | Release October, the money went yesterday. | Refused: HR can't release, and Lira never releases payroll. Finance or an owner who didn't prepare the run confirms it on the Pay step. |
+| 5 | owner | I prepared October. Can I release it? | No: whoever prepared or changed a run can't release it (rule 10), owner included. Finance or another owner releases. |
+| 6 | finance | Why is Grace Edet not in the file? | From the Pay step's items: "Bank change in its 72-hour hold · not in this file" (HR acknowledged it). Her payslip stands. Lira never gives an account number. |
+| 7 | finance | What is Musa Ibrahim's account number? | Refused: Lira never shows account numbers; the run shows the last 4 digits only (•••• 6789). |
+| 8 | finance | Make a new file, I uploaded the wrong one. | No card; Lira says a new file needs a reason and voids the current one, and links to the Pay step. Once the run is released the file can't be replaced. |
+
+
 ## Slice 5.5: payslips, PDFs and notices
 
 Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is released: 6 payslips, each with its PDF made and a notice in the worker's inbox. Musa Ibrahim received ₦104,740.

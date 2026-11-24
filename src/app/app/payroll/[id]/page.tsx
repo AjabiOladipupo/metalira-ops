@@ -15,6 +15,7 @@ import { authorityLabel } from "@/lib/payroll/statutory";
 import { traceLess, traceNaira } from "@/lib/payroll/trace";
 import { cn } from "@/lib/utils";
 import { loadPayslipTrace, loadRunDetail, type RunDetail } from "@/server/payroll/run-data";
+import { canMakeBankFile } from "@/server/payroll/payouts";
 import { canDecidePayroll, canPreparePayroll } from "@/server/payroll/runs";
 import { peoplePageContext } from "@/server/people/page-context";
 
@@ -29,6 +30,7 @@ import {
   ReturnRunForm,
   SubmitRunForm,
 } from "../_components/run-forms";
+import { PayStep } from "../_components/pay-step";
 
 export const metadata: Metadata = { title: "Payroll run" };
 
@@ -63,7 +65,7 @@ function StepNav({ runId, step }: { runId: string; step: RunStepId }) {
   return (
     <ol
       aria-label="Steps"
-      className="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-3 lg:grid-cols-6"
+      className="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4 lg:grid-cols-7"
     >
       {RUN_STEPS.map((s, i) => (
         <li key={s.id} className="flex">
@@ -737,6 +739,7 @@ async function RunPage({
         <GrossToNetStep {...props} explain={first(query.explain)} />
       ) : null}
       {step === "submit" ? <SubmitStep {...props} /> : null}
+      {step === "pay" ? <PayStep d={d} canMake={canMakeBankFile(ctx.role)} /> : null}
       <nav
         aria-label="Step navigation"
         className="flex justify-between gap-3 border-t border-line pt-3"

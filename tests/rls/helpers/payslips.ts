@@ -1,16 +1,12 @@
 /**
  * Slice 5.5 seeding for the RLS suite: a run for one worker posted through the real functions
  * (create, results saved with the secret key, anomaly acknowledged, submitted by the owner,
- * approved by a second person after the server's input check) and then marked released.
- *
- * Release (approved -> released) belongs to slice 5.4's `release_payroll_run`, which isn't on
- * main yet; until it is, `markReleased` makes the one move as the database owner with the run's
- * guard switched off for that transaction (restored as ENABLE ALWAYS before commit), setting
- * 5.4's released_at and released_by too when those columns exist. TODO(5.4): call
- * release_payroll_run with an active bank file instead.
+ * approved by a second person after the server's input check) and then released through slice
+ * 5.4's release_payroll_run (`releaseRun`).
  */
-import type pg from "pg";
 import { expect } from "vitest";
+
+import { releaseThroughBankFile } from "./payout";
 
 import { resultsFor, saveResults, SHA } from "./payroll";
 import type { Client, TenantUser, TestUser } from "./supabase";
@@ -91,43 +87,19 @@ export async function approveRun(
   expect(approved.error).toBeNull();
 }
 
-/** approved -> released, as the database owner (see the file header; TODO(5.4)). */
-export async function markReleased(
-  db: pg.Client,
+/**
+ * approved -> released through slice 5.4's release_payroll_run: the owner (the preparer) makes and
+ * downloads the bank file, `releaser` (the approver) releases (helpers/payout.ts).
+ */
+export async function releaseRun(
+  admin: Client,
+  owner: TenantUser,
   runId: string,
-  releasedBy: string,
+  releaser: TestUser,
 ): Promise<void> {
-  const { rows } = await db.query<{ column_name: string }>(
-    `select column_name from information_schema.columns
-     where table_schema = 'public' and table_name = 'payroll_runs'
-       and column_name in ('released_at', 'released_by')`,
-  );
-  const withColumns = rows.length === 2;
-  await db.query("begin");
-  try {
-    await db.query("alter table public.payroll_runs disable trigger payroll_runs_guard");
-    if (withColumns) {
-      await db.query(
-        "update public.payroll_runs set status = 'released', released_at = now(), released_by = $2 where id = $1 and status = 'approved'",
-        [runId, releasedBy],
-      );
-    } else {
-      await db.query(
-        "update public.payroll_runs set status = 'released' where id = $1 and status = 'approved'",
-        [runId],
-      );
-    }
-    await db.query("alter table public.payroll_runs enable always trigger payroll_runs_guard");
-    await db.query("commit");
-  } catch (error) {
-    await db.query("rollback");
-    throw error;
-  }
-  const { rows: after } = await db.query<{ status: string }>(
-    "select status from public.payroll_runs where id = $1",
-    [runId],
-  );
-  expect(after[0]?.status).toBe("released");
+  await releaseThroughBankFile(admin, owner, runId, releaser);
+  const { data } = await admin.from("payroll_runs").select("status").eq("id", runId).single();
+  expect(data?.status).toBe("released");
 }
 
 /** Uploads a stand-in PDF at the payslip's path and records it, as the server does. */

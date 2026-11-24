@@ -13,20 +13,14 @@
  *   a line manager or another company never; each yes audited with ids only.
  * - Release notices: one per payslip, only to its worker, only once released.
  *
- * Runs are posted through the real functions (helpers/payslips.ts); release is marked as the
- * database owner until slice 5.4's release_payroll_run lands (TODO(5.4)).
+ * Runs are posted through the real functions (helpers/payslips.ts); released through slice
+ * 5.4's release_payroll_run (the owner makes the bank file, Finance releases).
  */
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addPayrollWorker } from "./helpers/payroll";
-import {
-  approveRun,
-  FAKE_PDF,
-  markReleased,
-  recordDocument,
-  submitRunFor,
-} from "./helpers/payslips";
+import { approveRun, FAKE_PDF, releaseRun, recordDocument, submitRunFor } from "./helpers/payslips";
 import {
   adminClient,
   createTenantUser,
@@ -117,13 +111,13 @@ beforeAll(async () => {
   await addMember(musaUser, "worker", owner.orgId, musa.workerId);
   await addMember(graceUser, "worker", owner.orgId, grace.workerId);
 
-  // The owner prepares; Finance approves; release is marked (TODO(5.4)).
+  // The owner prepares and makes the bank file; Finance approves and releases (slice 5.4).
   augRun = await submitRunFor(admin, owner, musa, "2026-08-20");
   await approveRun(admin, owner.orgId, augRun, finance);
-  await markReleased(db, augRun, finance.id);
+  await releaseRun(admin, owner, augRun, finance);
   sepRun = await submitRunFor(admin, owner, musa, "2026-09-20");
   await approveRun(admin, owner.orgId, sepRun, finance);
-  await markReleased(db, sepRun, finance.id);
+  await releaseRun(admin, owner, sepRun, finance);
   // October pays early (21 Oct, before September's 25 Oct) and stays approved, not released:
   // its figures must not show through September's year to date.
   octRun = await submitRunFor(admin, owner, musa, "2026-10-20", "2026-10-21");
@@ -497,7 +491,7 @@ describe("a released payslip is frozen with its first PDF", () => {
     ).toBe("42501");
 
     // October, paid 21 Oct (before September's 25 Oct), is released later; the bank changes.
-    await markReleased(db, octRun, finance.id);
+    await releaseRun(admin, owner, octRun, finance);
     await setBankName("Zenith Bank");
 
     const { data } = await mine(musaUser.client);
@@ -510,10 +504,11 @@ describe("a released payslip is frozen with its first PDF", () => {
       net_kobo: "21880000",
     });
     expect(sep.worker.bank_name).toBe("GTBank");
-    // October isn't frozen yet: live figures (August and October) and today's bank.
+    // October isn't frozen yet: live figures (August and October), and the bank its released
+    // bank file paid (slice 5.4's payout item), not the bank on the worker record today.
     const oct = list.find((v) => v.run_id === octRun)!;
     expect(oct.year_to_date).toMatchObject({ payslips: 2, gross_kobo: "24000000" });
-    expect(oct.worker.bank_name).toBe("Zenith Bank");
+    expect(oct.worker.bank_name).toBe("GTBank");
 
     // The snapshot never changes, for anyone.
     for (const sql of [
@@ -538,22 +533,20 @@ describe("year to date on the same pay date", () => {
     expect(error).toBeNull();
     const w = await addPayrollWorker(admin, o.orgId);
     const wUser = await createTestUser("pslip-tie-worker");
-    const member = await admin
-      .from("memberships")
-      .insert({
-        organisation_id: o.orgId,
-        user_id: wUser.id,
-        role: "worker",
-        worker_id: w.workerId,
-      });
+    const member = await admin.from("memberships").insert({
+      organisation_id: o.orgId,
+      user_id: wUser.id,
+      role: "worker",
+      worker_id: w.workerId,
+    });
     expect(member.error).toBeNull();
     // September pays 25 Oct; October is set to pay the same day, approved after September.
     const sep = await submitRunFor(admin, o, w, "2026-09-20");
     await approveRun(admin, o.orgId, sep, fin);
-    await markReleased(db, sep, fin.id);
+    await releaseRun(admin, o, sep, fin);
     const oct = await submitRunFor(admin, o, w, "2026-10-20", "2026-10-25");
     await approveRun(admin, o.orgId, oct, fin);
-    await markReleased(db, oct, fin.id);
+    await releaseRun(admin, o, oct, fin);
     const { data, error: readError } = await wUser.client.rpc("my_payslips", {
       p_organisation_id: o.orgId,
     });
