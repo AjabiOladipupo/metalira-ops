@@ -193,8 +193,14 @@ async function runHistory(
   if (error) throw new Error(`Could not read earlier runs (${error.code})`);
   const all = runs ?? [];
   // The latest regular run of an earlier period, whatever its exact end (money review L-new-3).
-  const prev = all.find((r) => r.kind === "regular");
-  const posted = all.filter((r) => POSTED.has(r.status));
+  // A reversed run (slice 5.7a) gives way to its period's new run; with none, the reversed run
+  // stands for the period and is not posted.
+  const regular = all.filter((r) => r.kind === "regular");
+  const top = regular[0]?.period_start;
+  const atTop = regular.filter((r) => r.period_start === top);
+  const prev = atTop.find((r) => r.status !== "reversed") ?? atTop[0];
+  // A reversal run's copies never count as a worker's posted pay.
+  const posted = all.filter((r) => POSTED.has(r.status) && r.kind !== "reversal");
   const order = new Map(posted.map((r, i) => [r.id, i] as const));
   const prevSlips = new Map<string, PostedSlip>();
   const ranks = new Map<string, number>();

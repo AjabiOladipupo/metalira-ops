@@ -567,6 +567,9 @@ type SlipRecord = {
   nhf_kobo: string;
   nsitf_kobo: string;
   itf_kobo: string;
+  /** Pension only (slice 5.7a): the worker's encrypted RSA PIN as saved with the results. */
+  rsa_pin_enc?: string | null;
+  rsa_pin_snapshot?: boolean;
 };
 
 type WorkerRecord = {
@@ -619,12 +622,39 @@ export const scheduleFileSpec: MutationSpec<typeof remittanceIdSchema, ScheduleF
   schema: remittanceIdSchema,
   roles: REMITTANCE_RECORDERS,
   run: async ({ supabase, organisationId, data }) => {
+    // Security review M1 (slice 5.7a): a voided remittance, or one of a run that isn't posted, has
+    // no schedule. The database says so before anything is read or decrypted.
+    const { error: checkError } = await supabase.rpc("statutory_schedule_check", {
+      p_organisation_id: organisationId,
+      p_remittance_id: data.remittanceId,
+    });
+    if (checkError) {
+      if (checkError.code === "MLRVB") {
+        throw new MutationError("invalid", checkError.message, { remittance: "voided" });
+      }
+      if (checkError.code === "42501") {
+        throw new MutationError("forbidden", "Only an owner, HR or Finance downloads a schedule.");
+      }
+      if (checkError.code === "P0002") {
+        throw new MutationError("invalid", "That remittance wasn't found. Reload the page.");
+      }
+      throw new Error(`Could not check the remittance (${checkError.code})`);
+    }
     const r = await readRemittance(supabase, organisationId, data.remittanceId);
+    if (r.runStatus !== "approved" && r.runStatus !== "released") {
+      throw new MutationError(
+        "invalid",
+        "This remittance's run isn't posted, so it has no schedule.",
+        {
+          remittance: "voided",
+        },
+      );
+    }
     const kind = r.kind;
     const slipQuery = supabase
       .from("payslips")
       .select(
-        `id, worker_id, tax_state, pfa_name, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, nsitf_kobo::text, itf_kobo::text${kind === "paye" ? ", trace" : ""}`,
+        `id, worker_id, tax_state, pfa_name, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, nsitf_kobo::text, itf_kobo::text${kind === "paye" ? ", trace" : ""}${kind === "pension" ? ", rsa_pin_enc, rsa_pin_snapshot" : ""}`,
       )
       .eq("organisation_id", organisationId)
       .eq("run_id", r.runId);
@@ -671,9 +701,13 @@ export const scheduleFileSpec: MutationSpec<typeof remittanceIdSchema, ScheduleF
       const w = workers.get(s.worker_id);
       if (!w) throw new Error("A payslip's worker couldn't be read");
       let rsaPin: string | null = null;
-      if (kind === "pension" && w.rsa_pin_enc) {
+      // Security review L4 (slice 5.7a): the PIN as it was when the payslip's results were saved
+      // (the worker row's ciphertext, under its own context); payslips saved before the snapshot
+      // existed fall back to the PIN on file now.
+      const pinEnc = s.rsa_pin_snapshot ? (s.rsa_pin_enc ?? null) : w.rsa_pin_enc;
+      if (kind === "pension" && pinEnc) {
         try {
-          rsaPin = decryptPii(w.rsa_pin_enc, {
+          rsaPin = decryptPii(pinEnc, {
             organisationId,
             table: "workers",
             column: "rsa_pin_enc",

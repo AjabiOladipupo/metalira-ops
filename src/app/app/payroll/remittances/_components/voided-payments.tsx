@@ -43,6 +43,7 @@ export function VoidedPayments({
         {payments.map((p) => (
           <li
             key={p.paymentId}
+            id={`payment-${p.paymentId}`}
             className="flex min-w-0 flex-col gap-3 rounded-lg border border-line p-3 sm:p-4"
             data-testid="voided-payment"
             aria-label={p.title}

@@ -8,7 +8,7 @@
  *   never beyond what it still owes (MLARF).
  * - An offset lowers what November owes: paying the rest records as paid, with no "differs" tick.
  * - Insert-only (MLARI) for the secret key and the database owner, replica mode included; signed-in
- *   roles have no writes; a payment someone resolved can't be voided as wrong (MLARH).
+ *   roles have no writes; the resolved payment can't be voided (5.7a's MLRVB holds).
  * - owner, hr and finance record; a line manager can't (42501).
  */
 import { randomUUID } from "node:crypto";
@@ -246,7 +246,7 @@ describe("offsets and refunds, to the kobo", () => {
       p_payment_id: paymentId,
       p_reason: "Entered twice",
     });
-    expect(error?.code).toBe("MLARH");
+    expect(error?.code).toBe("MLRVB");
   });
 });
 

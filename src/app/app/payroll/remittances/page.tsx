@@ -14,7 +14,7 @@ import { loadRemittances, type RemittanceRow } from "@/server/payroll/remittance
 import { canRecordRemittances } from "@/server/payroll/remittances";
 import { peoplePageContext } from "@/server/people/page-context";
 
-import { loadVoidedPayments } from "@/server/payroll/remittance-resolutions";
+import { loadVoidedPayments, type VoidedPayment } from "@/server/payroll/remittance-resolutions";
 
 import { RouteGate } from "../../_shell/slots";
 import {
@@ -44,11 +44,14 @@ function RemittanceCard({
   canRecord,
   today,
   periodStart,
+  voidedPayment,
 }: {
   r: RemittanceRow;
   canRecord: boolean;
   today: string;
   periodStart: string;
+  /** Slice 5.7c: how far a payment on this voided remittance is refunded or offset. */
+  voidedPayment?: VoidedPayment;
 }) {
   const title = remittanceTitle(r.kind, r.authorityName);
   const status = REMITTANCE_STATUS[r.status];
@@ -69,8 +72,42 @@ function RemittanceCard({
             {r.workerCount} {r.workerCount === 1 ? "worker" : "workers"} · {dueText(r)}
           </p>
         </div>
-        <Status tone={status.tone}>{status.label}</Status>
+        {r.runVoid ? (
+          <Status tone="pending">Voided</Status>
+        ) : (
+          <Status tone={status.tone}>{status.label}</Status>
+        )}
       </div>
+      {r.runVoid ? (
+        <p
+          className="m-0 rounded-lg border border-line px-3 py-2 text-sm"
+          data-testid="remittance-run-void"
+        >
+          Voided {formatDateTime(r.runVoid.voidedAt)}: the run was reversed, so nothing is owed for
+          it.
+          {paid ? (
+            voidedPayment && voidedPayment.resolution.unresolvedKobo === 0n ? (
+              <strong className="block font-semibold" data-testid="refund-needed">
+                Resolved: {formatNaira(voidedPayment.resolution.refundedKobo)} refunded,{" "}
+                {formatNaira(voidedPayment.resolution.offsetKobo)} offset. The payment record stays
+                on file.
+              </strong>
+            ) : (
+              <strong className="block font-semibold" data-testid="refund-needed">
+                Refund or offset needed:{" "}
+                {formatNaira(voidedPayment?.resolution.unresolvedKobo ?? paid.paidAmountKobo)} of
+                the {formatNaira(paid.paidAmountKobo)} already paid to the authority. The payment
+                record stays on file.{" "}
+                {voidedPayment ? (
+                  <a href={`#payment-${voidedPayment.paymentId}`} className="text-signal">
+                    Record the refund or offset
+                  </a>
+                ) : null}
+              </strong>
+            )
+          ) : null}
+        </p>
+      ) : null}
       <p
         className="m-0 font-heading text-2xl font-medium tabular-nums"
         data-testid="remittance-amount"
@@ -120,18 +157,20 @@ function RemittanceCard({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-start gap-3">
-        {/* A plain link: the route streams the CSV (no-store, attachment); nothing is stored. */}
-        <a
-          href={`/app/payroll/remittances/${r.id}/schedule`}
-          aria-label={`Download schedule: ${title}`}
-          className="inline-flex h-10 items-center rounded-lg border border-line px-4 text-sm font-medium text-foreground no-underline hover:bg-surface hover:text-foreground"
-        >
-          Download schedule
-        </a>
-      </div>
+      {r.runVoid ? null : (
+        <div className="flex flex-wrap items-start gap-3">
+          {/* A plain link: the route streams the CSV (no-store, attachment); nothing is stored. */}
+          <a
+            href={`/app/payroll/remittances/${r.id}/schedule`}
+            aria-label={`Download schedule: ${title}`}
+            className="inline-flex h-10 items-center rounded-lg border border-line px-4 text-sm font-medium text-foreground no-underline hover:bg-surface hover:text-foreground"
+          >
+            Download schedule
+          </a>
+        </div>
+      )}
 
-      {canRecord && !paid ? (
+      {canRecord && !paid && !r.runVoid ? (
         <details className="rounded-lg border border-line px-3 py-2.5">
           <summary className="cursor-pointer text-sm font-semibold">Record payment</summary>
           <div className="pt-3">
@@ -144,7 +183,7 @@ function RemittanceCard({
           </div>
         </details>
       ) : null}
-      {canRecord && paid ? (
+      {canRecord && paid && !r.runVoid ? (
         <details className="rounded-lg border border-line px-3 py-2.5">
           <summary className="cursor-pointer text-sm font-medium">This record is wrong</summary>
           <div className="pt-3">
@@ -252,6 +291,7 @@ async function RemittancesPage({
                       canRecord={canRecord}
                       today={ctx.today}
                       periodStart={run.periodStart}
+                      voidedPayment={voidedPayments.find((p) => p.remittanceId === r.id)}
                     />
                   ))}
                 </ul>

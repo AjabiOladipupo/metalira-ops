@@ -7,7 +7,7 @@
  * or in parts, as either
  *   - a refund received from the authority (with its receipt), or
  *   - an offset against a later remittance to the same authority, which then owes that much less.
- * Which of these an authority allows is not a rule the app knows (RULES_NIGERIA open point 5):
+ * Which of these an authority allows is not a rule the app knows (RULES_NIGERIA open point 6):
  * it is the person's choice, recorded and audited.
  */
 

@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { PAYROLL_READERS } from "@/lib/pay-access";
-import type { RunTotals } from "@/lib/payroll/run";
+import type { RunAdjustment, RunTotals } from "@/lib/payroll/run";
 import type { ManagerRole } from "@/lib/roles";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
@@ -146,7 +146,7 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
   throw new Error(`Database refused the change (${error.code})`);
 }
 
-async function draftRun(
+export async function draftRun(
   supabase: Client,
   organisationId: string,
   runId: string,
@@ -159,7 +159,7 @@ async function draftRun(
   return run;
 }
 
-const targetOf = (run: PayrollRunRow) => ({
+export const targetOf = (run: PayrollRunRow) => ({
   runId: run.id,
   periodStart: run.periodStart,
   payDate: run.payDate,
@@ -234,18 +234,81 @@ export async function previewCreateRun(
     throw new MutationError("invalid", "Choose a pay period by its first day.");
   }
   const payDate = data.payDate ?? p.pay_date;
-  const calc = await calculateRun(ctx.supabase, ctx.organisationId, {
-    runId: null,
-    periodStart: p.period_start,
-    payDate,
-    ruleSetId: null,
-  });
+  // Slice 5.7a (money review H1): a period whose regular run was reversed carries that run's
+  // adjustments into the new run, so the preview works them in too.
+  const carried = await reversedRunAdjustments(ctx.supabase, ctx.organisationId, p.period_start);
+  const calc = await calculateRun(
+    ctx.supabase,
+    ctx.organisationId,
+    {
+      runId: null,
+      periodStart: p.period_start,
+      payDate,
+      ruleSetId: null,
+    },
+    carried.length > 0 ? { extraAdjustments: carried } : {},
+  );
   const last = await loadLastPostedRun(ctx.supabase, ctx.organisationId, p.period_start);
   const range = formatLeaveRange(p.period_start, p.period_end);
   return {
-    summary: `Prepares ${range} for ${calc.totals.workerCount} ${calc.totals.workerCount === 1 ? "worker" : "workers"}, paid ${formatDate(payDate)}, with ${calc.ruleSet.name}: net pay ${money(calc.totals.netKobo)}, ${calc.anomalies.length} anomalies (${blockingOf(calc)} blocking). ${last ? `Compared with ${formatLeaveRange(last.periodStart, last.periodEnd)}.` : "No earlier posted run to compare with."}`,
+    summary: `Prepares ${range} for ${calc.totals.workerCount} ${calc.totals.workerCount === 1 ? "worker" : "workers"}, paid ${formatDate(payDate)}, with ${calc.ruleSet.name}: net pay ${money(calc.totals.netKobo)}, ${calc.anomalies.length} anomalies (${blockingOf(calc)} blocking).${carried.length > 0 ? ` ${carried.length} ${carried.length === 1 ? "adjustment comes" : "adjustments come"} across from the reversed run of this period.` : ""} ${last ? `Compared with ${formatLeaveRange(last.periodStart, last.periodEnd)}.` : "No earlier posted run to compare with."}`,
     changes: totalsChanges(last?.totals ?? null, calc.totals),
   };
+}
+
+/**
+ * The adjustments of the period's latest reversed regular run (slice 5.7a), which
+ * create_payroll_run carries into the period's new run (workers employed in the period; the
+ * database filters again).
+ */
+async function reversedRunAdjustments(
+  supabase: Client,
+  organisationId: string,
+  periodStart: string,
+): Promise<RunAdjustment[]> {
+  const { data: runs, error } = await supabase
+    .from("payroll_runs")
+    .select("id")
+    .eq("organisation_id", organisationId)
+    .eq("kind", "regular")
+    .eq("status", "reversed")
+    .eq("period_start", periodStart)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) fromPayrollRunDbError(error);
+  const runId = runs?.[0]?.id;
+  if (!runId) return [];
+  const { data: rows, error: adjError } = await supabase
+    .from("payroll_adjustments")
+    .select(
+      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count",
+    )
+    .eq("organisation_id", organisationId)
+    .eq("run_id", runId);
+  if (adjError) fromPayrollRunDbError(adjError);
+  return (
+    (rows ?? []) as unknown as {
+      id: string;
+      worker_id: string;
+      kind: string;
+      label: string;
+      amount_kobo: string;
+      pensionable: boolean;
+      taxable: boolean;
+      instalment_number: number;
+      instalment_count: number;
+    }[]
+  ).map((a) => ({
+    id: a.id,
+    workerId: a.worker_id,
+    kind: a.kind === "deduction" ? "deduction" : "earning",
+    label: a.label,
+    amountKobo: toKobo(a.amount_kobo),
+    pensionable: a.pensionable,
+    taxable: a.taxable,
+    instalmentNumber: a.instalment_number,
+    instalmentCount: a.instalment_count,
+  }));
 }
 
 export async function previewRecalculate(
@@ -414,6 +477,12 @@ export async function previewReturn(
 ): Promise<CapabilityPreview> {
   const run = await loadRun(ctx.supabase, ctx.organisationId, data.runId);
   if (!run) throw new MutationError("invalid", "That payroll run wasn't found. Reload the page.");
+  if (run.kind === "reversal") {
+    return {
+      summary: `Declines the reversal of ${formatLeaveRange(run.periodStart, run.periodEnd)}: "${data.reason}". The run stays approved; a new reversal can be asked for.`,
+      changes: [{ label: "Reversal", before: "Waiting for approval", after: "Declined" }],
+    };
+  }
   return {
     summary: `Returns ${formatLeaveRange(run.periodStart, run.periodEnd)} to HR as a draft: "${data.reason}". Nothing is paid.`,
     changes: [{ label: "Status", before: "Waiting for approval", after: "Draft" }],

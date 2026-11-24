@@ -17,7 +17,7 @@ const workers = (n: number) => `${n} ${n === 1 ? "worker" : "workers"}`;
  * balance across posted runs, newest balance first; the entries open per worker.
  */
 export function CarriedPanel({ data }: { data: CarriedDeductions }) {
-  if (data.workers.length === 0) return null;
+  if (data.workers.length === 0 && data.notCarried.length === 0) return null;
   const owing = data.workers.filter((w) => w.balanceKobo > 0n);
   return (
     <section
@@ -38,6 +38,29 @@ export function CarriedPanel({ data }: { data: CarriedDeductions }) {
         and taken there first, after statutory deductions. Whether the law caps deductions from
         wages is a question for your tax adviser.
       </p>
+      {data.notCarried.length > 0 ? (
+        <div
+          className="flex flex-col gap-1.5 rounded-lg border border-foreground px-3 py-2.5 text-sm"
+          data-testid="instalments-not-carried"
+        >
+          <p className="m-0 font-semibold">
+            {data.notCarried.length} recurring{" "}
+            {data.notCarried.length === 1 ? "instalment" : "instalments"} not carried: the
+            worker&apos;s final pay had already posted
+          </p>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {data.notCarried.map((n) => (
+              <li key={`${n.seriesId}-${n.instalment}`}>
+                {n.workerName} · instalment {n.instalment} of {n.of} · {naira(n.amountKobo)} ·{" "}
+                {formatDate(n.at.slice(0, 10))}
+              </li>
+            ))}
+          </ul>
+          <p className="m-0 text-fg-muted">
+            Settle each with the worker, or with a correction run if anything is still owed.
+          </p>
+        </div>
+      ) : null}
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {data.workers.map((w) => (
           <li key={w.workerId} className="rounded-lg border border-line">

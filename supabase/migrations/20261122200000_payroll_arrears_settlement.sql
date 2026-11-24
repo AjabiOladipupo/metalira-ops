@@ -30,8 +30,8 @@
 --    prepared the run, and only after a download). A payslip is paid once across the original
 --    file and every supplementary one (partial unique index; the original item must be left out).
 --    payroll_files_due sweeps supplementary files too.
--- 5. Remittance refunds and offsets: see section 7 (after 5.7a voids a reversed run's
---    remittances).
+-- 5. Remittance refunds and offsets (section 7): a payment recorded against a remittance 5.7a
+--    voided is refunded or offset against a later remittance to the same authority.
 --
 -- Refusals (SQLSTATE), new here:
 --   MLAR1 a later run refunded this leave deduction, so it can't stop standing
@@ -45,7 +45,7 @@
 --   MLAR9 the confirmer prepared or changed the run
 --   MLARA nobody downloaded the supplementary file yet
 --   MLARB a download after confirmation needs a reason
---   (MLARC onwards: section 7)
+--   MLARC to MLARI: section 7 (remittance refunds and offsets)
 -- Reused: 42501 (role, untrusted session), 22023 (bad input), P0002 (not in the company), MLPR6
 -- (results break an invariant).
 -- No money maths here beyond sums and equality checks: the TypeScript engine works pay out.
@@ -1347,6 +1347,70 @@ revoke all on function public.payroll_leave_corrections(uuid, date, uuid[], uuid
 grant execute on function public.payroll_leave_corrections(uuid, date, uuid[], uuid)
   to authenticated, service_role;
 
+-- Recurring instalments a regular run didn't carry because the worker's final pay (5.7b) had
+-- already posted, as 5.7b records them in the audit log (`payroll.instalment_not_carried`), which
+-- hr and finance can't read. Owner, hr and finance, trusted session; ids and amounts (text) only,
+-- newest first. The carried deductions panel lists them so payroll settles them knowingly.
+create function private.payroll_instalments_not_carried(p_organisation_id uuid)
+returns table (
+  worker_id uuid,
+  series_id uuid,
+  instalment integer,
+  of_count integer,
+  amount_kobo text,
+  paid_by_run_id uuid,
+  regular_run_id uuid,
+  at timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if private.session_uid() is null
+    or not private.has_role(p_organisation_id, array['owner', 'hr', 'finance']) then
+    raise exception 'Only the owner, HR or finance can read payroll.' using errcode = '42501';
+  end if;
+  return query
+  select
+    (l.after ->> 'worker_id')::uuid, (l.after ->> 'series_id')::uuid,
+    (l.after ->> 'instalment')::integer, (l.after ->> 'of')::integer,
+    l.after ->> 'amount_kobo', (l.after ->> 'paid_by_run_id')::uuid, l.entity_id, l.at
+  from public.audit_log l
+  where l.organisation_id = p_organisation_id
+    and l.action = 'payroll.instalment_not_carried'
+    and jsonb_typeof(l.after) = 'object'
+  order by l.at desc
+  limit 200;
+end;
+$$;
+
+revoke all on function private.payroll_instalments_not_carried(uuid) from public, anon;
+grant execute on function private.payroll_instalments_not_carried(uuid) to authenticated;
+
+create function public.payroll_instalments_not_carried(p_organisation_id uuid)
+returns table (
+  worker_id uuid,
+  series_id uuid,
+  instalment integer,
+  of_count integer,
+  amount_kobo text,
+  paid_by_run_id uuid,
+  regular_run_id uuid,
+  at timestamptz
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select * from private.payroll_instalments_not_carried(p_organisation_id)
+$$;
+
+revoke all on function public.payroll_instalments_not_carried(uuid) from public, anon;
+grant execute on function public.payroll_instalments_not_carried(uuid) to authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 5. Supplementary payout files (carried from 5.4)
 -- ---------------------------------------------------------------------------
@@ -2277,5 +2341,529 @@ begin
   ) d
   order by d.created_at
   limit greatest(1, least(coalesce(p_limit, 500), 1000));
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 7. Remittance refunds and offsets (after 5.7a voids a reversed run's remittances)
+-- ---------------------------------------------------------------------------
+
+-- 5.7a (migration 20261122180000) voids a reversed run's remittances (statutory_remittance_voids)
+-- and leaves a payment already recorded against one standing, as evidence. That money is with
+-- the authority; the person resolves it in one of two ways (no rule decides which an authority
+-- allows; RULES_NIGERIA open point 6, confirm with a tax adviser):
+--   refund  a refund received from the authority, with its receipt (5.6's private
+--           payroll-evidence bucket and receipt check), the date and amount received;
+--   offset  set against a later standing remittance to the same authority (the same kind and
+--           normalised authority key, 5.6's money review M2), which then owes that much less.
+-- Insert-only, as payments are. A payment's refunds and offsets never exceed it; offsets into a
+-- remittance never exceed what it owes less what was paid against it. 5.7a's
+-- statutory_payments_not_voided already keeps the resolved payment from being voided (MLRVB).
+-- record_statutory_payment (5.6's, latest) compares a
+-- payment with what the remittance owes after offsets.
+--
+-- Refusals: MLARC the payment isn't a standing payment on a voided remittance; MLARD more than the
+-- payment's unresolved amount; MLARE the offset target isn't a later standing remittance to the
+-- same authority; MLARF more than the target still owes; MLARG the receipt isn't one the recorder
+-- checked for this remittance in the last hour, or another record uses it; MLARI resolutions are kept as written.
+
+create table public.statutory_payment_resolutions (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid not null references public.organisations (id),
+  -- The standing payment on a voided remittance, and that remittance.
+  payment_id uuid not null,
+  remittance_id uuid not null,
+  kind text not null constraint statutory_payment_resolutions_kind check (kind in ('refund', 'offset')),
+  amount_kobo bigint not null
+    constraint statutory_payment_resolutions_amount check (amount_kobo > 0 and amount_kobo <= 100000000000000),
+  currency text not null default 'NGN'
+    constraint statutory_payment_resolutions_currency check (currency = 'NGN'),
+  -- A refund: when it arrived, the bank reference, the receipt.
+  received_on date,
+  reference text
+    constraint statutory_payment_resolutions_reference check (
+      char_length(reference) between 1 and 100 and reference !~ '[\x01-\x1f\x7f-\x9f<>]'
+    ),
+  receipt_id uuid,
+  -- An offset: the later remittance it is set against.
+  target_remittance_id uuid,
+  note text
+    constraint statutory_payment_resolutions_note check (
+      char_length(note) between 1 and 500 and note !~ '[\x01-\x1f\x7f-\x9f<>]'
+      and regexp_replace(note, '[^0-9]', '', 'g') !~ '[0-9]{10}'
+    ),
+  recorded_by uuid not null,
+  created_at timestamptz not null default now(),
+  constraint statutory_payment_resolutions_organisation_id_id_key unique (organisation_id, id),
+  constraint statutory_payment_resolutions_payment_fkey foreign key (organisation_id, payment_id)
+    references public.statutory_payments (organisation_id, id),
+  constraint statutory_payment_resolutions_remittance_fkey foreign key (organisation_id, remittance_id)
+    references public.statutory_remittances (organisation_id, id),
+  constraint statutory_payment_resolutions_receipt_fkey foreign key (organisation_id, receipt_id)
+    references public.statutory_receipts (organisation_id, id),
+  constraint statutory_payment_resolutions_target_fkey foreign key (organisation_id, target_remittance_id)
+    references public.statutory_remittances (organisation_id, id),
+  -- A receipt backs one record.
+  constraint statutory_payment_resolutions_receipt_key unique (receipt_id),
+  constraint statutory_payment_resolutions_shape check (
+    case kind
+      when 'refund' then received_on is not null and receipt_id is not null
+        and target_remittance_id is null
+      else target_remittance_id is not null and received_on is null and receipt_id is null
+        and reference is null
+    end
+  )
+);
+
+create index statutory_payment_resolutions_payment_idx
+  on public.statutory_payment_resolutions (organisation_id, payment_id);
+create index statutory_payment_resolutions_target_idx
+  on public.statutory_payment_resolutions (organisation_id, target_remittance_id)
+  where target_remittance_id is not null;
+
+comment on table public.statutory_payment_resolutions is
+  'A payment recorded against a remittance later voided by a reversal (slice 5.7c), resolved: a refund received from the authority with its receipt, or an offset against a later remittance to the same authority. Insert-only.';
+
+-- A standing payment (recorded and not voided as wrong) on a remittance 5.7a voided. No role
+-- check: definers call it.
+create function private.payment_on_voided_remittance(p_organisation_id uuid, p_payment_id uuid)
+returns table (payment_id uuid, remittance_id uuid, paid_kobo bigint, kind text, authority_key text, pay_date date)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select p.id, p.remittance_id, p.paid_amount_kobo, m.kind, m.authority_key, r.pay_date
+  from public.statutory_payments p
+  join public.statutory_remittances m
+    on m.organisation_id = p.organisation_id and m.id = p.remittance_id
+  join public.payroll_runs r on r.organisation_id = m.organisation_id and r.id = m.run_id
+  where p.organisation_id = p_organisation_id and p.id = p_payment_id and p.entry = 'payment'
+    and exists (
+      select 1 from public.statutory_remittance_voids v
+      where v.organisation_id = m.organisation_id and v.remittance_id = m.id
+    )
+    and not exists (
+      select 1 from public.statutory_payments x
+      where x.organisation_id = p.organisation_id and x.voids_payment_id = p.id
+    )
+$$;
+
+revoke all on function private.payment_on_voided_remittance(uuid, uuid) from public, anon, authenticated;
+
+-- What a remittance still owes before any payment: its amount less offsets set against it.
+create function private.remittance_offsets_in(p_organisation_id uuid, p_remittance_id uuid)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(sum(s.amount_kobo), 0)::bigint
+  from public.statutory_payment_resolutions s
+  where s.organisation_id = p_organisation_id and s.target_remittance_id = p_remittance_id
+    and s.kind = 'offset'
+$$;
+
+revoke all on function private.remittance_offsets_in(uuid, uuid) from public, anon, authenticated;
+
+-- Insert-only (MLARI), serialised per source payment and per target, and checked again here so no
+-- path (the secret key or the database owner included) records more than the money allows.
+create function private.statutory_payment_resolutions_guard()
+returns trigger
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_src record;
+  v_resolved bigint;
+  v_target public.statutory_remittances%rowtype;
+  v_target_run public.payroll_runs%rowtype;
+  v_target_paid bigint;
+begin
+  if tg_op <> 'INSERT' then
+    raise exception 'Refunds and offsets are kept as written.' using errcode = 'MLARI';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('statutory_remittance:' || new.remittance_id::text, 0));
+  if new.target_remittance_id is not null then
+    perform pg_advisory_xact_lock(
+      hashtextextended('statutory_remittance:' || new.target_remittance_id::text, 0)
+    );
+  end if;
+  select * into v_src from private.payment_on_voided_remittance(new.organisation_id, new.payment_id);
+  if v_src.payment_id is null or v_src.remittance_id <> new.remittance_id then
+    raise exception 'Only a payment recorded against a voided remittance is refunded or offset.'
+      using errcode = 'MLARC';
+  end if;
+  select coalesce(sum(s.amount_kobo), 0) into v_resolved
+  from public.statutory_payment_resolutions s
+  where s.organisation_id = new.organisation_id and s.payment_id = new.payment_id;
+  if v_resolved + new.amount_kobo > v_src.paid_kobo then
+    raise exception 'That is more than the payment still to resolve.' using errcode = 'MLARD';
+  end if;
+  if new.kind = 'refund' then
+    if not exists (
+      select 1 from public.statutory_receipts c
+      where c.organisation_id = new.organisation_id and c.id = new.receipt_id
+        and c.remittance_id = new.remittance_id
+    ) or exists (
+      select 1 from public.statutory_payments p
+      where p.organisation_id = new.organisation_id and p.receipt_id = new.receipt_id
+    ) then
+      raise exception 'The receipt isn''t one of this remittance''s.' using errcode = 'MLARG';
+    end if;
+  else
+    select m.* into v_target
+    from public.statutory_remittances m
+    where m.organisation_id = new.organisation_id and m.id = new.target_remittance_id;
+    select r.* into v_target_run
+    from public.payroll_runs r
+    where r.organisation_id = new.organisation_id and r.id = v_target.run_id;
+    if v_target.id is null or v_target.id = new.remittance_id
+      or v_target.kind <> v_src.kind
+      or v_target.authority_key is distinct from v_src.authority_key
+      or v_target_run.status not in ('approved', 'released')
+      or v_target_run.pay_date < v_src.pay_date
+      or exists (
+        select 1 from public.statutory_remittance_voids v
+        where v.organisation_id = v_target.organisation_id and v.remittance_id = v_target.id
+      ) then
+      raise exception 'An offset goes against a later remittance to the same authority that stands.'
+        using errcode = 'MLARE';
+    end if;
+    select coalesce(sum(p.paid_amount_kobo), 0) into v_target_paid
+    from public.statutory_payments p
+    where p.organisation_id = new.organisation_id and p.remittance_id = v_target.id
+      and p.entry = 'payment'
+      and not exists (
+        select 1 from public.statutory_payments x
+        where x.organisation_id = p.organisation_id and x.voids_payment_id = p.id
+      );
+    if private.remittance_offsets_in(new.organisation_id, v_target.id) + v_target_paid
+      + new.amount_kobo > v_target.amount_kobo then
+      raise exception 'That is more than the later remittance still owes.' using errcode = 'MLARF';
+    end if;
+  end if;
+  new.currency := 'NGN';
+  new.created_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function private.statutory_payment_resolutions_guard() from public, anon, authenticated;
+
+create trigger statutory_payment_resolutions_guard
+  before insert or update or delete on public.statutory_payment_resolutions
+  for each row execute function private.statutory_payment_resolutions_guard();
+create trigger statutory_payment_resolutions_no_truncate
+  before truncate on public.statutory_payment_resolutions
+  for each statement execute function private.statutory_no_truncate();
+create trigger statutory_payment_resolutions_audit after insert on public.statutory_payment_resolutions
+  for each row execute function private.audit_row_change();
+alter table public.statutory_payment_resolutions enable always trigger statutory_payment_resolutions_guard;
+alter table public.statutory_payment_resolutions
+  enable always trigger statutory_payment_resolutions_no_truncate;
+
+alter table public.statutory_payment_resolutions enable row level security;
+
+create policy statutory_payment_resolutions_select on public.statutory_payment_resolutions
+  for select to authenticated
+  using (organisation_id in (select private.role_org_ids(array['owner', 'hr', 'finance'])));
+
+revoke all on table public.statutory_payment_resolutions from anon, authenticated, service_role;
+grant select on table public.statutory_payment_resolutions to authenticated, service_role;
+
+
+-- Records a refund received from the authority for a payment on a voided remittance (owner, hr
+-- or finance, trusted session): the date it arrived (from the payment's date to today, Lagos),
+-- the amount (text, digits only), an optional reference, and a receipt the caller checked for
+-- that remittance in the last hour that nothing else uses. Returns the record's id.
+create function private.record_remittance_refund(
+  p_organisation_id uuid,
+  p_payment_id uuid,
+  p_receipt_id uuid,
+  p_received_on date,
+  p_amount_kobo text,
+  p_reference text
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_remittance_recorder(p_organisation_id);
+  v_src record;
+  v_paid_on date;
+  v_amount bigint;
+  v_reference text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_today date := (now() at time zone 'Africa/Lagos')::date;
+  v_id uuid;
+begin
+  if p_payment_id is null or p_receipt_id is null then
+    raise exception 'Choose the payment and the refund''s receipt.' using errcode = '22023';
+  end if;
+  select * into v_src from private.payment_on_voided_remittance(p_organisation_id, p_payment_id);
+  if v_src.payment_id is null then
+    raise exception 'Only a payment recorded against a voided remittance is refunded or offset.'
+      using errcode = 'MLARC';
+  end if;
+  if p_amount_kobo is null or p_amount_kobo !~ '^[0-9]{1,15}$' or p_amount_kobo::bigint <= 0 then
+    raise exception 'Enter the amount refunded, above ₦0.' using errcode = '22023';
+  end if;
+  v_amount := p_amount_kobo::bigint;
+  select p.paid_on into v_paid_on from public.statutory_payments p
+  where p.organisation_id = p_organisation_id and p.id = p_payment_id;
+  if p_received_on is null or p_received_on > v_today or p_received_on < v_paid_on then
+    raise exception 'The refund date is from the payment''s date to today.' using errcode = '22023';
+  end if;
+  if v_reference is not null and (char_length(v_reference) > 100 or v_reference ~ '[\x01-\x1f\x7f-\x9f<>]') then
+    raise exception 'The reference is up to 100 characters, with no symbols like < or >.'
+      using errcode = '22023';
+  end if;
+  if not exists (
+    select 1 from public.statutory_receipts c
+    where c.organisation_id = p_organisation_id and c.id = p_receipt_id
+      and c.remittance_id = v_src.remittance_id and c.checked_by = v_uid
+      and c.created_at > now() - interval '1 hour'
+  ) then
+    raise exception 'Upload the refund''s receipt again, then record it.' using errcode = 'MLARG';
+  end if;
+  insert into public.statutory_payment_resolutions (
+    organisation_id, payment_id, remittance_id, kind, amount_kobo, received_on, reference,
+    receipt_id, recorded_by
+  )
+  values (
+    p_organisation_id, p_payment_id, v_src.remittance_id, 'refund', v_amount, p_received_on,
+    v_reference, p_receipt_id, v_uid
+  )
+  returning id into v_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.remittance_refund_recorded', 'statutory_remittances',
+    v_src.remittance_id, null,
+    jsonb_build_object(
+      'resolution_id', v_id, 'payment_id', p_payment_id, 'receipt_id', p_receipt_id,
+      'received_on', p_received_on, 'amount_kobo', v_amount::text, 'kind', v_src.kind
+    ),
+    null
+  );
+  return v_id;
+end;
+$$;
+
+revoke all on function private.record_remittance_refund(uuid, uuid, uuid, date, text, text) from public, anon;
+grant execute on function private.record_remittance_refund(uuid, uuid, uuid, date, text, text) to authenticated;
+
+create function public.record_remittance_refund(
+  p_organisation_id uuid,
+  p_payment_id uuid,
+  p_receipt_id uuid,
+  p_received_on date,
+  p_amount_kobo text,
+  p_reference text default null
+)
+returns uuid
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.record_remittance_refund(
+    p_organisation_id, p_payment_id, p_receipt_id, p_received_on, p_amount_kobo, p_reference
+  )
+$$;
+
+revoke all on function public.record_remittance_refund(uuid, uuid, uuid, date, text, text) from public, anon;
+grant execute on function public.record_remittance_refund(uuid, uuid, uuid, date, text, text) to authenticated;
+
+-- Offsets part or all of a payment on a voided remittance against a later standing remittance to
+-- the same authority (owner, hr or finance, trusted session), with a note saying why. Returns
+-- the record's id.
+create function private.record_remittance_offset(
+  p_organisation_id uuid,
+  p_payment_id uuid,
+  p_target_remittance_id uuid,
+  p_amount_kobo text,
+  p_note text
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_remittance_recorder(p_organisation_id);
+  v_src record;
+  v_amount bigint;
+  v_note text := nullif(btrim(coalesce(p_note, '')), '');
+  v_id uuid;
+begin
+  if p_payment_id is null or p_target_remittance_id is null then
+    raise exception 'Choose the payment and the remittance to offset it against.' using errcode = '22023';
+  end if;
+  select * into v_src from private.payment_on_voided_remittance(p_organisation_id, p_payment_id);
+  if v_src.payment_id is null then
+    raise exception 'Only a payment recorded against a voided remittance is refunded or offset.'
+      using errcode = 'MLARC';
+  end if;
+  if p_amount_kobo is null or p_amount_kobo !~ '^[0-9]{1,15}$' or p_amount_kobo::bigint <= 0 then
+    raise exception 'Enter the amount to offset, above ₦0.' using errcode = '22023';
+  end if;
+  v_amount := p_amount_kobo::bigint;
+  if v_note is null or char_length(v_note) > 500 or v_note ~ '[\x01-\x1f\x7f-\x9f<>]'
+    or regexp_replace(v_note, '[^0-9]', '', 'g') ~ '[0-9]{10}' then
+    raise exception 'Say why it is offset (for example, what the authority agreed), in up to 500 characters with no account numbers.'
+      using errcode = '22023';
+  end if;
+  insert into public.statutory_payment_resolutions (
+    organisation_id, payment_id, remittance_id, kind, amount_kobo, target_remittance_id, note,
+    recorded_by
+  )
+  values (
+    p_organisation_id, p_payment_id, v_src.remittance_id, 'offset', v_amount,
+    p_target_remittance_id, v_note, v_uid
+  )
+  returning id into v_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.remittance_offset_recorded', 'statutory_remittances',
+    v_src.remittance_id, null,
+    jsonb_build_object(
+      'resolution_id', v_id, 'payment_id', p_payment_id,
+      'target_remittance_id', p_target_remittance_id, 'amount_kobo', v_amount::text,
+      'kind', v_src.kind
+    ),
+    v_note
+  );
+  return v_id;
+end;
+$$;
+
+revoke all on function private.record_remittance_offset(uuid, uuid, uuid, text, text) from public, anon;
+grant execute on function private.record_remittance_offset(uuid, uuid, uuid, text, text) to authenticated;
+
+create function public.record_remittance_offset(
+  p_organisation_id uuid,
+  p_payment_id uuid,
+  p_target_remittance_id uuid,
+  p_amount_kobo text,
+  p_note text
+)
+returns uuid
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.record_remittance_offset(
+    p_organisation_id, p_payment_id, p_target_remittance_id, p_amount_kobo, p_note
+  )
+$$;
+
+revoke all on function public.record_remittance_offset(uuid, uuid, uuid, text, text) from public, anon;
+grant execute on function public.record_remittance_offset(uuid, uuid, uuid, text, text) to authenticated;
+
+-- private.record_statutory_payment: its latest version (5.6's, migration
+-- 20261122160000_statutory_remittances.sql), copied exactly except that the amount due it compares
+-- with (MLSR8) and audits is the remittance's amount less offsets set against it (slice 5.7c).
+create or replace function private.record_statutory_payment(
+  p_organisation_id uuid,
+  p_remittance_id uuid,
+  p_receipt_id uuid,
+  p_paid_on date,
+  p_paid_amount_kobo text,
+  p_reference text,
+  p_amount_differs boolean default false
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_remittance_recorder(p_organisation_id);
+  v_rem public.statutory_remittances%rowtype;
+  v_run public.payroll_runs%rowtype;
+  v_amount bigint;
+  v_reference text := nullif(btrim(coalesce(p_reference, '')), '');
+  v_id uuid;
+  v_today date := (now() at time zone 'Africa/Lagos')::date;
+  v_due bigint;
+begin
+  if p_remittance_id is null or p_receipt_id is null then
+    raise exception 'Choose the remittance and its receipt.' using errcode = '22023';
+  end if;
+  select r.* into v_rem
+  from public.statutory_remittances r
+  where r.organisation_id = p_organisation_id and r.id = p_remittance_id;
+  if v_rem.id is null then
+    raise exception 'That remittance wasn''t found.' using errcode = 'P0002';
+  end if;
+  select r.* into v_run
+  from public.payroll_runs r
+  where r.organisation_id = p_organisation_id and r.id = v_rem.run_id;
+  if v_run.id is null or v_run.status not in ('approved', 'released') then
+    raise exception 'This remittance''s payroll run isn''t posted any more, so nothing is recorded against it.'
+      using errcode = 'MLSR9';
+  end if;
+  if p_paid_amount_kobo is null or p_paid_amount_kobo !~ '^[0-9]{1,15}$' then
+    raise exception 'Enter the amount paid.' using errcode = 'MLSR3';
+  end if;
+  v_amount := p_paid_amount_kobo::bigint;
+  if v_amount <= 0 or v_amount > 100000000000000 then
+    raise exception 'Enter the amount paid, above ₦0.' using errcode = 'MLSR3';
+  end if;
+  if p_paid_on is null or p_paid_on > v_today or p_paid_on < v_run.period_start then
+    raise exception 'The payment date is from the pay period''s start to today.' using errcode = 'MLSR3';
+  end if;
+  -- Slice 5.7c: what the remittance owes after offsets set against it.
+  v_due := v_rem.amount_kobo - private.remittance_offsets_in(p_organisation_id, p_remittance_id);
+  if v_amount <> v_due and not coalesce(p_amount_differs, false) then
+    raise exception 'The amount paid isn''t the amount due. Tick that it differs to record it as it is.'
+      using errcode = 'MLSR8';
+  end if;
+  if v_reference is not null and (
+    char_length(v_reference) > 100 or v_reference ~ '[\x01-\x1f\x7f-\x9f<>]'
+  ) then
+    raise exception 'The reference is up to 100 characters, with no symbols like < or >.'
+      using errcode = '22023';
+  end if;
+  if not exists (
+    select 1 from public.statutory_receipts c
+    where c.organisation_id = p_organisation_id and c.id = p_receipt_id
+      and c.remittance_id = p_remittance_id and c.checked_by = v_uid
+      and c.created_at > now() - interval '1 hour'
+  ) or exists (
+    select 1 from public.statutory_payments p
+    where p.organisation_id = p_organisation_id and p.receipt_id = p_receipt_id
+  ) then
+    raise exception 'Upload the receipt again, then record the payment.' using errcode = 'MLSR2';
+  end if;
+
+  insert into public.statutory_payments (
+    organisation_id, remittance_id, entry, paid_on, paid_amount_kobo, reference, receipt_id,
+    recorded_by
+  )
+  values (
+    p_organisation_id, p_remittance_id, 'payment', p_paid_on, v_amount, v_reference, p_receipt_id,
+    v_uid
+  )
+  returning id into v_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.remittance_paid', 'statutory_remittances', p_remittance_id, null,
+    jsonb_build_object(
+      'payment_id', v_id, 'receipt_id', p_receipt_id, 'kind', v_rem.kind, 'run_id', v_rem.run_id,
+      'paid_on', p_paid_on, 'paid_amount_kobo', v_amount::text,
+      'amount_due_kobo', v_due::text,
+      'amount_differs', v_amount <> v_due,
+      'difference_kobo', (v_amount - v_due)::text
+    ),
+    null
+  );
+  return v_id;
 end;
 $$;

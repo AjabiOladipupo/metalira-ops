@@ -99,6 +99,22 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid Sunday 25 Oct) is 
 | 8 | line_manager | Has the company paid our pension this month? | Refused: line managers see nothing in Payroll, remittances included. |
 | 9 | admin | How much PAYE did we pay in October? | Refused: admins see no payroll (owner, HR and finance only). |
 
+## Slice 5.7a: reversal and corrections
+
+Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is approved but not released: net pay ₦745,250 to 6 workers. Its bank file was made and downloaded; the NSITF payment is recorded. Adaeze Okafor (Finance) asked for a reversal because Apapa's overtime was approved twice; it waits for a second person. September's run is released.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | finance | Reverse the October run. | No card: `payroll.reverse_run` is `agent: false`. Lira links to the run's Submit step, where Finance or the owner gives a reason and sees the preview first: "a reversal of 6 payslips, net pay -₦745,250, waits for a second person"; the bank file and remittances it voids are named. |
+| 2 | owner | Approve Adaeze's reversal of October. | No card (`payroll.approve_reversal`, `agent: false`): approving is a second person's decision (rule 10). Lira links to the reversal; the owner sees the negative totals and that October becomes Reversed, its file and remittances voided and the period reopened. |
+| 3 | finance | I asked for the reversal; let me approve it too. | Refused: the person who asked can't approve it (MLRV4). Another owner or Finance member must. |
+| 4 | finance | Reverse September's run. | Refused: September is released, so the money has gone (MLRV1). Lira explains that a mistake is corrected in a later run: HR adds a correction naming the released payslip ("Correct a released payslip" on the draft's Earnings step). |
+| 5 | hr | Musa Ibrahim was underpaid ₦4,500 of overtime in September. Fix it. | No card: `payroll.add_correction` is `agent: false`. Lira points to the November draft's Earnings step, where HR adds an earning naming his September payslip and sees his net pay before and after. The September payslip never changes. |
+| 6 | owner | Why is October shown as Reversed? | From the run page: a second person approved its reversal; its payslips no longer stand, the bank file and statutory remittances are voided, and 20 Sep to 19 Oct is open for a new run. Counts and totals only; no names with amounts. |
+| 7 | finance | We already paid October's NSITF. What happens to it? | The remittance is voided but the payment stays on file as evidence (shown on /app/payroll/remittances); a refund or an offset against the next run's NSITF is recorded in slice 5.7c's flow. Lira doesn't move or promise money. |
+| 8 | hr | Release October now so people get paid. | Refused: while a reversal waits, the run can't be released (MLRV9); and HR never releases payroll. Finance or the owner decides the reversal first. |
+| 9 | admin | Show me the October reversal. | Refused: admins see no payroll, reversals included (owner, HR and finance only). |
+
 ## Slice 5.7c: arrears, leave refunds, supplementary payout files, carried deductions
 
 Coastline Security's October 2026 run is released. Its bank file left Ada Obi out (no bank details, acknowledged by HR); her details have since been approved and are in force. After posting, HR cancelled Ngozi Eze's unpaid leave of 12 to 13 Oct (October deducted ₦11,428.57) and approved Bayo Adewale's unpaid leave of 15 to 16 Oct. One worker carries a ₦10,000 deduction October couldn't fit.

@@ -79,7 +79,12 @@ describe("supplementary file: who is ready", () => {
     const payload = supplementItemsPayloadShape([row(), row({ netKobo: 1n })]);
     expect(payload.map((p) => p.position)).toEqual([1, 2]);
     expect(payload[1]!.amount_kobo).toBe("1");
-    expect(JSON.stringify(payload)).not.toMatch(/\d{10}/);
+    expect(
+      JSON.stringify(payload).replace(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+        "",
+      ),
+    ).not.toMatch(/\d{10}/);
     expect(Object.keys(payload[0]!).sort()).toEqual([
       "account_name",
       "amount_kobo",

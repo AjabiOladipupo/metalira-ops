@@ -249,6 +249,11 @@ import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
 import { bankFileIdSchema, downloadBankFileSpec, makeBankFileSpec } from "@/server/payroll/payouts";
 import { loadPayoutSummary } from "@/server/payroll/payouts-data";
 import { releaseRunSpec } from "@/server/payroll/release";
+import {
+  addCorrectionSpec as addPayrollCorrectionSpec,
+  approveReversalSpec,
+  reverseRunSpec,
+} from "@/server/payroll/reversal";
 import { loadCarriedDeductionsSummary } from "@/server/payroll/carried-data";
 import {
   previewRefundSchema,
@@ -333,6 +338,9 @@ import {
 import {
   previewAcknowledgePayrollAnomalies,
   previewAddPayrollAdjustment,
+  previewAddPayrollCorrection,
+  previewApprovePayrollReversal,
+  previewReversePayrollRun,
   previewAddRuleSetVersion,
   previewApprovePayrollRun,
   previewCarryPayrollInstalment,
@@ -2900,6 +2908,50 @@ export const CAPABILITIES: readonly Capability[] = [
       "Approving payroll is a second person's decision (docs/PHASE_5.md decision 8, rule 10), made on the screen; Lira never approves or releases payroll.",
   },
   // -------------------------------------------------------------------------
+  // Reversal and corrections (payroll/reversal-actions.ts, slice 5.7a)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.reverse_run",
+    description:
+      "Finance or the owner asks for an approved, unreleased run to be reversed, with a reason; a second person approves it.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(reverseRunSpec),
+    changes: "many",
+    action: at("payroll/reversal-actions", "reverseRunAction"),
+    preview: previewReversePayrollRun,
+    agent: false,
+    agentNote:
+      "Reversing payroll is a person's decision with a reason (docs/PHASE_5.md decision 8, rule 5); Lira never reverses payroll.",
+  },
+  {
+    name: "payroll.approve_reversal",
+    description:
+      "A second person approves a reversal: the run is reversed, its bank file and remittances voided, and its period reopened.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(approveReversalSpec),
+    changes: "many",
+    action: at("payroll/reversal-actions", "approveReversalAction"),
+    preview: previewApprovePayrollReversal,
+    agent: false,
+    agentNote:
+      "Approving a reversal is a second person's decision (rule 10), made on the screen; Lira never approves payroll.",
+  },
+  {
+    name: "payroll.add_correction",
+    description:
+      "Adds an earning or deduction to a draft run that corrects a released payslip of the same worker, then recalculates.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(addPayrollCorrectionSpec),
+    changes: "many",
+    action: at("payroll/reversal-actions", "addCorrectionAction"),
+    preview: previewAddPayrollCorrection,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  // -------------------------------------------------------------------------
   // The bank file and release (payroll/payout-actions.ts, slice 5.4)
   // -------------------------------------------------------------------------
   {
@@ -3219,7 +3271,7 @@ export const CAPABILITIES: readonly Capability[] = [
     preview: previewRemittanceOffset,
     agent: false,
     agentNote:
-      "Whether an authority accepts an offset is a person's call with the adviser (RULES_NIGERIA open point 5); Lira never records payments or offsets.",
+      "Whether an authority accepts an offset is a person's call with the adviser (RULES_NIGERIA open point 6); Lira never records payments or offsets.",
   },
   {
     name: "payroll.open_remittance_receipt",
