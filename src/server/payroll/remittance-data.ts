@@ -4,6 +4,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { toKobo, type Kobo } from "@/lib/money";
 import {
+  remittanceIsOverdue,
+  remittanceOutstanding,
   remittanceStatus,
   type RemitDueDays,
   type RemittanceKind,
@@ -43,6 +45,16 @@ export interface RemittanceRow {
   runId: string;
   kind: RemittanceKind;
   authorityKey: string | null;
+  /** The display name (the state's own name, or the PFA's first spelling). */
+  authorityName: string | null;
+  /** Every spelling merged under the key; more than one shows a notice. */
+  authorityVariants: string[];
+  /** When the remittance (and its due date) was worked out: the approval. */
+  createdAt: string;
+  /** Still owed: the whole amount unpaid, or a part payment's gap. */
+  outstandingKobo: Kobo;
+  /** Past due with something still owed. */
+  overdue: boolean;
   amountKobo: Kobo;
   workerCount: number;
   dueDate: string | null;
@@ -67,6 +79,9 @@ type RemittanceRecord = {
   run_id: string;
   kind: string;
   authority_key: string | null;
+  authority_name: string | null;
+  authority_variants: string[] | null;
+  created_at: string;
   amount_kobo: string;
   worker_count: number;
   due_date: string | null;
@@ -111,7 +126,7 @@ export async function loadRemittances(
   supabase: Client,
   organisationId: string,
   today: string,
-  options: { runId?: string } = {},
+  options: { runId?: string; allRuns?: boolean } = {},
 ): Promise<RemittanceRun[]> {
   let runQuery = supabase
     .from("payroll_runs")
@@ -119,7 +134,7 @@ export async function loadRemittances(
     .eq("organisation_id", organisationId)
     .in("status", ["approved", "released"])
     .order("period_start", { ascending: false })
-    .limit(12);
+    .limit(options.allRuns ? 1000 : 12);
   if (options.runId) runQuery = runQuery.eq("id", options.runId);
   const { data: runs, error: runError } = await runQuery;
   if (runError) throw new Error(`Could not read payroll runs (${runError.code})`);
@@ -128,7 +143,9 @@ export async function loadRemittances(
 
   const { data: rems, error: remError } = await supabase
     .from("statutory_remittances")
-    .select("id, run_id, kind, authority_key, amount_kobo::text, worker_count, due_date")
+    .select(
+      "id, run_id, kind, authority_key, authority_name, authority_variants, amount_kobo::text, worker_count, due_date, created_at",
+    )
     .eq("organisation_id", organisationId)
     .in("run_id", runIds);
   if (remError) throw new Error(`Could not read remittances (${remError.code})`);
@@ -190,10 +207,15 @@ export async function loadRemittances(
       runId: r.run_id,
       kind: r.kind as RemittanceKind,
       authorityKey: r.authority_key,
+      authorityName: r.authority_name,
+      authorityVariants: r.authority_variants ?? [],
+      createdAt: r.created_at,
+      outstandingKobo: 0n,
+      overdue: false,
       amountKobo: toKobo(r.amount_kobo),
       workerCount: r.worker_count,
       dueDate: r.due_date,
-      status: remittanceStatus({ dueDate: r.due_date, paid: standing !== null }, today),
+      status: "due",
       payment: standing ? toPayment(standing) : null,
       voided: payments
         .filter((p) => voids.has(p.id))
@@ -210,6 +232,14 @@ export async function loadRemittances(
           };
         }),
     };
+    const owed = {
+      dueDate: row.dueDate,
+      amountKobo: row.amountKobo,
+      paidKobo: row.payment?.paidAmountKobo ?? null,
+    };
+    row.status = remittanceStatus(owed, today);
+    row.outstandingKobo = remittanceOutstanding(owed);
+    row.overdue = remittanceIsOverdue(owed, today);
     byRun.set(r.run_id, [...(byRun.get(r.run_id) ?? []), row]);
   }
   return runs.map((run) => ({
@@ -221,7 +251,7 @@ export async function loadRemittances(
     remittances: (byRun.get(run.id) ?? []).sort((a, b) => {
       const k = KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
       if (k !== 0) return k;
-      return (a.authorityKey ?? "").localeCompare(b.authorityKey ?? "");
+      return (a.authorityName ?? "").localeCompare(b.authorityName ?? "");
     }),
   }));
 }
@@ -268,31 +298,39 @@ export async function loadRemitDueDays(
 export interface RemittanceSummary {
   remittances: number;
   paid: number;
+  partPaid: number;
+  overpaid: number;
   due: number;
+  /** Past due with something still owed (unpaid or part paid). */
   overdue: number;
   noDueDate: number;
-  /** Owed and not yet paid, in kobo as a string. */
+  /** Still owed, part payments' gaps included, in kobo as a string. */
   outstandingKobo: string;
   nextDueDate: string | null;
 }
 
-/** Counts and totals only (no names, no references): the capability registry's read. */
+/**
+ * Counts and totals only (no names, no references): the capability registry's read. Every
+ * posted run counts, not only the 12 the screen lists (money review L6).
+ */
 export async function loadRemittanceSummary(
   supabase: Client,
   organisationId: string,
   today: string,
 ): Promise<RemittanceSummary> {
-  const runs = await loadRemittances(supabase, organisationId, today);
+  const runs = await loadRemittances(supabase, organisationId, today, { allRuns: true });
   const all = runs.flatMap((r) => r.remittances);
-  const open = all.filter((r) => r.status !== "paid");
-  const dues = open.flatMap((r) => (r.dueDate ? [r.dueDate] : [])).sort();
+  const owing = all.filter((r) => r.outstandingKobo > 0n);
+  const dues = owing.flatMap((r) => (r.dueDate ? [r.dueDate] : [])).sort();
   return {
     remittances: all.length,
-    paid: all.length - open.length,
-    due: open.filter((r) => r.status === "due").length,
-    overdue: open.filter((r) => r.status === "overdue").length,
-    noDueDate: open.filter((r) => r.status === "no_due_date").length,
-    outstandingKobo: open.reduce((n, r) => n + r.amountKobo, 0n).toString(),
+    paid: all.filter((r) => r.status === "paid").length,
+    partPaid: all.filter((r) => r.status === "part_paid").length,
+    overpaid: all.filter((r) => r.status === "overpaid").length,
+    due: all.filter((r) => r.status === "due").length,
+    overdue: all.filter((r) => r.overdue).length,
+    noDueDate: all.filter((r) => r.status === "no_due_date").length,
+    outstandingKobo: owing.reduce((n, r) => n + r.outstandingKobo, 0n).toString(),
     nextDueDate: dues[0] ?? null,
   };
 }

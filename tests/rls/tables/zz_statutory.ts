@@ -4,7 +4,8 @@
  * (statutory_remittances), then a receipt is put in the payroll-evidence bucket and recorded with
  * the secret key (statutory_receipts) and Finance records the PAYE payment (statutory_payments).
  * Signed-in roles have no write grants on any of them (the functions write), so every attack is
- * refused.
+ * refused. Finance's membership is removed again after seeding, so the company's only member
+ * stays its owner (isolation.test.ts checks that).
  *
  * Named to sort after zz_payroll_runs.ts, whose run it approves.
  */
@@ -77,6 +78,14 @@ export const tables: TableSpec[] = [
         p_reference: "LIRS-ISO",
       });
       if (paid.error) throw new Error(`statutory_payments: ${paid.error.message}`);
+      // isolation.test.ts expects each company's only member to be its owner: Finance leaves
+      // once the rows are made (the rows keep who acted).
+      const left = await admin
+        .from("memberships")
+        .delete()
+        .eq("organisation_id", side.orgId)
+        .eq("user_id", finance.id);
+      if (left.error) throw new Error(`memberships: ${left.error.message}`);
     },
   ),
   spec(

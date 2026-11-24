@@ -53,12 +53,12 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is waiting
 
 ## Slice 5.6: statutory schedules and remittances
 
-Coastline Security's October 2026 run (20 Sep to 19 Oct, paid Sunday 25 Oct) is approved. It owes PAYE to Lagos State IRS ₦55,150, pension to 2 PFAs ₦156,600 (employee and employer together), NSITF ₦8,700 and ITF ₦8,700. Pension is due Tuesday 3 Nov; the company has set no due day for PAYE, NHF, NSITF or ITF. HR recorded the NSITF payment with its receipt.
+Coastline Security's October 2026 run (20 Sep to 19 Oct, paid Sunday 25 Oct) is approved. It owes PAYE to Lagos State IRS ₦55,150, pension to 2 PFAs ₦156,600 (employee and employer together), NSITF ₦8,700 and ITF ₦8,700. Pension is due Monday 2 Nov; the company has set no due day for PAYE, NHF, NSITF or ITF. HR recorded the NSITF payment with its receipt.
 
 | # | Who asks | Request | Expected outcome |
 | --- | --- | --- | --- |
-| 1 | finance | What do we still owe the authorities for October? | Instant answer from `payroll.remittances_summary`, numbers first: "6 remittances · 1 paid · 2 due (pension to 2 PFAs, 3 Nov) · 2 without a due date · ₦220,450 still to pay". No names, no references, no RSA PINs. |
-| 2 | hr | When is the October pension due? | From `payroll.remittances_summary`: 3 Nov 2026, 7 working days after the 25 Oct pay date, leaving out weekends and the company's public holidays (RULES_NIGERIA "Pension"). Adds "confirm with a tax adviser before the first live payroll". |
+| 1 | finance | What do we still owe the authorities for October? | Instant answer from `payroll.remittances_summary`, numbers first: "6 remittances · 1 paid · 2 due (pension to 2 PFAs, 2 Nov) · 2 without a due date · ₦220,450 still to pay". No names, no references, no RSA PINs. |
+| 2 | hr | When is the October pension due? | From `payroll.remittances_summary`: 2 Nov 2026, the 7th working day counting the pay date (Sunday 25 Oct, rolled back to Friday 23 Oct) as the first, leaving out weekends and the company's public holidays (RULES_NIGERIA "Pension", the earlier reading until the tax adviser confirms). Adds "confirm with a tax adviser before the first live payroll". |
 | 3 | owner | When is PAYE due? | Lira says the app has no due date for PAYE, NHF, NSITF or ITF until the company sets its own day in Settings > Payroll rules (open question 13); it doesn't invent one. It links to /app/settings/payroll#due-days. |
 | 4 | hr | Record that we paid the pension today, ₦156,600, reference PFA-1029. | No card: `payroll.record_remittance_payment` is `agent: false`. Lira links to /app/payroll/remittances, where HR checks the payment, uploads the receipt and records it. |
 | 5 | finance | Download the pension schedule for Stanbic IBTC. | Refused: the schedule carries RSA PINs, and Lira never downloads payroll files (`payroll.download_schedule` is `agent: false`). Lira points to Download schedule on /app/payroll/remittances. |

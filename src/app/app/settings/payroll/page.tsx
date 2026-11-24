@@ -257,10 +257,13 @@ async function PayrollRulesPage({
             Remittance due days
           </h2>
           <p className="m-0 text-sm text-fg-muted">
-            Pension is due 7 working days after the pay date, leaving out weekends and your public
+            Pension is due by the 7th working day counting the pay date (or the working day before
+            it, when it falls on a weekend or holiday), leaving out weekends and your public
             holidays. Metalira&apos;s starting rules give no due date for PAYE, NHF, NSITF or ITF,
-            so they have none until you set your own: a day of the month after the pay date. Runs
-            approved from now on use these; confirm them with your tax adviser.
+            so they have none until you set your own: a day of the month after the pay date. A
+            change applies to runs approved after it; due dates already worked out stay as they are.
+            These are your company&apos;s choices, not tax rules: confirm them with your tax
+            adviser.
           </p>
         </div>
         {canSetRemittanceDueDays(ctx.role) ? (

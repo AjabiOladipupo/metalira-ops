@@ -5,12 +5,11 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { formatDate } from "@/lib/dates";
+import { formatDate, lagosToday } from "@/lib/dates";
 import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import {
   MAX_RECEIPT_BYTES,
   PAYROLL_EVIDENCE_BUCKET,
-  PAYROLL_FILES_BUCKET,
   PAYROLL_LINK_SECONDS,
   RECEIPT_TYPES,
   checkUploadedReceipt,
@@ -18,7 +17,13 @@ import {
   type ReceiptExt,
 } from "@/lib/payroll/receipts";
 import { runMonth } from "@/lib/payroll/run-format";
-import { REMITTANCE_KINDS, remittanceTitle, type RemittanceKind } from "@/lib/payroll/statutory";
+import {
+  REMITTANCE_KINDS,
+  normalisePfa,
+  normaliseTaxState,
+  remittanceTitle,
+  type RemittanceKind,
+} from "@/lib/payroll/statutory";
 import type { ManagerRole } from "@/lib/roles";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { decryptPii } from "@/server/crypto/pii";
@@ -44,9 +49,9 @@ import { renderSchedule, type ScheduleWorkerRow } from "./schedules/render";
  * session's.
  *
  * Schedules (rule 9): made on request from the posted payslips, read as the user under RLS; RSA
- * PINs are decrypted here only, written into the CSV in the private `payroll-files` bucket at
- * {organisation_id}/{run_id}/schedules/{remittance_id}.csv, and opened by a 60-second signed URL.
- * The download is audited with ids only. Never log a PIN, the file or the URL. Module: payroll.
+ * PINs are decrypted here only and the CSV is streamed in the response of
+ * /app/payroll/remittances/[remittanceId]/schedule (`no-store`, attachment), never stored. The
+ * download is audited with ids only. Never log a PIN or the file. Module: payroll.
  */
 
 type Client = SupabaseClient<Database>;
@@ -105,6 +110,11 @@ const paymentFields = {
     .optional()
     .transform((v) => v ?? "")
     .pipe(plain(100, "The bank reference", false)),
+  /** The person confirms an amount that isn't the amount due (money review H1). */
+  amountDiffers: z
+    .union([z.boolean(), z.string()])
+    .optional()
+    .transform((v) => v === true || v === "on" || v === "true"),
 };
 
 /** What the preview needs: the payment's details, before any file is uploaded. */
@@ -117,8 +127,9 @@ export const recordPaymentSchema = z.object({
   fileExt: z.enum(["pdf", "png", "jpg"], "Upload a PDF, PNG or JPEG receipt"),
 });
 
+/** Starting the upload checks the payment's details first (money review L5). */
 export const startReceiptSchema = z.object({
-  remittanceId,
+  ...paymentFields,
   fileName: z
     .string()
     .trim()
@@ -171,7 +182,7 @@ export function fromRemittanceDbError(error: Pick<PostgrestError, "code" | "mess
   }
   if (error.code === "P0002")
     throw new MutationError("invalid", `${error.message} Reload the page.`);
-  if (/^MLSR[1-7]$/.test(error.code) || error.code === "22023") {
+  if (/^MLSR[1-9]$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code})`);
@@ -186,8 +197,10 @@ interface RemittanceTarget {
   runId: string;
   kind: RemittanceKind;
   authorityKey: string | null;
+  authorityName: string | null;
   amountKobo: Kobo;
   standingPaymentId: string | null;
+  runStatus: string;
   periodStart: string;
   periodEnd: string;
   payDate: string;
@@ -200,7 +213,7 @@ async function readRemittance(
 ): Promise<RemittanceTarget> {
   const { data, error } = await supabase
     .from("statutory_remittances")
-    .select("id, run_id, kind, authority_key, amount_kobo::text")
+    .select("id, run_id, kind, authority_key, authority_name, amount_kobo::text")
     .eq("organisation_id", organisationId)
     .eq("id", id)
     .maybeSingle();
@@ -210,13 +223,14 @@ async function readRemittance(
     run_id: string;
     kind: string;
     authority_key: string | null;
+    authority_name: string | null;
     amount_kobo: string;
   } | null;
   if (!rem) throw new MutationError("invalid", "That remittance wasn't found. Reload the page.");
   const [{ data: run, error: runError }, { data: pays, error: payError }] = await Promise.all([
     supabase
       .from("payroll_runs")
-      .select("period_start, period_end, pay_date")
+      .select("period_start, period_end, pay_date, status")
       .eq("organisation_id", organisationId)
       .eq("id", rem.run_id)
       .maybeSingle(),
@@ -240,8 +254,10 @@ async function readRemittance(
     runId: rem.run_id,
     kind: rem.kind as RemittanceKind,
     authorityKey: rem.authority_key,
+    authorityName: rem.authority_name,
     amountKobo: toKobo(rem.amount_kobo),
     standingPaymentId: standing?.id ?? null,
+    runStatus: run.status,
     periodStart: run.period_start,
     periodEnd: run.period_end,
     payDate: run.pay_date,
@@ -251,7 +267,45 @@ async function readRemittance(
 const money = (k: Kobo) => formatNaira(k, { whole: k % 100n === 0n });
 
 function titleOf(r: RemittanceTarget): string {
-  return `${remittanceTitle(r.kind, r.authorityKey)} for ${runMonth(r.periodEnd)}`;
+  return `${remittanceTitle(r.kind, r.authorityName)} for ${runMonth(r.periodEnd)}`;
+}
+
+const ALREADY_PAID =
+  "A payment is already recorded for this remittance. Void it first if it was wrong.";
+
+/**
+ * The checks the database makes again, made before any receipt is uploaded or recorded (money
+ * review L5): unpaid, run still posted, a date from the period's start to today, and an amount
+ * that is the amount due unless the person ticked that it differs.
+ */
+function checkPayment(
+  r: RemittanceTarget,
+  data: { paidOn: string; amount: Kobo; amountDiffers: boolean },
+): void {
+  if (r.standingPaymentId) throw new MutationError("invalid", ALREADY_PAID);
+  if (r.runStatus !== "approved" && r.runStatus !== "released") {
+    throw new MutationError(
+      "invalid",
+      "This remittance's payroll run isn't posted any more, so nothing is recorded against it.",
+    );
+  }
+  if (data.paidOn > lagosToday() || data.paidOn < r.periodStart) {
+    throw new MutationError(
+      "invalid",
+      "The payment date is from the pay period's start to today.",
+      {
+        paidOn: `Choose a date from ${formatDate(r.periodStart)} to today`,
+      },
+    );
+  }
+  if (data.amount !== r.amountKobo && !data.amountDiffers) {
+    const gap = data.amount - r.amountKobo;
+    throw new MutationError(
+      "invalid",
+      `That is ${money(gap < 0n ? -gap : gap)} ${gap < 0n ? "less" : "more"} than the ${money(r.amountKobo)} due. Tick "The amount paid differs from the amount due" to record it as it is.`,
+      { amountDiffers: "Tick this to record an amount that isn't the amount due" },
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -263,12 +317,7 @@ export async function previewRecordPayment(
   data: z.output<typeof previewPaymentSchema>,
 ): Promise<CapabilityPreview> {
   const r = await readRemittance(ctx.supabase, ctx.organisationId, data.remittanceId);
-  if (r.standingPaymentId) {
-    throw new MutationError(
-      "invalid",
-      "A payment is already recorded for this remittance. Void it first if it was wrong.",
-    );
-  }
+  checkPayment(r, data);
   const difference = data.amount - r.amountKobo;
   const changes: CapabilityPreview["changes"] = [
     { label: "Amount due", after: money(r.amountKobo) },
@@ -276,7 +325,16 @@ export async function previewRecordPayment(
     { label: "Paid on", after: formatDate(data.paidOn) },
   ];
   if (data.reference) changes.push({ label: "Bank reference", after: data.reference });
-  changes.push({ label: "Status", before: "Unpaid", after: "Paid, with receipt" });
+  changes.push({
+    label: "Status",
+    before: "Unpaid",
+    after:
+      difference === 0n
+        ? "Paid, with receipt"
+        : difference < 0n
+          ? `Part paid, ${money(-difference)} still owed`
+          : "Overpaid, flagged",
+  });
   const gap =
     difference === 0n
       ? "the amount due"
@@ -346,12 +404,7 @@ export const startReceiptSpec: MutationSpec<typeof startReceiptSchema, StartedRe
   roles: REMITTANCE_RECORDERS,
   run: async ({ supabase, organisationId, data }) => {
     const r = await readRemittance(supabase, organisationId, data.remittanceId);
-    if (r.standingPaymentId) {
-      throw new MutationError(
-        "invalid",
-        "A payment is already recorded for this remittance. Void it first if it was wrong.",
-      );
-    }
+    checkPayment(r, data);
     const fileExt = receiptExtensionOf(data.fileName) as ReceiptExt;
     const receiptId = randomUUID();
     const path = `${organisationId}/${r.id}/${receiptId}.${fileExt}`;
@@ -397,12 +450,7 @@ export const recordPaymentSpec: MutationSpec<
   roles: REMITTANCE_RECORDERS,
   run: async ({ supabase, organisationId, userId, data }) => {
     const r = await readRemittance(supabase, organisationId, data.remittanceId);
-    if (r.standingPaymentId) {
-      throw new MutationError(
-        "invalid",
-        "A payment is already recorded for this remittance. Void it first if it was wrong.",
-      );
-    }
+    checkPayment(r, data);
     const path = `${organisationId}/${r.id}/${data.receiptId}.${data.fileExt}`;
     const admin = createAdminSupabase();
     const download = await admin.storage.from(PAYROLL_EVIDENCE_BUCKET).download(path);
@@ -436,6 +484,7 @@ export const recordPaymentSpec: MutationSpec<
       p_paid_on: data.paidOn,
       p_paid_amount_kobo: data.amount.toString(),
       p_reference: data.reference,
+      p_amount_differs: data.amountDiffers,
     });
     if (error) fromRemittanceDbError(error);
     return { remittanceId: r.id, paymentId: paymentId! };
@@ -530,40 +579,43 @@ function slug(text: string): string {
   );
 }
 
+export interface ScheduleFile {
+  bytes: Uint8Array;
+  fileName: string;
+  workerCount: number;
+}
+
 /**
- * Makes one remittance's schedule from its run's posted payslips (read as the user, under RLS),
- * puts it in the private bucket and returns a 60-second link that downloads it. RSA PINs are
- * decrypted here for pension and never logged; a PIN that won't decrypt stops the file.
+ * Makes one remittance's schedule from its run's posted payslips (read as the user, under RLS)
+ * and returns its bytes, which the route streams straight to the browser (security review M1:
+ * nothing is stored; the response is `no-store`). RSA PINs are decrypted here for pension and
+ * never logged or kept; a PIN that won't decrypt stops the file. Audited with the id only.
  */
-export const scheduleLinkSpec: MutationSpec<typeof remittanceIdSchema, FileLink> = {
+export const scheduleFileSpec: MutationSpec<typeof remittanceIdSchema, ScheduleFile> = {
   module: "payroll",
   schema: remittanceIdSchema,
   roles: REMITTANCE_RECORDERS,
   run: async ({ supabase, organisationId, data }) => {
     const r = await readRemittance(supabase, organisationId, data.remittanceId);
     const kind = r.kind;
-    let slipQuery = supabase
+    const slipQuery = supabase
       .from("payslips")
       .select(
         `id, worker_id, tax_state, pfa_name, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, nsitf_kobo::text, itf_kobo::text${kind === "paye" ? ", trace" : ""}`,
       )
       .eq("organisation_id", organisationId)
       .eq("run_id", r.runId);
-    if (kind === "paye") {
-      slipQuery =
-        r.authorityKey === null
-          ? slipQuery.is("tax_state", null)
-          : slipQuery.eq("tax_state", r.authorityKey);
-    }
-    if (kind === "pension") {
-      slipQuery =
-        r.authorityKey === null
-          ? slipQuery.is("pfa_name", null)
-          : slipQuery.eq("pfa_name", r.authorityKey);
-    }
     const { data: slipData, error: slipError } = await slipQuery;
     if (slipError) throw new Error(`Could not read the payslips (${slipError.code})`);
-    const slips = (slipData ?? []) as unknown as (SlipRecord & { trace?: unknown })[];
+    // The remittance's payslips: those whose tax state or PFA has its normalised key.
+    const slips = ((slipData ?? []) as unknown as (SlipRecord & { trace?: unknown })[]).filter(
+      (s) =>
+        kind === "paye"
+          ? normaliseTaxState(s.tax_state) === r.authorityKey
+          : kind === "pension"
+            ? normalisePfa(s.pfa_name) === r.authorityKey
+            : true,
+    );
     const workerIds = [...new Set(slips.map((s) => s.worker_id))];
 
     const basic = new Map<string, Kobo>();
@@ -633,18 +685,8 @@ export const scheduleLinkSpec: MutationSpec<typeof remittanceIdSchema, FileLink>
       throw new Error("The schedule doesn't add up to the remittance");
     }
 
-    const path = `${organisationId}/${r.runId}/schedules/${r.id}.csv`;
-    const fileName = `${slug(remittanceTitle(kind, r.authorityKey))}-${r.periodEnd.slice(0, 7)}.csv`;
-    const admin = createAdminSupabase();
-    const upload = await admin.storage
-      .from(PAYROLL_FILES_BUCKET)
-      .upload(path, schedule.bytes, { contentType: "text/csv", upsert: true });
-    if (upload.error) throw new Error("Could not store the schedule");
-    const { data: signed, error: signError } = await admin.storage
-      .from(PAYROLL_FILES_BUCKET)
-      .createSignedUrl(path, PAYROLL_LINK_SECONDS, { download: fileName });
-    if (signError || !signed?.signedUrl) throw new Error("Could not make the schedule's link");
-    return { url: signed.signedUrl, fileName };
+    const fileName = `${slug(remittanceTitle(kind, r.authorityName))}-${r.periodEnd.slice(0, 7)}.csv`;
+    return { bytes: schedule.bytes, fileName, workerCount: schedule.workerCount };
   },
   event: ({ data }) => ({
     action: "payroll.schedule_downloaded",

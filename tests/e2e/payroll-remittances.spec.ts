@@ -211,19 +211,19 @@ test("HR downloads the pension schedule and records the payment with its receipt
   await expect(paye).toContainText("No due date set");
   const pension = page.getByRole("listitem", { name: "Pension to Stanbic IBTC Pensions" });
   await expect(pension.getByTestId("remittance-amount")).toHaveText("₦21,600.00");
-  // Sunday 25 Oct 2026 + 7 working days.
-  await expect(pension).toContainText("Due 3 Nov 2026");
+  // Sunday 25 Oct 2026 rolls back to Friday 23 Oct, the first of 7 working days.
+  await expect(pension).toContainText("Due 2 Nov 2026");
   await expect(
     page.getByRole("listitem", { name: "NSITF" }).getByTestId("remittance-amount"),
   ).toHaveText("₦1,200.00");
 
   // The schedule downloads through its 60-second link.
   const downloading = page.waitForEvent("download");
-  await pension.getByRole("button", { name: /Download schedule/ }).click();
+  await pension.getByRole("link", { name: /Download schedule/ }).click();
   const download = await downloading;
   expect(download.suggestedFilename()).toBe("pension-to-stanbic-ibtc-pensions-2026-10.csv");
   const csv = await readFile((await download.path())!, "utf8");
-  expect(csv).toContain("Staff ID,Name,RSA PIN,Employee 8% (NGN),Employer 10% (NGN),Total (NGN)");
+  expect(csv).toContain("Staff ID,Name,RSA PIN,Employee (NGN),Employer (NGN),Total (NGN)");
   expect(csv).toContain(",Musa Ibrahim,Not on file,9600.00,12000.00,21600.00");
   expect(csv).toContain("Total,1 worker,,9600.00,12000.00,21600.00");
 

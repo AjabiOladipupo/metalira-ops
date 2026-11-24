@@ -10,10 +10,16 @@
 --    amount above 0. Kinds: paye (authority: the payslip's tax state), pension (the payslip's PFA
 --    name; employee and employer together), nhf, nsitf and itf (no authority). The amount is the
 --    sum of the run's payslip lines in kobo; the sums per kind must equal the run's totals.
---    Due date: pension 7 working days after the pay date (RULES_NIGERIA "Pension": within 7
---    working days of paying salary), skipping Saturdays, Sundays and the company's public
---    holidays; the other kinds the company's day of the following month when it set one, else
---    null. Insert-only for everyone (the secret key and the database owner included).
+--    Authorities are grouped on a normalised key (money review M2): a tax state lower-cased,
+--    trimmed, spaces collapsed, a trailing " state" dropped and FCT spellings joined, then named
+--    as one of the 36 states or FCT Abuja where it matches; a PFA lower-cased with spaces
+--    collapsed. authority_name is the display name and authority_variants every spelling merged.
+--    Due date: pension by the 7th working day counting from the pay date, rolled back to the
+--    working day before when it isn't one (RULES_NIGERIA "Pension": within 7 working days of
+--    paying salary; money review M3, the earlier and safer reading), skipping Saturdays, Sundays
+--    and the company's public holidays; the other kinds the company's day of the following month
+--    when it set one, else null. Insert-only for everyone (the secret key and the database owner
+--    included).
 -- 3. statutory_receipts: an evidence file the server checked (PDF, PNG or JPEG by its magic bytes,
 --    10 MB or less) in the private bucket payroll-evidence at
 --    {organisation_id}/{remittance_id}/{receipt_id}.{pdf,png,jpg}. Written only with the secret key
@@ -23,12 +29,12 @@
 --    receipt they checked themselves in the last hour; a wrong one is voided by a `void` entry
 --    with a reason, after which a new payment may be recorded. Nothing is ever updated.
 -- 5. Buckets. payroll-files (private, CSV) is shared with slice 5.4 (bank files) and created with
---    `on conflict do nothing`, so whichever slice lands first sets it up; schedules live at
---    {organisation_id}/{run_id}/schedules/{remittance_id}.csv. payroll-evidence (private) is this
---    slice's. Neither bucket has a storage policy from this slice: signed-in users can't list,
+--    `on conflict do nothing`, so whichever slice lands first sets it up; this slice stores
+--    nothing in it (schedules are streamed, never stored: security review M1). payroll-evidence
+--    (private) is this slice's. Neither bucket has a storage policy from this slice: signed-in users can't list,
 --    read, write or delete objects in them; the server writes with the secret key after an
---    RLS-checked read and hands out 60-second signed URLs (schedules) or signed upload tokens
---    for one exact path (receipts).
+--    RLS-checked read and hands out 60-second signed URLs (receipts) or signed upload tokens
+--    for one exact path (receipt uploads).
 --
 -- Refusals (SQLSTATE):
 --   MLSR1 a payment is already recorded for this remittance (void it first)
@@ -38,6 +44,8 @@
 --   MLSR5 the receipt file isn't in storage, or doesn't match what was checked
 --   MLSR6 statutory records are kept as written (no update, delete or truncate)
 --   MLSR7 the remittances don't match the run's payslips, or the run isn't posted
+--   MLSR8 the amount paid differs from the amount due and that wasn't confirmed
+--   MLSR9 the remittance's run isn't posted (approved or released) any more
 --   22023 bad input; 42501 the wrong role or an untrusted session; P0002 not in the company
 -- No money maths here beyond sums: amounts are the payslip lines' kobo, summed.
 
@@ -100,9 +108,36 @@ $$;
 
 revoke all on function private.add_working_days(uuid, date, integer) from public, anon, authenticated;
 
--- A remittance's due date (open question 13): pension 7 working days after the pay date
--- (RULES_NIGERIA "Pension"); PAYE, NHF, NSITF and ITF the company's day of the month after the pay
--- date when it set one, else null (no rule in RULES_NIGERIA.md).
+-- The working day on or before p_date (Monday to Friday, not one of the company's live public
+-- holidays). No role check: only definers call it.
+create function private.working_day_on_or_before(p_organisation_id uuid, p_date date)
+returns date
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_date date := p_date;
+begin
+  while extract(isodow from v_date) >= 6 or exists (
+    select 1 from public.public_holidays h
+    where h.organisation_id = p_organisation_id and h.holiday_date = v_date
+      and h.removed_at is null
+  ) loop
+    v_date := v_date - 1;
+  end loop;
+  return v_date;
+end;
+$$;
+
+revoke all on function private.working_day_on_or_before(uuid, date) from public, anon, authenticated;
+
+-- A remittance's due date (open question 13). Pension: the 7th working day counting the pay date
+-- as the first, after rolling a pay date that isn't a working day back to the working day before
+-- (RULES_NIGERIA "Pension", money review M3: the earlier, safer reading; to confirm with the tax
+-- adviser). PAYE, NHF, NSITF and ITF: the company's day of the month after the pay date when it
+-- set one, else null (no rule in RULES_NIGERIA.md).
 create function private.statutory_due_date(p_organisation_id uuid, p_kind text, p_pay_date date)
 returns date
 language plpgsql
@@ -115,7 +150,9 @@ declare
   v_day smallint;
 begin
   if p_kind = 'pension' then
-    return private.add_working_days(p_organisation_id, p_pay_date, 7);
+    return private.add_working_days(
+      p_organisation_id, private.working_day_on_or_before(p_organisation_id, p_pay_date), 6
+    );
   end if;
   select o.* into v_org from public.organisations o where o.id = p_organisation_id;
   v_day := case p_kind
@@ -149,6 +186,13 @@ create table public.statutory_remittances (
     constraint statutory_remittances_authority_text check (
       char_length(authority_key) between 1 and 200 and authority_key !~ '[\x01-\x1f\x7f-\x9f<>]'
     ),
+  -- How the screen names it: the state's own name, or the first spelling of the PFA.
+  authority_name text
+    constraint statutory_remittances_authority_name_text check (
+      char_length(authority_name) between 1 and 200 and authority_name !~ '[\x01-\x1f\x7f-\x9f<>]'
+    ),
+  -- Every spelling on the payslips that the key merged (more than one shows a notice).
+  authority_variants text[] not null default '{}',
   amount_kobo bigint not null constraint statutory_remittances_amount_positive check (amount_kobo > 0),
   currency text not null default 'NGN' constraint statutory_remittances_currency check (currency = 'NGN'),
   worker_count integer not null
@@ -160,6 +204,9 @@ create table public.statutory_remittances (
     references public.payroll_runs (organisation_id, id),
   constraint statutory_remittances_authority_kind check (
     authority_key is null or kind in ('paye', 'pension')
+  ),
+  constraint statutory_remittances_authority_name_pair check (
+    (authority_key is null) = (authority_name is null)
   ),
   constraint statutory_remittances_pension_due check (kind <> 'pension' or due_date is not null)
 );
@@ -260,29 +307,114 @@ comment on table public.statutory_payments is
 -- 4. Guards (every role, the secret key and the database owner included; ENABLE ALWAYS)
 -- ---------------------------------------------------------------------------
 
--- The amount each kind and authority of a run owes, from its payslip lines.
+-- The grouping key of a tax state (money review M2): lower-cased, trimmed, spaces collapsed, a
+-- trailing " state" dropped, FCT spellings joined as "fct abuja". Null for none. Mirrored by
+-- normaliseTaxState in src/lib/payroll/statutory.ts.
+create function private.normalise_tax_state(p text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when t.v is null or t.v = '' then null
+    when t.v in ('fct', 'abuja', 'fct abuja', 'fct, abuja', 'fct-abuja', 'federal capital territory')
+      then 'fct abuja'
+    else t.v
+  end
+  from (
+    select regexp_replace(regexp_replace(lower(btrim(p)), '\s+', ' ', 'g'), ' state$', '') as v
+  ) t
+$$;
+
+-- The grouping key of a PFA name: lower-cased, trimmed, spaces collapsed. Mirrored by normalisePfa.
+create function private.normalise_pfa(p text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select nullif(regexp_replace(lower(btrim(p)), '\s+', ' ', 'g'), '')
+$$;
+
+-- The 36 states and FCT Abuja, as src/lib/company.ts NIGERIAN_STATES names them: the display
+-- name of a tax-state key, or null when it is none of them.
+create function private.nigerian_state_name(p_key text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select s.name
+  from unnest(array[
+    'Abia', 'Adamawa', 'Akwa Ibom', 'Anambra', 'Bauchi', 'Bayelsa', 'Benue', 'Borno',
+    'Cross River', 'Delta', 'Ebonyi', 'Edo', 'Ekiti', 'Enugu', 'FCT Abuja', 'Gombe', 'Imo',
+    'Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Kogi', 'Kwara', 'Lagos', 'Nasarawa', 'Niger',
+    'Ogun', 'Ondo', 'Osun', 'Oyo', 'Plateau', 'Rivers', 'Sokoto', 'Taraba', 'Yobe', 'Zamfara'
+  ]) as s(name)
+  where lower(s.name) = p_key
+$$;
+
+revoke all on function private.normalise_tax_state(text) from public, anon, authenticated;
+revoke all on function private.normalise_pfa(text) from public, anon, authenticated;
+revoke all on function private.nigerian_state_name(text) from public, anon, authenticated;
+
+-- The amount each kind and authority of a run owes, from its payslip lines, grouped on the
+-- normalised key, with the display name and every spelling merged (spaces collapsed).
 create function private.statutory_amounts(p_organisation_id uuid, p_run_id uuid)
-returns table (kind text, authority_key text, amount_kobo bigint, worker_count integer)
+returns table (
+  kind text, authority_key text, authority_name text, authority_variants text[],
+  amount_kobo bigint, worker_count integer
+)
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select g.kind, g.authority_key, g.amount_kobo, g.worker_count
+  select
+    g.kind,
+    g.authority_key,
+    case
+      when g.authority_key is null then null
+      when g.kind = 'paye' then coalesce(private.nigerian_state_name(g.authority_key), g.first_spelling)
+      else g.first_spelling
+    end,
+    g.variants,
+    g.amount_kobo,
+    g.worker_count
   from (
     select
       k.kind,
-      case k.kind when 'paye' then s.tax_state when 'pension' then s.pfa_name end as authority_key,
+      k.authority_key,
+      -- Byte order ("C"), as the TypeScript mirror sorts.
+      min(k.spelling collate "C") as first_spelling,
+      coalesce(
+        array_agg(distinct k.spelling collate "C" order by k.spelling collate "C")
+          filter (where k.spelling is not null),
+        '{}'
+      ) as variants,
       sum(l.amount_kobo)::bigint as amount_kobo,
       (count(distinct s.id) filter (where l.amount_kobo > 0))::integer as worker_count
     from public.payslip_lines l
     join public.payslips s on s.organisation_id = l.organisation_id and s.id = l.payslip_id
     cross join lateral (
-      select case
-        when l.code = 'paye' then 'paye'
-        when l.code in ('pension_employee', 'pension_employer') then 'pension'
-        when l.code in ('nhf', 'nsitf', 'itf') then l.code
-      end as kind
+      select
+        c.kind,
+        case c.kind
+          when 'paye' then private.normalise_tax_state(s.tax_state)
+          when 'pension' then private.normalise_pfa(s.pfa_name)
+        end as authority_key,
+        case c.kind
+          when 'paye' then nullif(regexp_replace(btrim(s.tax_state), '\s+', ' ', 'g'), '')
+          when 'pension' then nullif(regexp_replace(btrim(s.pfa_name), '\s+', ' ', 'g'), '')
+        end as spelling
+      from (
+        select case
+          when l.code = 'paye' then 'paye'
+          when l.code in ('pension_employee', 'pension_employer') then 'pension'
+          when l.code in ('nhf', 'nsitf', 'itf') then l.code
+        end as kind
+      ) c
     ) k
     where l.organisation_id = p_organisation_id and l.run_id = p_run_id and k.kind is not null
     group by 1, 2
@@ -316,6 +448,8 @@ begin
   if not exists (
     select 1 from private.statutory_amounts(new.organisation_id, new.run_id) a
     where a.kind = new.kind and a.authority_key is not distinct from new.authority_key
+      and a.authority_name is not distinct from new.authority_name
+      and a.authority_variants = new.authority_variants
       and a.amount_kobo = new.amount_kobo and a.worker_count = new.worker_count
   ) or new.due_date is distinct from private.statutory_due_date(new.organisation_id, new.kind, v_run.pay_date) then
     raise exception 'A remittance must be what the run''s payslips owe.' using errcode = 'MLSR7';
@@ -434,8 +568,8 @@ create trigger statutory_payments_no_truncate before truncate on public.statutor
 
 create trigger statutory_remittances_audit after insert on public.statutory_remittances
   for each row execute function private.audit_row_change();
-create trigger statutory_receipts_audit after insert on public.statutory_receipts
-  for each row execute function private.audit_row_change();
+-- statutory_receipts has no row audit: record_statutory_receipt writes the event with its actor
+-- (the row trigger's actor would be empty under the secret key; security review L3).
 create trigger statutory_payments_audit after insert on public.statutory_payments
   for each row execute function private.audit_row_change();
 
@@ -464,9 +598,11 @@ declare
   v_sums record;
 begin
   insert into public.statutory_remittances (
-    organisation_id, run_id, kind, authority_key, amount_kobo, worker_count, due_date
+    organisation_id, run_id, kind, authority_key, authority_name, authority_variants, amount_kobo,
+    worker_count, due_date
   )
-  select new.organisation_id, new.id, a.kind, a.authority_key, a.amount_kobo, a.worker_count,
+  select new.organisation_id, new.id, a.kind, a.authority_key, a.authority_name,
+         a.authority_variants, a.amount_kobo, a.worker_count,
          private.statutory_due_date(new.organisation_id, a.kind, new.pay_date)
   from private.statutory_amounts(new.organisation_id, new.id) a
   order by a.kind, a.authority_key nulls first;
@@ -695,14 +831,17 @@ grant execute on function public.record_statutory_receipt(uuid, uuid, uuid, uuid
 -- Records the payment of a remittance (owner, hr or finance, trusted session), once: paid on a
 -- day from the run's period start to today (Lagos), an amount in kobo (as text, digits only), an
 -- optional bank reference, and a receipt the caller checked for this remittance in the last hour
--- and no payment uses. Returns the payment's id.
+-- and no payment uses. The run must still be posted (MLSR9). An amount that isn't the amount due
+-- is refused unless p_amount_differs confirms it (MLSR8; money review H1), and the audit event
+-- records the confirmation. Returns the payment's id.
 create function private.record_statutory_payment(
   p_organisation_id uuid,
   p_remittance_id uuid,
   p_receipt_id uuid,
   p_paid_on date,
   p_paid_amount_kobo text,
-  p_reference text
+  p_reference text,
+  p_amount_differs boolean default false
 )
 returns uuid
 language plpgsql
@@ -731,6 +870,10 @@ begin
   select r.* into v_run
   from public.payroll_runs r
   where r.organisation_id = p_organisation_id and r.id = v_rem.run_id;
+  if v_run.id is null or v_run.status not in ('approved', 'released') then
+    raise exception 'This remittance''s payroll run isn''t posted any more, so nothing is recorded against it.'
+      using errcode = 'MLSR9';
+  end if;
   if p_paid_amount_kobo is null or p_paid_amount_kobo !~ '^[0-9]{1,15}$' then
     raise exception 'Enter the amount paid.' using errcode = 'MLSR3';
   end if;
@@ -740,6 +883,10 @@ begin
   end if;
   if p_paid_on is null or p_paid_on > v_today or p_paid_on < v_run.period_start then
     raise exception 'The payment date is from the pay period''s start to today.' using errcode = 'MLSR3';
+  end if;
+  if v_amount <> v_rem.amount_kobo and not coalesce(p_amount_differs, false) then
+    raise exception 'The amount paid isn''t the amount due. Tick that it differs to record it as it is.'
+      using errcode = 'MLSR8';
   end if;
   if v_reference is not null and (
     char_length(v_reference) > 100 or v_reference ~ '[\x01-\x1f\x7f-\x9f<>]'
@@ -773,7 +920,9 @@ begin
     jsonb_build_object(
       'payment_id', v_id, 'receipt_id', p_receipt_id, 'kind', v_rem.kind, 'run_id', v_rem.run_id,
       'paid_on', p_paid_on, 'paid_amount_kobo', v_amount::text,
-      'amount_due_kobo', v_rem.amount_kobo::text
+      'amount_due_kobo', v_rem.amount_kobo::text,
+      'amount_differs', v_amount <> v_rem.amount_kobo,
+      'difference_kobo', (v_amount - v_rem.amount_kobo)::text
     ),
     null
   );
@@ -781,9 +930,9 @@ begin
 end;
 $$;
 
-revoke all on function private.record_statutory_payment(uuid, uuid, uuid, date, text, text)
+revoke all on function private.record_statutory_payment(uuid, uuid, uuid, date, text, text, boolean)
   from public, anon;
-grant execute on function private.record_statutory_payment(uuid, uuid, uuid, date, text, text)
+grant execute on function private.record_statutory_payment(uuid, uuid, uuid, date, text, text, boolean)
   to authenticated;
 
 create function public.record_statutory_payment(
@@ -792,7 +941,8 @@ create function public.record_statutory_payment(
   p_receipt_id uuid,
   p_paid_on date,
   p_paid_amount_kobo text,
-  p_reference text
+  p_reference text,
+  p_amount_differs boolean default false
 )
 returns uuid
 language sql
@@ -801,13 +951,14 @@ security invoker
 set search_path = ''
 as $$
   select private.record_statutory_payment(
-    p_organisation_id, p_remittance_id, p_receipt_id, p_paid_on, p_paid_amount_kobo, p_reference
+    p_organisation_id, p_remittance_id, p_receipt_id, p_paid_on, p_paid_amount_kobo, p_reference,
+    p_amount_differs
   )
 $$;
 
-revoke all on function public.record_statutory_payment(uuid, uuid, uuid, date, text, text)
+revoke all on function public.record_statutory_payment(uuid, uuid, uuid, date, text, text, boolean)
   from public, anon;
-grant execute on function public.record_statutory_payment(uuid, uuid, uuid, date, text, text)
+grant execute on function public.record_statutory_payment(uuid, uuid, uuid, date, text, text, boolean)
   to authenticated;
 
 -- Voids a recorded payment (owner, hr or finance, trusted session) with a reason, as a new entry;
@@ -956,3 +1107,65 @@ revoke all on function public.set_remittance_due_days(uuid, integer, integer, in
   from public, anon;
 grant execute on function public.set_remittance_due_days(uuid, integer, integer, integer, integer)
   to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 9. Orphan receipt uploads (security review L2)
+-- ---------------------------------------------------------------------------
+
+-- Objects in payroll-evidence older than p_older_than_minutes (at least 60) that no
+-- statutory_receipts row names: uploads whose payment was never recorded (the tab closed, or the
+-- check refused them and the server's own delete failed). The secret key only. Storage refuses
+-- deletes in SQL (and removing only the storage.objects row would leave the file behind), so the
+-- daily sweep deletes them through the Storage API (src/server/payroll/receipt-sweep.ts, run by
+-- the existing /api/cron/contract-documents job: no new cron).
+create function private.orphan_statutory_receipt_objects(
+  p_older_than_minutes integer default 120,
+  p_limit integer default 500
+)
+returns setof text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' or auth.uid() is not null then
+    raise exception 'Only the server sweeps receipt uploads.' using errcode = '42501';
+  end if;
+  if p_older_than_minutes is null or p_older_than_minutes < 60
+    or p_limit is null or p_limit not between 1 and 1000 then
+    raise exception 'Sweep uploads at least an hour old, up to 1000 at a time.' using errcode = '22023';
+  end if;
+  return query
+    select o.name
+    from storage.objects o
+    where o.bucket_id = 'payroll-evidence'
+      and o.created_at < now() - make_interval(mins => p_older_than_minutes)
+      and not exists (
+        select 1 from public.statutory_receipts r where r.storage_path = o.name
+      )
+    order by o.created_at
+    limit p_limit;
+end;
+$$;
+
+revoke all on function private.orphan_statutory_receipt_objects(integer, integer)
+  from public, anon, authenticated;
+grant execute on function private.orphan_statutory_receipt_objects(integer, integer) to service_role;
+
+create function public.orphan_statutory_receipt_objects(
+  p_older_than_minutes integer default 120,
+  p_limit integer default 500
+)
+returns setof text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select private.orphan_statutory_receipt_objects(p_older_than_minutes, p_limit)
+$$;
+
+revoke all on function public.orphan_statutory_receipt_objects(integer, integer)
+  from public, anon, authenticated;
+grant execute on function public.orphan_statutory_receipt_objects(integer, integer) to service_role;

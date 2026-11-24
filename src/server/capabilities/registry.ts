@@ -2956,13 +2956,18 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "payroll.download_schedule",
     description:
-      "Makes a 60-second link to a remittance's schedule, with TINs or RSA PINs, and audits the download.",
+      "Gives the page that streams a remittance's schedule (TINs or RSA PINs), never stored, audited on download.",
     kind: "read",
     audience: "manager",
     roles: REMITTANCE_RECORDERS,
     input: remittanceIdSchema,
     changes: "none",
-    action: at("payroll/remittance-actions", "remittanceScheduleLinkAction"),
+    action: null,
+    // Only where the file is: the route (/app/payroll/remittances/[id]/schedule) makes and
+    // audits it for a person on the screen.
+    read: async (_ctx, input) => ({
+      href: `/app/payroll/remittances/${remittanceIdSchema.parse(input).remittanceId}/schedule`,
+    }),
     agent: false,
     agentNote:
       "Schedules carry TINs and RSA PINs; Lira never downloads payroll files (docs/PHASE_5.md decision 8).",

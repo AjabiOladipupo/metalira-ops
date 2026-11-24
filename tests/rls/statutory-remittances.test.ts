@@ -24,7 +24,7 @@ import { encryptPiiForDb } from "@/server/crypto/pii";
 import { MutationError, runMutation } from "@/server/identity/mutate";
 import {
   recordPaymentSpec,
-  scheduleLinkSpec,
+  scheduleFileSpec,
   startReceiptSpec,
 } from "@/server/payroll/remittances";
 import type { Database } from "@/types/db";
@@ -76,7 +76,7 @@ const record = (
   by: TestUser,
   remittanceId: string,
   receiptId: string,
-  over: { paidOn?: string; amount?: string; reference?: string } = {},
+  over: { paidOn?: string; amount?: string; reference?: string; differs?: boolean } = {},
 ) =>
   by.client.rpc("record_statutory_payment", {
     p_organisation_id: owner.orgId,
@@ -85,6 +85,7 @@ const record = (
     p_paid_on: over.paidOn ?? "2026-10-30",
     p_paid_amount_kobo: over.amount ?? "2160000",
     p_reference: over.reference ?? "PFA-REF-1",
+    p_amount_differs: over.differs ?? false,
   });
 
 const RSA_PIN = "PEN100012345678";
@@ -160,15 +161,20 @@ describe("made at approval", () => {
   it("owes one remittance per kind and authority, summed from the payslip lines", async () => {
     const { data, error } = await admin
       .from("statutory_remittances")
-      .select("kind, authority_key, amount_kobo::text, worker_count, currency, due_date")
+      .select(
+        "kind, authority_key, authority_name, authority_variants, amount_kobo::text, worker_count, currency, due_date",
+      )
       .eq("run_id", runId)
       .order("kind");
     expect(error).toBeNull();
     expect(data).toEqual([
-      // Sunday 25 Oct + 7 working days, with Wednesday 28 Oct a company holiday: Wed 4 Nov.
+      // Pension: Sunday 25 Oct rolls back to Friday 23 Oct, day 1 of 7; Wednesday 28 Oct is a
+      // company holiday, so the 7th working day is Tuesday 3 Nov (money review M3).
       {
         kind: "nsitf",
         authority_key: null,
+        authority_name: null,
+        authority_variants: [],
         amount_kobo: "120000",
         worker_count: 1,
         currency: "NGN",
@@ -176,7 +182,9 @@ describe("made at approval", () => {
       },
       {
         kind: "paye",
-        authority_key: "Lagos",
+        authority_key: "lagos",
+        authority_name: "Lagos",
+        authority_variants: ["Lagos"],
         amount_kobo: "100000",
         worker_count: 1,
         currency: "NGN",
@@ -184,11 +192,13 @@ describe("made at approval", () => {
       },
       {
         kind: "pension",
-        authority_key: "Stanbic IBTC Pensions",
+        authority_key: "stanbic ibtc pensions",
+        authority_name: "Stanbic IBTC Pensions",
+        authority_variants: ["Stanbic IBTC Pensions"],
         amount_kobo: "2160000",
         worker_count: 1,
         currency: "NGN",
-        due_date: "2026-11-04",
+        due_date: "2026-11-03",
       },
     ]);
   });
@@ -364,9 +374,28 @@ describe("payments: once, with a receipt, voided with a reason", () => {
     expect((await voidIt(finance, "Wrong amount: the bank took ₦21,500")).error).toBeNull();
     expect((await voidIt(finance, "Again")).error?.code).toBe("MLSR4");
 
+    // A short or over payment needs the person to confirm it differs (money review H1).
     const fresh = await seedReceipt(admin, owner.orgId, rem.pension!, finance.id);
-    const right = await record(finance, rem.pension!, fresh.receiptId, { amount: "2150000" });
+    const short = await record(finance, rem.pension!, fresh.receiptId, { amount: "2150000" });
+    expect(short.error?.code).toBe("MLSR8");
+    const over = await record(finance, rem.pension!, fresh.receiptId, { amount: "2170000" });
+    expect(over.error?.code).toBe("MLSR8");
+    const right = await record(finance, rem.pension!, fresh.receiptId, {
+      amount: "2150000",
+      differs: true,
+    });
     expect(right.error).toBeNull();
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("after")
+      .eq("organisation_id", owner.orgId)
+      .eq("action", "payroll.remittance_paid")
+      .eq("actor_id", finance.id);
+    expect(audit![0]!.after).toMatchObject({
+      payment_id: right.data,
+      amount_differs: true,
+      difference_kobo: "-10000",
+    });
 
     const { data: rows } = await finance.client
       .from("statutory_payments")
@@ -460,28 +489,27 @@ describe("insert-only (rule 4)", () => {
 describe("through the server (src/server/payroll/remittances.ts)", () => {
   it("makes the pension schedule with the RSA PIN decrypted, behind a link, audited by id", async () => {
     await expect(
-      runMutation(ctxOf(lineManager, "line_manager"), scheduleLinkSpec, {
+      runMutation(ctxOf(lineManager, "line_manager"), scheduleFileSpec, {
         remittanceId: rem.pension,
       }),
     ).rejects.toBeInstanceOf(MutationError);
 
-    const link = await runMutation(ctxOf(finance, "finance"), scheduleLinkSpec, {
+    const file = await runMutation(ctxOf(finance, "finance"), scheduleFileSpec, {
       remittanceId: rem.pension,
     });
-    expect(link.fileName).toBe("pension-to-stanbic-ibtc-pensions-2026-10.csv");
-    const res = await fetch(link.url);
-    expect(res.ok).toBe(true);
+    expect(file.fileName).toBe("pension-to-stanbic-ibtc-pensions-2026-10.csv");
+    const res = new Response(file.bytes as BodyInit);
     const text = (await res.text()).replace(/^﻿/, "");
     const lines = text.split(/\r\n/);
-    expect(lines[0]).toBe("Staff ID,Name,RSA PIN,Employee 8% (NGN),Employer 10% (NGN),Total (NGN)");
+    expect(lines[0]).toBe("Staff ID,Name,RSA PIN,Employee (NGN),Employer (NGN),Total (NGN)");
     expect(lines[1]).toMatch(
       new RegExp(`^PR-[0-9a-f]{8},Musa Ibrahim,${RSA_PIN},9600.00,12000.00,21600.00$`),
     );
     expect(lines[2]).toBe("Total,1 worker,,9600.00,12000.00,21600.00");
 
     // The PAYE schedule names the TIN.
-    const paye = await runMutation(ctxOf(hr, "hr"), scheduleLinkSpec, { remittanceId: rem.paye });
-    expect(await (await fetch(paye.url)).text()).toContain(
+    const paye = await runMutation(ctxOf(hr, "hr"), scheduleFileSpec, { remittanceId: rem.paye });
+    expect(new TextDecoder().decode(paye.bytes)).toContain(
       ",Musa Ibrahim,12345678-0001,120000.00,",
     );
 
@@ -496,12 +524,43 @@ describe("through the server (src/server/payroll/remittances.ts)", () => {
     expect(audit![0]).toMatchObject({ actor_id: finance.id, entity: "statutory_remittances" });
     expect(JSON.stringify(audit)).not.toContain(RSA_PIN);
     expect(JSON.stringify(audit)).not.toContain("token");
+
+    // Nothing is stored (security review M1): payroll-files holds nothing of this company's.
+    const { rows: stored } = await db.query(
+      "select count(*)::int as n from storage.objects where bucket_id = 'payroll-files' and name like $1",
+      [`${owner.orgId}/%`],
+    );
+    expect(stored[0]!.n).toBe(0);
   });
 
   it("records a payment: the receipt goes to its signed path and is checked by its bytes", async () => {
     // A file named .pdf that isn't one is refused and deleted.
-    const fake = await runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
+    const payment = {
       remittanceId: rem.nsitf,
+      paidOn: "2026-10-30",
+      amount: "1,200",
+      reference: "NSITF-OCT",
+      amountDiffers: false,
+    };
+    // The details are checked before any upload starts (money review L5).
+    await expect(
+      runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
+        ...payment,
+        amount: "1,000",
+        fileName: "receipt.pdf",
+        size: 5,
+      }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    await expect(
+      runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
+        ...payment,
+        paidOn: "2099-01-01",
+        fileName: "receipt.pdf",
+        size: 5,
+      }),
+    ).rejects.toMatchObject({ code: "invalid" });
+    const fake = await runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
+      ...payment,
       fileName: "receipt.pdf",
       size: 5,
     });
@@ -515,21 +574,18 @@ describe("through the server (src/server/payroll/remittances.ts)", () => {
           })
       ).error,
     ).toBeNull();
-    const payment = {
-      remittanceId: rem.nsitf,
-      paidOn: "2026-10-30",
-      amount: "1,200",
-      reference: "NSITF-OCT",
-      fileExt: "pdf",
-    };
     await expect(
-      runMutation(ctxOf(hr, "hr"), recordPaymentSpec, { ...payment, receiptId: fake.receiptId }),
+      runMutation(ctxOf(hr, "hr"), recordPaymentSpec, {
+        ...payment,
+        fileExt: "pdf",
+        receiptId: fake.receiptId,
+      }),
     ).rejects.toMatchObject({ code: "invalid" });
     expect((await admin.storage.from(EVIDENCE_BUCKET).download(fake.path)).data).toBeNull();
 
     // A real PDF is checked, recorded with the secret key naming hr, then paid as hr.
     const real = await runMutation(ctxOf(hr, "hr"), startReceiptSpec, {
-      remittanceId: rem.nsitf,
+      ...payment,
       fileName: "NSITF receipt.PDF",
       size: RECEIPT_PDF.length,
     });
@@ -542,6 +598,7 @@ describe("through the server (src/server/payroll/remittances.ts)", () => {
     ).toBeNull();
     const paid = await runMutation(ctxOf(hr, "hr"), recordPaymentSpec, {
       ...payment,
+      fileExt: "pdf",
       receiptId: real.receiptId,
     });
     const { data: row } = await admin
@@ -568,7 +625,7 @@ describe("through the server (src/server/payroll/remittances.ts)", () => {
     // Paid now: no second upload is even started.
     await expect(
       runMutation(ctxOf(finance, "finance"), startReceiptSpec, {
-        remittanceId: rem.nsitf,
+        ...payment,
         fileName: "again.pdf",
         size: 10,
       }),
@@ -608,5 +665,67 @@ describe("the private buckets", () => {
         });
       expect(csv.error, by.email).not.toBeNull();
     }
+  });
+
+  it("are private and have no storage policy at all (security review M1, L1)", async () => {
+    const { rows: buckets } = await db.query<{ id: string; public: boolean }>(
+      "select id, public from storage.buckets where id in ('payroll-files', 'payroll-evidence') order by id",
+    );
+    expect(buckets).toEqual([
+      { id: "payroll-evidence", public: false },
+      { id: "payroll-files", public: false },
+    ]);
+    const { rows: policies } = await db.query<{ policyname: string }>(
+      `select policyname from pg_policies
+       where schemaname = 'storage'
+         and (coalesce(qual, '') ilike any (array['%payroll-files%', '%payroll-evidence%'])
+           or coalesce(with_check, '') ilike any (array['%payroll-files%', '%payroll-evidence%']))`,
+    );
+    expect(policies).toEqual([]);
+  });
+
+  it("sweeps uploads with no receipt after two hours, through the secret key only (L2)", async () => {
+    const args = { p_older_than_minutes: 120, p_limit: 500 };
+    expect((await owner.client.rpc("orphan_statutory_receipt_objects", args)).error?.code).toBe(
+      DENIED,
+    );
+    expect(
+      (await admin.rpc("orphan_statutory_receipt_objects", { ...args, p_older_than_minutes: 5 }))
+        .error?.code,
+    ).toBe("22023");
+    // An upload nobody recorded, made to look three hours old; and a recorded receipt as old.
+    const orphan = `${owner.orgId}/${rem.paye}/${randomUUID()}.pdf`;
+    expect(
+      (
+        await admin.storage
+          .from(EVIDENCE_BUCKET)
+          .upload(orphan, RECEIPT_PDF, { contentType: "application/pdf" })
+      ).error,
+    ).toBeNull();
+    const { data: kept } = await admin
+      .from("statutory_receipts")
+      .select("storage_path")
+      .eq("organisation_id", owner.orgId)
+      .limit(1)
+      .single();
+    await db.query(
+      "update storage.objects set created_at = now() - interval '3 hours' where bucket_id = 'payroll-evidence' and name = any($1)",
+      [[orphan, kept!.storage_path]],
+    );
+    const { data: due, error } = await admin.rpc("orphan_statutory_receipt_objects", args);
+    expect(error).toBeNull();
+    expect(due).toContain(orphan);
+    expect(due).not.toContain(kept!.storage_path);
+  });
+
+  it("audits receipts once, with the person (security review L3)", async () => {
+    const { data } = await admin
+      .from("audit_log")
+      .select("action, actor_id")
+      .eq("organisation_id", owner.orgId)
+      .in("action", ["statutory_receipts.insert", "payroll.remittance_receipt_checked"]);
+    expect(data!.some((a) => a.action === "statutory_receipts.insert")).toBe(false);
+    expect(data!.every((a) => a.actor_id !== null)).toBe(true);
+    expect(data!.length).toBeGreaterThan(0);
   });
 });

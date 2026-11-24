@@ -913,6 +913,38 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payslip_snapshots": {
+                  Row: {
+                    "bank_account_last4": string | null,"bank_name": string | null,"currency": string,"organisation_id": string,"payslip_id": string,"rsa_pin_last4": string | null,"run_id": string,"taken_at": string,"ytd_gross_kobo": number,"ytd_net_kobo": number,"ytd_nhf_kobo": number,"ytd_paye_kobo": number,"ytd_payslips": number,"ytd_pension_employee_kobo": number,"ytd_year": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "bank_account_last4"?: string | null,"bank_name"?: string | null,"currency"?: string,"organisation_id": string,"payslip_id": string,"rsa_pin_last4"?: string | null,"run_id": string,"taken_at"?: string,"ytd_gross_kobo": number,"ytd_net_kobo": number,"ytd_nhf_kobo": number,"ytd_paye_kobo": number,"ytd_payslips": number,"ytd_pension_employee_kobo": number,"ytd_year": number
+                  }
+                  Update: {
+                    "bank_account_last4"?: string | null,"bank_name"?: string | null,"currency"?: string,"organisation_id"?: string,"payslip_id"?: string,"rsa_pin_last4"?: string | null,"run_id"?: string,"taken_at"?: string,"ytd_gross_kobo"?: number,"ytd_net_kobo"?: number,"ytd_nhf_kobo"?: number,"ytd_paye_kobo"?: number,"ytd_payslips"?: number,"ytd_pension_employee_kobo"?: number,"ytd_year"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslip_snapshots_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslip_snapshots_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: true
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payslip_snapshots_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payslip_sources": {
                   Row: {
                     "created_at": string,"from_date": string,"id": string,"line_positions": (number)[],"off_day": boolean,"organisation_id": string,"payslip_id": string,"run_id": string,"source_id": string,"source_kind": string,"stands": boolean,"to_date": string,"worker_id": string
@@ -1489,14 +1521,14 @@ isOneToOne: false
                   ]
                 },"statutory_remittances": {
                   Row: {
-                    "amount_kobo": number,"authority_key": string | null,"created_at": string,"currency": string,"due_date": string | null,"id": string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
+                    "amount_kobo": number,"authority_key": string | null,"authority_name": string | null,"authority_variants": (string)[],"created_at": string,"currency": string,"due_date": string | null,"id": string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"authority_key"?: string | null,"created_at"?: string,"currency"?: string,"due_date"?: string | null,"id"?: string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
+                    "amount_kobo": number,"authority_key"?: string | null,"authority_name"?: string | null,"authority_variants"?: (string)[],"created_at"?: string,"currency"?: string,"due_date"?: string | null,"id"?: string,"kind": string,"organisation_id": string,"run_id": string,"worker_count": number
                   }
                   Update: {
-                    "amount_kobo"?: number,"authority_key"?: string | null,"created_at"?: string,"currency"?: string,"due_date"?: string | null,"id"?: string,"kind"?: string,"organisation_id"?: string,"run_id"?: string,"worker_count"?: number
+                    "amount_kobo"?: number,"authority_key"?: string | null,"authority_name"?: string | null,"authority_variants"?: (string)[],"created_at"?: string,"currency"?: string,"due_date"?: string | null,"id"?: string,"kind"?: string,"organisation_id"?: string,"run_id"?: string,"worker_count"?: number
                   }
                   Relationships: [
                     {
@@ -2289,6 +2321,9 @@ isOneToOne: false
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
                            },
+"orphan_statutory_receipt_objects":
+{ Args: { "p_limit"?: number,"p_older_than_minutes"?: number }; Returns: string[]
+                           },
 "pay_rate_earliest_start":
 { Args: { "p_organisation_id": string }; Returns: string
                            },
@@ -2341,7 +2376,7 @@ isOneToOne: false
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json
                            },
 "record_statutory_payment":
-{ Args: { "p_organisation_id": string,"p_paid_amount_kobo": string,"p_paid_on": string,"p_receipt_id": string,"p_reference": string,"p_remittance_id": string }; Returns: string
+{ Args: { "p_amount_differs"?: boolean,"p_organisation_id": string,"p_paid_amount_kobo": string,"p_paid_on": string,"p_receipt_id": string,"p_reference": string,"p_remittance_id": string }; Returns: string
                            },
 "record_statutory_receipt":
 { Args: { "p_actor": string,"p_file_ext": string,"p_organisation_id": string,"p_receipt_id": string,"p_remittance_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string

@@ -16,7 +16,6 @@ import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../../_shell/slots";
 import {
-  DownloadScheduleButton,
   ReceiptLinkButton,
   RecordPaymentForm,
   VoidPaymentForm,
@@ -31,7 +30,9 @@ function first(value: string | string[] | undefined): string | undefined {
 }
 
 function dueText(r: RemittanceRow): string {
-  if (r.dueDate) return `Due ${formatDate(r.dueDate)}`;
+  if (r.dueDate) {
+    return `Due ${formatDate(r.dueDate)} (worked out on ${formatDate(r.createdAt.slice(0, 10))})`;
+  }
   return r.kind === "itf" ? "Accrued monthly; no due date set" : "No due date set";
 }
 
@@ -46,7 +47,7 @@ function RemittanceCard({
   today: string;
   periodStart: string;
 }) {
-  const title = remittanceTitle(r.kind, r.authorityKey);
+  const title = remittanceTitle(r.kind, r.authorityName);
   const status = REMITTANCE_STATUS[r.status];
   const paid = r.payment;
   const gap = paid ? paid.paidAmountKobo - r.amountKobo : 0n;
@@ -72,7 +73,17 @@ function RemittanceCard({
         {formatNaira(r.amountKobo)}
       </p>
       {r.kind === "pension" ? (
-        <p className="m-0 -mt-2 text-xs text-fg-muted">Employee 8% and employer 10% together.</p>
+        <p className="m-0 -mt-2 text-xs text-fg-muted">Employee and employer shares together.</p>
+      ) : null}
+      {r.authorityVariants.length > 1 ? (
+        <p
+          className="m-0 rounded-lg border border-line px-3 py-2 text-xs"
+          data-testid="variants-note"
+        >
+          Spelled {r.authorityVariants.length} ways on the payslips, counted as one:{" "}
+          {r.authorityVariants.join(", ")}. Check the people&apos;s{" "}
+          {r.kind === "paye" ? "tax state" : "PFA"} if these are different authorities.
+        </p>
       ) : null}
 
       {paid ? (
@@ -85,8 +96,10 @@ function RemittanceCard({
             {paid.reference ? ` · ref ${paid.reference}` : ""}
           </span>
           {gap !== 0n ? (
-            <span className="text-fg-muted">
-              {formatNaira(gap < 0n ? -gap : gap)} {gap < 0n ? "less" : "more"} than due
+            <span className="font-medium">
+              {gap < 0n
+                ? `${formatNaira(-gap)} still owed`
+                : `${formatNaira(gap)} more than due: check with the authority`}
             </span>
           ) : null}
           <span className="text-fg-muted">
@@ -97,7 +110,14 @@ function RemittanceCard({
       ) : null}
 
       <div className="flex flex-wrap items-start gap-3">
-        <DownloadScheduleButton remittanceId={r.id} label={title} />
+        {/* A plain link: the route streams the CSV (no-store, attachment); nothing is stored. */}
+        <a
+          href={`/app/payroll/remittances/${r.id}/schedule`}
+          aria-label={`Download schedule: ${title}`}
+          className="inline-flex h-10 items-center rounded-lg border border-line px-4 text-sm font-medium text-foreground no-underline hover:bg-surface hover:text-foreground"
+        >
+          Download schedule
+        </a>
       </div>
 
       {canRecord && !paid ? (
@@ -150,9 +170,8 @@ async function RemittancesPage({
   const runs = await loadRemittances(ctx.supabase, ctx.organisationId, ctx.today, { runId });
   const canRecord = canRecordRemittances(ctx.role);
   const all = runs.flatMap((r) => r.remittances);
-  const open = all.filter((r) => r.status !== "paid");
-  const overdue = open.filter((r) => r.status === "overdue").length;
-  const outstanding = sumKobo(open.map((r) => r.amountKobo));
+  const overdue = all.filter((r) => r.overdue).length;
+  const outstanding = sumKobo(all.map((r) => r.outstandingKobo));
 
   return (
     <>
@@ -169,8 +188,9 @@ async function RemittancesPage({
       >
         <p className="m-0 text-[15px] font-semibold">{TAX_ADVISER_LINE}</p>
         <p className="m-0 text-sm text-fg-muted">
-          Pension is due 7 working days after the pay date, leaving out weekends and your public
-          holidays. PAYE, NHF, NSITF and ITF have a due date only when you set one in{" "}
+          Pension is due by the 7th working day counting the pay date (or the working day before it,
+          when it falls on a weekend or holiday), leaving out weekends and your public holidays.
+          PAYE, NHF, NSITF and ITF have a due date only when you set one in{" "}
           <Link href="/app/settings/payroll#due-days" className="text-signal">
             Payroll rules
           </Link>

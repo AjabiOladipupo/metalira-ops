@@ -16,7 +16,6 @@ import {
   previewVoidPayment,
   receiptLinkSpec,
   recordPaymentSpec,
-  scheduleLinkSpec,
   setDueDaysSpec,
   startReceiptSpec,
   voidPaymentSchema,
@@ -71,12 +70,18 @@ const previewVoidSpec: MutationSpec<typeof voidPaymentSchema, CapabilityPreview>
 export type PaymentPreviewResult = { ok: true; preview: CapabilityPreview } | Failure;
 
 /** "Check the payment": what recording it will do, before any file is uploaded. */
-export async function previewRemittancePaymentAction(input: {
+/** The payment's details as the form sends them. */
+export type PaymentDetails = {
   remittanceId: string;
   paidOn: string;
   amount: string;
   reference: string;
-}): Promise<PaymentPreviewResult> {
+  amountDiffers: boolean;
+};
+
+export async function previewRemittancePaymentAction(
+  input: PaymentDetails,
+): Promise<PaymentPreviewResult> {
   try {
     return { ok: true, preview: await mutate(previewPaymentSpec, input) };
   } catch (error) {
@@ -87,11 +92,9 @@ export async function previewRemittancePaymentAction(input: {
 export type StartReceiptResult = ({ ok: true } & StartedReceipt) | Failure;
 
 /** Step 1 of "Record payment": where the browser uploads the receipt. */
-export async function startRemittanceReceiptAction(input: {
-  remittanceId: string;
-  fileName: string;
-  size: number;
-}): Promise<StartReceiptResult> {
+export async function startRemittanceReceiptAction(
+  input: PaymentDetails & { fileName: string; size: number },
+): Promise<StartReceiptResult> {
   try {
     return { ok: true, ...(await mutate(startReceiptSpec, input)) };
   } catch (error) {
@@ -100,14 +103,9 @@ export async function startRemittanceReceiptAction(input: {
 }
 
 /** Step 2: the receipt is uploaded; check it and record the payment. */
-export async function recordRemittancePaymentAction(input: {
-  remittanceId: string;
-  receiptId: string;
-  fileExt: string;
-  paidOn: string;
-  amount: string;
-  reference: string;
-}): Promise<{ ok: true } | Failure> {
+export async function recordRemittancePaymentAction(
+  input: PaymentDetails & { receiptId: string; fileExt: string },
+): Promise<{ ok: true } | Failure> {
   try {
     await mutate(recordPaymentSpec, input);
   } catch (error) {
@@ -166,21 +164,15 @@ export async function setRemittanceDueDaysAction(
   }
   revalidatePath("/app/settings/payroll");
   revalidatePath(REMITTANCES_PATH);
-  return { ok: true, status: 200, message: "Due days saved. Runs approved from now on use them." };
+  return {
+    ok: true,
+    status: 200,
+    message:
+      "Due days saved. Runs approved from now on use them; due dates already worked out stay.",
+  };
 }
 
 export type FileLinkResult = ({ ok: true } & FileLink) | Failure;
-
-/** "Download schedule": a 60-second link to the CSV, audited. Never log the link. */
-export async function remittanceScheduleLinkAction(input: {
-  remittanceId: string;
-}): Promise<FileLinkResult> {
-  try {
-    return { ok: true, ...(await mutate(scheduleLinkSpec, input)) };
-  } catch (error) {
-    return failure(error);
-  }
-}
 
 /** "View receipt": a 60-second link to the receipt, audited. */
 export async function remittanceReceiptLinkAction(input: {

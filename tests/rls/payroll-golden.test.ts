@@ -307,17 +307,18 @@ describe("October 2026 through run and approval", () => {
     expect(owed("itf")).toBe(kobo(st.itf));
     expect(owed("paye")).toBe(kobo(golden.totals.paye));
     expect(owed("nhf")).toBe(0n);
-    // Everyone is in Lagos, with no PFA on file here; pension is due 7 working days after
-    // Sunday 25 Oct 2026 (Tuesday 3 Nov); the levies have no due date until the company sets one.
+    // Everyone is in Lagos, with no PFA on file here; pension is due by the 7th working day
+    // counting Sunday 25 Oct 2026 rolled back to Friday 23 Oct (Monday 2 Nov, money review M3);
+    // the levies have no due date until the company sets one.
     expect(rems!.find((r) => r.kind === "paye")).toMatchObject({
-      authority_key: "Lagos",
+      authority_key: "lagos",
       worker_count: 5,
       due_date: null,
     });
     expect(rems!.find((r) => r.kind === "pension")).toMatchObject({
       authority_key: null,
       worker_count: 6,
-      due_date: "2026-11-03",
+      due_date: "2026-11-02",
     });
     expect(rems).toHaveLength(4);
   });

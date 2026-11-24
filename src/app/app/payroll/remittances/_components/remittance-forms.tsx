@@ -18,7 +18,6 @@ import {
   previewRemittancePaymentAction,
   recordRemittancePaymentAction,
   remittanceReceiptLinkAction,
-  remittanceScheduleLinkAction,
   setRemittanceDueDaysAction,
   startRemittanceReceiptAction,
   voidRemittancePaymentAction,
@@ -73,35 +72,6 @@ function useFileLink() {
   return { busy, message, open };
 }
 
-export function DownloadScheduleButton({
-  remittanceId,
-  label,
-}: {
-  remittanceId: string;
-  label: string;
-}) {
-  const { busy, message, open } = useFileLink();
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Button
-        type="button"
-        variant="outline"
-        disabled={busy}
-        className="h-10 rounded-lg px-4 text-sm"
-        aria-label={`Download schedule: ${label}`}
-        onClick={() => void open(() => remittanceScheduleLinkAction({ remittanceId }))}
-      >
-        {busy ? "Making the file…" : "Download schedule"}
-      </Button>
-      {message ? (
-        <p role="alert" className="m-0 text-xs font-medium">
-          {message}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 export function ReceiptLinkButton({ paymentId }: { paymentId: string }) {
   const { busy, message, open } = useFileLink();
   return (
@@ -130,7 +100,9 @@ type Phase =
   | { kind: "uploading" }
   | { kind: "checking" }
   | { kind: "done" }
-  | { kind: "error"; message: string; field?: "file" | "paidOn" | "amount" | "reference" };
+  | { kind: "error"; message: string; field?: FieldName };
+
+type FieldName = "file" | "paidOn" | "amount" | "reference" | "amountDiffers";
 
 /**
  * "Record payment": the date, amount, reference and receipt; "Check the payment" shows what it
@@ -169,6 +141,7 @@ export function RecordPaymentForm({
         paidOn: String(data.get("paidOn") ?? ""),
         amount: String(data.get("amount") ?? ""),
         reference: String(data.get("reference") ?? ""),
+        amountDiffers: data.get("amountDiffers") === "on",
       },
       file: data.get("receipt"),
     };
@@ -190,13 +163,10 @@ export function RecordPaymentForm({
       setPhase({ kind: "previewing" });
       const previewed = await previewRemittancePaymentAction(fields);
       if (!previewed.ok) {
-        const field = previewed.fieldErrors?.paidOn
-          ? "paidOn"
-          : previewed.fieldErrors?.amount
-            ? "amount"
-            : previewed.fieldErrors?.reference
-              ? "reference"
-              : undefined;
+        const errors = previewed.fieldErrors ?? {};
+        const field = (["paidOn", "amount", "reference", "amountDiffers"] as const).find(
+          (name) => errors[name],
+        );
         setPhase({ kind: "error", message: previewed.message, field });
         return;
       }
@@ -206,7 +176,7 @@ export function RecordPaymentForm({
 
     setPhase({ kind: "uploading" });
     const started = await startRemittanceReceiptAction({
-      remittanceId,
+      ...fields,
       fileName: file.name,
       size: file.size,
     });
@@ -240,7 +210,7 @@ export function RecordPaymentForm({
     startTransition(() => router.refresh());
   }
 
-  const fieldError = (name: "file" | "paidOn" | "amount" | "reference") =>
+  const fieldError = (name: FieldName) =>
     phase.kind === "error" && phase.field === name ? phase.message : undefined;
   const status =
     phase.kind === "previewing"
@@ -291,6 +261,27 @@ export function RecordPaymentForm({
           maxLength={100}
           error={fieldError("reference")}
         />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="amountDiffers"
+            className="mt-0.5 size-4 shrink-0"
+            aria-invalid={fieldError("amountDiffers") ? true : undefined}
+          />
+          <span>The amount paid differs from the amount due</span>
+        </label>
+        {fieldError("amountDiffers") ? (
+          <p role="alert" className="m-0 text-xs font-medium">
+            {fieldError("amountDiffers")}
+          </p>
+        ) : (
+          <p className="m-0 text-xs text-fg-muted">
+            Tick only to record a part payment or an overpayment as it is. It shows as part paid or
+            overpaid, never as paid.
+          </p>
+        )}
       </div>
       <div className="flex flex-col gap-1.5">
         <label htmlFor={fileId} className="text-[13px] font-medium">

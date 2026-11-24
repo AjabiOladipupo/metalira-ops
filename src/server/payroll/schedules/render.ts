@@ -4,7 +4,7 @@
  * the server for pension) and passes them in; nothing here logs or keeps a value.
  *
  * - PAYE, per tax state: staff ID, name, TIN, gross, annual taxable income, PAYE.
- * - Pension, per PFA: staff ID, name, RSA PIN, employee 8%, employer 10%, total.
+ * - Pension, per PFA: staff ID, name, RSA PIN, employee and employer shares, total.
  * - NHF: staff ID, name, basic, NHF.
  * - NSITF and ITF: staff ID, name, gross (the levy base), the levy.
  * A last row gives the worker count and the totals; the total of the amount column equals the
@@ -73,20 +73,13 @@ function header(kind: RemittanceKind): string[] {
         "PAYE (NGN)",
       ];
     case "pension":
-      return [
-        "Staff ID",
-        "Name",
-        "RSA PIN",
-        "Employee 8% (NGN)",
-        "Employer 10% (NGN)",
-        "Total (NGN)",
-      ];
+      return ["Staff ID", "Name", "RSA PIN", "Employee (NGN)", "Employer (NGN)", "Total (NGN)"];
     case "nhf":
-      return ["Staff ID", "Name", "Basic pay (NGN)", "NHF 2.5% (NGN)"];
+      return ["Staff ID", "Name", "Basic pay (NGN)", "NHF (NGN)"];
     case "nsitf":
-      return ["Staff ID", "Name", "Gross pay (NGN)", "NSITF 1% (NGN)"];
+      return ["Staff ID", "Name", "Gross pay (NGN)", "NSITF (NGN)"];
     case "itf":
-      return ["Staff ID", "Name", "Gross pay (NGN)", "ITF 1% (NGN)"];
+      return ["Staff ID", "Name", "Gross pay (NGN)", "ITF (NGN)"];
   }
 }
 

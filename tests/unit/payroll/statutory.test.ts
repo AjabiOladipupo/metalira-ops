@@ -2,7 +2,10 @@
  * Slice 5.6 (docs/PHASE_5.md 5.6): statutory remittances and schedules, pure parts.
  * - Grouping by tax state and PFA, and the golden statutory totals from the engine's payslip
  *   lines: pension ₦156,600, NSITF ₦8,700, ITF ₦8,700 (fixtures/october-2026-golden.json).
- * - Pension's due date: 7 working days after the pay date, skipping weekends and holidays.
+ * - Pension's due date: the 7th working day counting the pay date (rolled back to a working day)
+ *   as the first, skipping weekends and holidays (money review M3).
+ * - Authorities grouped on a normalised key (money review M2); short and over payments are never
+ *   "paid" (money review H1).
  * - Other kinds: only the company's own day; status worked out on read.
  * - Schedules: formula-injection escaping, kobo to naira with 2 decimals, totals equal the
  *   remittance, exact bytes for a small PAYE file.
@@ -18,8 +21,13 @@ import {
   addWorkingDays,
   authorityLabel,
   groupStatutory,
+  normalisePfa,
+  normaliseTaxState,
   remittanceDueDate,
+  remittanceIsOverdue,
+  remittanceOutstanding,
   remittanceStatus,
+  workingDayOnOrBefore,
   remittanceTitle,
   type StatutorySlip,
 } from "@/lib/payroll/statutory";
@@ -76,15 +84,15 @@ describe("grouping the October 2026 golden run", () => {
   });
 
   it("makes one PAYE remittance per tax state and one pension remittance per PFA", () => {
-    expect(groups.map((g) => [g.kind, g.authorityKey, g.workerCount])).toEqual([
-      ["paye", "Lagos", 5], // Grace Edet's PAYE is ₦0, so she isn't counted
-      ["pension", "ARM Pension Managers", 3],
-      ["pension", "Stanbic IBTC Pensions", 3],
-      ["nsitf", null, 6],
-      ["itf", null, 6],
+    expect(groups.map((g) => [g.kind, g.authorityKey, g.authorityName, g.workerCount])).toEqual([
+      ["paye", "lagos", "Lagos", 5], // Grace Edet's PAYE is ₦0, so she isn't counted
+      ["pension", "arm pension managers", "ARM Pension Managers", 3],
+      ["pension", "stanbic ibtc pensions", "Stanbic IBTC Pensions", 3],
+      ["nsitf", null, null, 6],
+      ["itf", null, null, 6],
     ]);
     // Employee 8% and employer 10% together for each PFA.
-    const stanbic = groups.find((g) => g.authorityKey === "Stanbic IBTC Pensions")!;
+    const stanbic = groups.find((g) => g.authorityName === "Stanbic IBTC Pensions")!;
     const stanbicWorkers = golden.workers.filter((_, i) => i % 2 === 0);
     const expected = stanbicWorkers.reduce(
       (n, w) => n + kobo(w.pension_employee) + (kobo(w.gross) * 10n) / 100n,
@@ -101,14 +109,76 @@ describe("grouping the October 2026 golden run", () => {
       { taxState: "Oyo", pfaName: "X", lines: [{ code: "basic", amountKobo: 5000n }] },
     ]);
     expect(groups2).toEqual([
-      { kind: "pension", authorityKey: null, amountKobo: 1800n, workerCount: 2 },
+      {
+        kind: "pension",
+        authorityKey: null,
+        authorityName: null,
+        authorityVariants: [],
+        amountKobo: 1800n,
+        workerCount: 2,
+      },
     ]);
+  });
+
+  it("merges spellings of one state or PFA, and lists the variants", () => {
+    const line = (code: string, amountKobo: bigint) => ({ code, amountKobo });
+    const groups3 = groupStatutory([
+      {
+        taxState: "Lagos",
+        pfaName: "Stanbic IBTC Pensions",
+        lines: [line("paye", 100n), line("pension_employee", 10n)],
+      },
+      {
+        taxState: " lagos  state",
+        pfaName: "stanbic  ibtc pensions ",
+        lines: [line("paye", 200n), line("pension_employee", 20n)],
+      },
+      { taxState: "LAGOS STATE", pfaName: "Stanbic IBTC Pensions", lines: [line("paye", 300n)] },
+      { taxState: "Abuja", pfaName: null, lines: [line("paye", 50n)] },
+      { taxState: "FCT", pfaName: null, lines: [line("paye", 50n)] },
+      { taxState: "Ikeja Board", pfaName: null, lines: [line("paye", 7n)] },
+    ]);
+    expect(
+      groups3.map((g) => [
+        g.kind,
+        g.authorityKey,
+        g.authorityName,
+        g.authorityVariants,
+        g.amountKobo,
+        g.workerCount,
+      ]),
+    ).toEqual([
+      ["paye", "fct abuja", "FCT Abuja", ["Abuja", "FCT"], 100n, 2],
+      ["paye", "ikeja board", "Ikeja Board", ["Ikeja Board"], 7n, 1],
+      ["paye", "lagos", "Lagos", ["LAGOS STATE", "Lagos", "lagos state"], 600n, 3],
+      [
+        "pension",
+        "stanbic ibtc pensions",
+        "Stanbic IBTC Pensions",
+        ["Stanbic IBTC Pensions", "stanbic ibtc pensions"],
+        30n,
+        2,
+      ],
+    ]);
+  });
+
+  it("normalises keys as the database does", () => {
+    expect(normaliseTaxState("  Cross   River State ")).toBe("cross river");
+    expect(normaliseTaxState("Federal Capital Territory")).toBe("fct abuja");
+    expect(normaliseTaxState("FCT Abuja")).toBe("fct abuja");
+    expect(normaliseTaxState("   ")).toBeNull();
+    expect(normaliseTaxState(null)).toBeNull();
+    expect(normalisePfa("  ARM   Pension Managers ")).toBe("arm pension managers");
+    expect(normalisePfa("")).toBeNull();
   });
 });
 
 describe("due dates", () => {
-  it("makes pension due 7 working days after the pay date (Sunday 25 Oct 2026 gives Tue 3 Nov)", () => {
-    expect(remittanceDueDate("pension", "2026-10-25", NO_DUE_DAYS, new Set())).toBe("2026-11-03");
+  it("rolls a pay date that isn't a working day back, then counts it as day 1 of 7 (Sun 25 Oct 2026 gives Mon 2 Nov)", () => {
+    expect(workingDayOnOrBefore("2026-10-25", new Set())).toBe("2026-10-23");
+    expect(remittanceDueDate("pension", "2026-10-25", NO_DUE_DAYS, new Set())).toBe("2026-11-02");
+    // A working pay date counts itself: Friday 25 Sep 2026 gives Monday 5 Oct.
+    expect(remittanceDueDate("pension", "2026-09-25", NO_DUE_DAYS, new Set())).toBe("2026-10-05");
   });
 
   it("skips weekends and the company's public holidays", () => {
@@ -117,7 +187,8 @@ describe("due dates", () => {
     expect(addWorkingDays("2026-09-25", 7, new Set(["2026-10-01"]))).toBe("2026-10-07");
     // A holiday on a Saturday changes nothing.
     expect(addWorkingDays("2026-09-25", 7, new Set(["2026-10-03"]))).toBe("2026-10-06");
-    // Christmas and Boxing Day 2026 (Friday and Saturday), and 1 Jan 2027 (Friday).
+    // Paid on Christmas Day 2026 (a Friday holiday): back to Thursday 24 Dec, then Boxing Day
+    // (Saturday) and 1 Jan 2027 (Friday) skipped.
     expect(
       remittanceDueDate(
         "pension",
@@ -125,7 +196,11 @@ describe("due dates", () => {
         NO_DUE_DAYS,
         new Set(["2026-12-25", "2026-12-26", "2027-01-01"]),
       ),
-    ).toBe("2027-01-06");
+    ).toBe("2027-01-05");
+    // A holiday inside the 7 days moves it on a day: 1 Oct after a Friday 25 Sep pay date.
+    expect(remittanceDueDate("pension", "2026-09-25", NO_DUE_DAYS, new Set(["2026-10-01"]))).toBe(
+      "2026-10-06",
+    );
   });
 
   it("gives PAYE, NHF, NSITF and ITF a due date only when the company set a day", () => {
@@ -140,10 +215,31 @@ describe("due dates", () => {
   });
 
   it("works status out on read", () => {
-    expect(remittanceStatus({ dueDate: "2026-11-03", paid: false }, "2026-11-03")).toBe("due");
-    expect(remittanceStatus({ dueDate: "2026-11-03", paid: false }, "2026-11-04")).toBe("overdue");
-    expect(remittanceStatus({ dueDate: "2026-11-03", paid: true }, "2026-12-01")).toBe("paid");
-    expect(remittanceStatus({ dueDate: null, paid: false }, "2026-12-01")).toBe("no_due_date");
+    const owed = (paidKobo: bigint | null, dueDate: string | null = "2026-11-03") => ({
+      dueDate,
+      amountKobo: 2_160_000n,
+      paidKobo,
+    });
+    expect(remittanceStatus(owed(null), "2026-11-03")).toBe("due");
+    expect(remittanceStatus(owed(null), "2026-11-04")).toBe("overdue");
+    expect(remittanceStatus(owed(2_160_000n), "2026-12-01")).toBe("paid");
+    expect(remittanceStatus(owed(null, null), "2026-12-01")).toBe("no_due_date");
+  });
+
+  it("never shows a short or over payment as paid (money review H1)", () => {
+    const short = { dueDate: "2026-11-02", amountKobo: 2_160_000n, paidKobo: 2_150_000n };
+    expect(remittanceStatus(short, "2026-11-01")).toBe("part_paid");
+    expect(remittanceOutstanding(short)).toBe(10_000n);
+    expect(remittanceIsOverdue(short, "2026-11-01")).toBe(false);
+    expect(remittanceIsOverdue(short, "2026-11-03")).toBe(true);
+    const over = { dueDate: "2026-11-02", amountKobo: 2_160_000n, paidKobo: 2_170_000n };
+    expect(remittanceStatus(over, "2026-11-03")).toBe("overpaid");
+    expect(remittanceOutstanding(over)).toBe(0n);
+    expect(remittanceIsOverdue(over, "2026-11-03")).toBe(false);
+    const exact = { dueDate: "2026-11-02", amountKobo: 2_160_000n, paidKobo: 2_160_000n };
+    expect(remittanceOutstanding(exact)).toBe(0n);
+    expect(remittanceIsOverdue(exact, "2026-12-01")).toBe(false);
+    expect(remittanceOutstanding({ amountKobo: 5n, paidKobo: null })).toBe(5n);
   });
 
   it("refuses a silly count", () => {
@@ -226,9 +322,7 @@ describe("schedule CSV", () => {
       row({ staffId: "MLS-0009", rsaPin: null }),
     ]);
     const lines = decode(schedule.bytes).split("\r\n");
-    expect(lines[0]).toBe(
-      "﻿Staff ID,Name,RSA PIN,Employee 8% (NGN),Employer 10% (NGN),Total (NGN)",
-    );
+    expect(lines[0]).toBe("﻿Staff ID,Name,RSA PIN,Employee (NGN),Employer (NGN),Total (NGN)");
     expect(lines[1]).toBe("MLS-0001,Musa Ibrahim,PEN100012345678,9600.00,12000.00,21600.00");
     expect(lines[2]).toBe("MLS-0009,Musa Ibrahim,Not on file,9600.00,12000.00,21600.00");
     expect(lines[3]).toBe("Total,2 workers,,19200.00,24000.00,43200.00");
