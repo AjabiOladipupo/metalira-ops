@@ -39,7 +39,17 @@
 --   MLOC6 a payslip or source the off-cycle run doesn't allow
 --   MLOC7 a discarded run never changes; only an off-cycle draft is discarded
 --   MLOC8 an off-cycle run's workers and reason are fixed at creation
--- Reused: MLPRD (state), MLTA5 (a paid timesheet day), 42501, 22023, P0002.
+--   MLOC9 a line a correction or one-off run doesn't allow, or an earning line with no source
+--   MLOCA the period's regular run is waiting for approval with an item for a worker on this run
+-- Reused: MLPRD (state), MLTA5 (a paid timesheet day or leave), 42501, 22023, P0002.
+--
+-- Review fixes (security review of PR #81): free text on the run and on adjustments refuses
+-- personal numbers (private.has_personal_number, mirrored by src/lib/personal-number.ts); a
+-- correction or one-off run's lines are adjustment, statutory and employer lines only, and every
+-- earning line of any run names a source (checked at commit); approved leave a posted payslip pays
+-- never changes (MLTA5); the creation takes the company's lock first and reads workers FOR SHARE;
+-- a discard's audit keeps the deleted adjustments; a worker on an off-cycle run not yet approved is
+-- a visible warning on the regular run (`on_off_cycle_run`).
 -- No money maths here: the TypeScript engine works pay out (decision 5).
 
 -- ---------------------------------------------------------------------------
@@ -58,6 +68,34 @@ alter table public.payroll_runs
 -- 2. Columns
 -- ---------------------------------------------------------------------------
 
+-- True when free text holds a personal number (rule 9: NIN, BVN, account numbers, RSA PIN): 10 or
+-- more digits in a row once spaces and dashes are ignored, or PEN followed by 12 digits. Used by
+-- column checks beside tax_clean_text; src/lib/personal-number.ts applies the same rule in Zod.
+create function private.has_personal_number(p_text text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(
+    regexp_replace(p_text, '[[:space:]-]', '', 'g') ~ '[0-9]{10}'
+    or regexp_replace(p_text, '[[:space:]-]', '', 'g') ~* 'PEN[0-9]{12}',
+    false
+  )
+$$;
+
+revoke all on function private.has_personal_number(text) from public, anon;
+-- The column checks call it as whoever inserts.
+grant execute on function private.has_personal_number(text) to authenticated, service_role;
+
+-- Adjustment labels and reasons (slice 5.2's columns) refuse personal numbers too. NOT VALID:
+-- rows written before this check aren't rescanned; every new row is checked.
+alter table public.payroll_adjustments
+  add constraint payroll_adjustments_label_no_personal_number
+    check (not private.has_personal_number(label)) not valid,
+  add constraint payroll_adjustments_reason_no_personal_number
+    check (not private.has_personal_number(reason)) not valid;
+
 alter table public.payroll_runs
   add column off_cycle_reason text
     constraint payroll_runs_off_cycle_reason_value check (
@@ -67,6 +105,7 @@ alter table public.payroll_runs
     constraint payroll_runs_off_cycle_note_text check (
       off_cycle_note = btrim(off_cycle_note) and char_length(off_cycle_note) between 1 and 500
       and off_cycle_note !~ '[\x01-\x1f\x7f-\x9f<>]' and off_cycle_note !~* '(://|www\.)'
+      and not private.has_personal_number(off_cycle_note)
     ),
   add column discarded_at timestamptz,
   add column discarded_by uuid,
@@ -74,6 +113,7 @@ alter table public.payroll_runs
     constraint payroll_runs_discard_reason_text check (
       discard_reason = btrim(discard_reason) and char_length(discard_reason) between 1 and 500
       and discard_reason !~ '[\x01-\x1f\x7f-\x9f<>]' and discard_reason !~* '(://|www\.)'
+      and not private.has_personal_number(discard_reason)
     ),
   add constraint payroll_runs_off_cycle_fields check (
     (kind = 'off_cycle') = (off_cycle_reason is not null)
@@ -272,7 +312,17 @@ begin
   if not private.payroll_run_has_worker(new.organisation_id, new.run_id, new.worker_id) then
     raise exception 'That worker isn''t on this off-cycle run.' using errcode = 'MLOC5';
   end if;
-  if new.instalment_count <> 1 then
+  -- One-off items only, except that a final pay continues a recurring series already started in
+  -- an earlier run (money review M1: a leaver's last instalment), keeping its series.
+  if new.instalment_count <> 1 and not (
+    v_run.off_cycle_reason = 'final_pay'
+    and new.instalment_number > 1
+    and exists (
+      select 1 from public.payroll_adjustments a
+      where a.organisation_id = new.organisation_id and a.series_id = new.series_id
+        and a.instalment_number < new.instalment_number
+    )
+  ) then
     raise exception 'An off-cycle run takes one-off items only. Add recurring items to the regular run.'
       using errcode = 'MLOC5';
   end if;
@@ -326,9 +376,16 @@ as $$
 declare
   v_run public.payroll_runs%rowtype := private.payroll_off_cycle_run(new.organisation_id, new.run_id);
 begin
-  if v_run.id is not null and v_run.off_cycle_reason in ('correction', 'one_off')
-    and new.source_kind <> 'adjustment' then
-    raise exception 'A correction or one-off run pays its adjustments only.' using errcode = 'MLOC6';
+  -- A one-off run pays its adjustments only. A correction run may also pay timesheet days and
+  -- leave that no standing payslip has paid (money review M2; the exclusion constraint still
+  -- refuses one already paid), but never a pay version's days (salary).
+  if v_run.id is not null and (
+    (v_run.off_cycle_reason = 'one_off' and new.source_kind <> 'adjustment')
+    or (v_run.off_cycle_reason = 'correction'
+        and new.source_kind not in ('adjustment', 'timesheet_line', 'leave_request'))
+  ) then
+    raise exception 'A correction pays one-off items and unpaid days only; a one-off run pays its items only.'
+      using errcode = 'MLOC6';
   end if;
   return new;
 end;
@@ -426,6 +483,8 @@ declare
   v_workers uuid[];
   v_full boolean;
   v_worker uuid;
+  v_moved jsonb;
+  v_regular text;
 begin
   if p_period_start is null then
     raise exception 'Choose the pay period.' using errcode = '22023';
@@ -436,6 +495,13 @@ begin
   if v_note is null then
     raise exception 'Give a reason of up to 500 characters, with no web addresses.' using errcode = '22023';
   end if;
+  if private.has_personal_number(v_note) then
+    raise exception 'Leave personal numbers out of the reason (10 or more digits, or an RSA PIN).'
+      using errcode = '22023';
+  end if;
+  -- One creation at a time per company (as create_payroll_run), taken before anything is read, so
+  -- two full-pay runs for the same worker can't both pass the checks below.
+  perform pg_advisory_xact_lock(hashtextextended('payroll_runs:' || p_organisation_id::text, 0));
   select coalesce(array_agg(distinct x order by x), '{}') into v_workers
   from unnest(coalesce(p_worker_ids, '{}'::uuid[])) x
   where x is not null;
@@ -449,10 +515,19 @@ begin
     raise exception 'Choose a pay period by its first day.' using errcode = '22023';
   end if;
   v_pay := p_pay_date;
-  if v_pay is null or v_pay < v_start or v_pay > v_end + 45 then
-    raise exception 'The pay date falls in the period or up to 45 days after it.' using errcode = '22023';
+  -- A correction or one-off payment for a former worker may be paid any time after the period
+  -- (money review L3); the other runs pay in the period or up to 45 days after it.
+  if v_pay is null or v_pay < v_start
+    or (v_pay > v_end + 45 and p_reason not in ('correction', 'one_off')) then
+    raise exception 'The pay date falls in the period or up to 45 days after it (any later date for a correction or one-off payment).'
+      using errcode = '22023';
   end if;
 
+  -- The workers' start and end dates hold until the run is created.
+  perform 1 from public.workers w
+  where w.organisation_id = p_organisation_id and w.id = any (v_workers)
+  order by w.id
+  for share;
   if (
     select count(*) from public.workers w
     where w.organisation_id = p_organisation_id and w.id = any (v_workers)
@@ -475,10 +550,6 @@ begin
     raise exception 'A final pay needs each worker''s last day inside the period. Set the end date on their page first.'
       using errcode = 'MLOC2';
   end if;
-
-  -- One creation at a time per company (as create_payroll_run), so two full-pay runs for the same
-  -- worker can't both pass the checks below.
-  perform pg_advisory_xact_lock(hashtextextended('payroll_runs:' || p_organisation_id::text, 0));
 
   v_full := p_reason in ('final_pay', 'missed_worker');
   if v_full then
@@ -509,6 +580,17 @@ begin
     end loop;
   end if;
 
+  if v_full and exists (
+    select 1
+    from public.payroll_adjustments a
+    join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+    where a.organisation_id = p_organisation_id and a.worker_id = any (v_workers)
+      and r.kind = 'regular' and r.period_start = v_start and r.status = 'review'
+  ) then
+    raise exception 'The regular run for this period is waiting for approval with an item for a worker on this run. Ask Finance to return it first.'
+      using errcode = 'MLOCA';
+  end if;
+
   perform private.ensure_tax_rule_set(p_organisation_id);
   select t.id into v_rule_set from private.tax_rule_set_on(p_organisation_id, v_pay) t;
   if v_rule_set is null then
@@ -526,6 +608,49 @@ begin
 
   insert into public.payroll_run_workers (organisation_id, run_id, worker_id, created_by)
   select p_organisation_id, v_id, x, v_uid from unnest(v_workers) x;
+
+  -- Money review M1: a full-pay run takes over its workers' items from the period's regular draft
+  -- (one-off items, and a recurring series' next instalment, which keeps its series), so they
+  -- don't block the regular run that now leaves these workers out. A series started in the
+  -- regular draft itself (instalment 1 of several) stays there and shows as blocking, for HR.
+  if v_full then
+    select coalesce(jsonb_agg(to_jsonb(a) order by a.created_at, a.id), '[]'::jsonb), max(r.id::text)
+    into v_moved, v_regular
+    from public.payroll_adjustments a
+    join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+    where a.organisation_id = p_organisation_id and a.worker_id = any (v_workers)
+      and r.kind = 'regular' and r.period_start = v_start and r.status = 'draft'
+      and (a.instalment_count = 1 or (p_reason = 'final_pay' and a.instalment_number > 1));
+    if jsonb_array_length(v_moved) > 0 then
+      delete from public.payroll_adjustments a
+      where a.organisation_id = p_organisation_id
+        and a.id in (select (e ->> 'id')::uuid from jsonb_array_elements(v_moved) e);
+      insert into public.payroll_adjustments (
+        id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
+        series_id, instalment_number, instalment_count, reason, created_by
+      )
+      select (e ->> 'id')::uuid, p_organisation_id, v_id, (e ->> 'worker_id')::uuid, e ->> 'kind',
+        e ->> 'label', (e ->> 'amount_kobo')::bigint, (e ->> 'pensionable')::boolean,
+        (e ->> 'taxable')::boolean, (e ->> 'series_id')::uuid,
+        (e ->> 'instalment_number')::integer, (e ->> 'instalment_count')::integer, e ->> 'reason',
+        (e ->> 'created_by')::uuid
+      from jsonb_array_elements(v_moved) e;
+      update public.payroll_runs r set needs_recalculation = true
+      where r.organisation_id = p_organisation_id and r.id = v_regular::uuid;
+      perform private.log_audit_impl(
+        p_organisation_id, 'payroll.adjustments_moved', 'payroll_runs', v_id, null,
+        jsonb_build_object(
+          'from_run_id', v_regular,
+          'adjustments', (
+            select jsonb_agg(jsonb_build_object(
+              'id', e ->> 'id', 'worker_id', e ->> 'worker_id', 'amount_kobo', e ->> 'amount_kobo'
+            )) from jsonb_array_elements(v_moved) e
+          )
+        ),
+        null
+      );
+    end if;
+  end if;
 
   perform private.log_audit_impl(
     p_organisation_id, 'payroll.run_created', 'payroll_runs', v_id, null,
@@ -582,9 +707,14 @@ declare
   v_reason text := private.tax_clean_text(p_reason, 500);
   v_slips integer;
   v_adjustments integer;
+  v_deleted jsonb;
 begin
   if v_reason is null then
     raise exception 'Give a reason of up to 500 characters, with no web addresses.' using errcode = '22023';
+  end if;
+  if private.has_personal_number(v_reason) then
+    raise exception 'Leave personal numbers out of the reason (10 or more digits, or an RSA PIN).'
+      using errcode = '22023';
   end if;
   v_run := private.payroll_lock_run(p_organisation_id, p_run_id);
   if v_run.kind <> 'off_cycle' then
@@ -597,6 +727,13 @@ begin
     raise exception 'Only a draft is discarded. Ask Finance to return it first.' using errcode = 'MLPRD';
   end if;
   perform set_config('metalira.audit_channel', 'web', true);
+
+  -- What the audit keeps of the adjustments that go: ids, workers and amounts.
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', a.id, 'worker_id', a.worker_id, 'kind', a.kind, 'amount_kobo', a.amount_kobo::text
+  ) order by a.created_at, a.id), '[]'::jsonb) into v_deleted
+  from public.payroll_adjustments a
+  where a.organisation_id = p_organisation_id and a.run_id = p_run_id;
 
   delete from public.payroll_anomalies a
   where a.organisation_id = p_organisation_id and a.run_id = p_run_id;
@@ -618,7 +755,7 @@ begin
   perform private.log_audit_impl(
     p_organisation_id, 'payroll.off_cycle_discarded', 'payroll_runs', p_run_id,
     jsonb_build_object(
-      'payslips', v_slips, 'adjustments', v_adjustments,
+      'payslips', v_slips, 'adjustments', v_adjustments, 'deleted_adjustments', v_deleted,
       'gross_kobo', v_run.gross_kobo::text, 'net_kobo', v_run.net_kobo::text
     ),
     null,
@@ -642,3 +779,235 @@ $$;
 
 revoke all on function public.discard_off_cycle_run(uuid, uuid, text) from public, anon;
 grant execute on function public.discard_off_cycle_run(uuid, uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 6. Review fixes: lines, leave, the regular run's warning
+-- ---------------------------------------------------------------------------
+
+-- BEFORE INSERT on payslip_lines (security review M2): a one-off run carries only its adjustments
+-- and what they owe: adjustment earnings, deductions, and the statutory and employer lines. A
+-- correction may also carry lines for unpaid timesheet days and leave. Neither carries salary
+-- components or a carried deduction.
+create function private.payslip_lines_off_cycle_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run public.payroll_runs%rowtype := private.payroll_off_cycle_run(new.organisation_id, new.run_id);
+begin
+  if v_run.id is not null and (
+    (v_run.off_cycle_reason = 'one_off' and new.code not in (
+      'adjustment_earning', 'deduction', 'paye', 'pension_employee', 'nhf', 'pension_employer',
+      'nsitf', 'itf'
+    ))
+    -- A correction may also pay unpaid timesheet days and leave (money review M2), never salary
+    -- components or a carried deduction.
+    or (v_run.off_cycle_reason = 'correction' and new.code not in (
+      'adjustment_earning', 'deduction', 'paye', 'pension_employee', 'nhf', 'pension_employer',
+      'nsitf', 'itf', 'daily_pay', 'hourly_pay', 'overtime', 'off_day', 'public_holiday',
+      'arrears', 'leave_deduction'
+    ))
+  ) then
+    raise exception 'A correction pays one-off items and unpaid days only; a one-off run pays its items only.'
+      using errcode = 'MLOC9';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payslip_lines_off_cycle_guard() from public, anon, authenticated;
+
+create trigger payslip_lines_off_cycle before insert on public.payslip_lines
+  for each row execute function private.payslip_lines_off_cycle_guard();
+alter table public.payslip_lines enable always trigger payslip_lines_off_cycle;
+
+-- At commit, on every run (security review M2): an earning line names at least one source (the
+-- pay version, timesheet day, leave or adjustment it pays), so nothing is paid that decision 10
+-- can't hold to once. save_payroll_results writes lines before their sources, so the check is a
+-- deferred constraint trigger rather than a change to that function.
+create function private.payslip_lines_need_source()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.kind = 'earning'
+    and exists (
+      select 1 from public.payslip_lines l
+      where l.organisation_id = new.organisation_id and l.id = new.id
+    )
+    and not exists (
+      select 1 from public.payslip_sources s
+      where s.organisation_id = new.organisation_id and s.payslip_id = new.payslip_id
+        and new.position = any (s.line_positions)
+    ) then
+    raise exception 'An earning line on a payslip names no source.' using errcode = 'MLOC9';
+  end if;
+  return null;
+end;
+$$;
+
+revoke all on function private.payslip_lines_need_source() from public, anon, authenticated;
+
+create constraint trigger payslip_lines_need_source after insert on public.payslip_lines
+  deferrable initially deferred
+  for each row execute function private.payslip_lines_need_source();
+alter table public.payslip_lines enable always trigger payslip_lines_need_source;
+
+-- BEFORE UPDATE OR DELETE on leave_requests (security review M3): approved leave that a posted
+-- payslip of any run pays (a standing leave_request source of an approved or released run) keeps
+-- its status, dates, type and worker, as 5.3's lock does for regular periods. 5.7c replaces the
+-- leave lock with arrears and refunds.
+create function private.leave_requests_freeze_paid()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.status = 'approved'
+    and (
+      tg_op = 'DELETE'
+      or (new.status, new.start_date, new.end_date, new.leave_type_id, new.worker_id)
+        is distinct from (old.status, old.start_date, old.end_date, old.leave_type_id, old.worker_id)
+    )
+    and exists (
+      select 1
+      from public.payslip_sources s
+      join public.payroll_runs r on r.organisation_id = s.organisation_id and r.id = s.run_id
+      where s.organisation_id = old.organisation_id
+        and s.source_kind = 'leave_request' and s.source_id = old.id
+        and s.stands
+        and r.status in ('approved', 'released')
+    ) then
+    raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
+      using errcode = 'MLTA5';
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.leave_requests_freeze_paid() from public, anon, authenticated;
+
+create trigger leave_requests_freeze_paid before update or delete on public.leave_requests
+  for each row execute function private.leave_requests_freeze_paid();
+alter table public.leave_requests enable always trigger leave_requests_freeze_paid;
+
+-- The anomaly codes (5.2's list, mirrored by ANOMALY_SEVERITY in src/lib/payroll/run.ts) gain
+-- `on_off_cycle_run` (money review L4): a worker the regular run leaves out because a final-pay or
+-- missed-worker run of the period pays them, while that run isn't approved yet. A warning, so HR
+-- acknowledges it knowingly.
+create or replace function private.payroll_anomaly_severity(p_code text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when p_code in (
+      'no_pay_rate', 'no_rostered_days', 'no_tax_state', 'calculation_failed',
+      'previous_not_posted'
+    ) then 'blocking'
+    when p_code in (
+      'roster_pattern_unknown', 'leave_pay_missing', 'open_timesheet_days', 'no_show_days',
+      'bank_missing', 'bank_in_hold', 'bank_not_checked', 'bank_unreadable', 'bank_shared',
+      'bank_shared_unchecked', 'first_pay', 'final_pay', 'net_change', 'deduction_cut',
+      'no_pension_details', 'recurring_not_carried', 'on_off_cycle_run'
+    ) then 'warning'
+  end
+$$;
+
+revoke all on function private.payroll_anomaly_severity(text) from public, anon, authenticated;
+
+-- Money review L3: a correction or one-off payment may be paid any time after its period (a
+-- former worker); the other runs keep 5.2's window (the period to 45 days after it).
+alter table public.payroll_runs drop constraint payroll_runs_dates;
+alter table public.payroll_runs
+  add constraint payroll_runs_dates check (
+    period_end >= period_start and pay_date >= period_start
+    and (pay_date <= period_end + 45 or off_cycle_reason in ('correction', 'one_off'))
+  );
+
+-- BEFORE INSERT on payroll_adjustments, after the draft guard (money review M1): an item added to
+-- a regular draft for a worker a final-pay or missed-worker draft of the same period pays goes to
+-- that off-cycle draft instead (create_payroll_run's carried instalments included), which is
+-- marked for recalculation. When that off-cycle run is already posted, a carried instalment of a
+-- recurring series isn't added (the leaver's period is paid; it would only block the regular run)
+-- and the audit log says so; anything else stays and shows as blocking on the regular run.
+create function private.payroll_adjustments_to_off_cycle()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_target public.payroll_runs%rowtype;
+  v_regular public.payroll_runs%rowtype;
+begin
+  select r.* into v_regular from public.payroll_runs r
+  where r.organisation_id = new.organisation_id and r.id = new.run_id and r.kind = 'regular';
+  if v_regular.id is null then
+    return new;
+  end if;
+  select r.* into v_target
+  from public.payroll_run_workers x
+  join public.payroll_runs r on r.organisation_id = x.organisation_id and r.id = x.run_id
+  where x.organisation_id = new.organisation_id and x.worker_id = new.worker_id
+    and r.kind = 'off_cycle' and r.off_cycle_reason in ('final_pay', 'missed_worker')
+    and r.period_start = v_regular.period_start and r.discarded_at is null
+    and r.status <> 'reversed'
+  order by r.created_at desc
+  limit 1;
+  if v_target.id is null then
+    return new;
+  end if;
+  if v_target.status = 'draft'
+    and (new.instalment_count = 1
+      or (v_target.off_cycle_reason = 'final_pay' and new.instalment_number > 1)) then
+    new.run_id := v_target.id;
+    update public.payroll_runs r set needs_recalculation = true
+    where r.organisation_id = v_target.organisation_id and r.id = v_target.id;
+    -- Written directly (as save_payroll_results does): the insert may come from the secret key.
+    insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, after)
+    values (
+      new.organisation_id, coalesce(auth.uid(), new.created_by), 'payroll.adjustments_moved',
+      'payroll_runs', v_target.id,
+      jsonb_build_object(
+        'from_run_id', v_regular.id,
+        'adjustments', jsonb_build_array(jsonb_build_object(
+          'id', new.id, 'worker_id', new.worker_id, 'amount_kobo', new.amount_kobo::text
+        ))
+      )
+    );
+    return new;
+  end if;
+  if v_target.status in ('approved', 'released') and new.instalment_number > 1 then
+    insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, after)
+    values (
+      new.organisation_id, coalesce(auth.uid(), new.created_by), 'payroll.instalment_not_carried',
+      'payroll_runs', v_regular.id,
+      jsonb_build_object(
+        'series_id', new.series_id, 'worker_id', new.worker_id,
+        'instalment', new.instalment_number, 'of', new.instalment_count,
+        'amount_kobo', new.amount_kobo::text, 'paid_by_run_id', v_target.id
+      )
+    );
+    return null;
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payroll_adjustments_to_off_cycle() from public, anon, authenticated;
+
+-- Named to fire after payroll_adjustments_guard (the regular draft's own check) and before
+-- payroll_adjustments_off_cycle (which then checks the off-cycle run it lands on).
+create trigger payroll_adjustments_moved_to_off_cycle before insert on public.payroll_adjustments
+  for each row execute function private.payroll_adjustments_to_off_cycle();
+alter table public.payroll_adjustments enable always trigger payroll_adjustments_moved_to_off_cycle;

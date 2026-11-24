@@ -45,7 +45,8 @@ export interface TodayBoardRow {
   lateMinutes: number | null;
 }
 
-export type TodayKind = "on_site" | "late" | "no_show" | "starting" | "clocked_out" | "on_leave" | "off";
+export type TodayKind =
+  "on_site" | "late" | "no_show" | "starting" | "clocked_out" | "on_leave" | "off";
 
 export interface TodayStatus {
   kind: TodayKind;
@@ -111,7 +112,8 @@ export function minutesByWorker(
   lines: readonly { workerId: string; workedMinutes: number; otMinutes: number }[],
 ): Map<string, number> {
   const out = new Map<string, number>();
-  for (const l of lines) out.set(l.workerId, (out.get(l.workerId) ?? 0) + l.workedMinutes + l.otMinutes);
+  for (const l of lines)
+    out.set(l.workerId, (out.get(l.workerId) ?? 0) + l.workedMinutes + l.otMinutes);
   return out;
 }
 
@@ -132,7 +134,10 @@ export function nextShift(
 }
 
 /** "Sun 1 Nov · Gate A · Day · 06:00–18:00". */
-export function formatTeamShift(shift: Pick<TeamShift | OpenShift, "shiftDate" | "postName" | "startsAt" | "endsAt">, timeZone: string): string {
+export function formatTeamShift(
+  shift: Pick<TeamShift | OpenShift, "shiftDate" | "postName" | "startsAt" | "endsAt">,
+  timeZone: string,
+): string {
   return `${formatShortDay(shift.shiftDate)} · ${shift.postName} · ${formatShiftHours(shift.startsAt, shift.endsAt, timeZone)}`;
 }
 

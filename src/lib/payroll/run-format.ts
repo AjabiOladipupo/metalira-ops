@@ -71,7 +71,7 @@ export const OFF_CYCLE_REASONS: Record<
   },
   correction: {
     label: "A correction",
-    hint: "Pays one-off earnings you add, with a reason. Salary, timesheets and leave stay with the regular run.",
+    hint: "Pays one-off items you add, with a reason, and, for a leaver paid off-cycle, approved days and leave no payslip has paid yet. Salary stays with the period's other runs.",
     fullPay: false,
   },
   one_off: {

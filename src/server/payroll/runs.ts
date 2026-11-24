@@ -3,10 +3,11 @@ import "server-only";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { formatDate } from "@/lib/dates";
+import { addDays, formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { PAYROLL_READERS } from "@/lib/pay-access";
+import { hasPersonalNumber, PERSONAL_NUMBER_MESSAGE } from "@/lib/personal-number";
 import type { RunTotals } from "@/lib/payroll/run";
 import { OFF_CYCLE_REASONS, runTitle, type OffCycleReason } from "@/lib/payroll/run-format";
 import type { ManagerRole } from "@/lib/roles";
@@ -47,13 +48,17 @@ const reload = "Reload the page and try again";
 const isoDate = z.iso.date("Choose a date");
 const text = (max: number, what: string) => {
   const message = `${what} in up to ${max} characters, with no web addresses`;
-  return z
-    .string(message)
-    .trim()
-    .min(1, message)
-    .max(max, message)
-    .refine((v) => !/[\u0001-\u001f\u007f-\u009f<>]/.test(v), message)
-    .refine((v) => !/(:\/\/|www\.)/i.test(v), message);
+  return (
+    z
+      .string(message)
+      .trim()
+      .min(1, message)
+      .max(max, message)
+      .refine((v) => !/[\u0001-\u001f\u007f-\u009f<>]/.test(v), message)
+      .refine((v) => !/(:\/\/|www\.)/i.test(v), message)
+      // Rule 9, as the database's private.has_personal_number (slice 5.7b, security review M1).
+      .refine((v) => !hasPersonalNumber(v), PERSONAL_NUMBER_MESSAGE)
+  );
 };
 const checkbox = z
   .string()
@@ -162,11 +167,13 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
       "Your role can't do this in payroll. HR or the owner prepares; Finance or the owner decides.",
     );
   }
+  // A column check refused the text: the only one a form can reach is the personal-number rule.
+  if (error.code === "23514") throw new MutationError("invalid", `${PERSONAL_NUMBER_MESSAGE}.`);
   if (error.code === "P0002")
     throw new MutationError("invalid", `${error.message} Reload the page.`);
   if (
     /^MLPR[46ABCDF]$/.test(error.code) ||
-    /^MLOC[1-8]$/.test(error.code) ||
+    /^MLOC[1-9A]$/.test(error.code) ||
     error.code === "22023"
   ) {
     throw new MutationError("invalid", error.message);
@@ -214,7 +221,7 @@ export async function recalculateAndSave(
         "Another payslip already pays some of these days. If the worker is on this period's regular run, recalculate that run first (it then leaves them out), then recalculate this one.",
       );
     }
-    if (e.code && (/^MLPR[CD]$/.test(e.code) || /^MLOC[5-7]$/.test(e.code))) {
+    if (e.code && (/^MLPR[CD]$/.test(e.code) || /^MLOC[5-9]$/.test(e.code))) {
       throw new MutationError("invalid", e.detail ?? "The run changed. Reload the page.");
     }
     if (e.code === "MLPR6") {
@@ -299,6 +306,45 @@ export async function previewCreateOffCycleRun(
   const p = period?.[0];
   if (!p || p.period_start !== data.periodStart) {
     throw new MutationError("invalid", "Choose a pay period by its first day.");
+  }
+  // The checks create_off_cycle_run makes (MLOC1, MLOC2 and the pay date), so the preview never
+  // shows a run the database would refuse (security review L2).
+  const later = data.reason === "correction" || data.reason === "one_off";
+  if (data.payDate < p.period_start || (!later && data.payDate > addDays(p.period_end, 45))) {
+    throw new MutationError(
+      "invalid",
+      "The pay date falls in the period or up to 45 days after it (any later date for a correction or one-off payment).",
+    );
+  }
+  const { data: picked, error: workerError } = await ctx.supabase
+    .from("workers")
+    .select("id, start_date, end_date")
+    .eq("organisation_id", ctx.organisationId)
+    .in("id", data.workerIds);
+  if (workerError) fromPayrollRunDbError(workerError);
+  const rows = picked ?? [];
+  if (rows.length !== data.workerIds.length) {
+    throw new MutationError("invalid", "Some of those workers aren't in this company.");
+  }
+  if (
+    rows.some(
+      (w) =>
+        !(w.start_date <= p.period_end && (w.end_date === null || w.end_date >= p.period_start)),
+    )
+  ) {
+    throw new MutationError(
+      "invalid",
+      "Every worker on the run must be employed on some day of the period.",
+    );
+  }
+  if (
+    data.reason === "final_pay" &&
+    rows.some((w) => !w.end_date || w.end_date < p.period_start || w.end_date > p.period_end)
+  ) {
+    throw new MutationError(
+      "invalid",
+      "A final pay needs each worker's last day inside the period. Set the end date on their page first.",
+    );
   }
   const calc = await calculateRun(ctx.supabase, ctx.organisationId, {
     runId: null,

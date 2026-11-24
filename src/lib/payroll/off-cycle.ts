@@ -64,3 +64,31 @@ export function offCycleItf(
     ? { itfApplies: pick.itfApplies, fromPeriod: pick.periodStart }
     : { itfApplies: fallback, fromPeriod: null };
 }
+
+/**
+ * The earnings stage of a correction run (money review M2): only lines for timesheet days and
+ * leave (the caller has already left out what another standing payslip pays), never a salary
+ * line (a pay version's days). The database refuses a salary line or source on a correction too.
+ */
+export function correctionEarnings(e: EarningsResult): EarningsResult {
+  const lines = e.lines.filter(
+    (l) => l.sources.length > 0 && l.sources.every((s) => s.kind !== "pay_rate"),
+  );
+  return {
+    workerId: e.workerId,
+    lines,
+    trace: [
+      traceStep(
+        "off_cycle",
+        "Correction",
+        "Pays approved days and leave no other payslip has paid, and the one-off items below; salary stays with the period's other runs",
+        null,
+        "PHASE_5 5.7b",
+      ),
+      ...e.trace,
+    ],
+    flags: [],
+    days: { ...e.days, noShowDates: [], unratedDates: [] },
+    payRateIds: e.payRateIds,
+  };
+}

@@ -16,7 +16,10 @@ import { describe, expect, it } from "vitest";
 import golden from "../../../fixtures/october-2026-golden.json";
 import { allocateKobo, parseNairaToKobo, sumKobo, type Kobo } from "@/lib/money";
 import { computeEarnings, POLICY_DEFAULTS, type EarningsWorker } from "@/lib/payroll/earnings";
-import { adjustmentsOnlyEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
+import type { MonthToDate } from "@/lib/payroll/contract";
+import { adjustmentsOnlyEarnings, correctionEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
+import { hasPersonalNumber } from "@/lib/personal-number";
+import { salaryNarration } from "@/server/payroll/bank-formats";
 import { workerPayslip, type RunAdjustment } from "@/lib/payroll/run";
 import {
   OFF_CYCLE_REASONS,
@@ -243,5 +246,148 @@ describe("the worker's notice", () => {
     expect(notice.title).toBe("Your October 2026 off-cycle payslip is ready");
     expect(notice.body).toContain("off-cycle payslip for October 2026 (pay date 16 Oct 2026)");
     expect(`${notice.title} ${notice.body}`).not.toMatch(/₦|NGN|kobo/);
+  });
+});
+
+describe("month-aggregate PAYE (owner decision, 24 Nov 2026)", () => {
+  // ₦300,000 a month (₦150,000 / ₦90,000 / ₦60,000), no rent declared: pension ₦24,000; annual
+  // taxable ₦3,312,000; tax ₦330,000 + 18% of ₦312,000 = ₦386,160; PAYE ₦32,180 a month.
+  const regularGross = 30_000_000n;
+
+  function regularSlip(monthToDate?: MonthToDate) {
+    const w = worker({
+      payRates: [
+        {
+          id: randomUUID(),
+          payType: "monthly",
+          ...(() => {
+            const [basic, housing, transport] = allocateKobo(regularGross, [5n, 3n, 2n]);
+            return { basic: basic!, housing: housing!, transport: transport! };
+          })(),
+          otherAllowances: 0n,
+          dailyRate: 0n,
+          hourlyRate: 0n,
+          effectiveFrom: "2025-01-01",
+          effectiveTo: null,
+        },
+      ],
+    });
+    return slipWith(earnings(w), [], monthToDate);
+  }
+
+  function oneOffSlip(amountKobo: Kobo, monthToDate?: MonthToDate) {
+    const w = worker();
+    return slipWith(
+      adjustmentsOnlyEarnings(earnings(w)),
+      [oneOff(w.workerId, amountKobo)],
+      monthToDate,
+    );
+  }
+
+  function slipWith(
+    e: ReturnType<typeof earnings>,
+    adj: RunAdjustment[],
+    monthToDate?: MonthToDate,
+  ) {
+    return workerPayslip(
+      {
+        employmentType: "permanent",
+        earnings: e,
+        adjustments: adj,
+        nhfOptIn: false,
+        annualRentKobo: 0n,
+        carriedDeductionKobo: 0n,
+        ...(monthToDate ? { monthToDate } : {}),
+      },
+      NTA_2025_V1,
+      { itfApplies: false, ruleSetId: "rule-set" },
+    );
+  }
+
+  const asEarlier = (slip: ReturnType<typeof regularSlip>): MonthToDate => ({
+    payslips: 1,
+    taxableKobo:
+      sumKobo(
+        slip.lines.filter((l) => l.kind === "earning" && l.taxable).map((l) => l.amountKobo),
+      ) -
+      slip.pensionEmployeeKobo -
+      slip.nhfKobo,
+    payeKobo: slip.payeKobo,
+  });
+
+  it("withholds the marginal band on a ₦60,000 one-off paid after ₦300,000 of salary", () => {
+    const regular = regularSlip();
+    expect(regular.payeKobo).toBe(3_218_000n);
+    // Alone it would be ₦720,000 a year, under the nil band: ₦0.
+    expect(oneOffSlip(6_000_000n).payeKobo).toBe(0n);
+    // On the month's total (₦336,000 a month, ₦4,032,000 a year): ₦42,980 for the month, of
+    // which ₦32,180 is already withheld: ₦10,800, 18% of ₦60,000.
+    const bonus = oneOffSlip(6_000_000n, asEarlier(regular));
+    expect(bonus.payeKobo).toBe(1_080_000n);
+    const steps = bonus.trace.map((t) => t.step);
+    expect(steps).toEqual(expect.arrayContaining(["month_to_date", "paye_month", "paye_earlier"]));
+    expect(bonus.trace.find((t) => t.step === "paye_month")?.valueKobo).toBe(4_298_000n);
+    expect(bonus.trace.find((t) => t.step === "paye_earlier")?.valueKobo).toBe(3_218_000n);
+  });
+
+  it("taxes a ₦2,000,000 gratuity on the month's total", () => {
+    // ₦2,276,000 a month, ₦27,312,000 a year: ₦330,000 + ₦1,620,000 + ₦2,730,000 + 23% of
+    // ₦2,312,000 (₦531,760) = ₦5,211,760; ÷ 12 = ₦434,313.33; less ₦32,180 withheld.
+    const gratuity = oneOffSlip(200_000_000n, asEarlier(regularSlip()));
+    expect(gratuity.payeKobo).toBe(43_431_333n - 3_218_000n);
+  });
+
+  it("gives the month the same PAYE whichever payslip posts first", () => {
+    const regularFirst = regularSlip();
+    const bonusSecond = oneOffSlip(6_000_000n, asEarlier(regularFirst));
+    const bonusFirst = oneOffSlip(6_000_000n);
+    const regularSecond = regularSlip(asEarlier(bonusFirst));
+    expect(regularFirst.payeKobo + bonusSecond.payeKobo).toBe(4_298_000n);
+    expect(bonusFirst.payeKobo + regularSecond.payeKobo).toBe(4_298_000n);
+  });
+
+  it("never withholds below ₦0", () => {
+    const slip = oneOffSlip(100_000n, { payslips: 1, taxableKobo: 0n, payeKobo: 5_000_000n });
+    expect(slip.payeKobo).toBe(0n);
+  });
+});
+
+describe("correction runs and narration", () => {
+  it("keeps timesheet and leave lines and drops salary", () => {
+    const w = worker({
+      lines: [
+        {
+          id: randomUUID(),
+          workDate: "2026-10-01",
+          workedMinutes: 480,
+          otMinutes: 60,
+          hasShift: true,
+          projectId: null,
+        },
+      ],
+    });
+    const e = correctionEarnings(earnings(w));
+    expect(e.lines.map((l) => l.code)).toEqual(["overtime"]);
+    expect(e.lines.every((l) => l.sources.every((s) => s.kind === "timesheet_line"))).toBe(true);
+  });
+
+  it("names an off-cycle bank payment", () => {
+    expect(salaryNarration("2026-10-19", "MLS-0001", true)).toBe("Off-cycle Oct 2026 MLS-0001");
+    expect(salaryNarration("2026-10-19", "MLS-0001")).toBe("Salary Oct 2026 MLS-0001");
+  });
+});
+
+describe("personal numbers in free text (security review M1)", () => {
+  it.each([
+    ["1234567890", true],
+    ["12345-67890", true],
+    ["0123 456 789", true],
+    ["PEN123456789012", true],
+    ["pen 1234 5678 9012", true],
+    ["123456789", false],
+    ["Award for 10 years, 2026", false],
+    ["Acting supervisor at Lekki, October", false],
+  ])("%s → %s", (text, expected) => {
+    expect(hasPersonalNumber(text)).toBe(expected);
   });
 });

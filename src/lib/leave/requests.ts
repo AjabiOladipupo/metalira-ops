@@ -19,7 +19,11 @@ export const LEAVE_STATUSES = [
 export type LeaveStatus = (typeof LEAVE_STATUSES)[number];
 
 /** Requests that hold days and block other requests on the same dates. */
-export const LIVE_STATUSES: readonly LeaveStatus[] = ["pending_line_manager", "pending_hr", "approved"];
+export const LIVE_STATUSES: readonly LeaveStatus[] = [
+  "pending_line_manager",
+  "pending_hr",
+  "approved",
+];
 
 export function isLeaveStatus(value: string): value is LeaveStatus {
   return (LEAVE_STATUSES as readonly string[]).includes(value);

@@ -23,13 +23,15 @@ async function PayrollRunsPage() {
   const runs = await listRuns(ctx.supabase, ctx.organisationId);
   const canPrepare = canPreparePayroll(ctx.role);
 
-  // The period holding today and the five before it, without a run yet.
+  // The period holding today and the five before it, without a regular run yet.
   const periods: { value: string; label: string; payDate: string }[] = [];
   // Off-cycle runs (slice 5.7b) may share a period with the regular run and with each other.
   const offCyclePeriods: { value: string; label: string }[] = [];
   if (canPrepare) {
     let date = ctx.today;
-    for (let i = 0; i < 6; i += 1) {
+    // Off-cycle runs reach back a year (a correction or one-off for a former worker, money
+    // review L3); the regular run's choice stays the six latest periods.
+    for (let i = 0; i < 13; i += 1) {
       const { data } = await ctx.supabase.rpc("payroll_period", {
         p_organisation_id: ctx.organisationId,
         p_date: date,
@@ -40,7 +42,7 @@ async function PayrollRunsPage() {
         value: p.period_start,
         label: `${runMonth(p.period_end)}: ${formatLeaveRange(p.period_start, p.period_end)}`,
       });
-      if (!runs.some((r) => r.kind === "regular" && r.periodStart === p.period_start)) {
+      if (i < 6 && !runs.some((r) => r.kind === "regular" && r.periodStart === p.period_start)) {
         periods.push({
           value: p.period_start,
           label: `${runMonth(p.period_end)}: ${formatLeaveRange(p.period_start, p.period_end)}, paid ${formatDate(p.pay_date)}`,

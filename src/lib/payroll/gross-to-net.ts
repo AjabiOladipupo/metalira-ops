@@ -59,6 +59,7 @@ const REF = {
   rounding: "RULES_NIGERIA rounding",
   deductions: "PHASE_5 open question 6",
   levies: "RULES_NIGERIA employer levies",
+  monthAggregate: "RULES_NIGERIA PAYE: month-aggregate (owner decision, 24 Nov 2026)",
 } as const;
 
 function assertInput(input: GrossToNetInput): void {
@@ -216,8 +217,13 @@ export function grossToNet(
     const reliefCap = r.rentRelief.capKobo * BPS_DENOMINATOR;
     const reliefScaled = reliefRaw < reliefCap ? reliefRaw : reliefCap;
     const relief: Fraction = { num: reliefScaled, den: BPS_DENOMINATOR };
+    // Month-aggregate PAYE (slice 5.7b): the month's other payslips' taxable pay (already less
+    // their pension and NHF) joins this one's, so the bands and rent relief apply once a month.
+    const month = options.monthToDate;
+    const earlierAnnual = month ? 12n * month.taxableKobo : 0n;
     let taxableScaled =
-      (annualTaxablePay - 12n * pensionEmployee - 12n * nhf) * BPS_DENOMINATOR - reliefScaled;
+      (annualTaxablePay - 12n * pensionEmployee - 12n * nhf + earlierAnnual) * BPS_DENOMINATOR -
+      reliefScaled;
     const floored = taxableScaled < 0n;
     if (floored) taxableScaled = 0n;
     const taxable: Fraction = { num: taxableScaled, den: BPS_DENOMINATOR };
@@ -249,6 +255,18 @@ export function grossToNet(
           12n * nhf,
           REF.paye,
           { monthly_kobo: nhf.toString() },
+        ),
+      );
+    }
+    if (month) {
+      trace.push(
+        traceStep(
+          "month_to_date",
+          `Plus this month's other ${month.payslips === 1 ? "payslip" : "payslips"} (${traceNaira(month.taxableKobo)} × 12)`,
+          `Taxable pay less pension and NHF already paid this month: ${traceNaira(month.taxableKobo)} × 12`,
+          earlierAnnual,
+          REF.monthAggregate,
+          { payslips: month.payslips, monthly_kobo: month.taxableKobo.toString() },
         ),
       );
     }
@@ -308,7 +326,7 @@ export function grossToNet(
         ),
       );
     }
-    paye = monthlyPaye(annual.tax);
+    const monthPaye = monthlyPaye(annual.tax);
     trace.push(
       traceStep(
         "annual_tax",
@@ -318,14 +336,47 @@ export function grossToNet(
         REF.paye,
         { exact_num: annual.tax.num.toString(), exact_den: annual.tax.den.toString() },
       ),
-      traceStep(
-        "paye",
-        "PAYE this month",
-        "Tax for the year ÷ 12, rounded half up to the kobo once",
-        paye,
-        REF.rounding,
-      ),
     );
+    if (month) {
+      const owed = monthPaye - month.payeKobo;
+      paye = owed > 0n ? owed : 0n;
+      trace.push(
+        traceStep(
+          "paye_month",
+          "PAYE for the month",
+          "Tax for the year ÷ 12, rounded half up to the kobo once",
+          monthPaye,
+          REF.rounding,
+        ),
+        traceStep(
+          "paye_earlier",
+          "Less PAYE already withheld this month",
+          `${month.payslips} other ${month.payslips === 1 ? "payslip" : "payslips"}`,
+          month.payeKobo,
+          REF.monthAggregate,
+        ),
+        traceStep(
+          "paye",
+          "PAYE on this payslip",
+          owed > 0n
+            ? `${traceNaira(monthPaye)} − ${traceNaira(month.payeKobo)}`
+            : "Already withheld this month, so ₦0",
+          paye,
+          REF.monthAggregate,
+        ),
+      );
+    } else {
+      paye = monthPaye;
+      trace.push(
+        traceStep(
+          "paye",
+          "PAYE this month",
+          "Tax for the year ÷ 12, rounded half up to the kobo once",
+          paye,
+          REF.rounding,
+        ),
+      );
+    }
 
     lines.push(
       {

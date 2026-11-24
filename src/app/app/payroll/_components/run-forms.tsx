@@ -510,7 +510,7 @@ export function OffCycleRunForm({
                 type="date"
                 required
                 defaultValue={valueOf(state, "payDate", defaultPayDate)}
-                hint="In the period, or up to 45 days after it."
+                hint="In the period or up to 45 days after it; any later date for a correction or one-off."
                 error={errors?.payDate}
               />
             </div>

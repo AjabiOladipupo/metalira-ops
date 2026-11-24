@@ -8,7 +8,8 @@ import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
 import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
 import { parsePayrollInputs, type PayrollInputs } from "@/lib/payroll/inputs";
-import { adjustmentsOnlyEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
+import type { MonthToDate } from "@/lib/payroll/contract";
+import { adjustmentsOnlyEarnings, correctionEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
 import { NTA_2025_V1, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set";
 import {
   isOffCycleReason,
@@ -196,6 +197,7 @@ async function runHistory(
   organisationId: string,
   periodStart: string,
   workerIds: readonly string[],
+  runId: string | null,
 ): Promise<History> {
   const history: History = {
     previous: null,
@@ -206,15 +208,18 @@ async function runHistory(
   };
   const { data: runs, error } = await supabase
     .from("payroll_runs")
-    .select("id, kind, status, period_start, period_end, off_cycle_reason")
+    .select("id, kind, status, period_start, period_end, off_cycle_reason, created_at")
     .eq("organisation_id", organisationId)
-    .lt("period_start", periodStart)
+    .lte("period_start", periodStart)
     .order("period_start", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(400);
   if (error) throw new Error(`Could not read earlier runs (${error.code})`);
-  const all = runs ?? [];
+  // Posted runs of this period count too (slice 5.7b money review L1 and L2: a carried deduction
+  // or a first pay from a same-period run), but never the run being worked out.
+  const all = (runs ?? []).filter((r) => r.id !== runId);
   // The latest regular run of an earlier period, whatever its exact end (money review L-new-3).
-  const prev = all.find((r) => r.kind === "regular");
+  const prev = all.find((r) => r.kind === "regular" && r.period_start < periodStart);
   const posted = all.filter((r) => POSTED.has(r.status));
   const postedIds = new Set(posted.map((r) => r.id));
   // The carried deduction comes from runs that pay a worker's period (regular, final pay, missed
@@ -366,7 +371,7 @@ async function paidOffCycle(
   supabase: Client,
   organisationId: string,
   periodStart: string,
-): Promise<string[]> {
+): Promise<{ workerId: string; runId: string; posted: boolean }[]> {
   const { data: runs, error } = await supabase
     .from("payroll_runs")
     .select("id, status, off_cycle_reason, discarded_at")
@@ -374,24 +379,129 @@ async function paidOffCycle(
     .eq("kind", "off_cycle")
     .eq("period_start", periodStart);
   if (error) throw new Error(`Could not read off-cycle runs (${error.code})`);
-  const ids = (runs ?? [])
-    .filter(
-      (r) =>
-        r.discarded_at === null &&
-        r.status !== "reversed" &&
-        isOffCycleReason(r.off_cycle_reason) &&
-        offCyclePaysFullPeriod(r.off_cycle_reason),
-    )
-    .map((r) => r.id);
-  if (ids.length === 0) return [];
+  const full = (runs ?? []).filter(
+    (r) =>
+      r.discarded_at === null &&
+      r.status !== "reversed" &&
+      isOffCycleReason(r.off_cycle_reason) &&
+      offCyclePaysFullPeriod(r.off_cycle_reason),
+  );
+  if (full.length === 0) return [];
+  const posted = new Map(full.map((r) => [r.id, POSTED.has(r.status)] as const));
   const { data: rows, error: workerError } = await supabase
     .from("payroll_run_workers")
-    .select("worker_id")
+    .select("worker_id, run_id")
     .eq("organisation_id", organisationId)
-    .in("run_id", ids)
+    .in("run_id", [...posted.keys()])
     .limit(5000);
   if (workerError) throw new Error(`Could not read off-cycle workers (${workerError.code})`);
-  return [...new Set((rows ?? []).map((r) => r.worker_id))].sort();
+  return (rows ?? [])
+    .map((r) => ({ workerId: r.worker_id, runId: r.run_id, posted: posted.get(r.run_id) === true }))
+    .sort((a, b) => (a.workerId + a.runId).localeCompare(b.workerId + b.runId));
+}
+
+/**
+ * Timesheet days a standing payslip of another run already pays (slice 5.7b): a correction run
+ * pays only the rest.
+ */
+async function paidElsewhere(
+  supabase: Client,
+  organisationId: string,
+  workerIds: readonly string[],
+  runId: string | null,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (let i = 0; i < workerIds.length; i += 200) {
+    let query = supabase
+      .from("payslip_sources")
+      .select("source_id")
+      .eq("organisation_id", organisationId)
+      .eq("stands", true)
+      .eq("source_kind", "timesheet_line")
+      .in("worker_id", workerIds.slice(i, i + 200));
+    if (runId) query = query.neq("run_id", runId);
+    const { data, error } = await query.limit(20000);
+    if (error) throw new Error(`Could not read paid days (${error.code})`);
+    for (const r of data ?? []) out.add(r.source_id);
+  }
+  return out;
+}
+
+/** One worker's other payslips in a calendar month, for month-aggregate PAYE (slice 5.7b). */
+interface MonthSlip {
+  payslipId: string;
+  runKind: string;
+  taxableKobo: bigint;
+  payeKobo: bigint;
+}
+
+/**
+ * The workers' standing payslips (approved or released runs of any kind, not this run) with a pay
+ * date in the calendar month of `payDate`: each one's taxable pay less its employee pension and
+ * NHF, and its PAYE (owner decision, 24 Nov 2026).
+ */
+async function monthPayslips(
+  supabase: Client,
+  organisationId: string,
+  payDate: string,
+  workerIds: readonly string[],
+  runId: string | null,
+): Promise<Map<string, MonthSlip[]>> {
+  const out = new Map<string, MonthSlip[]>();
+  if (workerIds.length === 0) return out;
+  const [y, m] = payDate.split("-").map(Number) as [number, number];
+  const first = `${y}-${String(m).padStart(2, "0")}-01`;
+  const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  let runQuery = supabase
+    .from("payroll_runs")
+    .select("id, kind")
+    .eq("organisation_id", organisationId)
+    .in("status", ["approved", "released"])
+    .gte("pay_date", first)
+    .lt("pay_date", next);
+  if (runId) runQuery = runQuery.neq("id", runId);
+  const { data: runs, error } = await runQuery.limit(200);
+  if (error) throw new Error(`Could not read the month's runs (${error.code})`);
+  if (!runs || runs.length === 0) return out;
+  const kinds = new Map(runs.map((r) => [r.id, r.kind] as const));
+  for (let i = 0; i < workerIds.length; i += 200) {
+    const { data: slips, error: slipError } = await supabase
+      .from("payslips")
+      .select("id, run_id, worker_id, paye_kobo::text, pension_employee_kobo::text, nhf_kobo::text")
+      .eq("organisation_id", organisationId)
+      .in("run_id", [...kinds.keys()])
+      .in("worker_id", workerIds.slice(i, i + 200));
+    if (slipError) throw new Error(`Could not read the month's payslips (${slipError.code})`);
+    const ids = (slips ?? []).map((sl) => sl.id);
+    const taxable = new Map<string, bigint>();
+    for (let j = 0; j < ids.length; j += 200) {
+      const { data: lines, error: lineError } = await supabase
+        .from("payslip_lines")
+        .select("payslip_id, amount_kobo::text")
+        .eq("organisation_id", organisationId)
+        .eq("kind", "earning")
+        .eq("taxable", true)
+        .in("payslip_id", ids.slice(j, j + 200))
+        .limit(20000);
+      if (lineError) throw new Error(`Could not read the month's lines (${lineError.code})`);
+      for (const l of lines ?? []) {
+        taxable.set(l.payslip_id, (taxable.get(l.payslip_id) ?? 0n) + toKobo(l.amount_kobo));
+      }
+    }
+    for (const sl of slips ?? []) {
+      const list = out.get(sl.worker_id) ?? [];
+      list.push({
+        payslipId: sl.id,
+        runKind: kinds.get(sl.run_id) ?? "regular",
+        taxableKobo:
+          (taxable.get(sl.id) ?? 0n) - toKobo(sl.pension_employee_kobo) - toKobo(sl.nhf_kobo),
+        payeKobo: toKobo(sl.paye_kobo),
+      });
+      out.set(sl.worker_id, list);
+    }
+  }
+  for (const list of out.values()) list.sort((a, b) => a.payslipId.localeCompare(b.payslipId));
+  return out;
 }
 
 /** The company's regular runs' ITF choices, for an off-cycle run (slice 5.7b). */
@@ -430,6 +540,8 @@ export async function calculateRun(
   const offCycle = await runScope(supabase, organisationId, target);
   const fullPay = offCycle !== null && offCyclePaysFullPeriod(offCycle.reason);
   const adjustmentsOnly = offCycle !== null && !fullPay;
+  // A correction also pays approved days and leave no standing payslip has paid (money review M2).
+  const correction = offCycle?.reason === "correction";
   // An off-cycle run reads its chosen workers only (and a preview's worker within them).
   const scopedWorkers = offCycle
     ? options.workerIds
@@ -439,7 +551,7 @@ export async function calculateRun(
       ? [...options.workerIds]
       : null;
   const workerArg = scopedWorkers ? { p_worker_ids: scopedWorkers } : {};
-  const [{ data: raw, error }, excluded] = await Promise.all([
+  const [{ data: raw, error }, onOffCycle] = await Promise.all([
     target.runId
       ? supabase.rpc("payroll_run_inputs", {
           p_organisation_id: organisationId,
@@ -454,9 +566,39 @@ export async function calculateRun(
         }),
     offCycle ? Promise.resolve([]) : paidOffCycle(supabase, organisationId, target.periodStart),
   ]);
+  const excluded = [...new Set(onOffCycle.map((x) => x.workerId))].sort();
   // The code only: the message can name the period or the company.
   if (error) throw new Error(`Could not read pay inputs (${error.code})`);
-  const parsed: PayrollInputs = parsePayrollInputs(raw);
+  const parsedRaw: PayrollInputs = parsePayrollInputs(raw);
+  // A correction leaves out timesheet days another standing payslip pays (the inputs' cycle days
+  // aren't filtered in SQL; arrears and leave already are).
+  const leaversPaid = new Set(
+    correction
+      ? (await paidOffCycle(supabase, organisationId, target.periodStart)).map((x) => x.workerId)
+      : [],
+  );
+  const paidDays = correction
+    ? await paidElsewhere(
+        supabase,
+        organisationId,
+        parsedRaw.workers.map((w) => w.workerId),
+        target.runId,
+      )
+    : new Set<string>();
+  const parsed: PayrollInputs = correction
+    ? {
+        ...parsedRaw,
+        workers: parsedRaw.workers.map((w) => ({
+          ...w,
+          // Only for a worker a final-pay or missed-worker run of the period pays: the regular run
+          // never pays their days, so a correction can't take a day from it. Arrears and leave
+          // are already filtered to what no other standing payslip pays.
+          ...(leaversPaid.has(w.workerId)
+            ? { lines: w.lines.filter((l) => !paidDays.has(l.id)) }
+            : { lines: [], arrears: [], leave: [] }),
+        })),
+      }
+    : parsedRaw;
   // A regular run leaves out workers a final-pay or missed-worker run of the period pays.
   const leftOut = new Set(excluded);
   const inputs: PayrollInputs =
@@ -494,21 +636,40 @@ export async function calculateRun(
     ...(options.extraAdjustments ?? []),
   ].filter((a) => !removed.has(a.id));
 
-  // A correction or one-off run pays only workers with an item on it.
+  // A correction or one-off run pays only workers with an item on it (or, for a correction, an
+  // unpaid timesheet day or leave).
   const withItems = new Set(adjustments.map((a) => a.workerId));
   const runWorkers = adjustmentsOnly
-    ? inputs.workers.filter((w) => withItems.has(w.workerId))
+    ? inputs.workers.filter(
+        (w) =>
+          withItems.has(w.workerId) ||
+          (correction && (w.lines.length > 0 || w.arrears.length > 0 || w.leave.length > 0)),
+      )
     : inputs.workers;
   const workerIds = runWorkers.map((w) => w.workerId);
-  const [history, bank, openDays, carried, regulars] = await Promise.all([
-    runHistory(supabase, organisationId, period.start, workerIds),
+  const [history, bank, openDays, carried, regulars, month] = await Promise.all([
+    runHistory(supabase, organisationId, period.start, workerIds, target.runId),
     checkBankDetails(organisationId, workerIds),
     options.workerIds || adjustmentsOnly
       ? Promise.resolve([])
       : openDaysBySite(supabase, organisationId, period, offCycle ? workerIds : null),
     carriedSeries(supabase, organisationId, target.runId),
     offCycle ? regularItf(supabase, organisationId, period.start) : Promise.resolve([]),
+    monthPayslips(supabase, organisationId, target.payDate, workerIds, target.runId),
   ]);
+  // Month-aggregate PAYE (owner decision, 24 Nov 2026): an off-cycle payslip always counts the
+  // worker's other standing payslips of the pay date's month; a regular payslip does when an
+  // off-cycle one of that month posted first, so the order doesn't change the month's PAYE.
+  const monthOf = (workerId: string): MonthToDate | undefined => {
+    const list = month.get(workerId) ?? [];
+    if (list.length === 0) return undefined;
+    if (!offCycle && !list.some((x) => x.runKind === "off_cycle")) return undefined;
+    return {
+      payslips: list.length,
+      taxableKobo: list.reduce((n, x) => n + x.taxableKobo, 0n),
+      payeKobo: list.reduce((n, x) => n + x.payeKobo, 0n),
+    };
+  };
   const historyOf = (workerId: string) => {
     const h = workerHistory(workerId, history.previous, history.latestPosted);
     const paidBefore = h.paidBefore || history.paidAny.has(workerId);
@@ -534,7 +695,10 @@ export async function calculateRun(
       },
       policy,
     );
-    earnings.set(w.workerId, adjustmentsOnly ? adjustmentsOnlyEarnings(e) : e);
+    earnings.set(
+      w.workerId,
+      correction ? correctionEarnings(e) : adjustmentsOnly ? adjustmentsOnlyEarnings(e) : e,
+    );
   }
 
   const compute = (itfApplies: boolean) => {
@@ -551,6 +715,7 @@ export async function calculateRun(
               nhfOptIn: w.statutory.nhfOptIn,
               annualRentKobo: w.statutory.annualRentKobo,
               carriedDeductionKobo: historyOf(w.workerId).carriedKobo,
+              ...(monthOf(w.workerId) ? { monthToDate: monthOf(w.workerId)! } : {}),
             },
             rules,
             { itfApplies, ruleSetId: ruleSetId ?? "starting values, not yet saved" },
@@ -638,6 +803,21 @@ export async function calculateRun(
       });
     }
   }
+  // Money review L4: a worker left out because a final-pay or missed-worker run of the period
+  // pays them, while that run isn't approved yet, is shown, so nobody goes unpaid by accident.
+  if (!offCycle) {
+    const inPeriod = new Set(parsedRaw.workers.map((w) => w.workerId));
+    for (const x of onOffCycle) {
+      if (!x.posted && inPeriod.has(x.workerId) && !options.workerIds) {
+        anomalies.push({
+          workerId: x.workerId,
+          code: "on_off_cycle_run",
+          severity: "warning",
+          detail: { run_id: x.runId },
+        });
+      }
+    }
+  }
   anomalies.push(...runAnomalies(openDays, bank.shared));
   if (!options.workerIds) {
     // A correction or one-off run carries nothing from the period before.
@@ -679,7 +859,27 @@ export async function calculateRun(
       })),
       inputs: raw,
       adjustments: [...adjustments].sort((a, b) => a.id.localeCompare(b.id)),
-      ...(excluded.length > 0 ? { paid_off_cycle: excluded } : {}),
+      ...(excluded.length > 0 ? { paid_off_cycle: onOffCycle } : {}),
+      ...(month.size > 0
+        ? {
+            month_to_date: Object.fromEntries(
+              [...month]
+                .filter(([id]) => monthOf(id) !== undefined)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([id, list]) => [
+                  id,
+                  list.map((x) => ({
+                    id: x.payslipId,
+                    paye: x.payeKobo.toString(),
+                    taxable: x.taxableKobo.toString(),
+                  })),
+                ]),
+            ),
+          }
+        : {}),
+      ...(correction
+        ? { paid_elsewhere: [...paidDays].sort(), leavers_paid: [...leaversPaid].sort() }
+        : {}),
       ...(offCycle
         ? {
             off_cycle: {

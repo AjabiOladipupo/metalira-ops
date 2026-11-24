@@ -178,6 +178,12 @@ export function describeAnomaly(
         title: `Recurring item not carried · ${name}`,
         body: `Instalment ${num(detail, "next")} of ${num(detail, "of")} from the period before isn't on this run, because that run wasn't posted when this one was prepared. Use Carry next instalment below if it's due: it continues the same series, so it is never deducted twice.`,
       };
+    case "on_off_cycle_run":
+      // Slice 5.7b, money review L4.
+      return {
+        title: `On an off-cycle run not yet approved · ${name}`,
+        body: "Left out of this run because a final-pay or missed-worker run for this period pays them, and that run isn't approved yet. Approve it, or discard it and recalculate this run, so they're paid once.",
+      };
     default:
       return {
         title: `${code.replace(/_/g, " ")} · ${name}`,
