@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["dub1"],
+  "ignoreCommand": "bash scripts/vercel-ignore-build.sh",
   "crons": [
     { "path": "/api/cron/import-uploads", "schedule": "0 2 * * *" },
     { "path": "/api/cron/contract-documents", "schedule": "30 2 * * *" },
