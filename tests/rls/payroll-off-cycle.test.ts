@@ -1016,3 +1016,83 @@ describe("review fixes", () => {
     ).toBe("22023");
   });
 });
+
+describe("reversing an off-cycle run (5.7a)", () => {
+  it("reverses an approved off-cycle run, frees its days, and refuses a discarded draft (MLRV2)", async () => {
+    const owner = await createTenantUser("poff-reverse", "Off-cycle Reverse Org");
+    const finance = await createTestUser("poff-reverse-fin");
+    const finance2 = await createTestUser("poff-reverse-fin2");
+    await addMember(finance, "finance", owner.orgId);
+    await addMember(finance2, "finance", owner.orgId);
+    const leaver = await addPayrollWorker(admin, owner.orgId, { end_date: "2026-10-05" });
+    const day = await addLine(owner.orgId, leaver.workerId, "2026-10-01");
+    const created = await createOffCycle(owner.client, owner.orgId, [leaver.workerId], "final_pay");
+    expect(created.error).toBeNull();
+    const runId = created.data!;
+    const doc = resultsFor(
+      { workerId: leaver.workerId, payRateId: leaver.payRateId, adjustmentId: null },
+      {
+        extra: [
+          {
+            code: "overtime",
+            label: "Overtime",
+            amount: 75_000,
+            sources: [{ kind: "timesheet_line", id: day, from: "2026-10-01", to: "2026-10-01" }],
+          },
+        ],
+      },
+    );
+    expect((await saveResults(admin, owner, runId, doc)).error).toBeNull();
+    await submit(owner.client, owner.orgId, runId);
+    expect((await check(owner.orgId, runId, finance.id)).error).toBeNull();
+    expect((await approve(finance.client, owner.orgId, runId)).error).toBeNull();
+
+    const reversal = await finance.client.rpc("reverse_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: runId,
+      p_reason: "Wrong end date",
+    });
+    expect(reversal.error).toBeNull();
+    const approved = await finance2.client.rpc("approve_payroll_reversal", {
+      p_organisation_id: owner.orgId,
+      p_run_id: reversal.data!,
+    });
+    expect(approved.error).toBeNull();
+    const { data: run } = await admin
+      .from("payroll_runs")
+      .select("status")
+      .eq("id", runId)
+      .single();
+    expect(run).toEqual({ status: "reversed" });
+    const { data: sources } = await admin
+      .from("payslip_sources")
+      .select("stands")
+      .eq("run_id", runId);
+    expect((sources ?? []).every((s) => !s.stands)).toBe(true);
+    // The day it paid moves again, and a new final pay for the worker is allowed.
+    await seedRaw("update public.timesheet_lines set worked_minutes = 470 where id = $1", [day]);
+    expect(
+      (await createOffCycle(owner.client, owner.orgId, [leaver.workerId], "final_pay")).error,
+    ).toBeNull();
+
+    // A discarded draft is never reversed.
+    const { workerId } = await addPayrollWorker(admin, owner.orgId);
+    const draft = await createOffCycle(owner.client, owner.orgId, [workerId], "one_off");
+    expect(draft.error).toBeNull();
+    expect(
+      (
+        await owner.client.rpc("discard_off_cycle_run", {
+          p_organisation_id: owner.orgId,
+          p_run_id: draft.data!,
+          p_reason: "Not needed",
+        })
+      ).error,
+    ).toBeNull();
+    const refused = await finance.client.rpc("reverse_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: draft.data!,
+      p_reason: "Undo it",
+    });
+    expect(refused.error?.code).toBe("MLRV2");
+  });
+});
