@@ -178,7 +178,9 @@ beforeAll(async () => {
   run = await seedSubmittedRun(admin, owner, {
     count: 2,
     names: ["Musa Ibrahim", "Ada Obi"],
-    anomalies: (ids) => [{ worker_id: ids[1], code: "bank_missing", severity: "warning", detail: {} }],
+    anomalies: (ids) => [
+      { worker_id: ids[1], code: "bank_missing", severity: "warning", detail: {} },
+    ],
   });
   musa = run.workers[0]!;
   ada = run.workers[1]!;
@@ -272,7 +274,12 @@ describe("making, downloading and confirming a supplementary file", () => {
       .select("payslip_id, status, amount_kobo, bank_account_last4")
       .eq("supplement_id", first);
     expect(items).toEqual([
-      { payslip_id: ada.payslipId, status: "pending", amount_kobo: NET, bank_account_last4: "6789" },
+      {
+        payslip_id: ada.payslipId,
+        status: "pending",
+        amount_kobo: NET,
+        bank_account_last4: "6789",
+      },
     ]);
     const { data: audit } = await admin
       .from("audit_log")
@@ -365,10 +372,7 @@ describe("supplementary files are kept as written", () => {
       .eq("organisation_id", owner.orgId)
       .eq("status", "confirmed")
       .single();
-    const upd = await admin
-      .from("payout_supplements")
-      .update({ total_kobo: 1 })
-      .eq("id", file!.id);
+    const upd = await admin.from("payout_supplements").update({ total_kobo: 1 }).eq("id", file!.id);
     expect(upd.error).not.toBeNull();
     for (const sql of [
       "update public.payout_supplements set total_kobo = 1 where id = $1",

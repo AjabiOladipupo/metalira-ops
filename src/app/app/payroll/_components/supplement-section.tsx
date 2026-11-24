@@ -87,7 +87,9 @@ export async function SupplementSection({
       !confirmedPaid.has(i.payslipId),
   );
   // Owner and finance read whose details are ready now (the plan); hr sees the list only.
-  const plan = canMake ? summariseSupplement((await loadSupplementPlan(supabase, organisationId, runId)).rows) : null;
+  const plan = canMake
+    ? summariseSupplement((await loadSupplementPlan(supabase, organisationId, runId)).rows)
+    : null;
   const waitingOf = new Map<string, WaitingReason>(
     (plan?.waiting ?? []).map((w) => [w.row.payslipId, w.reason] as const),
   );
@@ -222,9 +224,8 @@ export async function SupplementSection({
             <div className="flex flex-col gap-3 rounded-xl border border-line p-4">
               <h4 className="m-0 text-sm font-semibold">After you upload it</h4>
               <p className="m-0 text-sm text-fg-muted">
-                Confirm the supplementary file went to the bank. Someone who prepared or changed
-                the run, or made this file, can&apos;t confirm it, and it must have been
-                downloaded.
+                Confirm the supplementary file went to the bank. Someone who prepared or changed the
+                run, or made this file, can&apos;t confirm it, and it must have been downloaded.
               </p>
               <ConfirmSupplementForm
                 runId={runId}

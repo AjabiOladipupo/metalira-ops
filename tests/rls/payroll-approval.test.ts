@@ -656,8 +656,9 @@ describe("leave in a posted period: corrected in the next run (slice 5.7c lifts 
     // nothing to refund: the next run's corrections hold no refund for it.
     const next = await corrections(hr.client);
     expect(next.error).toBeNull();
-    const refunds = (next.data as { workers: { leave_refunds: { request_id: string }[] }[] })
-      .workers.flatMap((w) => w.leave_refunds);
+    const refunds = (
+      next.data as { workers: { leave_refunds: { request_id: string }[] }[] }
+    ).workers.flatMap((w) => w.leave_refunds);
     expect(refunds.map((r) => r.request_id)).not.toContain(id);
   });
 

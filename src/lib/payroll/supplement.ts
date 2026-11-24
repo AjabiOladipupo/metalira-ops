@@ -33,7 +33,10 @@ export const WAITING_LABEL: Record<WaitingReason, string> = {
 /** Why a row can't be paid yet, or null when it can. */
 export function waitingReason(row: SupplementRow): WaitingReason | null {
   const usable =
-    row.onFile && row.bankName !== null && row.accountName !== null && row.bankAccountLast4 !== null;
+    row.onFile &&
+    row.bankName !== null &&
+    row.accountName !== null &&
+    row.bankAccountLast4 !== null;
   if (!usable) return "no_bank_details";
   if (row.inHold) return "bank_change_in_hold";
   if (row.bankCode === null) return "no_bank_code";

@@ -15,14 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Json } from "@/types/db";
 
 import type { TableSpec } from "../helpers/registry";
-import {
-  BUCKET,
-  download,
-  giveBankDetails,
-  makeBatch,
-  payAll,
-  release,
-} from "../helpers/payout";
+import { BUCKET, download, giveBankDetails, makeBatch, payAll, release } from "../helpers/payout";
 import { addPayrollWorker, resultsFor, saveResults } from "../helpers/payroll";
 import { approveRun, periodEnd } from "../helpers/payslips";
 import { createTestUser, pgClient, type Client } from "../helpers/supabase";

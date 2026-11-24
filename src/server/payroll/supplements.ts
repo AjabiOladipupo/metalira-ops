@@ -107,7 +107,8 @@ export function fromSupplementDbError(error: Pick<PostgrestError, "code" | "mess
       "Only Finance or an owner makes, downloads or confirms a supplementary bank file.",
     );
   }
-  if (error.code === "P0002") throw new MutationError("invalid", `${error.message} Reload the page.`);
+  if (error.code === "P0002")
+    throw new MutationError("invalid", `${error.message} Reload the page.`);
   if (/^MLAR[2-7AB]$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
@@ -505,7 +506,10 @@ export const makeSupplementSpec: MutationSpec<typeof makeSupplementSchema, MadeS
     const plan = await loadSupplementPlan(admin, organisationId, run.id, true);
     if (!samePlan(mine.rows, plan.rows)) {
       plan.ciphertext.clear();
-      throw new MutationError("invalid", "Bank details changed while the file was being made. Try again.");
+      throw new MutationError(
+        "invalid",
+        "Bank details changed while the file was being made. Try again.",
+      );
     }
     const summary = summariseSupplement(plan.rows);
     const decrypted = decryptForFile(organisationId, summary.ready, plan.ciphertext, run.periodEnd);
@@ -535,7 +539,8 @@ export const makeSupplementSpec: MutationSpec<typeof makeSupplementSchema, MadeS
       .from(PAYROLL_FILES_BUCKET)
       .upload(path, bytes, { contentType: format.contentType, upsert: false });
     bytes.fill(0);
-    if (stored.error) throw new Error(`Could not store the supplementary file (${stored.error.name})`);
+    if (stored.error)
+      throw new Error(`Could not store the supplementary file (${stored.error.name})`);
 
     const { data: made, error } = await supabase.rpc("make_payout_supplement", {
       p_organisation_id: organisationId,

@@ -98,7 +98,8 @@ export function carriedLedgers(slips: readonly CarriedSlip[]): CarriedLedger[] {
     });
   }
   return out.sort(
-    (a, b) => (b.balanceKobo > a.balanceKobo ? 1 : b.balanceKobo < a.balanceKobo ? -1 : 0) ||
+    (a, b) =>
+      (b.balanceKobo > a.balanceKobo ? 1 : b.balanceKobo < a.balanceKobo ? -1 : 0) ||
       a.workerId.localeCompare(b.workerId),
   );
 }

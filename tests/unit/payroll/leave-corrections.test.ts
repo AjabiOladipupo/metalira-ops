@@ -210,7 +210,9 @@ describe("leave approved after posting: arrears in the next run", () => {
 
   it("gives a daily worker no leave arrears", () => {
     const daily = { ...monthly(), payType: "daily" as const, dailyRate: 800_000n };
-    const r = run(worker({ employmentType: "daily", payRates: [daily], leaveArrears: [arrears()] }));
+    const r = run(
+      worker({ employmentType: "daily", payRates: [daily], leaveArrears: [arrears()] }),
+    );
     expect(byCode(r.lines, "leave_deduction")).toEqual([]);
   });
 });
@@ -304,7 +306,10 @@ describe("leave cancelled after posting: a refund in the next run", () => {
     const r = run(
       worker({
         leaveRefunds: [
-          { ...refund, lines: [{ label: "x, basic", amountKobo: 0n, pensionable: true, taxable: true }] },
+          {
+            ...refund,
+            lines: [{ label: "x, basic", amountKobo: 0n, pensionable: true, taxable: true }],
+          },
         ],
       }),
     );
@@ -346,7 +351,12 @@ describe("parseLeaveCorrections", () => {
               period_start: OCT.start,
               period_end: OCT.end,
               lines: [
-                { label: "Unpaid leave, basic", amount_kobo: "-285714", pensionable: true, taxable: true },
+                {
+                  label: "Unpaid leave, basic",
+                  amount_kobo: "-285714",
+                  pensionable: true,
+                  taxable: true,
+                },
               ],
             },
           ],

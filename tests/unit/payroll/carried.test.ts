@@ -77,7 +77,9 @@ describe("carried deductions settle across runs", () => {
       carriedForwardKobo: s.carriedForwardKobo,
     }));
     const [ledger] = carriedLedgers(slips);
-    expect(ledger!.entries.map((e) => [e.broughtKobo, e.settledKobo, e.addedKobo, e.carriedKobo])).toEqual([
+    expect(
+      ledger!.entries.map((e) => [e.broughtKobo, e.settledKobo, e.addedKobo, e.carriedKobo]),
+    ).toEqual([
       [0n, 0n, 3_000_000n, 3_000_000n],
       [3_000_000n, 2_000_000n, 0n, 1_000_000n],
       [1_000_000n, 1_000_000n, 0n, 0n],
