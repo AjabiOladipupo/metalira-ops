@@ -186,6 +186,10 @@ describe("payslip PDF", () => {
     expect(text.replace(/[,.]/g, "")).not.toMatch(/\d{10,}/);
   });
 
+  it("never carries the tax adviser line (owner decision, slice 5.8: managers only)", () => {
+    expect(text.toLowerCase()).not.toContain("tax adviser");
+  });
+
   it("is the same figures the view gives", () => {
     expect(view.netKobo).toBe(kobo(musa.net));
     expect(view.payeKobo).toBe(kobo(musa.paye));

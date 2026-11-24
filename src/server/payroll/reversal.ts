@@ -109,6 +109,8 @@ export function fromReversalDbError(error: Pick<PostgrestError, "code" | "messag
     throw new MutationError("invalid", error.message, { repeat: error.message });
   }
   if (/^MLRV[1236789AB]$/.test(error.code)) throw new MutationError("invalid", error.message);
+  // Slice 5.8: a later run depends on this one ("Reverse the later run first: November 2026").
+  if (error.code === "MLFX1") throw new MutationError("invalid", error.message);
   if (error.code === "42501") {
     throw new MutationError(
       "forbidden",
@@ -171,6 +173,23 @@ async function offsetWarning(
   const n = (offsets ?? []).length;
   if (n === 0) return "";
   return ` ${n} ${n === 1 ? "offset" : "offsets"} from earlier reversed runs ${n === 1 ? "was" : "were"} set against this run's remittances: once it is reversed ${n === 1 ? "it stops" : "they stop"} counting, and ${n === 1 ? "that payment needs" : "those payments need"} a refund or another offset again.`;
+}
+
+/**
+ * Slice 5.8: the later run that must be reversed first (it paid arrears from this period, holds
+ * one of its workers in a later period, or counted its payslips in the month's PAYE), if any.
+ * The database refuses the request and the approval the same way (MLFX1).
+ */
+async function laterRunFirst(
+  ctx: Pick<MutationContext, "supabase" | "organisationId">,
+  runId: string,
+): Promise<void> {
+  const { data, error } = await ctx.supabase.rpc("payroll_reversal_blocker", {
+    p_organisation_id: ctx.organisationId,
+    p_run_id: runId,
+  });
+  if (error) fromReversalDbError(error);
+  if (data) throw new MutationError("invalid", `Reverse the later run first: ${data}`);
 }
 
 async function sideEffects(
@@ -257,6 +276,7 @@ export async function previewReverse(
   if (run.status !== "approved" || run.kind === "reversal") {
     throw new MutationError("invalid", "Only an approved run that isn't released is reversed.");
   }
+  await laterRunFirst(ctx, run.id);
   const effects = await sideEffects(ctx, run.id);
   if (effects.downloaded && !data.notUploaded) {
     throw new MutationError("invalid", DOWNLOADED_MESSAGE, { notUploaded: DOWNLOADED_MESSAGE });
@@ -303,6 +323,7 @@ export async function previewApproveReversal(
       "The run was released: the money has gone. Decline this reversal and correct it in a later run.",
     );
   }
+  await laterRunFirst(ctx, original.id);
   const effects = await sideEffects(ctx, original.id);
   if (effects.downloaded && !data.notUploaded) {
     throw new MutationError("invalid", DOWNLOADED_MESSAGE, { notUploaded: DOWNLOADED_MESSAGE });

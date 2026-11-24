@@ -23,6 +23,7 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import golden from "../../fixtures/october-2026-golden.json";
+import { parseNairaToKobo } from "@/lib/money";
 import { MutationError, runMutation } from "@/server/identity/mutate";
 import { approveRunSpec, createRunSpec, INPUTS_CHANGED_MESSAGE } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
@@ -44,7 +45,7 @@ const OCT_START = "2026-09-20";
 const OCT_END = "2026-10-19";
 const NOV_START = "2026-10-20";
 const DEC_START = "2026-11-20";
-const kobo = (naira: number) => BigInt(Math.round(naira * 100));
+const kobo = (naira: number) => parseNairaToKobo(String(naira));
 
 let admin: Client;
 let db: pg.Client;

@@ -185,7 +185,11 @@ export type AnomalyCode =
   | "recurring_not_carried"
   | "on_off_cycle_run"
   /** Slice 5.7c (money review M4): leave arrears or a refund waiting for a worker not in the run. */
-  | "leave_correction_pending";
+  | "leave_correction_pending"
+  /** Slice 5.8: a later posted run already settled this worker's carried deduction. */
+  | "carry_settled_later"
+  /** Slice 5.8 (owner decision): a leave refund pays back arrears still in the carried balance. */
+  | "refund_uncollected_carry";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -212,6 +216,8 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   recurring_not_carried: "warning",
   on_off_cycle_run: "warning",
   leave_correction_pending: "warning",
+  carry_settled_later: "warning",
+  refund_uncollected_carry: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;
@@ -422,6 +428,140 @@ export function workerHistory(
     carriedKobo: prev ? prev.carriedForwardKobo : (own?.carriedForwardKobo ?? 0n),
     paidBefore: own !== undefined || prev !== undefined,
   };
+}
+
+/** A run as the carry check reads it (slice 5.8). */
+export interface CarryRun {
+  id: string;
+  kind: string;
+  status: string;
+  periodStart: string;
+  offCycleReason: string | null;
+}
+
+const CARRYING_REASONS = new Set(["final_pay", "missed_worker"]);
+
+/**
+ * Slice 5.8 (phase review, money): a full-pay off-cycle run for an earlier period than a posted
+ * run that already carried the worker on takes no carried deduction. That later run worked out
+ * its carry from the worker's latest posted payslip, so it took (or carried on) the whole
+ * balance; taking it again here would deduct it twice. Returns each such worker with the
+ * earliest later period that holds them. Carrying runs are regular, final-pay and missed-worker
+ * runs that are approved or released (a reversed run, a reversal's copies, a correction or a
+ * one-off run never settle a carry).
+ */
+export function carrySettledLater(
+  periodStart: string,
+  runs: readonly CarryRun[],
+  slips: readonly { runId: string; workerId: string }[],
+): Map<string, string> {
+  const carrying = new Map(
+    runs
+      .filter(
+        (r) =>
+          r.periodStart > periodStart &&
+          (r.status === "approved" || r.status === "released") &&
+          (r.kind === "regular" ||
+            (r.kind === "off_cycle" && CARRYING_REASONS.has(r.offCycleReason ?? ""))),
+      )
+      .map((r) => [r.id, r.periodStart] as const),
+  );
+  const out = new Map<string, string>();
+  for (const s of slips) {
+    const later = carrying.get(s.runId);
+    if (later === undefined) continue;
+    const seen = out.get(s.workerId);
+    if (seen === undefined || later < seen) out.set(s.workerId, later);
+  }
+  return out;
+}
+
+/**
+ * The carried deduction an off-cycle run takes (slices 5.7b and 5.8): none on a correction or
+ * one-off run, none when a later posted run already settled the worker's carry, else the
+ * worker's history.
+ */
+export function offCycleCarriedKobo(
+  carriedKobo: Kobo,
+  adjustmentsOnly: boolean,
+  settledLaterPeriod: string | undefined,
+): Kobo {
+  return adjustmentsOnly || settledLaterPeriod !== undefined ? 0n : carriedKobo;
+}
+
+/**
+ * The anomalies of a worker whose carry a later posted run settled (slice 5.8): a warning when a
+ * carry was there to take, and a block when this run would carry a new deduction forward, since
+ * the later run's chain never reads this payslip (the deduction would be lost).
+ */
+export function carrySettledLaterAnomalies(
+  workerId: string,
+  laterPeriodStart: string,
+  skippedKobo: Kobo,
+  carriedForwardKobo: Kobo,
+): RunAnomaly[] {
+  const out: RunAnomaly[] = [];
+  if (skippedKobo > 0n) {
+    out.push(anomaly("carry_settled_later", workerId, { period_start: laterPeriodStart }));
+  }
+  if (carriedForwardKobo > 0n) {
+    out.push(
+      anomaly("calculation_failed", workerId, {
+        deduction_cut: true,
+        carry_settled_later: true,
+        period_start: laterPeriodStart,
+      }),
+    );
+  }
+  return out;
+}
+
+/** A line a leave refund pays back (5.7c's refund input: the fields read here). */
+export interface RefundedLine {
+  code: string;
+  amountKobo: Kobo;
+  wantedKobo: Kobo | null;
+}
+
+/**
+ * Slice 5.8 (owner decision): the part of a leave refund that pays back arrears never recovered.
+ * A 5.7c refund pays an after-tax arrears line back in full, what it took plus what it carried;
+ * the carried rest may still sit in the worker's carried balance. That part is the sum over the
+ * refunded arrears lines of (wanted − taken), at most the carried balance this run brings in.
+ */
+export function refundUncollectedKobo(
+  refunds: readonly { lines: readonly RefundedLine[] }[],
+  carriedInKobo: Kobo,
+): Kobo {
+  let rest = 0n;
+  for (const r of refunds) {
+    for (const l of r.lines) {
+      if (l.code !== "leave_arrears" || l.wantedKobo === null) continue;
+      if (l.wantedKobo > l.amountKobo) rest += l.wantedKobo - l.amountKobo;
+    }
+  }
+  const carried = carriedInKobo > 0n ? carriedInKobo : 0n;
+  return rest < carried ? rest : carried;
+}
+
+/** Whole naira in thousands groups ("1,000,000,000"), so a stored detail never holds 10 digits. */
+function groupedNaira(naira: bigint): string {
+  return naira.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * "Refund includes ₦X not yet recovered from carried deductions": a warning HR acknowledges
+ * (owner decision; the one anomaly whose detail holds an amount, kept as whole naira in thousands
+ * groups and kobo, so no run of 10 digits is stored whatever the amount: money review L2).
+ */
+export function refundUncollectedAnomalies(workerId: string, uncollectedKobo: Kobo): RunAnomaly[] {
+  if (uncollectedKobo <= 0n) return [];
+  return [
+    anomaly("refund_uncollected_carry", workerId, {
+      naira: groupedNaira(uncollectedKobo / 100n),
+      kobo: Number(uncollectedKobo % 100n),
+    }),
+  ];
 }
 
 /**
