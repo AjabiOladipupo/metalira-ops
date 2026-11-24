@@ -9,11 +9,13 @@ import { addDays, formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira } from "@/lib/money";
 import { OFF_CYCLE_REASONS, REVERSAL_STATUS, RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
+import { loadCarriedDeductions } from "@/server/payroll/carried-data";
 import { listRuns } from "@/server/payroll/run-data";
 import { canPreparePayroll } from "@/server/payroll/runs";
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../_shell/slots";
+import { CarriedPanel } from "./_components/carried-panel";
 import { CreateRunForm, OffCycleRunForm, type OffCycleWorkerOption } from "./_components/run-forms";
 
 export const metadata: Metadata = { title: "Payroll run" };
@@ -22,6 +24,13 @@ async function PayrollRunsPage() {
   const ctx = await peoplePageContext();
   const runs = await listRuns(ctx.supabase, ctx.organisationId);
   const canPrepare = canPreparePayroll(ctx.role);
+  // The panel degrades to its error state; the run list never fails because of it.
+  const carried = await loadCarriedDeductions(ctx.supabase, ctx.organisationId).catch(
+    (e: unknown) => {
+      console.error("payroll.carried_read_failed:", e instanceof Error ? e.name : "unknown");
+      return null;
+    },
+  );
 
   // The period holding today and the five before it, without a regular run yet.
   const periods: { value: string; label: string; payDate: string }[] = [];
@@ -216,6 +225,8 @@ async function PayrollRunsPage() {
           </table>
         </div>
       )}
+
+      <CarriedPanel data={carried} />
     </>
   );
 }

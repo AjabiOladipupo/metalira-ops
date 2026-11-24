@@ -22,6 +22,18 @@ import {
   type reverseRunSchema,
 } from "@/server/payroll/reversal";
 import {
+  previewOffset,
+  previewRefund,
+  type offsetSchema,
+  type recordRefundSchema,
+} from "@/server/payroll/remittance-resolutions";
+import {
+  previewConfirmSupplement,
+  previewMakeSupplement,
+  type confirmSupplementSchema,
+  type makeSupplementSchema,
+} from "@/server/payroll/supplements";
+import {
   previewAcknowledge,
   previewAddAdjustment,
   previewApprove,
@@ -135,6 +147,15 @@ export const previewAddPayrollCorrection: PreviewFn<typeof correctionSchema> = (
   previewCorrection(ctx, ctx.data);
 
 // ---------------------------------------------------------------------------
+// Supplementary payout files (slice 5.7c)
+// ---------------------------------------------------------------------------
+
+export const previewMakePayrollSupplement: PreviewFn<typeof makeSupplementSchema> = (ctx) =>
+  previewMakeSupplement(ctx, ctx.data);
+export const previewConfirmPayrollSupplement: PreviewFn<typeof confirmSupplementSchema> = (ctx) =>
+  previewConfirmSupplement(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
 // Statutory remittances (slice 5.6)
 // ---------------------------------------------------------------------------
 
@@ -142,3 +163,12 @@ export const previewRecordRemittancePayment: PreviewFn<typeof recordPaymentSchem
   previewRecordPayment(ctx, ctx.data);
 export const previewVoidRemittancePayment: PreviewFn<typeof voidPaymentSchema> = (ctx) =>
   previewVoidPayment(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// Refunds and offsets of payments on voided remittances (slice 5.7c)
+// ---------------------------------------------------------------------------
+
+export const previewRemittanceRefund: PreviewFn<typeof recordRefundSchema> = (ctx) =>
+  previewRefund(ctx, ctx.data);
+export const previewRemittanceOffset: PreviewFn<typeof offsetSchema> = (ctx) =>
+  previewOffset(ctx, ctx.data);

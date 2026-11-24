@@ -466,7 +466,7 @@ export function grossToNet(
   for (const d of input.deductions) {
     const taken = take(d.amountKobo);
     lines.push({
-      code: "deduction",
+      code: d.code ?? "deduction",
       kind: "deduction",
       label: d.label,
       amountKobo: taken,
@@ -476,7 +476,7 @@ export function grossToNet(
     });
     trace.push(
       traceStep(
-        "deduction",
+        d.code ?? "deduction",
         `Less ${d.label}`,
         taken === d.amountKobo
           ? traceNaira(taken)

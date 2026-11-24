@@ -23,6 +23,15 @@ import {
   type FileLink,
   type StartedReceipt,
 } from "./remittances";
+import {
+  offsetSchema,
+  previewOffset,
+  previewRefund,
+  previewRefundSchema,
+  recordOffsetSpec,
+  recordRefundSpec,
+  startRefundReceiptSpec,
+} from "./remittance-resolutions";
 
 /**
  * Server Actions for statutory remittances (slice 5.6). Each goes through `mutate()` (role,
@@ -183,4 +192,95 @@ export async function remittanceReceiptLinkAction(input: {
   } catch (error) {
     return failure(error);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Refunds and offsets of payments on voided remittances (slice 5.7c)
+// ---------------------------------------------------------------------------
+
+const previewRefundSpec: MutationSpec<typeof previewRefundSchema, CapabilityPreview> = {
+  module: "payroll",
+  schema: previewRefundSchema,
+  roles: REMITTANCE_RECORDERS,
+  run: (ctx) => previewRefund(ctx, ctx.data),
+};
+
+const previewOffsetSpec: MutationSpec<typeof offsetSchema, CapabilityPreview> = {
+  module: "payroll",
+  schema: offsetSchema,
+  roles: REMITTANCE_RECORDERS,
+  run: (ctx) => previewOffset(ctx, ctx.data),
+};
+
+/** A refund's details as the form sends them. */
+export type RefundDetails = {
+  paymentId: string;
+  receivedOn: string;
+  amount: string;
+  reference: string;
+};
+
+/** "Check the refund": what recording it will do, before any file is uploaded. */
+export async function previewRemittanceRefundAction(
+  input: RefundDetails,
+): Promise<PaymentPreviewResult> {
+  try {
+    return { ok: true, preview: await mutate(previewRefundSpec, input) };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/** Step 1 of "Record a refund": where the browser uploads its receipt. */
+export async function startRefundReceiptAction(
+  input: RefundDetails & { fileName: string; size: number },
+): Promise<StartReceiptResult> {
+  try {
+    return { ok: true, ...(await mutate(startRefundReceiptSpec, input)) };
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/** Step 2: the receipt is uploaded; check it and record the refund. */
+export async function recordRemittanceRefundAction(
+  input: RefundDetails & { receiptId: string; fileExt: string },
+): Promise<{ ok: true } | Failure> {
+  try {
+    await mutate(recordRefundSpec, input);
+  } catch (error) {
+    return failure(error);
+  }
+  revalidatePath(REMITTANCES_PATH);
+  return { ok: true };
+}
+
+/** "Offset against a later remittance": preview first, then the offset. */
+export async function offsetRemittancePaymentAction(
+  _prev: RemittanceFormState,
+  formData: FormData,
+): Promise<RemittanceFormState> {
+  const values = formFields(formData);
+  const spec = values.intent === "save" ? recordOffsetSpec : previewOffsetSpec;
+  try {
+    const result = await mutate(spec as MutationSpec<typeof offsetSchema, unknown>, values);
+    if (values.intent !== "save") {
+      return { ok: true, status: 200, preview: result as CapabilityPreview, values };
+    }
+  } catch (error) {
+    const failed = failure(error);
+    return {
+      ok: false,
+      status: error instanceof MutationError && error.code === "forbidden" ? 403 : 400,
+      formError: failed.message,
+      fieldErrors: failed.fieldErrors,
+      values,
+    };
+  }
+  revalidatePath(REMITTANCES_PATH);
+  return {
+    ok: true,
+    status: 200,
+    message: "Offset recorded. The later remittance owes that much less.",
+  };
 }

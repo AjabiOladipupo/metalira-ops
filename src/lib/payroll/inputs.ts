@@ -203,6 +203,111 @@ export type TimesheetDayInput = WorkerPayInputs["lines"][number];
 export type ArrearsDayInput = WorkerPayInputs["arrears"][number];
 export type LeaveInput = WorkerPayInputs["leave"][number];
 
+// ---------------------------------------------------------------------------
+// Leave corrections (slice 5.7c): `public.payroll_leave_corrections`
+// ---------------------------------------------------------------------------
+
+const leaveArrearsSchema = z
+  .object({
+    request_id: z.uuid(),
+    type_code: z.string().min(1).max(40),
+    counting: z.enum(["working_days", "calendar_days"]),
+    pay_percent: z.number().int().min(0).max(100).nullable(),
+    pay_below_service: z.boolean().nullable(),
+    period_start: isoDate,
+    period_end: isoDate,
+    from: isoDate,
+    to: isoDate,
+    rostered_days: z.number().int().min(0).max(62),
+    shifts: z.array(z.object({ date: isoDate, on_leave: z.boolean() })),
+  })
+  .transform((q) => ({
+    requestId: q.request_id,
+    typeCode: q.type_code,
+    counting: q.counting,
+    payPercent: q.pay_percent,
+    payBelowService: q.pay_below_service,
+    periodStart: q.period_start,
+    periodEnd: q.period_end,
+    from: q.from,
+    to: q.to,
+    rosteredDays: q.rostered_days,
+    shifts: q.shifts.map((s) => ({ date: s.date, onLeave: s.on_leave })),
+  }));
+
+const signedKobo = z
+  .string()
+  .regex(/^-?\d+$/, "Expected whole kobo")
+  .transform((value): Kobo => BigInt(value));
+
+const leaveRefundSchema = z
+  .object({
+    request_id: z.uuid(),
+    from: isoDate,
+    to: isoDate,
+    period_start: isoDate,
+    period_end: isoDate,
+    lines: z
+      .array(
+        z.object({
+          code: z.enum(["leave_deduction", "leave_arrears"]).default("leave_deduction"),
+          label: z.string().min(1).max(300),
+          amount_kobo: signedKobo,
+          /** An after-tax arrears line's full amount, taken plus carried (its refund). */
+          wanted_kobo: signedKobo.nullable().optional(),
+          pensionable: z.boolean(),
+          taxable: z.boolean(),
+        }),
+      )
+      .min(1),
+  })
+  .transform((r) => ({
+    requestId: r.request_id,
+    from: r.from,
+    to: r.to,
+    periodStart: r.period_start,
+    periodEnd: r.period_end,
+    lines: r.lines.map((l) => ({
+      code: l.code,
+      label: l.label,
+      wantedKobo: l.wanted_kobo ?? null,
+      amountKobo: l.amount_kobo,
+      pensionable: l.pensionable,
+      taxable: l.taxable,
+    })),
+  }));
+
+export const leaveCorrectionsSchema = z
+  .object({
+    version: z.literal(1),
+    period: z.object({ start: isoDate, end: isoDate }),
+    workers: z.array(
+      z.object({
+        worker_id: z.uuid(),
+        leave_arrears: z.array(leaveArrearsSchema),
+        leave_refunds: z.array(leaveRefundSchema),
+      }),
+    ),
+  })
+  .transform((x) => ({
+    period: x.period,
+    byWorker: new Map(
+      x.workers.map((w) => [
+        w.worker_id,
+        { leaveArrears: w.leave_arrears, leaveRefunds: w.leave_refunds },
+      ]),
+    ),
+  }));
+
+export type LeaveCorrections = z.output<typeof leaveCorrectionsSchema>;
+export type LeaveArrearsInput = z.output<typeof leaveArrearsSchema>;
+export type LeaveRefundInput = z.output<typeof leaveRefundSchema>;
+
+/** Parses `public.payroll_leave_corrections`'s jsonb; throws a ZodError when the shape is wrong. */
+export function parseLeaveCorrections(raw: unknown): LeaveCorrections {
+  return leaveCorrectionsSchema.parse(raw);
+}
+
 export interface PayPeriod {
   start: string;
   end: string;

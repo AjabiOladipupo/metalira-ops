@@ -295,7 +295,14 @@ describe("making the file", () => {
       position: 1,
     });
     // Never a number: no column holds more than the last 4 digits.
-    expect(JSON.stringify(items)).not.toMatch(/\d{10}/);
+    // Ids are uuids, which can hold ten digits in a row by chance: take them out first, so the
+    // check still catches an account number anywhere else in the rows.
+    expect(
+      JSON.stringify(items).replace(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+        "",
+      ),
+    ).not.toMatch(/\d{10}/);
     expect(Object.keys(items![0]!).filter((k) => /_enc$|account_number/.test(k))).toEqual([]);
 
     // Audited with control totals, never a number.

@@ -108,6 +108,8 @@ export function workerPayslip(
   options: WorkerPayslipOptions,
 ): PayslipResult {
   const adj = adjustmentLines(input.adjustments);
+  // Slice 5.7c: leave arrears come off after tax, before the adjustments' deductions.
+  adj.deductions.unshift(...(input.earnings.deductions ?? []));
   const priorTrace = [...input.earnings.trace];
   for (const e of adj.earnings) {
     priorTrace.push(
@@ -181,7 +183,9 @@ export type AnomalyCode =
   | "deduction_cut"
   | "no_pension_details"
   | "recurring_not_carried"
-  | "on_off_cycle_run";
+  | "on_off_cycle_run"
+  /** Slice 5.7c (money review M4): leave arrears or a refund waiting for a worker not in the run. */
+  | "leave_correction_pending";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -207,6 +211,7 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   no_pension_details: "warning",
   recurring_not_carried: "warning",
   on_off_cycle_run: "warning",
+  leave_correction_pending: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;
@@ -557,6 +562,7 @@ function storedSource(ref: PaySourceRef, period: { start: string; end: string })
       };
     case "leave_request":
     case "pay_rate":
+    case "leave_refund":
       return { kind: ref.kind, id: ref.id, from: ref.from, to: ref.to, off_day: false };
     case "adjustment":
       return { kind: ref.kind, id: ref.id, from: period.start, to: period.end, off_day: false };

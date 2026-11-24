@@ -7,7 +7,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
 import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
-import { parsePayrollInputs, type PayrollInputs } from "@/lib/payroll/inputs";
+import {
+  parseLeaveCorrections,
+  parsePayrollInputs,
+  type LeaveCorrections,
+  type PayrollInputs,
+} from "@/lib/payroll/inputs";
 import type { MonthToDate } from "@/lib/payroll/contract";
 import { adjustmentsOnlyEarnings, correctionEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
 import { NTA_2025_V1, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set";
@@ -341,6 +346,25 @@ async function openDaysBySite(
   }));
 }
 
+/** Slice 5.7c: the run's leave corrections (`payroll_leave_corrections`), as the signed-in user. */
+async function loadLeaveCorrections(
+  supabase: Client,
+  organisationId: string,
+  periodStart: string,
+  workerIds: readonly string[] | null,
+  runId: string | null,
+): Promise<{ raw: unknown; parsed: LeaveCorrections }> {
+  const { data, error } = await supabase.rpc("payroll_leave_corrections", {
+    p_organisation_id: organisationId,
+    p_period_start: periodStart,
+    ...(workerIds ? { p_worker_ids: [...workerIds] } : {}),
+    ...(runId ? { p_run_id: runId } : {}),
+  });
+  // The code only: the message can name the period or the company.
+  if (error) throw new Error(`Could not read leave corrections (${error.code})`);
+  return { raw: data, parsed: parseLeaveCorrections(data) };
+}
+
 /** A saved run's kind and, for an off-cycle run, its reason and workers (slice 5.7b). */
 async function runScope(
   supabase: Client,
@@ -615,6 +639,21 @@ export async function calculateRun(
       ? { ...parsed, workers: parsed.workers.filter((w) => !leftOut.has(w.workerId)) }
       : parsed;
   const period = inputs.period;
+  // Slice 5.7c: leave decided after its period was posted (arrears and refunds), read beside the
+  // inputs as the same user and hashed with them.
+  // Regular, final-pay and missed-worker runs take them; 5.7b's correction and one-off runs never
+  // do (they pay their own items), so a correction is paid once.
+  // A final-pay or missed-worker run takes its workers' pending corrections too (money review M4).
+  const corrections =
+    offCycle && !fullPay
+      ? { raw: null, parsed: { period, byWorker: new Map() } as LeaveCorrections }
+      : await loadLeaveCorrections(
+          supabase,
+          organisationId,
+          period.start,
+          inputs.workers.map((w) => w.workerId),
+          target.runId,
+        );
 
   // Decision 15: one rule set for the whole run, the version in force on the pay date.
   const versions = await ruleSetVersions(supabase, organisationId);
@@ -699,7 +738,7 @@ export async function calculateRun(
         period,
         holidays: inputs.holidays,
         defaultWorkDays: inputs.organisation.defaultWorkDays,
-        worker: w,
+        worker: { ...w, ...corrections.parsed.byWorker.get(w.workerId) },
         policyOn,
       },
       policy,
@@ -827,6 +866,27 @@ export async function calculateRun(
       }
     }
   }
+  // Money review M4: leave corrections waiting for a worker who isn't in this run (left, or paid
+  // by a final-pay or missed-worker run) are shown, so they're settled knowingly.
+  if (!options.workerIds && (!offCycle || fullPay)) {
+    const everyone = await loadLeaveCorrections(
+      supabase,
+      organisationId,
+      period.start,
+      null,
+      target.runId,
+    );
+    const inRun = new Set(workerIds);
+    for (const [workerId, c] of everyone.parsed.byWorker) {
+      if (inRun.has(workerId)) continue;
+      anomalies.push({
+        workerId,
+        code: "leave_correction_pending",
+        severity: "warning",
+        detail: { arrears: c.leaveArrears.length, refunds: c.leaveRefunds.length },
+      });
+    }
+  }
   anomalies.push(...runAnomalies(openDays, bank.shared));
   if (!options.workerIds) {
     // A correction or one-off run carries nothing from the period before.
@@ -867,6 +927,9 @@ export async function calculateRun(
         policy: v.policy,
       })),
       inputs: raw,
+      // Present only when there is something to correct, so runs without corrections keep the
+      // hash they had before slice 5.7c.
+      ...(corrections.parsed.byWorker.size > 0 ? { leave_corrections: corrections.raw } : {}),
       adjustments: [...adjustments].sort((a, b) => a.id.localeCompare(b.id)),
       ...(excluded.length > 0 ? { paid_off_cycle: onOffCycle } : {}),
       ...(month.size > 0

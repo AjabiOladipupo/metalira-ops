@@ -827,6 +827,82 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payout_supplement_items": {
+                  Row: {
+                    "account_name": string,"amount_kobo": number,"bank_account_last4": string,"bank_code": string,"bank_detail_change_id": string | null,"bank_name": string,"created_at": string,"currency": string,"id": string,"organisation_id": string,"original_item_id": string,"payslip_id": string,"position": number,"run_id": string,"status": string,"supplement_id": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "account_name": string,"amount_kobo": number,"bank_account_last4": string,"bank_code": string,"bank_detail_change_id"?: string | null,"bank_name": string,"created_at"?: string,"currency"?: string,"id"?: string,"organisation_id": string,"original_item_id": string,"payslip_id": string,"position": number,"run_id": string,"status"?: string,"supplement_id": string,"worker_id": string
+                  }
+                  Update: {
+                    "account_name"?: string,"amount_kobo"?: number,"bank_account_last4"?: string,"bank_code"?: string,"bank_detail_change_id"?: string | null,"bank_name"?: string,"created_at"?: string,"currency"?: string,"id"?: string,"organisation_id"?: string,"original_item_id"?: string,"payslip_id"?: string,"position"?: number,"run_id"?: string,"status"?: string,"supplement_id"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payout_supplement_items_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payout_supplement_items_original_fkey"
+      columns: ["organisation_id","original_item_id"]
+isOneToOne: false
+      referencedRelation: "payout_items"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_supplement_items_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_supplement_items_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_supplement_items_supplement_fkey"
+      columns: ["organisation_id","supplement_id"]
+isOneToOne: false
+      referencedRelation: "payout_supplements"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_supplement_items_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payout_supplements": {
+                  Row: {
+                    "bank_format": string,"confirmed_at": string | null,"confirmed_by": string | null,"created_at": string,"currency": string,"file_bytes": number,"file_path": string,"file_sha256": string,"id": string,"item_count": number,"made_by": string,"organisation_id": string,"run_id": string,"status": string,"total_kobo": number,"void_reason": string | null,"voided_at": string | null,"voided_by": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "bank_format": string,"confirmed_at"?: string | null,"confirmed_by"?: string | null,"created_at"?: string,"currency"?: string,"file_bytes": number,"file_path": string,"file_sha256": string,"id"?: string,"item_count": number,"made_by": string,"organisation_id": string,"run_id": string,"status"?: string,"total_kobo": number,"void_reason"?: string | null,"voided_at"?: string | null,"voided_by"?: string | null
+                  }
+                  Update: {
+                    "bank_format"?: string,"confirmed_at"?: string | null,"confirmed_by"?: string | null,"created_at"?: string,"currency"?: string,"file_bytes"?: number,"file_path"?: string,"file_sha256"?: string,"id"?: string,"item_count"?: number,"made_by"?: string,"organisation_id"?: string,"run_id"?: string,"status"?: string,"total_kobo"?: number,"void_reason"?: string | null,"voided_at"?: string | null,"voided_by"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payout_supplements_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payout_supplements_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payroll_adjustments": {
                   Row: {
                     "amount_kobo": number,"corrects_payslip_id": string | null,"created_at": string,"created_by": string,"currency": string,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
@@ -1625,6 +1701,50 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"statutory_payment_resolutions": {
+                  Row: {
+                    "amount_kobo": number,"created_at": string,"currency": string,"id": string,"kind": string,"note": string | null,"organisation_id": string,"payment_id": string,"receipt_id": string | null,"received_on": string | null,"recorded_by": string,"reference": string | null,"remittance_id": string,"target_remittance_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount_kobo": number,"created_at"?: string,"currency"?: string,"id"?: string,"kind": string,"note"?: string | null,"organisation_id": string,"payment_id": string,"receipt_id"?: string | null,"received_on"?: string | null,"recorded_by": string,"reference"?: string | null,"remittance_id": string,"target_remittance_id"?: string | null
+                  }
+                  Update: {
+                    "amount_kobo"?: number,"created_at"?: string,"currency"?: string,"id"?: string,"kind"?: string,"note"?: string | null,"organisation_id"?: string,"payment_id"?: string,"receipt_id"?: string | null,"received_on"?: string | null,"recorded_by"?: string,"reference"?: string | null,"remittance_id"?: string,"target_remittance_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "statutory_payment_resolutions_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "statutory_payment_resolutions_payment_fkey"
+      columns: ["organisation_id","payment_id"]
+isOneToOne: false
+      referencedRelation: "statutory_payments"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "statutory_payment_resolutions_receipt_fkey"
+      columns: ["organisation_id","receipt_id"]
+isOneToOne: false
+      referencedRelation: "statutory_receipts"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "statutory_payment_resolutions_remittance_fkey"
+      columns: ["organisation_id","remittance_id"]
+isOneToOne: false
+      referencedRelation: "statutory_remittances"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "statutory_payment_resolutions_target_fkey"
+      columns: ["organisation_id","target_remittance_id"]
+isOneToOne: false
+      referencedRelation: "statutory_remittances"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"statutory_payments": {
                   Row: {
                     "created_at": string,"currency": string,"entry": string,"id": string,"organisation_id": string,"paid_amount_kobo": number | null,"paid_on": string | null,"reason": string | null,"receipt_id": string | null,"recorded_by": string,"reference": string | null,"remittance_id": string,"voids_payment_id": string | null
@@ -2360,6 +2480,9 @@ isOneToOne: false
 "confirm_contract_document":
 { Args: { "p_actor": string,"p_document_id": string,"p_organisation_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: undefined
                            },
+"confirm_payout_supplement":
+{ Args: { "p_file_sha256": string,"p_organisation_id": string,"p_supplement_id": string }; Returns: string
+                           },
 "confirm_tax_rule_set":
 { Args: { "p_note": string,"p_organisation_id": string,"p_rule_set_id": string }; Returns: undefined
                            },
@@ -2491,6 +2614,9 @@ isOneToOne: false
 "make_payout_batch":
 { Args: { "p_bank_format": string,"p_batch_id": string,"p_file_bytes": number,"p_file_sha256": string,"p_items": Json,"p_not_uploaded"?: boolean,"p_organisation_id": string,"p_run_id": string,"p_void_reason"?: string }; Returns: Json
                            },
+"make_payout_supplement":
+{ Args: { "p_bank_format": string,"p_file_bytes": number,"p_file_sha256": string,"p_items": Json,"p_not_uploaded"?: boolean,"p_organisation_id": string,"p_run_id": string,"p_supplement_id": string,"p_void_reason"?: string }; Returns: Json
+                           },
 "membership_invite_lookup":
 { Args: { "p_token": string }; Returns: {
               "email": string,"expires_at": string,"invite_id": string,"invited_at": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
@@ -2563,6 +2689,19 @@ isOneToOne: false
               "account_name": string,"acknowledged_code": string,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string,"bank_detail_change_id": string,"bank_name": string,"in_hold": boolean,"net_kobo": string,"on_file": boolean,"payslip_id": string,"staff_id": string,"worker_id": string,"worker_name": string
             }[]
                            },
+"payout_supplement_download":
+{ Args: { "p_organisation_id": string,"p_reason"?: string,"p_supplement_id": string }; Returns: string
+                           },
+"payout_supplement_downloads":
+{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: {
+              "actor_id": string,"downloaded_at": string,"supplement_id": string
+            }[]
+                           },
+"payout_supplement_plan":
+{ Args: { "p_organisation_id": string,"p_run_id": string,"p_with_ciphertext"?: boolean }; Returns: {
+              "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string,"bank_detail_change_id": string,"bank_name": string,"in_hold": boolean,"left_out_reason": string,"net_kobo": string,"on_file": boolean,"original_item_id": string,"payslip_id": string,"ready": boolean,"staff_id": string,"worker_id": string,"worker_name": string
+            }[]
+                           },
 "payroll_clock":
 { Args: Record<PropertyKey, never>; Returns: string
                            },
@@ -2573,6 +2712,14 @@ isOneToOne: false
                            },
 "payroll_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
+                           },
+"payroll_instalments_not_carried":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "amount_kobo": string,"at": string,"instalment": number,"of_count": number,"paid_by_run_id": string,"regular_run_id": string,"series_id": string,"worker_id": string
+            }[]
+                           },
+"payroll_leave_corrections":
+{ Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id"?: string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
 "payroll_period":
 { Args: { "p_date": string,"p_organisation_id": string }; Returns: {
@@ -2624,6 +2771,12 @@ isOneToOne: false
                            },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json
+                           },
+"record_remittance_offset":
+{ Args: { "p_amount_kobo": string,"p_note": string,"p_organisation_id": string,"p_payment_id": string,"p_target_remittance_id": string }; Returns: string
+                           },
+"record_remittance_refund":
+{ Args: { "p_amount_kobo": string,"p_organisation_id": string,"p_payment_id": string,"p_receipt_id": string,"p_received_on": string,"p_reference"?: string }; Returns: string
                            },
 "record_statutory_payment":
 { Args: { "p_amount_differs"?: boolean,"p_organisation_id": string,"p_paid_amount_kobo": string,"p_paid_on": string,"p_receipt_id": string,"p_reference": string,"p_remittance_id": string }; Returns: string

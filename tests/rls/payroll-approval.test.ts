@@ -11,6 +11,8 @@
  *   with session_replication_role = replica, and can't be truncated.
  * - The period lock: timesheet_period_posted is true inside the posted period only; 4.3's reopen
  *   and dispute refuse with MLTA5; the database owner can't move an approved day either.
+ * - Leave in a posted period (slice 5.7c lifted 5.3's MLTA5 for leave): approving or cancelling
+ *   it goes through, and the next run's corrections deduct or refund it.
  * - Backdated pay rates (Phase 1 decision 17): back to the day after the posted period, never into
  *   it; a version a posted payslip used never changes or goes (MLPRG).
  * - A rule-set version a posted run used may still close for a new version from tomorrow.
@@ -27,10 +29,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addDays, lagosToday } from "@/lib/dates";
 import { NTA_2025_V1, ruleSetPolicyJson, ruleSetRulesJson } from "@/lib/payroll/rule-set";
+import { runMutation } from "@/server/identity/mutate";
+import { createRunSpec } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
 import {
   addPayrollWorker,
+  OCT_START,
   OCT_END,
   resultsFor,
   saveResults,
@@ -42,6 +47,7 @@ import {
   adminClient,
   createTenantUser,
   createTestUser,
+  loadLocalEnv,
   pgClient,
   type Client,
   type TenantUser,
@@ -599,10 +605,9 @@ describe("the period lock", () => {
   });
 });
 
-describe("leave in a posted period (money review H1)", () => {
-  const LOCKED =
-    "Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.";
+describe("leave in a posted period: corrected in the next run (slice 5.7c lifts MLTA5)", () => {
   let typeId: string;
+  const NEXT = "2026-10-20";
 
   async function leave(start: string, end: string, status: string) {
     const id = randomUUID();
@@ -616,6 +621,13 @@ describe("leave in a posted period (money review H1)", () => {
     return id;
   }
 
+  const corrections = (client: Client) =>
+    client.rpc("payroll_leave_corrections", {
+      p_organisation_id: owner.orgId,
+      p_period_start: NEXT,
+      p_worker_ids: [posted.workerId],
+    });
+
   beforeAll(async () => {
     typeId = randomUUID();
     await seedRaw(
@@ -625,7 +637,7 @@ describe("leave in a posted period (money review H1)", () => {
     );
   });
 
-  it("refuses cancelling approved leave after posting, and lets a request not approved be withdrawn", async () => {
+  it("cancels approved leave after posting; the next run refunds only what a posted payslip deducted", async () => {
     const pending = await leave("2026-10-09", "2026-10-09", "pending_hr");
     const withdrawn = await hr.client.rpc("cancel_leave_request", {
       p_organisation_id: owner.orgId,
@@ -639,13 +651,21 @@ describe("leave in a posted period (money review H1)", () => {
       p_request_id: id,
       p_reason: "Came to work after all",
     });
-    expect(error?.code).toBe("MLTA5");
-    expect(error?.message).toBe(LOCKED);
+    // No MLTA5 any more: the cancellation goes through.
+    expect(error).toBeNull();
     const { data } = await admin.from("leave_requests").select("status").eq("id", id).single();
-    expect(data).toEqual({ status: "approved" });
+    expect(data).toEqual({ status: "cancelled" });
+    // October's posted payslip never deducted it (it was approved outside payroll), so there is
+    // nothing to refund: the next run's corrections hold no refund for it.
+    const next = await corrections(hr.client);
+    expect(next.error).toBeNull();
+    const refunds = (
+      next.data as { workers: { leave_refunds: { request_id: string }[] }[] }
+    ).workers.flatMap((w) => w.leave_refunds);
+    expect(refunds.map((r) => r.request_id)).not.toContain(id);
   });
 
-  it("refuses approving leave in a posted period, even partly; declining stays open", async () => {
+  it("approves leave partly in a posted period; the next run deducts the posted days as arrears", async () => {
     const id = await leave("2026-10-16", "2026-10-21", "pending_hr");
     const approved = await hr.client.rpc("decide_leave_hr", {
       p_organisation_id: owner.orgId,
@@ -653,17 +673,81 @@ describe("leave in a posted period (money review H1)", () => {
       p_decision: "approved",
       p_note: "Checked",
     });
-    expect(approved.error?.code).toBe("MLTA5");
-    expect(approved.error?.message).toBe(LOCKED);
+    // No MLTA5 any more.
+    expect(approved.error).toBeNull();
     const { data } = await admin.from("leave_requests").select("status").eq("id", id).single();
-    expect(data).toEqual({ status: "pending_hr" });
-    const declined = await hr.client.rpc("decide_leave_hr", {
-      p_organisation_id: owner.orgId,
-      p_request_id: id,
-      p_decision: "declined",
-      p_note: "Payroll for these days is posted",
-    });
-    expect(declined.error).toBeNull();
+    expect(data).toEqual({ status: "approved" });
+
+    const { data: slip } = await admin
+      .from("payslips")
+      .select("rostered_days")
+      .eq("run_id", posted.runId)
+      .eq("worker_id", posted.workerId)
+      .single();
+    const next = await corrections(hr.client);
+    expect(next.error).toBeNull();
+    const arrears = (
+      next.data as {
+        workers: { worker_id: string; leave_arrears: Record<string, unknown>[] }[];
+      }
+    ).workers.flatMap((w) => w.leave_arrears);
+    // Only the posted days (Fri 16 to Mon 19 Oct), on the posted payslip's rostered days; 20 and
+    // 21 Oct are the next run's own leave.
+    expect(arrears.filter((a) => a.request_id === id)).toEqual([
+      expect.objectContaining({
+        request_id: id,
+        type_code: "unpaid_test",
+        counting: "working_days",
+        pay_percent: 0,
+        period_start: OCT_START,
+        period_end: OCT_END,
+        from: "2026-10-16",
+        to: OCT_END,
+        rostered_days: slip!.rostered_days,
+      }),
+    ]);
+
+    // Only payroll readers see corrections; another company's period gives nothing of ours.
+    expect((await corrections(lineManager.client)).error?.code).toBe(DENIED);
+    expect((await corrections(workerUser.client)).error?.code).toBe(DENIED);
+
+    // Money review H1: the next run SAVES with the one request backing both the arrears (16 to
+    // 19 Oct) and its own leave (20 and 21 Oct) on one payslip.
+    const env = loadLocalEnv();
+    process.env.NEXT_PUBLIC_SUPABASE_URL = env.apiUrl;
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = env.publishableKey;
+    process.env.SUPABASE_SECRET_KEY = env.secretKey;
+    const nov = await runMutation(
+      { supabase: hr.client, userId: hr.id, organisationId: owner.orgId, role: "hr" },
+      createRunSpec,
+      { periodStart: NEXT },
+    );
+    expect(nov.calculated).toBe(true);
+    const { data: novSlip } = await admin
+      .from("payslips")
+      .select("id")
+      .eq("run_id", nov.runId)
+      .eq("worker_id", posted.workerId)
+      .single();
+    const { data: sources } = await admin
+      .from("payslip_sources")
+      .select("from_date, to_date")
+      .eq("payslip_id", novSlip!.id)
+      .eq("source_kind", "leave_request")
+      .eq("source_id", id)
+      .order("from_date");
+    expect(sources).toEqual([
+      { from_date: "2026-10-16", to_date: OCT_END },
+      { from_date: NEXT, to_date: "2026-10-21" },
+    ]);
+    const { data: codes } = await admin
+      .from("payslip_lines")
+      .select("code")
+      .eq("payslip_id", novSlip!.id)
+      .in("code", ["leave_arrears", "leave_deduction"]);
+    expect(new Set(codes!.map((c) => c.code))).toEqual(
+      new Set(["leave_arrears", "leave_deduction"]),
+    );
   });
 });
 

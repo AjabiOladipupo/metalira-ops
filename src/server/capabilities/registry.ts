@@ -254,6 +254,19 @@ import {
   approveReversalSpec,
   reverseRunSpec,
 } from "@/server/payroll/reversal";
+import { loadCarriedDeductionsSummary } from "@/server/payroll/carried-data";
+import {
+  previewRefundSchema,
+  recordOffsetSpec,
+  recordRefundSpec,
+  startRefundReceiptSpec,
+} from "@/server/payroll/remittance-resolutions";
+import {
+  confirmSupplementSpec,
+  downloadSupplementSpec,
+  makeSupplementSpec,
+  supplementIdSchema,
+} from "@/server/payroll/supplements";
 import { loadRemittanceSummary } from "@/server/payroll/remittance-data";
 import {
   REMITTANCE_RECORDERS,
@@ -333,14 +346,18 @@ import {
   previewAddRuleSetVersion,
   previewApprovePayrollRun,
   previewCarryPayrollInstalment,
+  previewConfirmPayrollSupplement,
   previewCreateOffCyclePayrollRun,
   previewCreatePayrollRun,
   previewDiscardOffCyclePayrollRun,
   previewMakePayrollBankFile,
+  previewMakePayrollSupplement,
   previewRecalculatePayrollRun,
   previewReleasePayrollRun,
   previewRemovePayrollAdjustment,
   previewRecordRemittancePayment,
+  previewRemittanceOffset,
+  previewRemittanceRefund,
   previewReturnPayrollRun,
   previewSubmitPayrollRun,
   previewVoidRemittancePayment,
@@ -3024,6 +3041,66 @@ export const CAPABILITIES: readonly Capability[] = [
       "Releasing payroll is a person's confirmation, never anyone who prepared the run (rule 10); Lira never releases payroll.",
   },
   // -------------------------------------------------------------------------
+  // Supplementary payout files and carried deductions (payroll/payout-actions.ts, slice 5.7c)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.make_supplementary_file",
+    description:
+      "Makes a bank file for workers a released run's file left out, once their bank details are in force.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(makeSupplementSpec),
+    changes: "many",
+    action: at("payroll/payout-actions", "makeSupplementAction"),
+    preview: previewMakePayrollSupplement,
+    agent: false,
+    agentNote:
+      "Lira never makes, downloads or confirms a bank file (docs/PHASE_5.md decision 8; docs/LIRA.md: never moves money). It holds account numbers.",
+  },
+  {
+    name: "payroll.download_supplementary_file",
+    description:
+      "Opens a supplementary bank file for 60 seconds, for an owner or Finance; audited.",
+    kind: "read",
+    audience: "manager",
+    roles: fromSpec(downloadSupplementSpec).roles,
+    input: supplementIdSchema,
+    changes: "none",
+    action: at("payroll/payout-actions", "downloadSupplementAction"),
+    agent: false,
+    agentNote:
+      "A supplementary bank file holds account numbers (CLAUDE.md rule 9): only a person downloads it, on the screen.",
+  },
+  {
+    name: "payroll.confirm_supplementary_file",
+    description:
+      "Finance or the owner confirms a supplementary bank file went to the bank; never its maker or the run's preparer.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(confirmSupplementSpec),
+    changes: "many",
+    action: at("payroll/payout-actions", "confirmSupplementAction"),
+    preview: previewConfirmPayrollSupplement,
+    agent: false,
+    agentNote:
+      "Confirming a payment went to the bank is a person's statement (rule 10); Lira never confirms or releases payroll.",
+  },
+  {
+    name: "payroll.carried_deductions_summary",
+    description:
+      "Gives the total of carried deductions still owed and how many workers owe one, across posted runs.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadCarriedDeductionsSummary(supabase, organisationId),
+    agent: false,
+    agentNote:
+      "Carried deductions are amounts owed by named people from their pay; a person reads them on the payroll page (security review L3).",
+  },
+  // -------------------------------------------------------------------------
   // Payslips: PDFs, the worker app and notices (payroll/payslip-actions.ts, slice 5.5)
   // -------------------------------------------------------------------------
   {
@@ -3177,6 +3254,57 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Schedules carry TINs and RSA PINs; Lira never downloads payroll files (docs/PHASE_5.md decision 8).",
+  },
+  {
+    name: "payroll.preview_remittance_refund",
+    description:
+      "Works out what recording a refund of a payment on a voided remittance will do, without saving.",
+    kind: "read",
+    audience: "manager",
+    roles: REMITTANCE_RECORDERS,
+    input: previewRefundSchema,
+    changes: "none",
+    action: at("payroll/remittance-actions", "previewRemittanceRefundAction"),
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.start_refund_receipt",
+    description: "Prepares the upload of a refund's receipt to the private evidence store.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(startRefundReceiptSpec),
+    changes: "none",
+    action: at("payroll/remittance-actions", "startRefundReceiptAction"),
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.record_remittance_refund",
+    description:
+      "Records a refund an authority sent back for a payment on a remittance a reversal voided, with its receipt.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recordRefundSpec),
+    changes: "one",
+    action: at("payroll/remittance-actions", "recordRemittanceRefundAction"),
+    preview: previewRemittanceRefund,
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.offset_remittance_payment",
+    description:
+      "Offsets a payment on a voided remittance against a later remittance to the same authority.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recordOffsetSpec),
+    changes: "many",
+    action: at("payroll/remittance-actions", "offsetRemittancePaymentAction"),
+    preview: previewRemittanceOffset,
+    agent: false,
+    agentNote:
+      "Whether an authority accepts an offset is a person's call with the adviser (RULES_NIGERIA open point 8); Lira never records payments or offsets.",
   },
   {
     name: "payroll.open_remittance_receipt",

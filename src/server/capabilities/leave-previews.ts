@@ -59,7 +59,10 @@ export const previewHolidayCopy: PreviewFn<typeof copyHolidaysSchema> = async ({
   supabase,
   organisationId,
   data,
-}) => describeHolidayCopy(await previewCopyHolidays(supabase, organisationId, data.fromYear, data.toYear));
+}) =>
+  describeHolidayCopy(
+    await previewCopyHolidays(supabase, organisationId, data.fromYear, data.toYear),
+  );
 
 export function describePresetResult(result: PresetResult): CapabilityPreview {
   const preset = findPreset(result.preset);
@@ -68,9 +71,7 @@ export function describePresetResult(result: PresetResult): CapabilityPreview {
   const parts: string[] = [];
   if (created > 0) parts.push(`adds ${created} leave ${created === 1 ? "type" : "types"}`);
   if (versioned > 0) {
-    parts.push(
-      `changes the days of ${versioned} from ${formatDate(result.effectiveFrom)}`,
-    );
+    parts.push(`changes the days of ${versioned} from ${formatDate(result.effectiveFrom)}`);
   }
   const action = parts.length > 0 ? parts.join(" and ") : "changes no days";
   const kept =
@@ -84,7 +85,10 @@ export function describePresetResult(result: PresetResult): CapabilityPreview {
         const after = `${formatLeaveDays(t.after.daysPerYear, t.after.counting)} · ${formatLeavePay(t.after.payPercent > 0, t.after.payPercent, t.after.payMinServiceMonths)}`;
         if (t.action === "create") return { label: t.name, after: `New: ${after}` };
         if (t.action === "unchanged") {
-          return { label: t.name, after: t.detailsChanged ? `Same days; rules updated` : "No change" };
+          return {
+            label: t.name,
+            after: t.detailsChanged ? `Same days; rules updated` : "No change",
+          };
         }
         return {
           label: t.name,

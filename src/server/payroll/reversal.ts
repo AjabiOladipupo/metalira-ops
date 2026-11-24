@@ -144,6 +144,35 @@ async function mustLoad(
 }
 
 /** What else reversing touches: the active bank file (downloaded?) and the remittances. */
+/**
+ * Slice 5.7c (money review M3): payments on earlier voided remittances offset against this run's
+ * remittances. Reversing voids those remittances, so the offsets stop counting and the earlier
+ * payments show as needing a refund or offset again.
+ */
+async function offsetWarning(
+  ctx: Pick<MutationContext, "supabase" | "organisationId">,
+  runId: string,
+): Promise<string> {
+  const { data: rems, error } = await ctx.supabase
+    .from("statutory_remittances")
+    .select("id")
+    .eq("organisation_id", ctx.organisationId)
+    .eq("run_id", runId);
+  if (error) fromReversalDbError(error);
+  const ids = (rems ?? []).map((r) => r.id);
+  if (ids.length === 0) return "";
+  const { data: offsets, error: offsetError } = await ctx.supabase
+    .from("statutory_payment_resolutions")
+    .select("id")
+    .eq("organisation_id", ctx.organisationId)
+    .eq("kind", "offset")
+    .in("target_remittance_id", ids);
+  if (offsetError) fromReversalDbError(offsetError);
+  const n = (offsets ?? []).length;
+  if (n === 0) return "";
+  return ` ${n} ${n === 1 ? "offset" : "offsets"} from earlier reversed runs ${n === 1 ? "was" : "were"} set against this run's remittances: once it is reversed ${n === 1 ? "it stops" : "they stop"} counting, and ${n === 1 ? "that payment needs" : "those payments need"} a refund or another offset again.`;
+}
+
 async function sideEffects(
   ctx: Pick<MutationContext, "supabase" | "organisationId">,
   runId: string,
@@ -232,10 +261,11 @@ export async function previewReverse(
   if (effects.downloaded && !data.notUploaded) {
     throw new MutationError("invalid", DOWNLOADED_MESSAGE, { notUploaded: DOWNLOADED_MESSAGE });
   }
+  const offsets = await offsetWarning(ctx, run.id);
   const t = run.totals;
   return {
     summary:
-      `Asks to reverse ${runMonth(run.periodEnd)} (${formatLeaveRange(run.periodStart, run.periodEnd)}): a reversal of ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}, waits for a second person in Finance. Once approved the run is Reversed, its timesheet days and leave are payable again, its adjustments (one-offs, instalments and corrections) are carried into the period's next run, and the period reopens. ${effectsText(effects)} Reason: "${data.reason}".`.trim(),
+      `Asks to reverse ${runMonth(run.periodEnd)} (${formatLeaveRange(run.periodStart, run.periodEnd)}): a reversal of ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}, waits for a second person in Finance. Once approved the run is Reversed, its timesheet days and leave are payable again, its adjustments (one-offs, instalments and corrections) are carried into the period's next run, and the period reopens. ${effectsText(effects)}${offsets} Reason: "${data.reason}".`.trim(),
     changes: negativeChanges(t),
   };
 }
@@ -277,10 +307,11 @@ export async function previewApproveReversal(
   if (effects.downloaded && !data.notUploaded) {
     throw new MutationError("invalid", DOWNLOADED_MESSAGE, { notUploaded: DOWNLOADED_MESSAGE });
   }
+  const offsets = await offsetWarning(ctx, original.id);
   const t = reversal.totals;
   return {
     summary:
-      `Approves the reversal of ${runMonth(original.periodEnd)}: ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}. ${runMonth(original.periodEnd)} becomes Reversed, its timesheet days and leave are payable again, its adjustments (one-offs, instalments and corrections) are carried into the period's next run, and ${formatLeaveRange(original.periodStart, original.periodEnd)} reopens for a new run. ${effectsText(effects)}`.trim(),
+      `Approves the reversal of ${runMonth(original.periodEnd)}: ${t.workerCount} ${t.workerCount === 1 ? "payslip" : "payslips"}, net pay ${money(-t.netKobo)}. ${runMonth(original.periodEnd)} becomes Reversed, its timesheet days and leave are payable again, its adjustments (one-offs, instalments and corrections) are carried into the period's next run, and ${formatLeaveRange(original.periodStart, original.periodEnd)} reopens for a new run. ${effectsText(effects)}${offsets}`.trim(),
     changes: negativeChanges(t),
   };
 }

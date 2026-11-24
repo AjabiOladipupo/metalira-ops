@@ -184,6 +184,12 @@ export function describeAnomaly(
         title: `On an off-cycle run not yet approved · ${name}`,
         body: "Left out of this run because a final-pay or missed-worker run for this period pays them, and that run isn't approved yet. Approve it, or discard it and recalculate this run, so they're paid once.",
       };
+    case "leave_correction_pending":
+      // Slice 5.7c, money review M4.
+      return {
+        title: `Leave correction waiting, not in this run · ${name}`,
+        body: `${num(detail, "arrears")} leave arrears and ${num(detail, "refunds")} leave refunds are waiting for this worker, who isn't in this run (they left, or a final-pay or missed-worker run pays them). Settle it with a correction run, or on their final pay.`,
+      };
     default:
       return {
         title: `${code.replace(/_/g, " ")} · ${name}`,

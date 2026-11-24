@@ -773,7 +773,12 @@ export const createRunSpec: MutationSpec<typeof createRunSchema, CreatedRun> = {
       return { runId: run.id, calculated: true };
     } catch (e) {
       // The run exists, empty and marked for recalculation; the screen offers Recalculate.
-      console.error("payroll.first_calculation_failed:", e instanceof Error ? e.name : "unknown");
+      // The name and the database code only (a message can name a person or the period).
+      console.error(
+        "payroll.first_calculation_failed:",
+        e instanceof Error ? e.name : "unknown",
+        (e as { code?: unknown }).code ?? "",
+      );
       return { runId: run.id, calculated: false };
     }
   },
@@ -802,7 +807,12 @@ export const createOffCycleRunSpec: MutationSpec<typeof createOffCycleRunSchema,
       return { runId: run.id, calculated: true };
     } catch (e) {
       // The run exists, empty and marked for recalculation; the screen offers Recalculate.
-      console.error("payroll.first_calculation_failed:", e instanceof Error ? e.name : "unknown");
+      // The name and the database code only (a message can name a person or the period).
+      console.error(
+        "payroll.first_calculation_failed:",
+        e instanceof Error ? e.name : "unknown",
+        (e as { code?: unknown }).code ?? "",
+      );
       return { runId: run.id, calculated: false };
     }
   },
