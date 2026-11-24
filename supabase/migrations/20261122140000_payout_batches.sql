@@ -938,8 +938,9 @@ begin
       where g.payslip_id is null
         or (p.expected = 'pending' and (
           g.status <> 'pending' or g.left_out_reason is not null
-          or g.amount_kobo is null or g.amount_kobo !~ '^[0-9]{1,15}$'
-          or g.amount_kobo::bigint <> p.net_kobo
+          -- The cast only when the text is whole kobo (OR doesn't fix the order of evaluation).
+          or (case when g.amount_kobo ~ '^[0-9]{1,15}$' then g.amount_kobo::bigint end)
+            is distinct from p.net_kobo
           or (g.bank_name, g.bank_code, g.account_name, g.bank_account_last4, g.bank_detail_change_id)
             is distinct from
              (p.bank_name, p.bank_code, p.account_name, p.bank_account_last4, p.bank_detail_change_id)
