@@ -571,6 +571,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     seed: Omit<Bucket, "value" | "minutes" | "days" | "sources">,
     c: Contribution,
     day: DayLines,
+    paidAsOffDay = false,
   ) => {
     const bucket = buckets.get(key) ?? { ...seed, value: ZERO, minutes: 0, days: 0, sources: [] };
     bucket.value = add(bucket.value, c.value);
@@ -578,7 +579,12 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     bucket.days += c.days;
     for (const id of day.lineIds) {
       if (!bucket.sources.some((s) => s.kind === "timesheet_line" && s.id === id)) {
-        bucket.sources.push({ kind: "timesheet_line", id, workDate: day.date });
+        bucket.sources.push({
+          kind: "timesheet_line",
+          id,
+          workDate: day.date,
+          ...(paidAsOffDay ? { offDay: true } : {}),
+        });
       }
     }
     buckets.set(key, bucket);
@@ -604,6 +610,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         { code: c.code, rate, policy: p },
         c,
         day,
+        offDay && rate.payType === "monthly",
       );
     }
   }
@@ -648,6 +655,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         { code: "arrears", rate: null, periodStart: meta.periodStart, policy: p },
         c,
         day,
+        offDay && rate.payType === "monthly",
       );
     }
   }

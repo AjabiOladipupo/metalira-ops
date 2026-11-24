@@ -245,6 +245,17 @@ import {
 } from "@/server/workforce/timesheet-approval";
 import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-review-data";
 import { PAYROLL_READERS, loadPayInputsSummary } from "@/server/payroll/inputs";
+import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
+import {
+  acknowledgeSpec,
+  addAdjustmentSpec,
+  carryInstalmentSpec,
+  createRunSpec,
+  recalculateRunSpec,
+  removeAdjustmentSpec,
+  returnRunSpec,
+  submitRunSpec,
+} from "@/server/payroll/runs";
 import {
   loadTimesheetLines,
   loadTimesheetSummary,
@@ -284,7 +295,17 @@ import {
   previewHrLeaveDecision,
   previewPreset,
 } from "./leave-previews";
-import { previewAddRuleSetVersion } from "./payroll-previews";
+import {
+  previewAcknowledgePayrollAnomalies,
+  previewAddPayrollAdjustment,
+  previewAddRuleSetVersion,
+  previewCarryPayrollInstalment,
+  previewCreatePayrollRun,
+  previewRecalculatePayrollRun,
+  previewRemovePayrollAdjustment,
+  previewReturnPayrollRun,
+  previewSubmitPayrollRun,
+} from "./payroll-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { previewApproveClean, previewCorrection } from "./timesheet-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
@@ -299,6 +320,11 @@ import { fromSpec, type ActionRef, type Capability } from "./types";
  * from its `mutate()` spec with `fromSpec`, and give a write that changes several rows or money
  * a `preview` (./previews.ts) before marking it `agent: true`.
  */
+
+const NO_PAYROLL =
+  "Lira never prepares, changes, submits, approves or releases payroll (docs/PHASE_5.md decision 8).";
+
+const payslipInput = z.object({ payslipId: z.uuid() });
 
 const at = (module: string, name: string): ActionRef => ({
   module: `src/server/${module}.ts`,
@@ -2511,7 +2537,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "payroll.confirm_rule_set",
-    description: "Records, once, that the company's tax adviser confirmed a version of the payroll rules.",
+    description:
+      "Records, once, that the company's tax adviser confirmed a version of the payroll rules.",
     kind: "write",
     audience: "manager",
     ...fromSpec(confirmRuleSetSpec),
@@ -2676,6 +2703,140 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Lira does nothing in Payroll (docs/PHASE_5.md decision 8); payroll inputs stay with owner, HR and finance.",
+  },
+  // -------------------------------------------------------------------------
+  // The payroll run (payroll/run-actions.ts, slice 5.2)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.run_summary",
+    description:
+      "Counts payroll runs and gives the latest run's period, status, workers, open anomalies and totals.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadRunSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "payroll.payslip_explain",
+    description:
+      "Gives one payslip's step-by-step trace from Explain: how gross, pension, PAYE and net were worked out.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_READERS,
+    input: payslipInput,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }, input) =>
+      loadPayslipTrace(supabase, organisationId, payslipInput.parse(input).payslipId),
+    agent: true,
+  },
+  {
+    name: "payroll.create_run",
+    description:
+      "Prepares a pay period's payroll run with the rule set in force on its pay date and works out every payslip.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(createRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "createRunAction"),
+    preview: previewCreatePayrollRun,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.recalculate_run",
+    description:
+      "Works out a draft payroll run again from current pay rates, timesheets, leave and adjustments.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recalculateRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "recalculateRunAction"),
+    preview: previewRecalculatePayrollRun,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.add_adjustment",
+    description:
+      "Adds a one-off or recurring earning or deduction for one worker to a draft run, with a reason.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(addAdjustmentSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "addAdjustmentAction"),
+    preview: previewAddPayrollAdjustment,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.carry_instalment",
+    description:
+      "Carries a recurring item's next instalment onto a draft run in the same series, so it is never paid twice.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(carryInstalmentSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "carryInstalmentAction"),
+    preview: previewCarryPayrollInstalment,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.remove_adjustment",
+    description:
+      "Removes an earning or deduction from a draft run, with a reason, and recalculates.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(removeAdjustmentSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "removeAdjustmentAction"),
+    preview: previewRemovePayrollAdjustment,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.acknowledge_anomalies",
+    description:
+      "Acknowledges warnings on a draft run, such as open timesheet days paid next run; blocking ones are fixed.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(acknowledgeSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "acknowledgeAnomaliesAction"),
+    preview: previewAcknowledgePayrollAnomalies,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.submit_run",
+    description:
+      "Submits a draft run for approval once nothing blocks it and every warning is acknowledged; emails Finance.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(submitRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "submitRunAction"),
+    preview: previewSubmitPayrollRun,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.return_run",
+    description: "Finance or the owner returns a submitted run to HR as a draft, with a reason.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(returnRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "returnRunAction"),
+    preview: previewReturnPayrollRun,
+    agent: false,
+    agentNote:
+      "A decision on a submitted payroll run is a person's (docs/PHASE_5.md decision 8), made on the screen.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)

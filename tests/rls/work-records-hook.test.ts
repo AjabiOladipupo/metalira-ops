@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { pgClient } from "./helpers/supabase";
 
 /** Tables that record work or pay under the worker's staff ID: checked by the hook. */
-const WORK_RECORD_TABLES: readonly string[] = ["punches", "timesheet_lines"];
+const WORK_RECORD_TABLES: readonly string[] = ["punches", "timesheet_lines", "payslips"];
 
 /** Tables with a worker_id that are not work records, and why. */
 const NOT_WORK_RECORDS: Record<string, string> = {
@@ -30,6 +30,12 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "time off a worker asks for (slice 4.4); approved leave days get no timesheet line, so nothing worked is recorded",
   memberships: "the worker's login",
   pay_rates: "rates of pay, not payments",
+  payroll_adjustments:
+    "earnings and deductions on a payroll run (slice 5.2); each is paid through a payslip, which is the work record",
+  payroll_anomalies:
+    "what looks wrong on a payroll run (slice 5.2); a flag about the worker, nothing worked or paid",
+  payslip_sources:
+    "what each payslip pays (slice 5.2); each hangs off a payslip, which is the work record",
   shift_assignments:
     "the roster (slice 3.2): planned shifts, not work done; punches (3.5) are the work records",
   staff_id_corrections: "the corrections themselves",

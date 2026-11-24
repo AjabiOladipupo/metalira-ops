@@ -5,6 +5,23 @@ import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
 import type { ruleSetVersionSchema } from "@/lib/payroll/rule-set-form";
 import { fromPayrollRulesDbError } from "@/server/payroll/rule-sets";
 import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payroll/rule-sets-data";
+import {
+  previewAcknowledge,
+  previewAddAdjustment,
+  previewCarryInstalment,
+  previewCreateRun,
+  previewRecalculate,
+  previewRemoveAdjustment,
+  previewReturn,
+  previewSubmit,
+  type acknowledgeSchema,
+  type adjustmentSchema,
+  type carryInstalmentSchema,
+  type createRunSchema,
+  type removeAdjustmentSchema,
+  type returnRunSchema,
+  type runIdSchema,
+} from "@/server/payroll/runs";
 
 import type { CapabilityPreview, PreviewFn } from "./types";
 
@@ -48,3 +65,24 @@ export const previewAddRuleSetVersion: PreviewFn<typeof ruleSetVersionSchema> = 
   if (error) fromPayrollRulesDbError(error);
   return describeRuleSetVersion(result!);
 };
+
+// ---------------------------------------------------------------------------
+// The payroll run (slice 5.2): each preview works the change out without writing.
+// ---------------------------------------------------------------------------
+
+export const previewCreatePayrollRun: PreviewFn<typeof createRunSchema> = (ctx) =>
+  previewCreateRun(ctx, ctx.data);
+export const previewRecalculatePayrollRun: PreviewFn<typeof runIdSchema> = (ctx) =>
+  previewRecalculate(ctx, ctx.data);
+export const previewAddPayrollAdjustment: PreviewFn<typeof adjustmentSchema> = (ctx) =>
+  previewAddAdjustment(ctx, ctx.data);
+export const previewCarryPayrollInstalment: PreviewFn<typeof carryInstalmentSchema> = (ctx) =>
+  previewCarryInstalment(ctx, ctx.data);
+export const previewRemovePayrollAdjustment: PreviewFn<typeof removeAdjustmentSchema> = (ctx) =>
+  previewRemoveAdjustment(ctx, ctx.data);
+export const previewAcknowledgePayrollAnomalies: PreviewFn<typeof acknowledgeSchema> = (ctx) =>
+  previewAcknowledge(ctx, ctx.data);
+export const previewSubmitPayrollRun: PreviewFn<typeof runIdSchema> = (ctx) =>
+  previewSubmit(ctx, ctx.data);
+export const previewReturnPayrollRun: PreviewFn<typeof returnRunSchema> = (ctx) =>
+  previewReturn(ctx, ctx.data);
