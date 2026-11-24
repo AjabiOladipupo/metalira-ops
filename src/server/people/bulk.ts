@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { PostgrestError } from "@supabase/supabase-js";
 import { z } from "zod";
 
@@ -72,23 +74,45 @@ export const previewBulkEndSchema = z.object({
   endDate: isoDateSchema,
 });
 
-export const bulkEndEmploymentSchema = previewBulkEndSchema.extend({ reason: reasonSchema });
+/**
+ * The digest of the people a preview showed (`PreviewedSet.digest`). A confirm sends it back,
+ * and the server refuses (MLBU6) when the selection now resolves to anyone else, so "all
+ * matching" can never end or move someone who wasn't in the preview.
+ */
+const expectedDigestSchema = z
+  .string("Preview the change first")
+  .regex(/^[0-9a-f]{64}$/, "Preview the change first");
 
-export const bulkLineManagerSchema = z.object({
+export const bulkEndEmploymentSchema = previewBulkEndSchema.extend({
+  reason: reasonSchema,
+  expectedDigest: expectedDigestSchema,
+});
+
+const lineManagerChoice = {
   selection: peopleSelectionSchema,
   lineManager: z
     .string("Choose a line manager")
     .regex(/^[wm]:[0-9a-f-]{36}$/i, "Choose a line manager"),
+};
+
+const departmentChoice = {
+  selection: peopleSelectionSchema,
+  departmentId: z.uuid("Choose a department"),
+};
+
+export const bulkLineManagerSchema = z.object({
+  ...lineManagerChoice,
+  expectedDigest: expectedDigestSchema,
 });
 
 export const bulkDepartmentSchema = z.object({
-  selection: peopleSelectionSchema,
-  departmentId: z.uuid("Choose a department"),
+  ...departmentChoice,
+  expectedDigest: expectedDigestSchema,
 });
 
 export const previewBulkReassignSchema = z.discriminatedUnion("change", [
-  bulkLineManagerSchema.extend({ change: z.literal("line_manager") }),
-  bulkDepartmentSchema.extend({ change: z.literal("department") }),
+  z.object({ ...lineManagerChoice, change: z.literal("line_manager") }),
+  z.object({ ...departmentChoice, change: z.literal("department") }),
 ]);
 
 export const exportPeopleSchema = z.object({ selection: peopleSelectionSchema });
@@ -96,6 +120,35 @@ export const exportPeopleSchema = z.object({ selection: peopleSelectionSchema })
 // ---------------------------------------------------------------------------
 // Results and refusals
 // ---------------------------------------------------------------------------
+
+/** The people a preview covers: the ids it resolved, how many, and their digest. */
+export interface PreviewedSet {
+  ids: string[];
+  count: number;
+  digest: string;
+}
+
+/** SHA-256 of the sorted, distinct ids: the same set always gives the same digest. */
+export function selectionDigest(ids: readonly string[]): string {
+  const sorted = [...new Set(ids.map((id) => id.toLowerCase()))].sort();
+  return createHash("sha256").update(sorted.join("\n")).digest("hex");
+}
+
+function previewed(ids: readonly string[]): PreviewedSet {
+  const distinct = [...new Set(ids)];
+  return { ids: distinct, count: distinct.length, digest: selectionDigest(distinct) };
+}
+
+export const SELECTION_CHANGED = "The list changed since the preview. Review it again.";
+
+/** The selection resolves to different people than the preview showed (MLBU6). */
+export class SelectionChanged extends MutationError {
+  override name = "SelectionChanged";
+  readonly refusal = "MLBU6";
+  constructor() {
+    super("invalid", SELECTION_CHANGED, { selection: SELECTION_CHANGED });
+  }
+}
 
 /** Someone selected who can't be changed, and why. */
 export interface BulkProblem {
@@ -197,6 +250,28 @@ async function idsFor(
   return ids;
 }
 
+/**
+ * Ids for a confirmed write: resolved again exactly as the preview did, and refused (MLBU6)
+ * unless they are the same people the preview showed.
+ */
+async function confirmedIds(
+  ctx: MutationContext,
+  selection: PeopleSelection,
+  limit: number,
+  expectedDigest: string,
+): Promise<string[]> {
+  let ids: string[];
+  try {
+    ids = await idsFor(ctx, selection, limit);
+  } catch (error) {
+    // Nobody matches any more, or too many do: the list changed since the preview.
+    if (error instanceof MutationError && error.code === "invalid") throw new SelectionChanged();
+    throw error;
+  }
+  if (selectionDigest(ids) !== expectedDigest) throw new SelectionChanged();
+  return ids;
+}
+
 // ---------------------------------------------------------------------------
 // End employment
 // ---------------------------------------------------------------------------
@@ -215,6 +290,8 @@ export interface BulkEndPreviewPerson {
 export interface BulkEndPreview {
   endDate: string;
   people: BulkEndPreviewPerson[];
+  /** Send `selection.digest` back with the confirm. */
+  selection: PreviewedSet;
 }
 
 const previewResult = z.object({
@@ -258,7 +335,7 @@ export const previewBulkEndSpec: MutationSpec<typeof previewBulkEndSchema, BulkE
         refusal: p.refusal,
       }))
       .sort((a, b) => (a.name ?? "~").localeCompare(b.name ?? "~", "en", { sensitivity: "base" }));
-    return { endDate: result.end_date, people };
+    return { endDate: result.end_date, people, selection: previewed(ids) };
   },
 };
 
@@ -272,7 +349,12 @@ export const bulkEndEmploymentSpec: MutationSpec<typeof bulkEndEmploymentSchema,
   schema: bulkEndEmploymentSchema,
   roles: PEOPLE_EDITORS,
   run: async (ctx) => {
-    const ids = await idsFor(ctx, ctx.data.selection, BULK_END_LIMIT);
+    const ids = await confirmedIds(
+      ctx,
+      ctx.data.selection,
+      BULK_END_LIMIT,
+      ctx.data.expectedDigest,
+    );
     const { data, error } = await ctx.supabase.rpc("bulk_end_employment", {
       p_organisation_id: ctx.organisationId,
       p_worker_ids: ids,
@@ -293,16 +375,33 @@ export const bulkEndEmploymentSpec: MutationSpec<typeof bulkEndEmploymentSchema,
 export interface BulkReassigned {
   selected: number;
   changed: number;
+  /** The people selected (the database checked each). */
+  workerIds: string[];
 }
 
 const reassignResult = z.object({ selected: z.number(), changed: z.number() });
 
-export const bulkLineManagerSpec: MutationSpec<typeof bulkLineManagerSchema, BulkReassigned> = {
+/** A bulk line manager change, with what the notice to the new line manager needs. */
+export interface BulkLineManagerChanged extends BulkReassigned {
+  organisationId: string;
+  /** The signed-in user who made the change (never told about their own change). */
+  actorUserId: string;
+}
+
+export const bulkLineManagerSpec: MutationSpec<
+  typeof bulkLineManagerSchema,
+  BulkLineManagerChanged
+> = {
   module: "people",
   schema: bulkLineManagerSchema,
   roles: PEOPLE_EDITORS,
   run: async (ctx) => {
-    const ids = await idsFor(ctx, ctx.data.selection, BULK_REASSIGN_LIMIT);
+    const ids = await confirmedIds(
+      ctx,
+      ctx.data.selection,
+      BULK_REASSIGN_LIMIT,
+      ctx.data.expectedDigest,
+    );
     const lm = decodeLineManager(ctx.data.lineManager);
     const { data, error } = await ctx.supabase.rpc("bulk_set_line_manager", {
       p_organisation_id: ctx.organisationId,
@@ -311,7 +410,12 @@ export const bulkLineManagerSpec: MutationSpec<typeof bulkLineManagerSchema, Bul
       p_line_manager_membership_id: lm.lineManagerMembershipId ?? undefined,
     });
     if (error) fromDbError(error);
-    return reassignResult.parse(data);
+    return {
+      ...reassignResult.parse(data),
+      workerIds: ids,
+      organisationId: ctx.organisationId,
+      actorUserId: ctx.userId,
+    };
   },
 };
 
@@ -320,14 +424,19 @@ export const bulkDepartmentSpec: MutationSpec<typeof bulkDepartmentSchema, BulkR
   schema: bulkDepartmentSchema,
   roles: PEOPLE_EDITORS,
   run: async (ctx) => {
-    const ids = await idsFor(ctx, ctx.data.selection, BULK_REASSIGN_LIMIT);
+    const ids = await confirmedIds(
+      ctx,
+      ctx.data.selection,
+      BULK_REASSIGN_LIMIT,
+      ctx.data.expectedDigest,
+    );
     const { data, error } = await ctx.supabase.rpc("bulk_set_department", {
       p_organisation_id: ctx.organisationId,
       p_worker_ids: ids,
       p_department_id: ctx.data.departmentId,
     });
     if (error) fromDbError(error);
-    return reassignResult.parse(data);
+    return { ...reassignResult.parse(data), workerIds: ids };
   },
 };
 
@@ -346,6 +455,8 @@ export interface BulkReassignPreview {
   }[];
   /** Ids sent that the caller can't read (another company's, or gone). */
   notFound: number;
+  /** Send `selection.digest` back with the confirm. */
+  selection: PreviewedSet;
 }
 
 export const previewBulkReassignSpec: MutationSpec<
@@ -425,6 +536,7 @@ export const previewBulkReassignSpec: MutationSpec<
           p.status === "ended" ? "This employee has left, so their mapping can't change." : null,
       })),
       notFound: ids.length - people.length,
+      selection: previewed(ids),
     };
   },
 };

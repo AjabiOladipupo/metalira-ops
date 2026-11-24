@@ -17,12 +17,22 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { EMPTY_FILTERS } from "@/lib/people-filters";
-import { exportPeopleSpec } from "@/server/people/bulk";
+import {
+  SELECTION_CHANGED,
+  SelectionChanged,
+  bulkDepartmentSpec,
+  bulkEndEmploymentSpec,
+  bulkLineManagerSpec,
+  exportPeopleSpec,
+  previewBulkEndSpec,
+  previewBulkReassignSpec,
+} from "@/server/people/bulk";
 import { loadScopedPeople, selectPeople } from "@/server/people/people-scope";
 import type { Database, Json } from "@/types/db";
 
 import {
   adminClient,
+  anonClient,
   createTenantUser,
   createTestUser,
   insertMembershipAsOwner,
@@ -282,12 +292,13 @@ describe("bulk_end_employment_preview", () => {
       await db.query("set local session_replication_role = replica");
       await db.query(
         `insert into public.shift_assignments
-           (organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status)
+           (organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at, status,
+            removed_at)
          values
-           ($1, gen_random_uuid(), $2, $3::date, $4, now() + interval '5 days', now() + interval '5 days 8 hours', 'assigned'),
-           ($1, gen_random_uuid(), $2, $5::date, $4, now() + interval '10 days', now() + interval '10 days 8 hours', 'assigned'),
-           ($1, gen_random_uuid(), $2, $5::date, $4, now() + interval '10 days', now() + interval '10 days 8 hours', 'removed'),
-           ($1, gen_random_uuid(), $2, $6::date, $4, now(), now() + interval '8 hours', 'assigned')`,
+           ($1, gen_random_uuid(), $2, $3::date, $4, now() + interval '5 days', now() + interval '5 days 8 hours', 'assigned', null),
+           ($1, gen_random_uuid(), $2, $5::date, $4, now() + interval '10 days', now() + interval '10 days 8 hours', 'assigned', null),
+           ($1, gen_random_uuid(), $2, $5::date, $4, now() + interval '10 days', now() + interval '10 days 8 hours', 'removed', now()),
+           ($1, gen_random_uuid(), $2, $6::date, $4, now(), now() + interval '8 hours', 'assigned', null)`,
         [owner.orgId, siteA, IN_5, id, IN_10, TODAY],
       );
       await db.query(
@@ -471,8 +482,9 @@ describe("line manager scope and the export", () => {
       );
       await db.query(
         `insert into public.pay_rates
-           (organisation_id, worker_id, pay_type, basic_kobo, housing_kobo, effective_from)
-         values ($1, $2, 'monthly', 12345600, 7654300, $3)`,
+           (organisation_id, worker_id, pay_type, basic_kobo, housing_kobo, transport_kobo,
+            other_allowances_kobo, effective_from)
+         values ($1, $2, 'monthly', 12345600, 7654300, 0, 0, $3)`,
         [owner.orgId, id, SINCE],
       );
       await db.query("commit");
@@ -505,5 +517,192 @@ describe("line manager scope and the export", () => {
     ]) {
       expect(file.csv, secret).not.toContain(secret);
     }
+  });
+});
+
+describe("a confirm acts only on the people its preview showed (security review M1)", () => {
+  /** A fresh department, so "all matching" means exactly the people put in it here. */
+  async function department(name: string): Promise<string> {
+    const { data, error } = await hr.client
+      .from("departments")
+      .insert({ organisation_id: owner.orgId, name: `${name} ${randomUUID().slice(0, 8)}` })
+      .select("id")
+      .single();
+    expect(error).toBeNull();
+    return data!.id;
+  }
+
+  const ctx = () => ({
+    supabase: hr.client,
+    organisationId: owner.orgId,
+    userId: hr.id,
+    role: "hr" as const,
+  });
+  const byDepartment = (dept: string) => ({
+    kind: "filters" as const,
+    filters: { ...EMPTY_FILTERS, dept },
+  });
+
+  it("refuses to end employment when someone joined the filter after the preview", async () => {
+    const dept = await department("Joined");
+    const first = [
+      await newWorker({ department_id: dept }),
+      await newWorker({ department_id: dept }),
+    ];
+    const preview = await previewBulkEndSpec.run({
+      ...ctx(),
+      data: { selection: byDepartment(dept), endDate: TODAY },
+    });
+    expect(preview.selection.count).toBe(2);
+    expect([...preview.selection.ids].sort()).toEqual([...first].sort());
+
+    const latecomer = await newWorker({ department_id: dept });
+    const confirm = bulkEndEmploymentSpec.run({
+      ...ctx(),
+      data: {
+        selection: byDepartment(dept),
+        endDate: TODAY,
+        reason: REASON,
+        expectedDigest: preview.selection.digest,
+      },
+    });
+    await expect(confirm).rejects.toBeInstanceOf(SelectionChanged);
+    await expect(confirm).rejects.toMatchObject({ refusal: "MLBU6", message: SELECTION_CHANGED });
+    for (const id of [...first, latecomer]) {
+      expect(await statusOf(id)).toEqual({ status: "active", end_date: null });
+    }
+
+    // Previewed again, the confirm goes through for everyone now matching.
+    const again = await previewBulkEndSpec.run({
+      ...ctx(),
+      data: { selection: byDepartment(dept), endDate: TODAY },
+    });
+    const done = await bulkEndEmploymentSpec.run({
+      ...ctx(),
+      data: {
+        selection: byDepartment(dept),
+        endDate: TODAY,
+        reason: REASON,
+        expectedDigest: again.selection.digest,
+      },
+    });
+    expect(done.ended).toBe(3);
+  });
+
+  it("refuses a line manager change when someone left the filter after the preview", async () => {
+    const dept = await department("Left");
+    const lead = await newWorker();
+    const ids = [
+      await newWorker({ department_id: dept }),
+      await newWorker({ department_id: dept }),
+    ];
+    const preview = await previewBulkReassignSpec.run({
+      ...ctx(),
+      data: { change: "line_manager", selection: byDepartment(dept), lineManager: `w:${lead}` },
+    });
+    expect(preview.selection.count).toBe(2);
+
+    const moved = await hr.client
+      .from("workers")
+      .update({ department_id: departmentId })
+      .eq("id", ids[1]!);
+    expect(moved.error).toBeNull();
+
+    await expect(
+      bulkLineManagerSpec.run({
+        ...ctx(),
+        data: {
+          selection: byDepartment(dept),
+          lineManager: `w:${lead}`,
+          expectedDigest: preview.selection.digest,
+        },
+      }),
+    ).rejects.toMatchObject({ refusal: "MLBU6" });
+    const { rows } = await db.query<{ lm: string | null }>(
+      "select line_manager_worker_id::text as lm from public.workers where id = any($1::uuid[])",
+      [ids],
+    );
+    expect(rows.every((r) => r.lm === null)).toBe(true);
+  });
+
+  it("refuses a department change when the list grew, and a digest that isn't the preview's", async () => {
+    const dept = await department("Grew");
+    const target = await department("Target");
+    await newWorker({ department_id: dept });
+    const preview = await previewBulkReassignSpec.run({
+      ...ctx(),
+      data: { change: "department", selection: byDepartment(dept), departmentId: target },
+    });
+    await newWorker({ department_id: dept });
+    await expect(
+      bulkDepartmentSpec.run({
+        ...ctx(),
+        data: {
+          selection: byDepartment(dept),
+          departmentId: target,
+          expectedDigest: preview.selection.digest,
+        },
+      }),
+    ).rejects.toMatchObject({ refusal: "MLBU6" });
+
+    // Ticked ids are checked too: the digest must be the one their own preview gave.
+    const ticked = await newWorker({ department_id: dept });
+    await expect(
+      bulkDepartmentSpec.run({
+        ...ctx(),
+        data: {
+          selection: { kind: "ids", ids: [ticked] },
+          departmentId: target,
+          expectedDigest: preview.selection.digest,
+        },
+      }),
+    ).rejects.toMatchObject({ refusal: "MLBU6" });
+    const { rows } = await db.query<{ n: string }>(
+      "select count(*)::text as n from public.workers where department_id = $1",
+      [target],
+    );
+    expect(rows[0]!.n).toBe("0");
+  });
+});
+
+describe("untrusted sessions (security review L2)", () => {
+  it("get 42501 from all four functions, even with the HR role", async () => {
+    const email = `rls-bu-untrusted-${randomUUID()}@example.test`;
+    const password = `${randomUUID()}a1`;
+    const created = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+    expect(created.error).toBeNull();
+    const client = anonClient();
+    expect((await client.auth.signInWithPassword({ email, password })).error).toBeNull();
+    const { error: memberError } = await admin
+      .from("memberships")
+      .insert({ organisation_id: owner.orgId, user_id: created.data.user!.id, role: "hr" });
+    expect(memberError).toBeNull();
+
+    const id = await newWorker();
+    const results = await Promise.all([
+      client.rpc("bulk_end_employment_preview", {
+        p_organisation_id: owner.orgId,
+        p_worker_ids: [id],
+        p_end_date: TODAY,
+      }),
+      endBulk(client, [id]),
+      client.rpc("bulk_set_line_manager", {
+        p_organisation_id: owner.orgId,
+        p_worker_ids: [id],
+        p_line_manager_membership_id: lineManagerMembership,
+      }),
+      client.rpc("bulk_set_department", {
+        p_organisation_id: owner.orgId,
+        p_worker_ids: [id],
+        p_department_id: departmentId,
+      }),
+    ]);
+    for (const { error } of results) expect(error?.code).toBe(DENIED);
+    expect(await statusOf(id)).toEqual({ status: "active", end_date: null });
+    const { rows } = await db.query<{ dept: string | null; lm: string | null }>(
+      "select department_id::text as dept, line_manager_membership_id::text as lm from public.workers where id = $1",
+      [id],
+    );
+    expect(rows[0]).toEqual({ dept: null, lm: null });
   });
 });

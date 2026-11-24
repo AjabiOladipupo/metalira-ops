@@ -10,6 +10,7 @@ import {
   peopleExportFileName,
   type PeopleExportRow,
 } from "@/server/people/export-csv";
+import { csvCell } from "@/server/people/import/csv";
 import { toExportRow, type ScopedPerson } from "@/server/people/people-scope";
 
 const BOM = "﻿";
@@ -141,5 +142,23 @@ describe("toExportRow", () => {
     expect(exported.status).toBe("invited");
     expect(peopleExportCsv([exported])).not.toContain("1234");
     expect(peopleExportCsv([exported])).not.toContain("Monthly");
+  });
+});
+
+describe("csvCell (shared by imports and exports)", () => {
+  it.each([
+    ["=1+1", "'=1+1"],
+    [" =1+1", "' =1+1"],
+    ["  +234", "'  +234"],
+    [" -cmd", "' -cmd"],
+    ["\n@SUM(A1)", '"\'\n@SUM(A1)"'],
+    ["\tTAB", "'\tTAB"],
+  ])("escapes %j", (input, output) => {
+    expect(csvCell(input)).toBe(output);
+  });
+
+  it("leaves ordinary values alone", () => {
+    expect(csvCell("  Ada Obi")).toBe("  Ada Obi");
+    expect(csvCell("a=b")).toBe("a=b");
   });
 });

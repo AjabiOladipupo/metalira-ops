@@ -20,7 +20,6 @@ import {
   bulkEndEmploymentAction,
   bulkSetDepartmentAction,
   bulkSetLineManagerAction,
-  exportPeopleAction,
   previewBulkEndEmploymentAction,
   previewBulkReassignAction,
 } from "@/server/people/bulk-actions";
@@ -166,21 +165,35 @@ function ExportButton({
         onClick={() =>
           start(async () => {
             setError(null);
-            const result = await exportPeopleAction({ selection });
-            if (!result.ok) {
-              setError(result.message);
+            // A route handler, so the file goes out with no-store and as an attachment.
+            let response: Response;
+            try {
+              response = await fetch("/app/people/export", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ selection }),
+              });
+            } catch {
+              setError("The file couldn't be made. Try again in a minute.");
               return;
             }
-            const blob = new Blob([result.value.csv], { type: "text/csv;charset=utf-8" });
-            const url = URL.createObjectURL(blob);
+            if (!response.ok) {
+              setError((await response.text()) || "The file couldn't be made.");
+              return;
+            }
+            const count = Number(response.headers.get("x-export-count") ?? "0");
+            const name =
+              /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1] ??
+              "people.csv";
+            const url = URL.createObjectURL(await response.blob());
             const link = document.createElement("a");
             link.href = url;
-            link.download = result.value.fileName;
+            link.download = name;
             document.body.append(link);
             link.click();
             link.remove();
             URL.revokeObjectURL(url);
-            onDone(result.message ?? "Exported.");
+            onDone(`Exported ${people(count)}.`);
           })
         }
       >
@@ -379,8 +392,15 @@ function EndEmploymentSheet({
                 start(async () => {
                   setError(null);
                   setProblems([]);
-                  const result = await bulkEndEmploymentAction({ selection, endDate, reason });
+                  const result = await bulkEndEmploymentAction({
+                    selection,
+                    endDate,
+                    reason,
+                    expectedDigest: preview.selection.digest,
+                  });
                   if (!result.ok) {
+                    // The list changed since the preview: back to the first step to preview again.
+                    if (result.changed) setPreview(null);
                     setError(result.message);
                     setProblems(result.problems ?? []);
                     return;
@@ -534,10 +554,20 @@ function ReassignSheet({
                 start(async () => {
                   setError(null);
                   setProblems([]);
+                  const expectedDigest = preview.selection.digest;
                   const result = isManager
-                    ? await bulkSetLineManagerAction({ selection, lineManager: choice })
-                    : await bulkSetDepartmentAction({ selection, departmentId: choice });
+                    ? await bulkSetLineManagerAction({
+                        selection,
+                        lineManager: choice,
+                        expectedDigest,
+                      })
+                    : await bulkSetDepartmentAction({
+                        selection,
+                        departmentId: choice,
+                        expectedDigest,
+                      });
                   if (!result.ok) {
+                    if (result.changed) setPreview(null);
                     setError(result.message);
                     setProblems(result.problems ?? []);
                     return;

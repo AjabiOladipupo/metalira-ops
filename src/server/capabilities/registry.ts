@@ -152,7 +152,6 @@ import {
   bulkDepartmentSpec,
   bulkEndEmploymentSpec,
   bulkLineManagerSpec,
-  exportPeopleSpec,
   previewBulkEndSpec,
   previewBulkReassignSpec,
 } from "@/server/people/bulk";
@@ -999,18 +998,6 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/bulk-actions", "previewBulkReassignAction"),
     agent: false,
     agentNote: BULK_PEOPLE,
-  },
-  {
-    name: "people.export_csv",
-    description:
-      "Exports the selected employees' work details to CSV in the caller's own scope, without personal data or pay.",
-    kind: "read",
-    audience: "manager",
-    ...fromSpec(exportPeopleSpec),
-    changes: "none",
-    action: at("people/bulk-actions", "exportPeopleAction"),
-    agent: false,
-    agentNote: "Makes a file of people's details for download: exports are made on the screen.",
   },
 
   // -------------------------------------------------------------------------

@@ -2,24 +2,26 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { formatDate } from "@/lib/dates";
+import { createServerSupabase } from "@/lib/supabase/server";
 import { MutationError, mutate } from "@/server/identity/mutate";
 
 import {
   BulkRefusal,
+  SelectionChanged,
   bulkDepartmentSpec,
   bulkEndEmploymentSpec,
   bulkLineManagerSpec,
-  exportPeopleSpec,
   previewBulkEndSpec,
   previewBulkReassignSpec,
   type BulkEndPreview,
   type BulkProblem,
   type BulkReassignPreview,
-  type PeopleExport,
 } from "./bulk";
+import { notifyNewLineManager } from "./bulk-notices";
 
 /**
  * Server Actions for the People list's bulk actions (slice U.1). Each goes through `mutate()`
@@ -34,11 +36,16 @@ export type BulkResult<T> =
       message: string;
       fieldErrors?: Partial<Record<string, string>>;
       problems?: BulkProblem[];
+      /** The selection now resolves to other people (MLBU6): preview again. */
+      changed?: boolean;
     };
 
 const FAILED = "That didn't work. Try again in a minute.";
 
 function refusal(error: unknown): BulkResult<never> {
+  if (error instanceof SelectionChanged) {
+    return { ok: false, message: error.message, changed: true };
+  }
   if (error instanceof BulkRefusal) {
     return { ok: false, message: error.message, problems: error.problems };
   }
@@ -101,6 +108,11 @@ export async function bulkSetLineManagerAction(
   try {
     const result = await mutate(bulkLineManagerSpec, input);
     revalidatePath("/app/people", "layout");
+    // One summary notice to the new line manager, after the response (as the single save does).
+    if (result.changed > 0) {
+      const supabase = await createServerSupabase();
+      after(() => notifyNewLineManager(supabase, result));
+    }
     return {
       ok: true,
       value: { changed: result.changed },
@@ -122,15 +134,6 @@ export async function bulkSetDepartmentAction(
       value: { changed: result.changed },
       message: `Department changed for ${people(result.changed)}.`,
     };
-  } catch (error) {
-    return refusal(error);
-  }
-}
-
-export async function exportPeopleAction(input: unknown): Promise<BulkResult<PeopleExport>> {
-  try {
-    const file = await mutate(exportPeopleSpec, input);
-    return { ok: true, value: file, message: `Exported ${people(file.count)}.` };
   } catch (error) {
     return refusal(error);
   }
