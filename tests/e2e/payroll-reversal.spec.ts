@@ -202,9 +202,15 @@ test("Finance reverses an approved run before release; a second person approves;
   await expect(preview).toContainText("net pay -₦104,740", { timeout: 30_000 });
   await expect(preview).toContainText("waits for a second person");
   await ask.getByRole("button", { name: "Ask for the reversal" }).click();
-  await expect(page).toHaveURL(/\/app\/payroll\/[0-9a-f-]+\?step=submit/, { timeout: 30_000 });
+  // The request redirects to the new reversal run (the page was the original's Submit step).
+  await expect(page).toHaveURL(
+    (url) =>
+      /^\/app\/payroll\/[0-9a-f-]+$/.test(url.pathname) &&
+      url.pathname !== `/app/payroll/${runId}` &&
+      url.searchParams.get("step") === "submit",
+    { timeout: 30_000 },
+  );
   const reversalPath = new URL(page.url()).pathname;
-  expect(reversalPath).not.toBe(`/app/payroll/${runId}`);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Reversal of October 2026");
   await expect(page.getByTestId("reversal-totals")).toContainText("-₦104,740");
   await expect(page.getByTestId("reversal-banner")).toContainText("This reverses");
