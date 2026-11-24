@@ -76,10 +76,12 @@ describe("nav config", () => {
 
 // The owner's role-to-nav decision, docs/PHASE_0.md "Roles and access".
 describe("nav by role", () => {
-  it("shows owner and admin every item", () => {
+  it("shows owner every item, and admin every item but Payroll run", () => {
     const all = NAV_ITEMS.map((i) => i.label);
     expect(labels("owner")).toEqual(all);
-    expect(labels("admin")).toEqual(all);
+    // Admins see no payroll (docs/PHASE_5.md decision 8 and "Roles and access", owner decision
+    // 23 Nov 2026; slice 5.2).
+    expect(labels("admin")).toEqual(all.filter((l) => l !== "Payroll run"));
     expect(all).toHaveLength(14);
   });
 
@@ -142,7 +144,8 @@ describe("nav by role", () => {
   it("lists every item for owner and admin, and only real roles", () => {
     for (const item of NAV_ITEMS) {
       expect(item.roles).toContain("owner");
-      expect(item.roles).toContain("admin");
+      if (item.href === "/app/payroll") expect(item.roles).not.toContain("admin");
+      else expect(item.roles).toContain("admin");
       for (const role of item.roles) expect(ROLES).toContain(role);
       expect(item.roles).not.toContain("worker");
       expect(item.roles).not.toContain("client_approver");
@@ -151,6 +154,9 @@ describe("nav by role", () => {
 
   it("enforces the same rules for direct URLs", () => {
     expect(canAccessHref("line_manager", "/app/payroll")).toBe(false);
+    expect(canAccessHref("admin", "/app/payroll")).toBe(false);
+    expect(canAccessHref("admin", "/app/payroll/b0000000-0000-4000-8000-000000000002")).toBe(false);
+    expect(canAccessHref("finance", "/app/payroll/b0000000-0000-4000-8000-000000000002")).toBe(true);
     expect(canAccessHref("line_manager", "/app/timesheets")).toBe(true);
     expect(canAccessHref("finance", "/app/roster")).toBe(false);
     expect(canAccessHref("finance", "/app/collections/inv-0001")).toBe(true);

@@ -30,7 +30,17 @@ export type EarningCode =
  * pay version; an adjustment (5.2) by id.
  */
 export type PaySourceRef =
-  | { kind: "timesheet_line"; id: string; workDate: string }
+  | {
+      kind: "timesheet_line";
+      id: string;
+      workDate: string;
+      /**
+       * Paid as off-day work (the off-day rule; a monthly worker's day off, or a shift past
+       * work_days_per_week). Stored on `payslip_sources.off_day` so arrears know the off days
+       * already paid in a week (slice 5.2).
+       */
+      offDay?: boolean;
+    }
   | { kind: "leave_request"; id: string; from: string; to: string }
   | { kind: "pay_rate"; id: string; from: string; to: string }
   | { kind: "adjustment"; id: string };

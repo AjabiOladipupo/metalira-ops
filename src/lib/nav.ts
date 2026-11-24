@@ -136,7 +136,8 @@ export const NAV: NavGroup[] = [
         label: "Payroll run",
         module: "payroll",
         href: "/app/payroll",
-        roles: ["owner", "admin", "hr", "finance"],
+        // Slice 5.2: owner, hr and finance (admins see no payroll, PHASE_5 decision 8).
+        roles: ["owner", "hr", "finance"],
         icon: "payroll",
         description: "Pay cycle 20th to 19th, paid on the 25th.",
         empty: "No payroll runs yet. Approve timesheets to prepare the first run.",
@@ -282,6 +283,8 @@ export const EXTRA_PAGES: readonly {
   // no payroll, PHASE_5 decision 8). Part of Payroll: hidden when the company has it off.
   { href: "/app/settings/payroll", roles: ["owner", "hr", "finance"], module: "payroll" },
   { href: "/app/settings/payroll/new", roles: ["owner", "hr"], module: "payroll" },
+  // Slice 5.2: a payroll run's page (owner, hr, finance; hr and owner prepare, finance decides).
+  { href: "/app/payroll/[id]", roles: ["owner", "hr", "finance"], module: "payroll" },
   // Slice 4.4: leave balances (and HR's adjustments). Ops managers read requests' dates and type
   // only, never balances. A request's own page follows Leave.
   { href: "/app/leave/balances", roles: ["owner", "admin", "hr", "line_manager"] },

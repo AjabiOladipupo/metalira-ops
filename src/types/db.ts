@@ -751,6 +751,212 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payroll_adjustments": {
+                  Row: {
+                    "amount_kobo": number,"created_at": string,"created_by": string,"currency": string,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount_kobo": number,"created_at"?: string,"created_by": string,"currency"?: string,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind": string,"label": string,"organisation_id": string,"pensionable"?: boolean,"reason": string,"run_id": string,"series_id": string,"taxable"?: boolean,"worker_id": string
+                  }
+                  Update: {
+                    "amount_kobo"?: number,"created_at"?: string,"created_by"?: string,"currency"?: string,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind"?: string,"label"?: string,"organisation_id"?: string,"pensionable"?: boolean,"reason"?: string,"run_id"?: string,"series_id"?: string,"taxable"?: boolean,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_adjustments_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_adjustments_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_adjustments_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_anomalies": {
+                  Row: {
+                    "acknowledged_at": string | null,"acknowledged_by": string | null,"code": string,"created_at": string,"detail": NonNullable<Json>,"id": string,"organisation_id": string,"run_id": string,"severity": string,"worker_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "acknowledged_at"?: string | null,"acknowledged_by"?: string | null,"code": string,"created_at"?: string,"detail"?: NonNullable<Json>,"id"?: string,"organisation_id": string,"run_id": string,"severity": string,"worker_id"?: string | null
+                  }
+                  Update: {
+                    "acknowledged_at"?: string | null,"acknowledged_by"?: string | null,"code"?: string,"created_at"?: string,"detail"?: NonNullable<Json>,"id"?: string,"organisation_id"?: string,"run_id"?: string,"severity"?: string,"worker_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_anomalies_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_anomalies_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_anomalies_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_run_decisions": {
+                  Row: {
+                    "actor_id": string,"created_at": string,"decision": string,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"net_kobo": number,"organisation_id": string,"reason": string | null,"run_id": string,"worker_count": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "actor_id": string,"created_at"?: string,"decision": string,"gross_kobo": number,"id"?: string,"inputs_sha256"?: string | null,"net_kobo": number,"organisation_id": string,"reason"?: string | null,"run_id": string,"worker_count": number
+                  }
+                  Update: {
+                    "actor_id"?: string,"created_at"?: string,"decision"?: string,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"net_kobo"?: number,"organisation_id"?: string,"reason"?: string | null,"run_id"?: string,"worker_count"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_run_decisions_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_run_decisions_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_runs": {
+                  Row: {
+                    "calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                  }
+                  Update: {
+                    "calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_runs_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_runs_rule_set_fkey"
+      columns: ["organisation_id","rule_set_id"]
+isOneToOne: false
+      referencedRelation: "tax_rule_sets"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payslip_lines": {
+                  Row: {
+                    "amount_kobo": number,"code": string,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"taxable": boolean
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "amount_kobo": number,"code": string,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"taxable": boolean
+                  }
+                  Update: {
+                    "amount_kobo"?: number,"code"?: string,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"run_id"?: string,"taxable"?: boolean
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslip_lines_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslip_lines_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payslip_sources": {
+                  Row: {
+                    "created_at": string,"from_date": string,"id": string,"line_positions": (number)[],"off_day": boolean,"organisation_id": string,"payslip_id": string,"run_id": string,"source_id": string,"source_kind": string,"stands": boolean,"to_date": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"from_date": string,"id"?: string,"line_positions": (number)[],"off_day"?: boolean,"organisation_id": string,"payslip_id": string,"run_id": string,"source_id": string,"source_kind": string,"stands"?: boolean,"to_date": string,"worker_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"from_date"?: string,"id"?: string,"line_positions"?: (number)[],"off_day"?: boolean,"organisation_id"?: string,"payslip_id"?: string,"run_id"?: string,"source_id"?: string,"source_kind"?: string,"stands"?: boolean,"to_date"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslip_sources_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslip_sources_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payslips": {
+                  Row: {
+                    "carried_forward_kobo": number,"created_at": string,"currency": string,"cycle_days": number,"employed_rostered_days": number,"employer_cost_kobo": number,"employment_type": string,"gross_kobo": number,"id": string,"itf_kobo": number,"leave_deducted_days": number,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_rate_ids": (string)[],"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"pfa_name": string | null,"rostered_days": number,"rule_set_id": string,"run_id": string,"tax_state": string | null,"trace": NonNullable<Json>,"trace_version": number,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "carried_forward_kobo": number,"created_at"?: string,"currency"?: string,"cycle_days": number,"employed_rostered_days": number,"employer_cost_kobo": number,"employment_type": string,"gross_kobo": number,"id"?: string,"itf_kobo": number,"leave_deducted_days": number,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_rate_ids"?: (string)[],"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"pfa_name"?: string | null,"rostered_days": number,"rule_set_id": string,"run_id": string,"tax_state"?: string | null,"trace": NonNullable<Json>,"trace_version": number,"worker_id": string
+                  }
+                  Update: {
+                    "carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"cycle_days"?: number,"employed_rostered_days"?: number,"employer_cost_kobo"?: number,"employment_type"?: string,"gross_kobo"?: number,"id"?: string,"itf_kobo"?: number,"leave_deducted_days"?: number,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_rate_ids"?: (string)[],"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"pfa_name"?: string | null,"rostered_days"?: number,"rule_set_id"?: string,"run_id"?: string,"tax_state"?: string | null,"trace"?: NonNullable<Json>,"trace_version"?: number,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslips_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslips_rule_set_fkey"
+      columns: ["organisation_id","rule_set_id"]
+isOneToOne: false
+      referencedRelation: "tax_rule_sets"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payslips_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payslips_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"posts": {
                   Row: {
                     "band": string,"closed_on": string | null,"closed_reason": string | null,"contract_id": string,"created_at": string,"created_by": string | null,"headcount_requirement_id": string | null,"id": string,"kind": string | null,"name": string,"opened_on": string,"organisation_id": string,"role": string,"site_id": string,"status": string,"unit": string,"updated_at": string
@@ -1670,6 +1876,9 @@ isOneToOne: false
               "organisation_id": string,"pin_reset": boolean,"worker_id": string
             }[]
                            },
+"acknowledge_payroll_anomalies":
+{ Args: { "p_anomaly_ids": (string)[],"p_organisation_id": string,"p_run_id": string }; Returns: number
+                           },
 "activate_contract":
 { Args: { "p_contract_id": string,"p_go_live_date"?: string,"p_organisation_id": string,"p_send_welcome"?: boolean }; Returns: Json
                            },
@@ -1681,6 +1890,9 @@ isOneToOne: false
                            },
 "add_pay_rate":
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
+                           },
+"add_payroll_adjustment":
+{ Args: { "p_amount_kobo": string,"p_instalments": number,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_pensionable": boolean,"p_reason": string,"p_run_id": string,"p_taxable": boolean,"p_worker_id": string }; Returns: string
                            },
 "add_post":
 { Args: { "p_add_site"?: boolean,"p_band": string,"p_contract_id": string,"p_count": number,"p_days": (number)[],"p_end": string,"p_from": string,"p_note"?: string,"p_organisation_id": string,"p_post_name": string,"p_role": string,"p_site_id": string,"p_start": string,"p_unit": string }; Returns: Json
@@ -1825,6 +2037,9 @@ isOneToOne: false
 "create_organisation":
 { Args: { "p_name": string }; Returns: string
                            },
+"create_payroll_run":
+{ Args: { "p_organisation_id": string,"p_pay_date"?: string,"p_period_start": string }; Returns: string
+                           },
 "create_worker":
 { Args: { "p_pay_rate"?: Json,"p_worker": Json }; Returns: string
                            },
@@ -1965,7 +2180,7 @@ isOneToOne: false
             }[]
                            },
 "payroll_inputs":
-{ Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
+{ Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id"?: string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
 "payroll_period":
 { Args: { "p_date": string,"p_organisation_id": string }; Returns: {
@@ -2026,6 +2241,9 @@ isOneToOne: false
               "member_email": string,"member_name": string,"member_user_id": string,"old_role": Database["public"]['Enums']["membership_role"]
             }[]
                            },
+"remove_payroll_adjustment":
+{ Args: { "p_adjustment_id": string,"p_organisation_id": string,"p_reason": string }; Returns: undefined
+                           },
 "remove_public_holiday":
 { Args: { "p_holiday_id": string,"p_organisation_id": string }; Returns: undefined
                            },
@@ -2057,6 +2275,9 @@ isOneToOne: false
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: {
               "invite_email": string,"invite_expires_at": string,"invite_role": Database["public"]['Enums']["membership_role"],"token": string
             }[]
+                           },
+"return_payroll_run":
+{ Args: { "p_organisation_id": string,"p_reason": string,"p_run_id": string }; Returns: string
                            },
 "revoke_membership_invite":
 { Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
@@ -2094,6 +2315,9 @@ isOneToOne: false
 "save_leave_type":
 { Args: { "p_carry_over_cap_days"?: number,"p_counting": string,"p_days_per_year"?: number,"p_leave_type_id"?: string,"p_min_service_months": number,"p_name": string,"p_needs_certificate": boolean,"p_organisation_id": string,"p_paid": boolean,"p_pay_percent"?: number,"p_status": string }; Returns: string
                            },
+"save_payroll_results":
+{ Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_results": Json,"p_run_id": string }; Returns: Json
+                           },
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
                            },
@@ -2118,6 +2342,9 @@ isOneToOne: false
 { Args: { "p_organisation_id": string,"p_site_id"?: string }; Returns: {
               "area_m2": number,"boundary": Json,"centre_lat": number,"centre_lng": number,"radius_m": number,"site_id": string
             }[]
+                           },
+"submit_payroll_run":
+{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
                            },
 "tax_rule_set_on":
 { Args: { "p_on": string,"p_organisation_id": string }; Returns: {
