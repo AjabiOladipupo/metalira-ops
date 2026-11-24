@@ -293,6 +293,35 @@ describe("October 2026 through run and approval", () => {
     }
   });
 
+  it("owes the golden statutory figures as remittances (slice 5.6)", async () => {
+    const { data: rems, error } = await admin
+      .from("statutory_remittances")
+      .select("kind, authority_key, amount_kobo::text, worker_count, due_date")
+      .eq("run_id", runId);
+    expect(error).toBeNull();
+    const owed = (kind: string) =>
+      (rems ?? []).filter((r) => r.kind === kind).reduce((n, r) => n + BigInt(r.amount_kobo), 0n);
+    const st = golden.statutory;
+    expect(owed("pension")).toBe(kobo(st.pension_total));
+    expect(owed("nsitf")).toBe(kobo(st.nsitf));
+    expect(owed("itf")).toBe(kobo(st.itf));
+    expect(owed("paye")).toBe(kobo(golden.totals.paye));
+    expect(owed("nhf")).toBe(0n);
+    // Everyone is in Lagos, with no PFA on file here; pension is due 7 working days after
+    // Sunday 25 Oct 2026 (Tuesday 3 Nov); the levies have no due date until the company sets one.
+    expect(rems!.find((r) => r.kind === "paye")).toMatchObject({
+      authority_key: "Lagos",
+      worker_count: 5,
+      due_date: null,
+    });
+    expect(rems!.find((r) => r.kind === "pension")).toMatchObject({
+      authority_key: null,
+      worker_count: 6,
+      due_date: "2026-11-03",
+    });
+    expect(rems).toHaveLength(4);
+  });
+
   it("locks 20 Sep to 19 Oct: reopening a day there is refused", async () => {
     const { data: day } = await admin
       .from("timesheet_lines")
