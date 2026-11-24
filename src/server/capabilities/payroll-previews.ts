@@ -4,6 +4,12 @@ import { formatDate } from "@/lib/dates";
 import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
 import type { ruleSetVersionSchema } from "@/lib/payroll/rule-set-form";
 import { fromPayrollRulesDbError } from "@/server/payroll/rule-sets";
+import {
+  previewRecordPayment,
+  previewVoidPayment,
+  type recordPaymentSchema,
+  type voidPaymentSchema,
+} from "@/server/payroll/remittances";
 import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payroll/rule-sets-data";
 import {
   previewAcknowledge,
@@ -89,3 +95,12 @@ export const previewReturnPayrollRun: PreviewFn<typeof returnRunSchema> = (ctx) 
   previewReturn(ctx, ctx.data);
 export const previewApprovePayrollRun: PreviewFn<typeof runIdSchema> = (ctx) =>
   previewApprove(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// Statutory remittances (slice 5.6)
+// ---------------------------------------------------------------------------
+
+export const previewRecordRemittancePayment: PreviewFn<typeof recordPaymentSchema> = (ctx) =>
+  previewRecordPayment(ctx, ctx.data);
+export const previewVoidRemittancePayment: PreviewFn<typeof voidPaymentSchema> = (ctx) =>
+  previewVoidPayment(ctx, ctx.data);

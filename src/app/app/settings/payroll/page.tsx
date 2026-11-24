@@ -13,11 +13,14 @@ import {
   ruleSetFigures,
   type RuleSet,
 } from "@/lib/payroll/rule-set";
+import { loadRemitDueDays } from "@/server/payroll/remittance-data";
+import { canSetRemittanceDueDays } from "@/server/payroll/remittances";
 import { canConfirmPayrollRules, canEditPayrollRules } from "@/server/payroll/rule-sets";
 import { loadPayrollRules, type RuleSetVersion } from "@/server/payroll/rule-sets-data";
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../../_shell/slots";
+import { RemitDueDaysForm } from "../../payroll/remittances/_components/remittance-forms";
 import { ConfirmAdviserForm } from "./_components/payroll-rules-forms";
 
 export const metadata: Metadata = { title: "Payroll rules" };
@@ -65,7 +68,10 @@ async function PayrollRulesPage({
   searchParams: PageProps<"/app/settings/payroll">["searchParams"];
 }) {
   const [ctx, query] = await Promise.all([peoplePageContext(), searchParams]);
-  const rules = await loadPayrollRules(ctx.supabase, ctx.organisationId);
+  const [rules, dueDays] = await Promise.all([
+    loadPayrollRules(ctx.supabase, ctx.organisationId),
+    loadRemitDueDays(ctx.supabase, ctx.organisationId),
+  ]);
   const canEdit = canEditPayrollRules(ctx.role);
   const canConfirm = canConfirmPayrollRules(ctx.role);
   const added = first(query.added);
@@ -244,6 +250,42 @@ async function PayrollRulesPage({
           </ul>
         </section>
       ) : null}
+
+      <section aria-labelledby="due-days" className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 id="due-days" className="m-0 type-h2">
+            Remittance due days
+          </h2>
+          <p className="m-0 text-sm text-fg-muted">
+            Pension is due by the 7th working day counting the pay date (or the working day before
+            it, when it falls on a weekend or holiday), leaving out weekends and your public
+            holidays. Metalira&apos;s starting rules give no due date for PAYE, NHF, NSITF or ITF,
+            so they have none until you set your own: a day of the month after the pay date. A
+            change applies to runs approved after it; due dates already worked out stay as they are.
+            These are your company&apos;s choices, not tax rules: confirm them with your tax
+            adviser.
+          </p>
+        </div>
+        {canSetRemittanceDueDays(ctx.role) ? (
+          <RemitDueDaysForm values={dueDays} />
+        ) : (
+          <dl className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-1.5 rounded-xl border border-line p-4 text-sm">
+            {(
+              [
+                ["PAYE", dueDays.paye],
+                ["NHF", dueDays.nhf],
+                ["NSITF", dueDays.nsitf],
+                ["ITF", dueDays.itf],
+              ] as const
+            ).map(([label, day]) => (
+              <div key={label} className="contents">
+                <dt>{label}</dt>
+                <dd className="m-0 text-right">{day ? `Day ${day} of the next month` : "None"}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
 
       <p className="m-0 text-[13px] text-fg-muted">
         A version in force is never changed: a change is a new version from tomorrow or later, and

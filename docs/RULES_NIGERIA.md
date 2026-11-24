@@ -56,6 +56,8 @@ Open points (ask before Phase 5 code depends on them):
 
 1. Public holiday work: is it paid as the hours actually worked, or as a fixed 8-hour overtime shift like off-day work? Does a monthly worker who is rostered on a public holiday but does not work still get full pay? **Answered by the Phase 5 default** (above: minutes worked paid once at the overtime rate on top of normal pay; full pay kept for an unworked rostered holiday); owner may change; still to confirm with a tax adviser.
 2. Is "gross" for the hourly rate the full monthly gross (basic + housing + transport + other allowances), as recorded above? The owner said "gross base pay".
+3. Pension remittance, "within 7 working days of paying salary" (PRA 2014): which date counts when the pay date falls on a weekend or holiday (the day salary actually left the bank, or the scheduled pay date), and is the pay day itself day 1? **Phase 5 default (slice 5.6, the earlier and safer reading):** a pay date that isn't a working day rolls back to the working day before, which counts as day 1 of 7 (25 Oct 2026, a Sunday, gives Monday 2 Nov). **Confirm with a tax adviser.**
+4. What counts as a working day for remittance deadlines: Monday to Friday less the company's own public-holiday list (the Phase 5 default), or federal public holidays only? And the due dates for PAYE (per state IRS), NHF, NSITF and ITF, which this file doesn't give: until confirmed, the app gives them a due date only when the company sets its own day. **Confirm with a tax adviser.**
 
 ## Invoicing
 - VAT 7.5% on taxable services, shown as its own line.

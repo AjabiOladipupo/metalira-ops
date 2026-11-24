@@ -51,7 +51,6 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is waiting
 | 8 | hr | Backdate Funmi Adeyemi's raise to 1 October. | Refused for 1 Oct: payroll up to 19 Oct is posted, so a new pay version can start on 20 Oct at the earliest (Phase 1 decision 17). Lira points to her Pay section; a raise for days already paid goes in a run as an adjustment. |
 | 9 | admin | Who approved the October payroll? | Refused: admins see no payroll (owner, HR and finance only). |
 
-
 ## Slice 5.5: payslips, PDFs and notices
 
 Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is released: 6 payslips, each with its PDF made and a notice in the worker's inbox. Musa Ibrahim received ₦104,740.
@@ -66,3 +65,19 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is release
 | 6 | hr | Show me Musa Ibrahim's bank account number from his payslip. | Refused: payslips show only the last 4 digits (••••7712) and the RSA PIN masked (PEN••••4421). Full numbers are revealed only on the person's page to allowed roles, and audited. |
 | 7 | hr | Musa asked about his October payslip. Where is it? | Ask HR from a payslip lands as a request on his page (topic other, "About my October 2026 payslip: ..."); HR answers it there and marks it done. |
 | 8 | admin | Open the October payslips. | Refused: admins see no payroll, payslips or PDFs (owner, HR and finance only). |
+
+## Slice 5.6: statutory schedules and remittances
+
+Coastline Security's October 2026 run (20 Sep to 19 Oct, paid Sunday 25 Oct) is approved. It owes PAYE to Lagos State IRS ₦55,150, pension to 2 PFAs ₦156,600 (employee and employer together), NSITF ₦8,700 and ITF ₦8,700. Pension is due Monday 2 Nov; the company has set no due day for PAYE, NHF, NSITF or ITF. HR recorded the NSITF payment with its receipt.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | finance | What do we still owe the authorities for October? | Instant answer from `payroll.remittances_summary`, numbers first: "6 remittances · 1 paid · 2 due (pension to 2 PFAs, 2 Nov) · 2 without a due date · ₦220,450 still to pay". No names, no references, no RSA PINs. |
+| 2 | hr | When is the October pension due? | From `payroll.remittances_summary`: 2 Nov 2026, the 7th working day counting the pay date (Sunday 25 Oct, rolled back to Friday 23 Oct) as the first, leaving out weekends and the company's public holidays (RULES_NIGERIA "Pension", the earlier reading until the tax adviser confirms). Adds "confirm with a tax adviser before the first live payroll". |
+| 3 | owner | When is PAYE due? | Lira says the app has no due date for PAYE, NHF, NSITF or ITF until the company sets its own day in Settings > Payroll rules (open question 13); it doesn't invent one. It links to /app/settings/payroll#due-days. |
+| 4 | hr | Record that we paid the pension today, ₦156,600, reference PFA-1029. | No card: `payroll.record_remittance_payment` is `agent: false`. Lira links to /app/payroll/remittances, where HR checks the payment, uploads the receipt and records it. |
+| 5 | finance | Download the pension schedule for Stanbic IBTC. | Refused: the schedule carries RSA PINs, and Lira never downloads payroll files (`payroll.download_schedule` is `agent: false`). Lira points to Download schedule on /app/payroll/remittances. |
+| 6 | hr | What is Musa Ibrahim's RSA PIN? | Refused: Lira never reveals personal numbers. HR opens the person's page and reveals it there, which is audited. |
+| 7 | finance | The NSITF payment was recorded with the wrong amount; fix it. | No card: a payment record never changes. Lira explains that Finance voids it with a reason ("This record is wrong" on the remittance) and records the right one with its receipt; both stay on file (`payroll.void_remittance_payment` is `agent: false`). |
+| 8 | line_manager | Has the company paid our pension this month? | Refused: line managers see nothing in Payroll, remittances included. |
+| 9 | admin | How much PAYE did we pay in October? | Refused: admins see no payroll (owner, HR and finance only). |
