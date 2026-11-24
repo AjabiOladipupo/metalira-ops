@@ -27,6 +27,7 @@ import {
 } from "@/lib/people";
 import type { SignInCredential } from "@/lib/pin-lockout";
 import { ROLE_LABELS, type ManagerRole } from "@/lib/roles";
+import { loadPayRateEarliestStart } from "@/server/payroll/run-data";
 import { sendAppliedBankChangeNotices } from "@/server/people/bank-change-notices";
 import {
   applyDueBankChanges,
@@ -178,6 +179,7 @@ function Profile({
   corrections,
   staffIdViewer,
   queries,
+  payFloor,
 }: {
   worker: WorkerProfile;
   ctx: Awaited<ReturnType<typeof peoplePageContext>>;
@@ -193,6 +195,8 @@ function Profile({
   staffIdViewer: StaffIdViewer;
   /** The HR file's queries, or null for roles that don't see the HR file. */
   queries: QueryView[] | null;
+  /** The earliest start for a new pay version (decision 17), or null for "today". */
+  payFloor: string | null;
 }) {
   const { today, canEdit, canSeePay, canEditPay, role } = ctx;
   const active = worker.status === "active";
@@ -201,9 +205,11 @@ function Profile({
   const pendingCorrection = corrections.find((c) => c.status === "pending") ?? null;
   const current = currentPayVersion(worker.payRates, today);
   const latest = worker.payRates.at(-1) ?? null;
-  // A new version starts after the latest one, and never in the past.
+  // A new version starts after the latest one, and never before the floor: today until payroll
+  // posts, then back to the day after the latest posted pay period (Phase 1 decision 17).
+  const floor = payFloor ?? today;
   const minFrom =
-    latest && latest.effectiveFrom >= today ? addDays(latest.effectiveFrom, 1) : today;
+    latest && latest.effectiveFrom >= floor ? addDays(latest.effectiveFrom, 1) : floor;
   const nextMonth = firstOfNextMonth(today);
   const defaultFrom = nextMonth > minFrom ? nextMonth : minFrom;
 
@@ -553,9 +559,14 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
   ]);
   // The HR file (slice 4.6): RLS gives a line manager only their current reportees' queries
   // and the ones they raised.
-  const queries = has(HR_FILE_READERS, ctx.role)
-    ? await loadWorkerQueries(ctx.supabase, ctx.organisationId, id)
-    : null;
+  const [queries, payFloor] = await Promise.all([
+    has(HR_FILE_READERS, ctx.role)
+      ? loadWorkerQueries(ctx.supabase, ctx.organisationId, id)
+      : Promise.resolve(null),
+    ctx.canEditPay
+      ? loadPayRateEarliestStart(ctx.supabase, ctx.organisationId)
+      : Promise.resolve(null),
+  ]);
   return (
     <Profile
       worker={worker}
@@ -571,6 +582,7 @@ async function WorkerPage({ params }: { params: PageProps<"/app/people/[id]">["p
         ownWorkerIds: viewer.ownWorkerIds,
       }}
       queries={queries}
+      payFloor={payFloor}
     />
   );
 }

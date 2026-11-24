@@ -12,11 +12,12 @@ import { MutationError, mutate, type MutationSpec } from "@/server/identity/muta
 import { formFields } from "@/server/identity/schemas";
 import { getSession } from "@/server/identity/session";
 
-import { notifyRunSubmitted } from "./run-notices";
+import { notifyRunDecided, notifyRunSubmitted } from "./run-notices";
 import {
   acknowledgeSpec,
   addAdjustmentSpec,
   adjustmentSchema,
+  approveRunSpec,
   carryInstalmentSchema,
   carryInstalmentSpec,
   createRunSchema,
@@ -24,6 +25,7 @@ import {
   PAYROLL_APPROVERS,
   PAYROLL_PREPARERS,
   previewAddAdjustment,
+  previewApprove,
   previewCarryInstalment,
   previewCreateRun,
   previewRecalculate,
@@ -40,7 +42,7 @@ import {
 } from "./runs";
 
 /**
- * Server Actions for the payroll run (slice 5.2). Each money write is two presses: the first
+ * Server Actions for the payroll run (slices 5.2 and 5.3). Each money write is two presses: the first
  * (`intent` not "save") runs the preview, which works the change out without writing; the second
  * makes it. Every write goes through `mutate()` (role, module, Zod, then one SQL function as the
  * user, which checks the role again). Registered in src/server/capabilities/registry.ts.
@@ -105,6 +107,7 @@ const previewCarrySpec = previewSpec(
 );
 const previewSubmitSpec = previewSpec(runIdSchema, PAYROLL_PREPARERS, previewSubmit);
 const previewReturnSpec = previewSpec(returnRunSchema, PAYROLL_APPROVERS, previewReturn);
+const previewApproveSpec = previewSpec(runIdSchema, PAYROLL_APPROVERS, previewApprove);
 
 async function twoStep<R>(
   formData: FormData,
@@ -265,21 +268,52 @@ export async function submitRunAction(
   );
 }
 
-/** "Return to HR" (Finance or the owner), with a reason. */
+/** "Return to HR" (Finance or the owner), with a reason; the preparer is emailed. */
 export async function returnRunAction(
   _prev: RunFormState,
   formData: FormData,
 ): Promise<RunFormState> {
   const input = formFields(formData);
+  const organisationId = (await getSession())?.active?.organisationId ?? null;
   return twoStep(
     formData,
     input,
     previewReturnSpec as MutationSpec<z.ZodType, CapabilityPreview>,
-    returnRunSpec as MutationSpec<z.ZodType, { runId: string }>,
+    returnRunSpec as MutationSpec<z.ZodType, { runId: string; decisionId: string }>,
     (r) => {
+      if (organisationId) after(() => notifyRunDecided(organisationId, r.decisionId));
       revalidatePath(PAYROLL_PATH);
       revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
       return { ok: true, status: 200, message: "Returned to HR as a draft" };
+    },
+  );
+}
+
+/**
+ * "Approve" (Finance or the owner, never whoever prepared or changed the run): preview (control
+ * totals and acknowledged anomalies, after re-gathering the inputs), then approve, which posts
+ * the payslips and locks the period. The preparer is emailed.
+ */
+export async function approveRunAction(
+  _prev: RunFormState,
+  formData: FormData,
+): Promise<RunFormState> {
+  const input = formFields(formData);
+  const organisationId = (await getSession())?.active?.organisationId ?? null;
+  return twoStep(
+    formData,
+    input,
+    previewApproveSpec as MutationSpec<z.ZodType, CapabilityPreview>,
+    approveRunSpec as MutationSpec<z.ZodType, { runId: string; decisionId: string }>,
+    (r) => {
+      if (organisationId) after(() => notifyRunDecided(organisationId, r.decisionId));
+      revalidatePath(PAYROLL_PATH);
+      revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
+      return {
+        ok: true,
+        status: 200,
+        message: "Approved. The payslips are posted and the period is locked.",
+      };
     },
   );
 }

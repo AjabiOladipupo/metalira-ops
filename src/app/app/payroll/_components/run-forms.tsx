@@ -7,6 +7,7 @@ import type { CapabilityPreview } from "@/server/capabilities/types";
 import {
   acknowledgeAnomaliesAction,
   addAdjustmentAction,
+  approveRunAction,
   carryInstalmentAction,
   createRunAction,
   recalculateRunAction,
@@ -416,5 +417,18 @@ export function ReturnRunForm({ runId }: { runId: string }) {
         />
       )}
     </TwoStepForm>
+  );
+}
+
+export function ApproveRunForm({ runId }: { runId: string }) {
+  return (
+    <TwoStepForm
+      action={approveRunAction}
+      hidden={{ runId }}
+      label="Approve the run"
+      previewLabel="Check and approve"
+      confirmLabel="Confirm and approve"
+      pendingLabel="Checking the inputs…"
+    />
   );
 }
