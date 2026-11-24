@@ -35,12 +35,14 @@ export interface PayrollRunRow {
   submittedBy: string | null;
   approvedAt: string | null;
   approvedBy: string | null;
+  releasedAt: string | null;
+  releasedBy: string | null;
   createdAt: string;
   totals: RunTotals;
 }
 
 const RUN_COLUMNS =
-  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
+  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, released_at, released_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
 
 type RunRecord = {
   id: string;
@@ -60,6 +62,8 @@ type RunRecord = {
   submitted_by: string | null;
   approved_at: string | null;
   approved_by: string | null;
+  released_at: string | null;
+  released_by: string | null;
   created_at: string;
   worker_count: number;
   gross_kobo: string;
@@ -94,6 +98,8 @@ function toRun(r: RunRecord): PayrollRunRow {
     submittedBy: r.submitted_by,
     approvedAt: r.approved_at,
     approvedBy: r.approved_by,
+    releasedAt: r.released_at,
+    releasedBy: r.released_by,
     createdAt: r.created_at,
     totals: {
       grossKobo: toKobo(r.gross_kobo),

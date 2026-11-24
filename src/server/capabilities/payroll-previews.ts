@@ -5,6 +5,8 @@ import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
 import type { ruleSetVersionSchema } from "@/lib/payroll/rule-set-form";
 import { fromPayrollRulesDbError } from "@/server/payroll/rule-sets";
 import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payroll/rule-sets-data";
+import { previewMakeBankFile, type makeBankFileSchema } from "@/server/payroll/payouts";
+import { previewRelease, type releaseRunSchema } from "@/server/payroll/release";
 import {
   previewAcknowledge,
   previewAddAdjustment,
@@ -89,3 +91,12 @@ export const previewReturnPayrollRun: PreviewFn<typeof returnRunSchema> = (ctx) 
   previewReturn(ctx, ctx.data);
 export const previewApprovePayrollRun: PreviewFn<typeof runIdSchema> = (ctx) =>
   previewApprove(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// The bank file and release (slice 5.4)
+// ---------------------------------------------------------------------------
+
+export const previewMakePayrollBankFile: PreviewFn<typeof makeBankFileSchema> = (ctx) =>
+  previewMakeBankFile(ctx, ctx.data);
+export const previewReleasePayrollRun: PreviewFn<typeof releaseRunSchema> = (ctx) =>
+  previewRelease(ctx, ctx.data);

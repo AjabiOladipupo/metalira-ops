@@ -53,14 +53,14 @@ isOneToOne: false
                   ]
                 },"bank_detail_changes": {
                   Row: {
-                    "account_name": string,"applied_at": string | null,"applied_notified_at": string | null,"applies_after": string | null,"approved_by": string | null,"bank_account_digest": string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string | null,"bank_lookup_id": string | null,"bank_name": string,"cancelled_at": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"name_check": Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected": string | null,"name_check_reason": string | null,"name_check_source": string | null,"organisation_id": string,"previous_account_name": string | null,"previous_bank_account_enc": string | null,"previous_bank_account_last4": string | null,"previous_bank_name": string | null,"raised_by_worker": boolean,"reason": string | null,"rejected_by": string | null,"requested_by": string,"status": Database["public"]['Enums']["bank_detail_change_status"],"updated_at": string,"worker_id": string
+                    "account_name": string,"applied_at": string | null,"applied_notified_at": string | null,"applies_after": string | null,"approved_by": string | null,"bank_account_digest": string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string | null,"bank_lookup_id": string | null,"bank_name": string,"cancelled_at": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"name_check": Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected": string | null,"name_check_reason": string | null,"name_check_source": string | null,"organisation_id": string,"previous_account_name": string | null,"previous_bank_account_enc": string | null,"previous_bank_account_last4": string | null,"previous_bank_code": string | null,"previous_bank_name": string | null,"raised_by_worker": boolean,"reason": string | null,"rejected_by": string | null,"requested_by": string,"status": Database["public"]['Enums']["bank_detail_change_status"],"updated_at": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_name": string,"applied_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"bank_account_digest"?: string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_code"?: string | null,"bank_lookup_id"?: string | null,"bank_name": string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"name_check"?: Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected"?: string | null,"name_check_reason"?: string | null,"name_check_source"?: string | null,"organisation_id": string,"previous_account_name"?: string | null,"previous_bank_account_enc"?: string | null,"previous_bank_account_last4"?: string | null,"previous_bank_name"?: string | null,"raised_by_worker"?: boolean,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["bank_detail_change_status"],"updated_at"?: string,"worker_id": string
+                    "account_name": string,"applied_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"bank_account_digest"?: string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_code"?: string | null,"bank_lookup_id"?: string | null,"bank_name": string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"name_check"?: Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected"?: string | null,"name_check_reason"?: string | null,"name_check_source"?: string | null,"organisation_id": string,"previous_account_name"?: string | null,"previous_bank_account_enc"?: string | null,"previous_bank_account_last4"?: string | null,"previous_bank_code"?: string | null,"previous_bank_name"?: string | null,"raised_by_worker"?: boolean,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["bank_detail_change_status"],"updated_at"?: string,"worker_id": string
                   }
                   Update: {
-                    "account_name"?: string,"applied_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"bank_account_digest"?: string | null,"bank_account_enc"?: string,"bank_account_last4"?: string,"bank_code"?: string | null,"bank_lookup_id"?: string | null,"bank_name"?: string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"name_check"?: Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected"?: string | null,"name_check_reason"?: string | null,"name_check_source"?: string | null,"organisation_id"?: string,"previous_account_name"?: string | null,"previous_bank_account_enc"?: string | null,"previous_bank_account_last4"?: string | null,"previous_bank_name"?: string | null,"raised_by_worker"?: boolean,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["bank_detail_change_status"],"updated_at"?: string,"worker_id"?: string
+                    "account_name"?: string,"applied_at"?: string | null,"applied_notified_at"?: string | null,"applies_after"?: string | null,"approved_by"?: string | null,"bank_account_digest"?: string | null,"bank_account_enc"?: string,"bank_account_last4"?: string,"bank_code"?: string | null,"bank_lookup_id"?: string | null,"bank_name"?: string,"cancelled_at"?: string | null,"cancelled_by"?: string | null,"created_at"?: string,"decided_at"?: string | null,"decision_note"?: string | null,"id"?: string,"name_check"?: Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected"?: string | null,"name_check_reason"?: string | null,"name_check_source"?: string | null,"organisation_id"?: string,"previous_account_name"?: string | null,"previous_bank_account_enc"?: string | null,"previous_bank_account_last4"?: string | null,"previous_bank_code"?: string | null,"previous_bank_name"?: string | null,"raised_by_worker"?: boolean,"reason"?: string | null,"rejected_by"?: string | null,"requested_by"?: string,"status"?: Database["public"]['Enums']["bank_detail_change_status"],"updated_at"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -751,6 +751,76 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payout_batches": {
+                  Row: {
+                    "bank_format": string,"created_at": string,"currency": string,"file_bytes": number,"file_path": string,"file_sha256": string,"id": string,"item_count": number,"left_out_count": number,"left_out_kobo": number,"made_by": string,"organisation_id": string,"run_id": string,"status": string,"total_kobo": number,"void_reason": string | null,"voided_at": string | null,"voided_by": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "bank_format": string,"created_at"?: string,"currency"?: string,"file_bytes": number,"file_path": string,"file_sha256": string,"id"?: string,"item_count": number,"left_out_count": number,"left_out_kobo": number,"made_by": string,"organisation_id": string,"run_id": string,"status"?: string,"total_kobo": number,"void_reason"?: string | null,"voided_at"?: string | null,"voided_by"?: string | null
+                  }
+                  Update: {
+                    "bank_format"?: string,"created_at"?: string,"currency"?: string,"file_bytes"?: number,"file_path"?: string,"file_sha256"?: string,"id"?: string,"item_count"?: number,"left_out_count"?: number,"left_out_kobo"?: number,"made_by"?: string,"organisation_id"?: string,"run_id"?: string,"status"?: string,"total_kobo"?: number,"void_reason"?: string | null,"voided_at"?: string | null,"voided_by"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payout_batches_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payout_batches_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payout_items": {
+                  Row: {
+                    "account_name": string | null,"amount_kobo": number,"bank_account_last4": string | null,"bank_code": string | null,"bank_detail_change_id": string | null,"bank_name": string | null,"batch_id": string,"created_at": string,"currency": string,"id": string,"left_out_reason": string | null,"organisation_id": string,"payslip_id": string,"position": number,"run_id": string,"status": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "account_name"?: string | null,"amount_kobo": number,"bank_account_last4"?: string | null,"bank_code"?: string | null,"bank_detail_change_id"?: string | null,"bank_name"?: string | null,"batch_id": string,"created_at"?: string,"currency"?: string,"id"?: string,"left_out_reason"?: string | null,"organisation_id": string,"payslip_id": string,"position": number,"run_id": string,"status": string,"worker_id": string
+                  }
+                  Update: {
+                    "account_name"?: string | null,"amount_kobo"?: number,"bank_account_last4"?: string | null,"bank_code"?: string | null,"bank_detail_change_id"?: string | null,"bank_name"?: string | null,"batch_id"?: string,"created_at"?: string,"currency"?: string,"id"?: string,"left_out_reason"?: string | null,"organisation_id"?: string,"payslip_id"?: string,"position"?: number,"run_id"?: string,"status"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payout_items_batch_fkey"
+      columns: ["organisation_id","batch_id"]
+isOneToOne: false
+      referencedRelation: "payout_batches"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_items_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payout_items_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_items_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payout_items_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payroll_adjustments": {
                   Row: {
                     "amount_kobo": number,"created_at": string,"created_by": string,"currency": string,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
@@ -869,14 +939,14 @@ isOneToOne: false
                   ]
                 },"payroll_runs": {
                   Row: {
-                    "approved_at": string | null,"approved_by": string | null,"calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
+                    "approved_at": string | null,"approved_by": string | null,"calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"released_at": string | null,"released_by": string | null,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"released_at"?: string | null,"released_by"?: string | null,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
                   }
                   Update: {
-                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"released_at"?: string | null,"released_by"?: string | null,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
                   }
                   Relationships: [
                     {
@@ -2152,6 +2222,9 @@ isOneToOne: false
 "log_audit":
 { Args: { "p_action": string,"p_after"?: Json,"p_before"?: Json,"p_entity": string,"p_entity_id"?: string,"p_organisation_id": string,"p_reason"?: string }; Returns: string
                            },
+"make_payout_batch":
+{ Args: { "p_bank_format": string,"p_batch_id": string,"p_file_bytes": number,"p_file_sha256": string,"p_items": Json,"p_organisation_id": string,"p_run_id": string,"p_void_reason"?: string }; Returns: Json
+                           },
 "membership_invite_lookup":
 { Args: { "p_token": string }; Returns: {
               "email": string,"expires_at": string,"invite_id": string,"invited_at": string,"inviter_name": string,"organisation_id": string,"organisation_name": string,"role": Database["public"]['Enums']["membership_role"],"state": string
@@ -2201,6 +2274,14 @@ isOneToOne: false
                            },
 "pay_rate_earliest_start":
 { Args: { "p_organisation_id": string }; Returns: string
+                           },
+"payout_file_download":
+{ Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: string
+                           },
+"payout_plan":
+{ Args: { "p_organisation_id": string,"p_run_id": string,"p_with_ciphertext"?: boolean }; Returns: {
+              "account_name": string,"acknowledged_code": string,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string,"bank_detail_change_id": string,"bank_name": string,"in_hold": boolean,"net_kobo": string,"on_file": boolean,"payslip_id": string,"staff_id": string,"worker_id": string,"worker_name": string
+            }[]
                            },
 "payroll_clock":
 { Args: Record<PropertyKey, never>; Returns: string
@@ -2261,6 +2342,9 @@ isOneToOne: false
                            },
 "reject_timesheet_line":
 { Args: { "p_line_id": string,"p_organisation_id": string,"p_reason": string }; Returns: Json
+                           },
+"release_payroll_run":
+{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
                            },
 "remove_assignment":
 { Args: { "p_assignment_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
@@ -2428,7 +2512,7 @@ isOneToOne: false
                            },
 "worker_bank_details_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string,"p_worker_id": string }; Returns: {
-              "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_detail_change_id": string,"bank_name": string
+              "account_name": string,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string,"bank_detail_change_id": string,"bank_name": string
             }[]
                            },
 "worker_invite_lookup":

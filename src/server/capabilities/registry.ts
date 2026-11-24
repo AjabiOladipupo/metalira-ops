@@ -247,6 +247,13 @@ import { loadReviewSummary, periodInput } from "@/server/workforce/timesheet-rev
 import { PAYROLL_READERS, loadPayInputsSummary } from "@/server/payroll/inputs";
 import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
 import {
+  bankFileIdSchema,
+  downloadBankFileSpec,
+  makeBankFileSpec,
+} from "@/server/payroll/payouts";
+import { loadPayoutSummary } from "@/server/payroll/payouts-data";
+import { releaseRunSpec } from "@/server/payroll/release";
+import {
   acknowledgeSpec,
   addAdjustmentSpec,
   approveRunSpec,
@@ -303,7 +310,9 @@ import {
   previewApprovePayrollRun,
   previewCarryPayrollInstalment,
   previewCreatePayrollRun,
+  previewMakePayrollBankFile,
   previewRecalculatePayrollRun,
+  previewReleasePayrollRun,
   previewRemovePayrollAdjustment,
   previewReturnPayrollRun,
   previewSubmitPayrollRun,
@@ -2853,6 +2862,63 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Approving payroll is a second person's decision (docs/PHASE_5.md decision 8, rule 10), made on the screen; Lira never approves or releases payroll.",
+  },
+  // -------------------------------------------------------------------------
+  // The bank file and release (payroll/payout-actions.ts, slice 5.4)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.bank_file_summary",
+    description:
+      "Gives the latest posted run's status and its bank file's control totals: workers paid, total and workers left out.",
+    kind: "read",
+    audience: "manager",
+    roles: PAYROLL_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => loadPayoutSummary(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "payroll.make_bank_file",
+    description:
+      "Makes an approved run's bank file after checking each account number's last 4 digits; replaces the current one with a reason.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(makeBankFileSpec),
+    changes: "many",
+    action: at("payroll/payout-actions", "makeBankFileAction"),
+    preview: previewMakePayrollBankFile,
+    agent: false,
+    agentNote:
+      "Lira never makes, downloads or releases a bank file (docs/PHASE_5.md decision 8; docs/LIRA.md: never moves money). It holds account numbers.",
+  },
+  {
+    name: "payroll.download_bank_file",
+    description: "Opens the run's current bank file for 60 seconds, for an owner or Finance; audited.",
+    kind: "read",
+    audience: "manager",
+    roles: fromSpec(downloadBankFileSpec).roles,
+    input: bankFileIdSchema,
+    changes: "none",
+    action: at("payroll/payout-actions", "downloadBankFileAction"),
+    agent: false,
+    agentNote:
+      "The bank file holds account numbers (CLAUDE.md rule 9): only a person downloads it, on the screen.",
+  },
+  {
+    name: "payroll.release_run",
+    description:
+      "Finance or the owner confirms an approved run's bank file went to the bank, releasing the run and its payslips.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(releaseRunSpec),
+    changes: "many",
+    action: at("payroll/payout-actions", "releaseRunAction"),
+    preview: previewReleasePayrollRun,
+    agent: false,
+    agentNote:
+      "Releasing payroll is a person's confirmation, never anyone who prepared the run (rule 10); Lira never releases payroll.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)
