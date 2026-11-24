@@ -486,7 +486,7 @@ describe("November pays each correction once", () => {
          where s.id = $1`,
         [src!.id],
       ),
-    ).rejects.toMatchObject({ code: "23505" });
+    ).rejects.toMatchObject({ code: "23P01" });
   });
 
   it("approves November, and December pays none of them again", async () => {
