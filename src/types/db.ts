@@ -2738,6 +2738,9 @@ isOneToOne: false
               "pay_date": string,"period_end": string,"period_start": string
             }[]
                            },
+"payroll_reversal_blocker":
+{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
+                           },
 "payroll_run_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },

@@ -46,6 +46,7 @@ import {
   runIdSchema,
   submitRunSpec,
 } from "./runs";
+import { errorTag } from "./error-tag";
 
 /**
  * Server Actions for the payroll run (slices 5.2 and 5.3). Each money write is two presses: the first
@@ -79,10 +80,7 @@ function refusal(error: unknown, values?: Record<string, string>): RunFormState 
     }
   }
   const cause = error instanceof MutationError ? error.cause : error;
-  console.error(
-    "payroll_run.save_failed:",
-    cause instanceof Error ? `${cause.name}: ${cause.message}` : "unknown error",
-  );
+  console.error("payroll_run.save_failed:", errorTag(cause));
   return { ok: false, status: 500, formError: FAILED, values };
 }
 

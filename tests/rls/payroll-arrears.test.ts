@@ -597,5 +597,22 @@ describe("partly recovered arrears, then cancelled (coordinator, 24 Nov 2026)", 
     expect(refunded).toBe(owed);
     expect(carriedTaken).toBe(carriedOn);
     expect(taken + carriedTaken - refunded).toBe(0n);
+    // Slice 5.8 (owner decision): December says the refund includes the carried rest, not yet
+    // recovered when it was worked out (whole naira in thousands groups, and kobo).
+    const { data: flags } = await admin
+      .from("payroll_anomalies")
+      .select("severity, detail")
+      .eq("run_id", decRun)
+      .eq("worker_id", femi)
+      .eq("code", "refund_uncollected_carry");
+    expect(flags).toEqual([
+      {
+        severity: "warning",
+        detail: {
+          naira: (carriedOn / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","),
+          kobo: Number(carriedOn % 100n),
+        },
+      },
+    ]);
   });
 });

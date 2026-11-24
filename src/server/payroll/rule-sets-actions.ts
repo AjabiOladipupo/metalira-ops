@@ -14,6 +14,7 @@ import type { CapabilityPreview } from "@/server/capabilities/types";
 
 import type { RuleSetVersionPreview } from "./rule-sets-data";
 import { addRuleSetVersionSpec, confirmRuleSetSpec, previewRuleSetVersionSpec } from "./rule-sets";
+import { errorTag } from "./error-tag";
 
 /**
  * Server Actions for Settings > Payroll rules (slice 5.0). Each goes through `mutate()` (role,
@@ -47,10 +48,7 @@ function refusal(error: unknown, values?: Record<string, string>): RuleSetFormSt
     }
   }
   const cause = error instanceof MutationError ? error.cause : error;
-  console.error(
-    "payroll_rules.save_failed:",
-    cause instanceof Error ? `${cause.name}: ${cause.message}` : "unknown error",
-  );
+  console.error("payroll_rules.save_failed:", errorTag(cause));
   return { ok: false, status: 500, formError: FAILED, values };
 }
 
