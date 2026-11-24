@@ -627,13 +627,15 @@ begin
         and a.id in (select (e ->> 'id')::uuid from jsonb_array_elements(v_moved) e);
       insert into public.payroll_adjustments (
         id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
-        series_id, instalment_number, instalment_count, reason, created_by
+        series_id, instalment_number, instalment_count, reason, created_by, corrects_payslip_id
       )
       select (e ->> 'id')::uuid, p_organisation_id, v_id, (e ->> 'worker_id')::uuid, e ->> 'kind',
         e ->> 'label', (e ->> 'amount_kobo')::bigint, (e ->> 'pensionable')::boolean,
         (e ->> 'taxable')::boolean, (e ->> 'series_id')::uuid,
         (e ->> 'instalment_number')::integer, (e ->> 'instalment_count')::integer, e ->> 'reason',
-        (e ->> 'created_by')::uuid
+        (e ->> 'created_by')::uuid,
+        -- 5.7a: a correction keeps the released payslip it names.
+        (e ->> 'corrects_payslip_id')::uuid
       from jsonb_array_elements(v_moved) e;
       update public.payroll_runs r set needs_recalculation = true
       where r.organisation_id = p_organisation_id and r.id = v_regular::uuid;
@@ -834,7 +836,12 @@ security definer
 set search_path = ''
 as $$
 begin
+  -- A reversal run's negative copies (5.7a) pay nothing, so they name no source.
   if new.kind = 'earning'
+    and not exists (
+      select 1 from public.payroll_runs r
+      where r.organisation_id = new.organisation_id and r.id = new.run_id and r.kind = 'reversal'
+    )
     and exists (
       select 1 from public.payslip_lines l
       where l.organisation_id = new.organisation_id and l.id = new.id
@@ -931,7 +938,11 @@ alter table public.payroll_runs drop constraint payroll_runs_dates;
 alter table public.payroll_runs
   add constraint payroll_runs_dates check (
     period_end >= period_start and pay_date >= period_start
-    and (pay_date <= period_end + 45 or off_cycle_reason in ('correction', 'one_off'))
+    and (
+      pay_date <= period_end + 45 or off_cycle_reason in ('correction', 'one_off')
+      -- A reversal (5.7a) keeps the dates of the approved run it reverses.
+      or kind = 'reversal'
+    )
   );
 
 -- BEFORE INSERT on payroll_adjustments, after the draft guard (money review M1): an item added to

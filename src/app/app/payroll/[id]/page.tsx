@@ -10,10 +10,13 @@ import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, sumKobo, toKobo, type Kobo } from "@/lib/money";
 import { describeAnomaly } from "@/lib/payroll/anomaly-text";
 import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
+import { negatedTotals } from "@/lib/payroll/reversal";
 import {
   OFF_CYCLE_REASONS,
+  REVERSAL_STATUS,
   RUN_STATUS,
   RUN_STEPS,
+  runMonth,
   runStep,
   runTitle,
   type RunStepId,
@@ -39,6 +42,12 @@ import {
   SubmitRunForm,
 } from "../_components/run-forms";
 import { PayStep } from "../_components/pay-step";
+import {
+  AddCorrectionForm,
+  ApproveReversalForm,
+  DeclineReversalForm,
+  ReverseRunForm,
+} from "../_components/reversal-forms";
 
 export const metadata: Metadata = { title: "Payroll run" };
 
@@ -53,6 +62,7 @@ const DECISION_LABEL = {
   returned: "Returned",
   approved: "Approved",
   released: "Released",
+  reversed: "Reversed",
 } as const;
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -127,7 +137,7 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
           : "Not worked out yet."}
         {run.needsRecalculation ? " Something changed since: recalculate before submitting." : ""}
       </p>
-      {run.status === "review" ? (
+      {run.status === "review" && run.kind !== "reversal" ? (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-line p-6 text-center">
           <Illustration name="payroll-ready" size="empty" decorative />
           <p className="m-0 type-body-lg">
@@ -136,7 +146,10 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
           </p>
         </div>
       ) : null}
-      {run.status === "approved" || run.status === "released" ? <PostedNote d={d} /> : null}
+      {run.kind !== "reversal" && (run.status === "approved" || run.status === "released") ? (
+        <PostedNote d={d} />
+      ) : null}
+      {canDecide ? <ReversePanel d={d} /> : null}
       {run.status === "draft" && canPrepare && !run.discardedAt ? (
         <div className="flex flex-col gap-2 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">Recalculate</h3>
@@ -147,7 +160,7 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
           <RecalculateForm runId={run.id} />
         </div>
       ) : null}
-      {run.status === "review" && canDecide ? (
+      {run.status === "review" && canDecide && run.kind !== "reversal" ? (
         <div className="flex flex-col gap-2 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">Return to HR</h3>
           <p className="m-0 text-sm text-fg-muted">
@@ -317,6 +330,22 @@ function EarningsStep({ d, canPrepare }: StepProps) {
             </p>
           ) : null}
           <AddAdjustmentForm runId={d.run.id} workers={d.workers} oneOffOnly={offCycle} />
+        </div>
+      ) : null}
+      {draft && canPrepare && d.correctable.length > 0 ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-line p-5">
+          <h3 className="m-0 type-h3">Correct a released payslip</h3>
+          <p className="m-0 text-sm text-fg-muted">
+            A released payslip never changes: the money has gone. Add the difference here, naming
+            the payslip it corrects.
+          </p>
+          <AddCorrectionForm
+            runId={d.run.id}
+            payslips={d.correctable.map((p) => ({
+              id: p.id,
+              label: `${p.workerName} · ${runMonth(p.periodEnd)} · net ${naira(p.netKobo)}`,
+            }))}
+          />
         </div>
       ) : null}
     </section>
@@ -559,6 +588,7 @@ function GrossToNetStep({ d, explain }: StepProps & { explain: string | undefine
 
 function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
   const { run } = d;
+  if (run.kind === "reversal") return <ReversalStep d={d} canDecide={canDecide} />;
   const t = run.totals;
   const byState = new Map<string | null, Kobo>();
   const pfas = new Set<string>();
@@ -630,8 +660,197 @@ function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
       ) : null}
       {run.status === "review" && canDecide ? <ApprovalPanel d={d} /> : null}
       {run.status === "approved" || run.status === "released" ? <PostedNote d={d} /> : null}
+      {canDecide ? <ReversePanel d={d} /> : null}
     </section>
   );
+}
+
+/**
+ * "Reverse this run" (slice 5.7a): on an approved run that isn't released, for Finance or the
+ * owner. A reversal waiting for approval is linked from the banner instead. A released run is
+ * corrected in a later run, never reversed.
+ */
+function ReversePanel({ d }: { d: RunDetail }) {
+  const { run } = d;
+  if (run.kind === "reversal" || run.status !== "approved") return null;
+  if (d.reversals.some((r) => r.status === "review")) return null;
+  return (
+    <section
+      aria-labelledby="reverse"
+      className="flex flex-col gap-3 rounded-xl border border-line p-5"
+      data-testid="reverse-panel"
+    >
+      <h3 id="reverse" className="m-0 type-h3">
+        Reverse this run
+      </h3>
+      <p className="m-0 text-sm text-fg-muted">
+        Before release only: the bank file hasn&apos;t paid anyone yet. A reversal copies every
+        payslip as a negative and waits for a second person in Finance. Once approved the run is
+        Reversed, its bank file and statutory remittances are voided, its adjustments are carried
+        into the period&apos;s next run, and {formatLeaveRange(run.periodStart, run.periodEnd)}{" "}
+        opens again so its days can be paid in a new run.
+      </p>
+      <ReverseRunForm runId={run.id} downloaded={d.activeFileDownloaded} />
+    </section>
+  );
+}
+
+/** A reversal run's Submit step: its negative totals, why, and approve or decline. */
+function ReversalStep({ d, canDecide }: { d: RunDetail; canDecide: boolean }) {
+  const { run, original } = d;
+  const t = negatedTotals(run.totals);
+  const asked = d.decisions.find((x) => x.decision === "submitted");
+  const requester = d.names.get(run.preparedBy) ?? "a manager";
+  const month = runMonth(original?.periodEnd ?? run.periodEnd);
+  return (
+    <section aria-labelledby="reversal" className="flex max-w-3xl flex-col gap-4">
+      <h2 id="reversal" className="m-0 type-h2">
+        Reversal of {month}
+      </h2>
+      <dl
+        className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5 rounded-xl border border-line p-5 text-[15px]"
+        data-testid="reversal-totals"
+      >
+        <dt>
+          Net pay, {t.workerCount} {t.workerCount === 1 ? "payslip" : "payslips"}
+        </dt>
+        <dd className="m-0 text-right font-semibold tabular-nums">{naira(t.netKobo)}</dd>
+        <dt>Gross pay</dt>
+        <dd className="m-0 text-right tabular-nums">{naira(t.grossKobo)}</dd>
+        <dt>PAYE</dt>
+        <dd className="m-0 text-right tabular-nums">{naira(t.payeKobo)}</dd>
+        <dt>Pension (8% + 10%)</dt>
+        <dd className="m-0 text-right tabular-nums">
+          {naira(t.pensionEmployeeKobo + t.pensionEmployerKobo)}
+        </dd>
+        <dt>NSITF and ITF</dt>
+        <dd className="m-0 text-right tabular-nums">{naira(t.nsitfKobo + t.itfKobo)}</dd>
+        <dt>Employer cost</dt>
+        <dd className="m-0 text-right tabular-nums">{naira(t.employerCostKobo)}</dd>
+      </dl>
+      <p className="m-0 text-sm text-fg-muted">
+        Asked for by {requester}
+        {asked ? ` · ${formatDateTime(asked.createdAt)}` : ""}
+        {asked?.reason ? `: "${asked.reason}"` : ""}. Every payslip of {month} is copied as a
+        negative, so the two sum to ₦0. A different person must approve it.
+      </p>
+      {run.status === "review" ? (
+        <p role="status" className="m-0 flex items-center gap-2 font-semibold">
+          <Status tone="action">Waiting for approval</Status>
+        </p>
+      ) : null}
+      {run.status === "review" && canDecide ? (
+        <section
+          aria-labelledby="approve-reversal"
+          className="flex flex-col gap-4 rounded-xl border border-line p-5"
+          data-testid="reversal-approval"
+        >
+          <h3 id="approve-reversal" className="m-0 type-h3">
+            Approve or decline
+          </h3>
+          <p className="m-0 text-sm text-fg-muted">
+            Approving reverses {month} in one step: its bank file and statutory remittances are
+            voided, its timesheet days and leave become payable again, its adjustments (one-offs,
+            instalments and corrections) are carried into the period&apos;s next run, and the period
+            reopens for a new run. A remittance already paid stays on record for a refund or an
+            offset.
+          </p>
+          <ApproveReversalForm runId={run.id} downloaded={d.activeFileDownloaded} />
+          <details className="rounded-lg border border-line px-3 py-2.5">
+            <summary className="cursor-pointer text-sm font-medium">Decline instead</summary>
+            <div className="pt-3">
+              <DeclineReversalForm runId={run.id} />
+            </div>
+          </details>
+        </section>
+      ) : null}
+      {run.status === "approved" ? (
+        <p
+          role="status"
+          className="m-0 flex flex-wrap items-center gap-2 rounded-xl border border-line p-4 text-sm"
+          data-testid="reversal-approved"
+        >
+          <Status tone="done">Reversal approved</Status>
+          <span>
+            by {(run.approvedBy && d.names.get(run.approvedBy)) ?? "a manager"}
+            {run.approvedAt ? ` · ${formatDateTime(run.approvedAt)}` : ""}. {month} is reversed and{" "}
+            {formatLeaveRange(run.periodStart, run.periodEnd)} is open for a new run.
+          </span>
+        </p>
+      ) : null}
+      {run.status === "draft" ? (
+        <p role="status" className="m-0 flex flex-wrap items-center gap-2 text-sm">
+          <Status tone="pending">Reversal declined</Status>
+          <span className="text-fg-muted">
+            The run stays approved. Ask for a new reversal if one is needed.
+          </span>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+/** Links between a run and its reversal (slice 5.7a), above the steps. */
+function ReversalBanner({ d }: { d: RunDetail }) {
+  const { run, original } = d;
+  if (run.kind === "reversal") {
+    return (
+      <p
+        className="m-0 flex flex-wrap items-center gap-2 rounded-xl border border-line p-4 text-sm"
+        data-testid="reversal-banner"
+      >
+        <span>
+          This reverses{" "}
+          {original ? (
+            <Link href={`/app/payroll/${original.id}`} className="text-signal">
+              {runMonth(original.periodEnd)} payroll
+            </Link>
+          ) : (
+            "a payroll run"
+          )}
+          . Its amounts count negatively and pay nothing: no bank file and no remittances.
+        </span>
+      </p>
+    );
+  }
+  const approved = d.reversals.find((r) => r.status === "approved");
+  const waiting = d.reversals.find((r) => r.status === "review");
+  if (run.status === "reversed") {
+    return (
+      <p
+        role="status"
+        className="m-0 flex flex-wrap items-center gap-2 rounded-xl border border-line p-4 text-sm"
+        data-testid="reversed-banner"
+      >
+        <Status tone="partial">Reversed</Status>
+        <span>
+          These payslips no longer stand: the bank file and remittances are voided and the period is
+          open for a new run.
+        </span>
+        {approved ? (
+          <Link href={`/app/payroll/${approved.id}?step=submit`} className="text-signal">
+            See the reversal
+          </Link>
+        ) : null}
+      </p>
+    );
+  }
+  if (waiting) {
+    return (
+      <p
+        role="status"
+        className="m-0 flex flex-wrap items-center gap-2 rounded-xl border border-line p-4 text-sm"
+        data-testid="reversal-waiting"
+      >
+        <Status tone="action">Reversal waiting for approval</Status>
+        <span>The run can&apos;t be released until it is decided.</span>
+        <Link href={`/app/payroll/${waiting.id}?step=submit`} className="text-signal">
+          Open the reversal
+        </Link>
+      </p>
+    );
+  }
+  return null;
 }
 
 /** What the approver checks: every acknowledged anomaly, then Approve or Return. */
@@ -777,9 +996,11 @@ async function RunPage({
   const d = await loadRunDetail(ctx.supabase, ctx.organisationId, id);
   if (!d) notFound();
   const step = runStep(first(query.step));
+  const reversal = d.run.kind === "reversal";
   const props: StepProps = {
     d,
-    canPrepare: canPreparePayroll(ctx.role),
+    // A reversal run is made whole by the database: nobody prepares, adjusts or submits it.
+    canPrepare: canPreparePayroll(ctx.role) && !reversal,
     canDecide: canDecidePayroll(ctx.role),
   };
   const index = RUN_STEPS.findIndex((s) => s.id === step);
@@ -787,7 +1008,8 @@ async function RunPage({
   const next = RUN_STEPS[index + 1];
   const status = d.run.discardedAt
     ? ({ label: "Discarded", tone: "partial" } as const)
-    : RUN_STATUS[d.run.status];
+    : (reversal ? REVERSAL_STATUS : RUN_STATUS)[d.run.status];
+  const shownNet = reversal ? -d.run.totals.netKobo : d.run.totals.netKobo;
   const offCycle = d.run.kind === "off_cycle";
 
   return (
@@ -795,8 +1017,14 @@ async function RunPage({
       <PageHeader
         back={{ href: "/app/payroll", label: "Payroll run" }}
         eyebrow={`${formatLeaveRange(d.run.periodStart, d.run.periodEnd)} · pay date ${formatDate(d.run.payDate)}`}
-        title={offCycle ? runTitle(d.run) : `Run ${runTitle(d.run)} payroll`}
-        description={`${d.run.totals.workerCount} workers · net pay ${naira(d.run.totals.netKobo)} · rule set ${d.ruleSet?.name ?? ""}${d.ruleSet ? ` · effective ${formatDate(d.ruleSet.effectiveFrom)}` : ""}`}
+        title={
+          reversal
+            ? `Reversal of ${runMonth(d.run.periodEnd)} payroll`
+            : offCycle
+              ? runTitle(d.run)
+              : `Run ${runTitle(d.run)} payroll`
+        }
+        description={`${d.run.totals.workerCount} workers · net pay ${naira(shownNet)} · rule set ${d.ruleSet?.name ?? ""}${d.ruleSet ? ` · effective ${formatDate(d.ruleSet.effectiveFrom)}` : ""}`}
         actions={
           <span className="flex flex-wrap items-center gap-2">
             {offCycle ? (
@@ -811,6 +1039,7 @@ async function RunPage({
           </span>
         }
       />
+      <ReversalBanner d={d} />
       <StepNav runId={d.run.id} step={step} />
       {step === "period" ? <PeriodStep {...props} /> : null}
       {step === "timesheets" ? <TimesheetsStep {...props} /> : null}

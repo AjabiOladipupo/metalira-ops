@@ -219,8 +219,14 @@ async function runHistory(
   // or a first pay from a same-period run), but never the run being worked out.
   const all = (runs ?? []).filter((r) => r.id !== runId);
   // The latest regular run of an earlier period, whatever its exact end (money review L-new-3).
-  const prev = all.find((r) => r.kind === "regular" && r.period_start < periodStart);
-  const posted = all.filter((r) => POSTED.has(r.status));
+  // The latest regular run of an earlier period. A reversed run (slice 5.7a) gives way to its
+  // period's new run; with none, the reversed run stands for the period and is not posted.
+  const regular = all.filter((r) => r.kind === "regular" && r.period_start < periodStart);
+  const top = regular[0]?.period_start;
+  const atTop = regular.filter((r) => r.period_start === top);
+  const prev = atTop.find((r) => r.status !== "reversed") ?? atTop[0];
+  // A reversal run's copies never count as a worker's posted pay.
+  const posted = all.filter((r) => POSTED.has(r.status) && r.kind !== "reversal");
   const postedIds = new Set(posted.map((r) => r.id));
   // The carried deduction comes from runs that pay a worker's period (regular, final pay, missed
   // worker): a correction or one-off run never takes or settles one (slice 5.7b).
@@ -457,6 +463,9 @@ async function monthPayslips(
     .select("id, kind")
     .eq("organisation_id", organisationId)
     .in("status", ["approved", "released"])
+    // A reversed run (5.7a) has status reversed and its reversal's negative copies offset it, so
+    // neither counts: the month holds what still stands.
+    .neq("kind", "reversal")
     .gte("pay_date", first)
     .lt("pay_date", next);
   if (runId) runQuery = runQuery.neq("id", runId);

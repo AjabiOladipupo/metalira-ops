@@ -188,6 +188,7 @@ export async function loadPayoutSummary(
     .select("id, period_start, period_end, status")
     .eq("organisation_id", organisationId)
     .in("status", ["approved", "released"])
+    .neq("kind", "reversal")
     .order("period_start", { ascending: false })
     .limit(24);
   if (error) throw new Error(`Could not read payroll runs (${error.code})`);

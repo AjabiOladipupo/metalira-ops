@@ -212,7 +212,14 @@ export function remittanceDueDate(
 }
 
 export type RemittanceStatus =
-  "paid" | "part_paid" | "overpaid" | "overdue" | "due" | "no_due_date";
+  | "paid"
+  | "part_paid"
+  | "overpaid"
+  | "overdue"
+  | "due"
+  | "no_due_date"
+  /** Its run was reversed (slice 5.7a): nothing is owed; a payment made needs a refund or offset. */
+  | "voided";
 
 /**
  * Worked out on read (no crons), from the standing payment against the amount due (money review
@@ -249,6 +256,7 @@ export const REMITTANCE_STATUS: Record<
   { label: string; tone: "done" | "pending" | "partial" | "action" }
 > = {
   paid: { label: "Paid", tone: "done" },
+  voided: { label: "Voided", tone: "pending" },
   part_paid: { label: "Part paid", tone: "action" },
   overpaid: { label: "Overpaid", tone: "action" },
   overdue: { label: "Overdue", tone: "action" },

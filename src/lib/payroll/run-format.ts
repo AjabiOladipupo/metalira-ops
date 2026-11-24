@@ -23,7 +23,7 @@ export function runMonth(periodEnd: string): string {
   return `${MONTHS[(m ?? 1) - 1]} ${y}`;
 }
 
-export type RunStatusName = "draft" | "review" | "approved" | "released";
+export type RunStatusName = "draft" | "review" | "approved" | "released" | "reversed";
 export type RunStatusTone = "done" | "pending" | "partial" | "action";
 
 export const RUN_STATUS: Record<RunStatusName, { label: string; tone: RunStatusTone }> = {
@@ -31,6 +31,16 @@ export const RUN_STATUS: Record<RunStatusName, { label: string; tone: RunStatusT
   review: { label: "Waiting for approval", tone: "action" },
   approved: { label: "Approved", tone: "done" },
   released: { label: "Released", tone: "done" },
+  reversed: { label: "Reversed", tone: "partial" },
+};
+
+/** A reversal run's status (slice 5.7a): a declined one is back in draft and never submitted again. */
+export const REVERSAL_STATUS: Record<RunStatusName, { label: string; tone: RunStatusTone }> = {
+  draft: { label: "Reversal declined", tone: "pending" },
+  review: { label: "Reversal waiting for approval", tone: "action" },
+  approved: { label: "Reversal approved", tone: "done" },
+  released: { label: "Released", tone: "done" },
+  reversed: { label: "Reversed", tone: "partial" },
 };
 
 export const RUN_STEPS = [

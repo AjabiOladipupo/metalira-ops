@@ -27,6 +27,20 @@ const workers = (n: number) => `${n} ${n === 1 ? "worker" : "workers"}`;
 export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }) {
   const { run } = d;
   const posted = run.status === "approved" || run.status === "released";
+  if (run.kind === "reversal" || run.status === "reversed") {
+    return (
+      <section aria-labelledby="pay" className="flex max-w-3xl flex-col gap-3">
+        <h2 id="pay" className="m-0 type-h2">
+          Pay
+        </h2>
+        <p className="m-0 text-[15px] text-fg-muted">
+          {run.kind === "reversal"
+            ? "A reversal pays nothing: it has no bank file."
+            : "This run was reversed: its bank file is voided and nobody is paid from it."}
+        </p>
+      </section>
+    );
+  }
   if (!posted) {
     return (
       <section aria-labelledby="pay" className="flex max-w-3xl flex-col gap-3">

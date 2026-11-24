@@ -123,7 +123,8 @@ export function fromPayoutDbError(error: Pick<PostgrestError, "code" | "message"
   if (error.code === "P0002") {
     throw new MutationError("invalid", `${error.message} Reload the page.`);
   }
-  if (/^MLBF[2-79A-E]$/.test(error.code) || error.code === "22023") {
+  // MLRV9 (slice 5.7a): a reversal of the run waits, so it can't be released yet.
+  if (/^MLBF[2-79A-E]$/.test(error.code) || error.code === "MLRV9" || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code})`);
@@ -409,7 +410,7 @@ async function removeStored(admin: Client, path: string): Promise<void> {
 }
 
 /** A refusal the database made on purpose: the batch certainly wasn't recorded. */
-const REFUSAL_CODE = /^(MLBF[0-9A-Z]|22023|42501|P0002)$/;
+const REFUSAL_CODE = /^(MLBF[0-9A-Z]|MLRV[0-9A]|22023|42501|P0002)$/;
 
 /**
  * After `make_payout_batch` failed (money review M3): a real refusal means nothing was recorded,

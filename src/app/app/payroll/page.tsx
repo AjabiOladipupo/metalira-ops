@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { addDays, formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira } from "@/lib/money";
-import { OFF_CYCLE_REASONS, RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
+import { OFF_CYCLE_REASONS, REVERSAL_STATUS, RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
 import { listRuns } from "@/server/payroll/run-data";
 import { canPreparePayroll } from "@/server/payroll/runs";
 import { peoplePageContext } from "@/server/people/page-context";
@@ -42,7 +42,14 @@ async function PayrollRunsPage() {
         value: p.period_start,
         label: `${runMonth(p.period_end)}: ${formatLeaveRange(p.period_start, p.period_end)}`,
       });
-      if (i < 6 && !runs.some((r) => r.kind === "regular" && r.periodStart === p.period_start)) {
+      // A reversed run (slice 5.7a) no longer holds its period: it may be run again.
+      if (
+        i < 6 &&
+        !runs.some(
+          (r) =>
+            r.kind === "regular" && r.status !== "reversed" && r.periodStart === p.period_start,
+        )
+      ) {
         periods.push({
           value: p.period_start,
           label: `${runMonth(p.period_end)}: ${formatLeaveRange(p.period_start, p.period_end)}, paid ${formatDate(p.pay_date)}`,
@@ -167,39 +174,44 @@ async function PayrollRunsPage() {
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => (
-                <tr key={r.id} className="border-t border-line">
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <Link href={`/app/payroll/${r.id}`} className="font-semibold text-signal">
-                      {runMonth(r.periodEnd)}
-                    </Link>
-                    {r.kind === "off_cycle" ? (
-                      <span
-                        data-testid="off-cycle-label"
-                        className="ml-2 rounded-md border border-line px-1.5 py-0.5 text-xs font-medium"
-                      >
-                        Off-cycle
+              {runs.map((r) => {
+                const reversal = r.kind === "reversal";
+                const status = r.discardedAt
+                  ? ({ label: "Discarded", tone: "partial" } as const)
+                  : (reversal ? REVERSAL_STATUS : RUN_STATUS)[r.status];
+                return (
+                  <tr key={r.id} className="border-t border-line">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <Link href={`/app/payroll/${r.id}`} className="font-semibold text-signal">
+                        {reversal ? `Reversal of ${runMonth(r.periodEnd)}` : runMonth(r.periodEnd)}
+                      </Link>
+                      {r.kind === "off_cycle" ? (
+                        <span
+                          data-testid="off-cycle-label"
+                          className="ml-2 rounded-md border border-line px-1.5 py-0.5 text-xs font-medium"
+                        >
+                          Off-cycle
+                        </span>
+                      ) : null}
+                      <span className="block text-xs text-fg-muted">
+                        {formatLeaveRange(r.periodStart, r.periodEnd)}
+                        {r.offCycleReason ? ` · ${OFF_CYCLE_REASONS[r.offCycleReason].label}` : ""}
                       </span>
-                    ) : null}
-                    <span className="block text-xs text-fg-muted">
-                      {formatLeaveRange(r.periodStart, r.periodEnd)}
-                      {r.offCycleReason ? ` · ${OFF_CYCLE_REASONS[r.offCycleReason].label}` : ""}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.payDate)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{r.totals.workerCount}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">
-                    {formatNaira(r.totals.netKobo, { whole: true })}
-                  </td>
-                  <td className="px-4 py-3">
-                    {r.discardedAt ? (
-                      <Status tone="partial">Discarded</Status>
-                    ) : (
-                      <Status tone={RUN_STATUS[r.status].tone}>{RUN_STATUS[r.status].label}</Status>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.payDate)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{r.totals.workerCount}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">
+                      {/* A reversal's totals count negatively (slice 5.7a's sign convention). */}
+                      {formatNaira(reversal ? -r.totals.netKobo : r.totals.netKobo, {
+                        whole: true,
+                      })}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Status tone={status.tone}>{status.label}</Status>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
