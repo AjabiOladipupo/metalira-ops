@@ -121,7 +121,9 @@ beforeAll(async () => {
   sepRun = await submitRunFor(admin, owner, musa, "2026-09-20");
   await approveRun(admin, owner.orgId, sepRun, finance);
   await markReleased(db, sepRun, finance.id);
-  octRun = await submitRunFor(admin, owner, musa, "2026-10-20");
+  // October pays early (21 Oct, before September's 25 Oct) and stays approved, not released:
+  // its figures must not show through September's year to date.
+  octRun = await submitRunFor(admin, owner, musa, "2026-10-20", "2026-10-21");
   await approveRun(admin, owner.orgId, octRun, finance);
   const created = await owner.client.rpc("create_payroll_run", {
     p_organisation_id: owner.orgId,
@@ -175,7 +177,8 @@ describe("a worker reads only their own released payslips", () => {
   it("sums the year to date from posted payslips up to the pay date, in bigint", async () => {
     const { data } = await mine(musaUser.client);
     const [sep, aug] = data as unknown as View[];
-    // August's payslip (25 Sep) counts itself; September's (25 Oct) counts both.
+    // August's payslip (25 Sep) counts itself; September's (25 Oct) counts both, and not
+    // October's approved-but-unreleased payslip dated 21 Oct.
     expect(aug!.year_to_date).toMatchObject({
       year: 2026,
       payslips: 1,
@@ -286,6 +289,21 @@ describe("payslip documents", () => {
     expect(direct.error?.code).toBe("42501");
 
     docId = await recordDocument(admin, owner.orgId, sepRun, sepSlip, finance.id);
+    // Recording the same file again (a second publish running together) adds nothing.
+    const again = await admin.rpc("record_payslip_document", {
+      p_organisation_id: owner.orgId,
+      p_payslip_id: sepSlip,
+      p_actor: finance.id,
+      p_sha256: "c".repeat(64),
+      p_size_bytes: FAKE_PDF.length,
+    });
+    expect(again.error).toBeNull();
+    expect(again.data).toBe(docId);
+    const { count } = await admin
+      .from("payslip_documents")
+      .select("id", { count: "exact", head: true })
+      .eq("payslip_id", sepSlip);
+    expect(count).toBe(1);
     const { data: row } = await admin
       .from("payslip_documents")
       .select("storage_path, made_by, run_id")

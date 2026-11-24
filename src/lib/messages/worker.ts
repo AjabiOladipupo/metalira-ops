@@ -532,7 +532,7 @@ export const workerMessages = {
   },
   /** Payslips (slice 5.5), per the WkPayslip board: released payslips only. */
   payslips: {
-    title: "Payslip",
+    title: "Payslips",
     empty:
       "No payslips yet. Your payslip shows here on pay day, once your company releases payroll.",
     month: "Month",
@@ -548,7 +548,7 @@ export const workerMessages = {
     nhf: "Housing fund (NHF)",
     netPay: "Net pay",
     carried: (amount: string) =>
-      `${amount} of deductions didn't fit this month and comes off your next pay.`,
+      `${amount} of deductions didn't fit this month and is still owed. HR takes it from a later pay.`,
     ruleSet: (name: string) => `Worked out with the payroll rules ${name}.`,
     download: "Download PDF",
     downloading: "Opening…",

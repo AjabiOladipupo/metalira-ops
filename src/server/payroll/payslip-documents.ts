@@ -138,6 +138,13 @@ async function allRows<T>(
   }
 }
 
+/** Storage's answer when an object is already at the path. */
+function isAlreadyThere(error: Error): boolean {
+  const fields = error as Error & { statusCode?: unknown; status?: unknown };
+  const status = String(fields.statusCode ?? fields.status ?? "");
+  return status === "409" || /already exists|duplicate/i.test(error.message);
+}
+
 /** Makes, uploads and records one payslip's PDF. Throws on failure (the caller counts it). */
 async function makeOne(
   admin: Client,
@@ -146,14 +153,21 @@ async function makeOne(
   logoPng: Uint8Array | null,
   actorId: string | null,
 ): Promise<void> {
-  const bytes = await renderPayslipPdf(view, { logoPng, madeOn: lagosToday() });
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const path = payslipObjectPath(organisationId, view.runId, view.payslipId);
+  let bytes = await renderPayslipPdf(view, { logoPng, madeOn: lagosToday() });
+  // Never overwrite (rule 5): a file already at the path (an upload whose record failed, or a
+  // publish running at the same time) is the payslip's PDF, so record that file as it is.
   const upload = await admin.storage.from(PAYSLIPS_BUCKET).upload(path, bytes, {
     contentType: "application/pdf",
-    upsert: true,
+    upsert: false,
   });
-  if (upload.error) throw new Error(`Upload refused (${upload.error.name})`);
+  if (upload.error) {
+    if (!isAlreadyThere(upload.error)) throw new Error(`Upload refused (${upload.error.name})`);
+    const existing = await admin.storage.from(PAYSLIPS_BUCKET).download(path);
+    if (existing.error || !existing.data) throw new Error("Existing PDF unreadable");
+    bytes = new Uint8Array(await existing.data.arrayBuffer());
+  }
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
   const { error } = await admin.rpc("record_payslip_document", {
     p_organisation_id: organisationId,
     p_payslip_id: view.payslipId,

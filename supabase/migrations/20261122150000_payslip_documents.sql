@@ -20,8 +20,8 @@
 --    inside the caps) carries the item's title and body, which hold no amounts (open question 7).
 -- 4. Reads:
 --    * my_payslips(org): the signed-in worker's own payslips of RELEASED runs, newest first, each
---      with its lines, year-to-date sums (posted payslips, approved or released, in the calendar
---      year of its pay date, up to that pay date), the rule set's name, the masked bank account
+--      with its lines, year-to-date sums (payslips of released runs in the calendar year of its
+--      pay date, up to and including it), the rule set's name, the masked bank account
 --      and RSA PIN (last 4 only), the PFA, the declared rent the tax used (from the trace) and
 --      whether its PDF is made. Drafts, runs in review and approved runs not released yet are
 --      never returned. No manager ids, no TIN, NIN, BVN or full numbers.
@@ -110,8 +110,7 @@ revoke all on function private.payslip_documents_guard() from public, anon, auth
 
 create trigger payslip_documents_guard before insert or update or delete on public.payslip_documents
   for each row execute function private.payslip_documents_guard();
-create trigger payslip_documents_audit after insert on public.payslip_documents
-  for each row execute function private.audit_row_change();
+-- Audited once, by record_payslip_document (payroll.payslip_pdf_made), the only writer.
 
 create function private.payslip_documents_no_truncate()
 returns trigger
@@ -137,6 +136,14 @@ alter table public.payslip_documents enable row level security;
 
 create policy payslip_documents_select on public.payslip_documents for select to authenticated
   using (organisation_id in (select private.role_org_ids(array['owner', 'hr', 'finance'])));
+-- Nobody writes through the Data API (no grants either): explicit refusals, so a later grant
+-- can't open a write path by accident.
+create policy payslip_documents_no_insert on public.payslip_documents for insert to authenticated
+  with check (false);
+create policy payslip_documents_no_update on public.payslip_documents for update to authenticated
+  using (false) with check (false);
+create policy payslip_documents_no_delete on public.payslip_documents for delete to authenticated
+  using (false);
 
 revoke all on table public.payslip_documents from anon, authenticated, service_role;
 grant select on table public.payslip_documents to authenticated, service_role;
@@ -200,6 +207,7 @@ revoke all on function private.inbox_items_payslip_check() from public, anon, au
 
 create trigger inbox_items_payslip_check before insert on public.inbox_items
   for each row execute function private.inbox_items_payslip_check();
+alter table public.inbox_items enable always trigger inbox_items_payslip_check;
 
 -- The inbox guard (slice 3.1, as 3.3 left it in 20261120180000_roster_publications.sql), with
 -- payslip_id among the fields that never change.
@@ -306,8 +314,10 @@ as $$
       from public.payslip_lines l
       where l.organisation_id = s.organisation_id and l.payslip_id = s.id
     ), '[]'::jsonb),
-    -- Year to date (decision "Year to date"): posted payslips (approved or released runs) of this
-    -- worker whose pay date is in the same calendar year and not after this one's.
+    -- Year to date (decision "Year to date"): this worker's payslips of RELEASED runs in the
+    -- calendar year of this one's pay date, up to and including this one in the order
+    -- my_payslips lists them (pay date, then approval time, then id). Only released runs, so an
+    -- approved run not released yet never shows through a released payslip's figures.
     'year_to_date', (
       select jsonb_build_object(
         'year', extract(year from r.pay_date)::integer,
@@ -322,9 +332,9 @@ as $$
       join public.payroll_runs yr on yr.organisation_id = y.organisation_id and yr.id = y.run_id
       where y.organisation_id = s.organisation_id
         and y.worker_id = s.worker_id
-        and yr.status in ('approved', 'released')
+        and (y.id = s.id or yr.status = 'released')
         and yr.pay_date >= make_date(extract(year from r.pay_date)::integer, 1, 1)
-        and yr.pay_date <= r.pay_date
+        and (y.id = s.id or (yr.pay_date, yr.approved_at, y.id) <= (r.pay_date, r.approved_at, s.id))
     ),
     'document', (
       select jsonb_build_object('id', d.id, 'made_at', d.made_at)
@@ -357,18 +367,17 @@ set search_path = ''
 as $$
 declare
   v_uid uuid := private.session_uid();
-  v_worker uuid;
+  v_workers uuid[];
   v_result jsonb;
 begin
   if v_uid is null or p_organisation_id is null then
     raise exception 'Sign in to the worker app to see your payslips.' using errcode = '42501';
   end if;
-  select w.id into v_worker
+  select array_agg(w.id) into v_workers
   from public.workers w
   where w.organisation_id = p_organisation_id
-    and w.id in (select private.my_worker_ids())
-  limit 1;
-  if v_worker is null then
+    and w.id in (select private.my_worker_ids());
+  if v_workers is null then
     raise exception 'Sign in to the worker app to see your payslips.' using errcode = '42501';
   end if;
   select coalesce(jsonb_agg(private.payslip_view(p_organisation_id, x.id) order by x.pay_date desc, x.approved_at desc, x.id), '[]'::jsonb)
@@ -378,7 +387,7 @@ begin
     from public.payslips s
     join public.payroll_runs r on r.organisation_id = s.organisation_id and r.id = s.run_id
     where s.organisation_id = p_organisation_id
-      and s.worker_id = v_worker
+      and s.worker_id = any (v_workers)
       and r.status = 'released'
     order by r.pay_date desc, r.approved_at desc, s.id
     limit 36
@@ -485,10 +494,13 @@ declare
   v_status text;
   v_path text;
   v_id uuid;
+  v_latest public.payslip_documents%rowtype;
 begin
   if coalesce(auth.role(), '') <> 'service_role' or auth.uid() is not null then
     raise exception 'Only the server records payslip PDFs.' using errcode = '42501';
   end if;
+  -- One recording per payslip at a time: two publishes running together record in turn.
+  perform pg_advisory_xact_lock(hashtextextended('payslip_documents:' || coalesce(p_payslip_id::text, ''), 0));
   if p_sha256 is null or p_sha256 !~ '^[0-9a-f]{64}$'
     or p_size_bytes is null or p_size_bytes not between 1 and 5242880 then
     raise exception 'That document doesn''t match its payslip.' using errcode = 'MLPD4';
@@ -505,10 +517,24 @@ begin
   end if;
   -- The server uploads first: a row never points at a file that isn't there.
   v_path := p_organisation_id::text || '/' || v_run::text || '/' || p_payslip_id::text || '.pdf';
+  -- The file is never replaced (the server uploads without overwriting), and the size recorded
+  -- is the size stored.
   if not exists (
-    select 1 from storage.objects o where o.bucket_id = 'payslips' and o.name = v_path
+    select 1 from storage.objects o
+    where o.bucket_id = 'payslips' and o.name = v_path
+      and (o.metadata ->> 'size') is not null
+      and (o.metadata ->> 'size')::bigint = p_size_bytes
   ) then
-    raise exception 'The payslip''s PDF isn''t in storage.' using errcode = 'MLPD4';
+    raise exception 'The payslip''s PDF isn''t in storage as recorded.' using errcode = 'MLPD4';
+  end if;
+  -- The file is already recorded as it is: nothing new to record.
+  select d.* into v_latest
+  from public.payslip_documents d
+  where d.organisation_id = p_organisation_id and d.payslip_id = p_payslip_id
+  order by d.made_at desc, d.id desc
+  limit 1;
+  if v_latest.id is not null and v_latest.sha256 = p_sha256 and v_latest.size_bytes = p_size_bytes then
+    return v_latest.id;
   end if;
   perform set_config('metalira.audit_channel', 'system', true);
   insert into public.payslip_documents (

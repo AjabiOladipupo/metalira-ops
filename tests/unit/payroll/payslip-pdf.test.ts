@@ -152,6 +152,12 @@ describe("payslip PDF", () => {
     expect(text).toContain("₦24,000.00");
   });
 
+  it("shows this year so far from the year-to-date figures, not the month's", () => {
+    expect(text).toContain("₦1,200,000.00");
+    expect(text).toContain("₦56,600.00");
+    expect(text).toContain("₦96,000.00");
+  });
+
   it("names the sections, the company, the period, the pay date and the rule set", () => {
     for (const words of [
       "Coastline Guards",

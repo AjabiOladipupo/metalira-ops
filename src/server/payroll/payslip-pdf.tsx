@@ -259,8 +259,8 @@ export function PayslipDocument({
 
         {view.carriedForwardKobo > 0n ? (
           <Text style={[s.small, { marginTop: 8 }]}>
-            {money(view.carriedForwardKobo)} of deductions didn&apos;t fit this month and is carried
-            to your next pay.
+            {money(view.carriedForwardKobo)} of deductions didn&apos;t fit this month and is still
+            owed. HR takes it from a later pay.
           </Text>
         ) : null}
 

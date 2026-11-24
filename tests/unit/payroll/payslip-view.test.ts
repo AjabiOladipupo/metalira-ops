@@ -33,8 +33,8 @@ function json(over: Record<string, unknown> = {}) {
     pension_employee_kobo: "960000",
     pension_employer_kobo: "1200000",
     nhf_kobo: "0",
-    other_deductions_kobo: "0",
-    net_kobo: "10074050",
+    other_deductions_kobo: "100000",
+    net_kobo: "9974000",
     carried_forward_kobo: "0",
     nsitf_kobo: "116000",
     itf_kobo: "0",
@@ -55,6 +55,14 @@ function json(over: Record<string, unknown> = {}) {
     annual_rent_kobo: "36000000",
     lines: [
       { position: 1, code: "basic", kind: "earning", label: "Basic", amount_kobo: "6000000" },
+      { position: 8, code: "housing", kind: "earning", label: "Housing", amount_kobo: "3600000" },
+      {
+        position: 9,
+        code: "transport",
+        kind: "earning",
+        label: "Transport",
+        amount_kobo: "2400000",
+      },
       {
         position: 2,
         code: "leave_deduction",
@@ -104,14 +112,19 @@ describe("payslip view", () => {
   const view = parsePayslipView(json());
 
   it("turns kobo strings into bigint, never numbers", () => {
-    expect(view.netKobo).toBe(10_074_050n);
+    expect(view.netKobo).toBe(9_974_000n);
     expect(typeof view.grossKobo).toBe("bigint");
     expect(view.yearToDate.grossKobo).toBe(23_600_000n);
     expect(view.annualRentKobo).toBe(36_000_000n);
   });
 
   it("groups lines: earned in order, taken out statutory first, employer apart", () => {
-    expect(view.earned.map((l) => l.code)).toEqual(["basic", "leave_deduction"]);
+    expect(view.earned.map((l) => l.code)).toEqual([
+      "basic",
+      "housing",
+      "transport",
+      "leave_deduction",
+    ]);
     expect(view.takenOut.map((l) => l.code)).toEqual(["paye", "pension_employee", "deduction"]);
     expect(view.employer.map((l) => l.code)).toEqual(["pension_employer", "nsitf"]);
     expect(view.totalTakenOutKobo).toBe(566_000n + 960_000n + 100_000n);
@@ -161,6 +174,11 @@ describe("payslip view", () => {
     expect(rentLine(view)).toBe("Tax uses your rent declaration of ₦360,000 a year.");
     expect(rentLine(parsePayslipView(json({ annual_rent_kobo: null })))).toBeNull();
     expect(rentLine(parsePayslipView(json({ annual_rent_kobo: "0" })))).toBeNull();
+  });
+
+  it("refuses lines that don't add up to the totals", () => {
+    expect(() => parsePayslipView(json({ net_kobo: "9974050" }))).toThrow(/add up/);
+    expect(() => parsePayslipView(json({ gross_kobo: "12000000" }))).toThrow(/add up/);
   });
 
   it("names the PDF by month only", () => {

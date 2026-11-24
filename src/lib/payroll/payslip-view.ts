@@ -34,57 +34,73 @@ const lineSchema = z.object({
   amount_kobo: kobo,
 });
 
-export const payslipViewSchema = z.object({
-  payslip_id: z.uuid(),
-  run_id: z.uuid(),
-  worker_id: z.uuid(),
-  run_status: z.string(),
-  period_start: isoDate,
-  period_end: isoDate,
-  pay_date: isoDate,
-  currency: z.literal("NGN"),
-  gross_kobo: kobo,
-  paye_kobo: kobo,
-  pension_employee_kobo: kobo,
-  pension_employer_kobo: kobo,
-  nhf_kobo: kobo,
-  other_deductions_kobo: kobo,
-  net_kobo: kobo,
-  carried_forward_kobo: kobo,
-  nsitf_kobo: kobo,
-  itf_kobo: kobo,
-  employment_type: z.string(),
-  tax_state: z.string().nullable(),
-  pfa_name: z.string().nullable(),
-  rule_set_name: z.string().nullable(),
-  organisation: z.object({
-    name: z.string(),
-    legal_name: z.string().nullable(),
-    address: z.string().nullable(),
-    logo_path: z.string().nullable(),
-  }),
-  worker: z.object({
-    first_name: z.string(),
-    last_name: z.string(),
-    staff_id: z.string(),
-    job_title: z.string().nullable(),
-    bank_name: z.string().nullable(),
-    bank_account_last4: last4,
-    rsa_pin_last4: last4,
-  }),
-  annual_rent_kobo: kobo.nullable(),
-  lines: z.array(lineSchema),
-  year_to_date: z.object({
-    year: z.number().int(),
-    payslips: z.number().int(),
+export const payslipViewSchema = z
+  .object({
+    payslip_id: z.uuid(),
+    run_id: z.uuid(),
+    worker_id: z.uuid(),
+    run_status: z.string(),
+    period_start: isoDate,
+    period_end: isoDate,
+    pay_date: isoDate,
+    currency: z.literal("NGN"),
     gross_kobo: kobo,
     paye_kobo: kobo,
     pension_employee_kobo: kobo,
+    pension_employer_kobo: kobo,
     nhf_kobo: kobo,
+    other_deductions_kobo: kobo,
     net_kobo: kobo,
-  }),
-  document: z.object({ id: z.uuid(), made_at: z.string() }).nullable(),
-});
+    carried_forward_kobo: kobo,
+    nsitf_kobo: kobo,
+    itf_kobo: kobo,
+    employment_type: z.string(),
+    tax_state: z.string().nullable(),
+    pfa_name: z.string().nullable(),
+    rule_set_name: z.string().nullable(),
+    organisation: z.object({
+      name: z.string(),
+      legal_name: z.string().nullable(),
+      address: z.string().nullable(),
+      logo_path: z.string().nullable(),
+    }),
+    worker: z.object({
+      first_name: z.string(),
+      last_name: z.string(),
+      staff_id: z.string(),
+      job_title: z.string().nullable(),
+      bank_name: z.string().nullable(),
+      bank_account_last4: last4,
+      rsa_pin_last4: last4,
+    }),
+    annual_rent_kobo: kobo.nullable(),
+    lines: z.array(lineSchema),
+    year_to_date: z.object({
+      year: z.number().int(),
+      payslips: z.number().int(),
+      gross_kobo: kobo,
+      paye_kobo: kobo,
+      pension_employee_kobo: kobo,
+      nhf_kobo: kobo,
+      net_kobo: kobo,
+    }),
+    document: z.object({ id: z.uuid(), made_at: z.string() }).nullable(),
+  })
+  // Defence in depth (the database checks the same when the run is saved, MLPR6): the lines add
+  // up to the payslip's totals, so what the screen and PDF list is what was paid.
+  .superRefine((v, ctx) => {
+    const sum = (kinds: readonly string[]) =>
+      sumKobo(v.lines.filter((l) => kinds.includes(l.kind)).map((l) => l.amount_kobo));
+    const takenOut = v.paye_kobo + v.pension_employee_kobo + v.nhf_kobo + v.other_deductions_kobo;
+    if (
+      sum(["earning"]) !== v.gross_kobo ||
+      sum(["statutory", "deduction"]) !== takenOut ||
+      v.net_kobo !== v.gross_kobo - takenOut ||
+      sum(["employer"]) !== v.pension_employer_kobo + v.nsitf_kobo + v.itf_kobo
+    ) {
+      ctx.addIssue({ code: "custom", message: "The payslip's lines don't add up to its totals." });
+    }
+  });
 
 type Raw = z.output<typeof payslipViewSchema>;
 

@@ -30,10 +30,12 @@ export async function submitRunFor(
   owner: TenantUser,
   worker: { workerId: string; payRateId: string },
   periodStart: string,
+  payDate?: string,
 ): Promise<string> {
   const created = await owner.client.rpc("create_payroll_run", {
     p_organisation_id: owner.orgId,
     p_period_start: periodStart,
+    ...(payDate ? { p_pay_date: payDate } : {}),
   });
   expect(created.error).toBeNull();
   const runId = created.data!;

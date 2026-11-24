@@ -274,14 +274,9 @@ test("after release Musa Ibrahim reads his October payslip on the phone and down
   await expect(row).toContainText("Not made yet");
   const publish = page.getByTestId("publish-payslips");
   await publish.getByRole("button", { name: "Finish publishing" }).click();
-  await expect(publish.getByRole("status")).toContainText(
-    "1 of 1 payslip PDFs made, 1 workers told",
-    {
-      timeout: 60_000,
-    },
-  );
-  await page.reload();
-  await expect(row).toContainText("Made", { timeout: 15_000 });
+  // The page refreshes with the PDF made, and the form goes: nothing is left to publish.
+  await expect(row).toContainText("Made", { timeout: 60_000 });
+  await expect(publish).toHaveCount(0);
   await expect(row.getByTestId("payslip-pdf")).toBeVisible();
   await expectNoHorizontalScroll(page);
 
