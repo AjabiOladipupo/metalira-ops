@@ -972,7 +972,7 @@ isOneToOne: false
     },{
       foreignKeyName: "payslip_snapshots_payslip_fkey"
       columns: ["organisation_id","payslip_id"]
-isOneToOne: true
+isOneToOne: false
       referencedRelation: "payslips"
       referencedColumns: ["organisation_id","id"]
     },{
