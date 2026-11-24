@@ -123,6 +123,8 @@ export function fromResolutionDbError(error: Pick<PostgrestError, "code" | "mess
 
 export interface ResolutionRow {
   id: string;
+  /** An offset whose target remittance a later reversal voided: it no longer counts. */
+  lapsed?: boolean;
   kind: "refund" | "offset";
   amountKobo: Kobo;
   receivedOn: string | null;
@@ -257,7 +259,7 @@ export async function loadVoidedPayments(
     }[]
   ).map((r) => ({
     paymentId: r.payment_id,
-    row: {
+    row: <ResolutionRow>{
       id: r.id,
       kind: r.kind === "offset" ? ("offset" as const) : ("refund" as const),
       amountKobo: toKobo(r.amount_kobo),
@@ -294,7 +296,14 @@ export async function loadVoidedPayments(
     const run = runOf.get(rem.run_id);
     if (!payment || !voidReason.has(rem.id) || !run) continue;
     const mine = resolutions.filter((r) => r.paymentId === payment.id).map((r) => r.row);
-    const resolution = resolvePayment(payment.paidKobo, mine);
+    // An offset whose target a later reversal voided resolves nothing any more (money review M3).
+    const resolution = resolvePayment(
+      payment.paidKobo,
+      mine.filter(
+        (r) =>
+          !(r.kind === "offset" && r.targetRemittanceId && voidReason.has(r.targetRemittanceId)),
+      ),
+    );
     const kind = rem.kind as RemittanceKind;
     const targets: OffsetTarget[] = standingTargets
       .filter((t) => {
@@ -322,6 +331,11 @@ export async function loadVoidedPayments(
         };
       })
       .filter((t) => t.roomKobo > 0n);
+    for (const r of mine) {
+      if (r.kind === "offset" && r.targetRemittanceId && voidReason.has(r.targetRemittanceId)) {
+        r.lapsed = true;
+      }
+    }
     out.push({
       paymentId: payment.id,
       remittanceId: rem.id,

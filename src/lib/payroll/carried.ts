@@ -54,13 +54,18 @@ export interface CarriedLedger {
   settledKobo: Kobo;
 }
 
+/**
+ * The engine's order (src/lib/payroll/run.ts workerHistory: a run carries from the posted payslip
+ * of the latest earlier period), so the balance here is the one the next run takes (money review
+ * M5): period start, then approval time, then run id.
+ */
 const order = (a: CarriedSlip, b: CarriedSlip) =>
-  a.payDate.localeCompare(b.payDate) ||
+  a.periodStart.localeCompare(b.periodStart) ||
   a.approvedAt.localeCompare(b.approvedAt) ||
   a.runId.localeCompare(b.runId);
 
 /**
- * Each worker's running balance from their posted payslips, in pay order. Only workers who ever
+ * Each worker's running balance from their posted payslips, in the engine's order. Only workers who ever
  * carried or settled something are returned; their entries start at the first payslip that did.
  */
 export function carriedLedgers(slips: readonly CarriedSlip[]): CarriedLedger[] {

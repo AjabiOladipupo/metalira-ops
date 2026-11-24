@@ -29,6 +29,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addDays, lagosToday } from "@/lib/dates";
 import { NTA_2025_V1, ruleSetPolicyJson, ruleSetRulesJson } from "@/lib/payroll/rule-set";
+import { runMutation } from "@/server/identity/mutate";
+import { createRunSpec } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
 import {
@@ -45,6 +47,7 @@ import {
   adminClient,
   createTenantUser,
   createTestUser,
+  loadLocalEnv,
   pgClient,
   type Client,
   type TenantUser,
@@ -707,6 +710,44 @@ describe("leave in a posted period: corrected in the next run (slice 5.7c lifts 
     // Only payroll readers see corrections; another company's period gives nothing of ours.
     expect((await corrections(lineManager.client)).error?.code).toBe(DENIED);
     expect((await corrections(workerUser.client)).error?.code).toBe(DENIED);
+
+    // Money review H1: the next run SAVES with the one request backing both the arrears (16 to
+    // 19 Oct) and its own leave (20 and 21 Oct) on one payslip.
+    const env = loadLocalEnv();
+    process.env.NEXT_PUBLIC_SUPABASE_URL = env.apiUrl;
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = env.publishableKey;
+    process.env.SUPABASE_SECRET_KEY = env.secretKey;
+    const nov = await runMutation(
+      { supabase: hr.client, userId: hr.id, organisationId: owner.orgId, role: "hr" },
+      createRunSpec,
+      { periodStart: NEXT },
+    );
+    expect(nov.calculated).toBe(true);
+    const { data: novSlip } = await admin
+      .from("payslips")
+      .select("id")
+      .eq("run_id", nov.runId)
+      .eq("worker_id", posted.workerId)
+      .single();
+    const { data: sources } = await admin
+      .from("payslip_sources")
+      .select("from_date, to_date")
+      .eq("payslip_id", novSlip!.id)
+      .eq("source_kind", "leave_request")
+      .eq("source_id", id)
+      .order("from_date");
+    expect(sources).toEqual([
+      { from_date: "2026-10-16", to_date: OCT_END },
+      { from_date: NEXT, to_date: "2026-10-21" },
+    ]);
+    const { data: codes } = await admin
+      .from("payslip_lines")
+      .select("code")
+      .eq("payslip_id", novSlip!.id)
+      .in("code", ["leave_arrears", "leave_deduction"]);
+    expect(new Set(codes!.map((c) => c.code))).toEqual(
+      new Set(["leave_arrears", "leave_deduction"]),
+    );
   });
 });
 

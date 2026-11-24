@@ -351,13 +351,13 @@ async function loadLeaveCorrections(
   supabase: Client,
   organisationId: string,
   periodStart: string,
-  workerIds: readonly string[],
+  workerIds: readonly string[] | null,
   runId: string | null,
 ): Promise<{ raw: unknown; parsed: LeaveCorrections }> {
   const { data, error } = await supabase.rpc("payroll_leave_corrections", {
     p_organisation_id: organisationId,
     p_period_start: periodStart,
-    p_worker_ids: [...workerIds],
+    ...(workerIds ? { p_worker_ids: [...workerIds] } : {}),
     ...(runId ? { p_run_id: runId } : {}),
   });
   // The code only: the message can name the period or the company.
@@ -641,18 +641,19 @@ export async function calculateRun(
   const period = inputs.period;
   // Slice 5.7c: leave decided after its period was posted (arrears and refunds), read beside the
   // inputs as the same user and hashed with them.
-  // Regular runs only: 5.7b's off-cycle runs never take them (a correction or one-off run pays
-  // its items; a final-pay or missed-worker run its own period), so the next regular run pays a
-  // correction once.
-  const corrections = offCycle
-    ? { raw: null, parsed: { period, byWorker: new Map() } as LeaveCorrections }
-    : await loadLeaveCorrections(
-        supabase,
-        organisationId,
-        period.start,
-        inputs.workers.map((w) => w.workerId),
-        target.runId,
-      );
+  // Regular, final-pay and missed-worker runs take them; 5.7b's correction and one-off runs never
+  // do (they pay their own items), so a correction is paid once.
+  // A final-pay or missed-worker run takes its workers' pending corrections too (money review M4).
+  const corrections =
+    offCycle && !fullPay
+      ? { raw: null, parsed: { period, byWorker: new Map() } as LeaveCorrections }
+      : await loadLeaveCorrections(
+          supabase,
+          organisationId,
+          period.start,
+          inputs.workers.map((w) => w.workerId),
+          target.runId,
+        );
 
   // Decision 15: one rule set for the whole run, the version in force on the pay date.
   const versions = await ruleSetVersions(supabase, organisationId);
@@ -863,6 +864,27 @@ export async function calculateRun(
           detail: { run_id: x.runId },
         });
       }
+    }
+  }
+  // Money review M4: leave corrections waiting for a worker who isn't in this run (left, or paid
+  // by a final-pay or missed-worker run) are shown, so they're settled knowingly.
+  if (!options.workerIds && (!offCycle || fullPay)) {
+    const everyone = await loadLeaveCorrections(
+      supabase,
+      organisationId,
+      period.start,
+      null,
+      target.runId,
+    );
+    const inRun = new Set(workerIds);
+    for (const [workerId, c] of everyone.parsed.byWorker) {
+      if (inRun.has(workerId)) continue;
+      anomalies.push({
+        workerId,
+        code: "leave_correction_pending",
+        severity: "warning",
+        detail: { arrears: c.leaveArrears.length, refunds: c.leaveRefunds.length },
+      });
     }
   }
   anomalies.push(...runAnomalies(openDays, bank.shared));

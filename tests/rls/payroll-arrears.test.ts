@@ -9,8 +9,16 @@
  *   deducts ₦11,428.57 (₦120,000 x 2 ÷ 21). After posting HR cancels it (no MLTA5): November
  *   refunds exactly that, line by line, once; December refunds nothing.
  * - Bayo Adewale's unpaid leave on Thu 15 and Fri 16 Oct waits for HR at October's run. After
- *   posting HR approves it (no MLTA5): November deducts it as arrears, on October's 21 days, at
- *   October's rate, once.
+ *   posting HR approves it (no MLTA5): November recovers it as arrears after tax (RULES_NIGERIA
+ *   open point 5's default), on October's 21 days, at October's rate, once.
+ * - Money review H1, each saved through the real functions:
+ *   (A) Chika Obi's unpaid leave 16 to 21 Oct, approved after October posted: November recovers
+ *       16 to 19 Oct as arrears and deducts 20 and 21 Oct as its own leave, one request backing
+ *       both on one payslip;
+ *   (B) Dayo Bello's unpaid leave 15 to 21 Oct, approved after November posted too: December
+ *       recovers 15 to 19 Oct and 20 to 21 Oct as two arrears, one per posted period;
+ *   (C) Emeka Nwosu's unpaid leave 16 to 21 Oct, deducted by October and by November, then
+ *       cancelled: December refunds both deductions.
  * - Bayo's Saturday 10 Oct waits for his manager at October's run and is approved after posting;
  *   his pay rises to ₦150,000 from 20 Oct. November pays the Saturday as arrears at the rate in
  *   force that day (8 hours at ₦750, not ₦937.50), once; December doesn't pay it again.
@@ -66,6 +74,13 @@ let late: string;
 let saturday: string;
 let octRun: string;
 let novRun: string;
+let decRun: string;
+let chika: string;
+let dayo: string;
+let emeka: string;
+let leaveA: string;
+let leaveB: string;
+let leaveC: string;
 
 async function addMember(user: TestUser, role: Role) {
   const { error } = await admin
@@ -209,6 +224,12 @@ beforeAll(async () => {
   );
   cancelled = await leave(ngozi, "2026-10-12", "2026-10-13", "approved");
   late = await leave(bayo, "2026-10-15", "2026-10-16", "pending_hr");
+  chika = await addWorker("Chika", "Obi");
+  dayo = await addWorker("Dayo", "Bello");
+  emeka = await addWorker("Emeka", "Nwosu");
+  leaveA = await leave(chika, "2026-10-16", "2026-10-21", "pending_hr");
+  leaveB = await leave(dayo, "2026-10-15", "2026-10-21", "pending_hr");
+  leaveC = await leave(emeka, "2026-10-16", "2026-10-21", "approved");
 
   // Bayo's Saturday, still waiting for his manager when October is prepared.
   await asOwnerWithTriggersOff(
@@ -269,6 +290,14 @@ describe("after posting: corrections, not MLTA5", () => {
       p_note: "Form found",
     });
     expect(a.error).toBeNull();
+    // (A) Chika's leave runs across the posted boundary into November.
+    const aa = await hr.client.rpc("decide_leave_hr", {
+      p_organisation_id: owner.orgId,
+      p_request_id: leaveA,
+      p_decision: "approved",
+      p_note: "Form found",
+    });
+    expect(aa.error).toBeNull();
     // Bayo's Saturday is approved too (as the database owner, with its decision), and his pay
     // rises from 20 Oct.
     await asOwnerWithTriggersOff(
@@ -380,12 +409,16 @@ describe("November pays each correction once", () => {
     ]);
   });
 
-  it("deducts Bayo's late leave on October's 21 days at October's rate", async () => {
-    const arrears = await linesOf(novRun, bayo, "leave_deduction");
-    expect(sum(arrears.lines)).toBe(-TWO_DAYS);
-    expect(arrears.lines[0]!.label).toBe(
-      "Unpaid leave in 20 Sep to 19 Oct, approved after posting (15 to 16 Oct, 2 days), basic",
-    );
+  it("recovers Bayo's late leave after tax, on October's 21 days at October's rate", async () => {
+    expect((await linesOf(novRun, bayo, "leave_deduction")).lines).toEqual([]);
+    const arrears = await linesOf(novRun, bayo, "leave_arrears");
+    expect(arrears.lines).toEqual([
+      {
+        label: "Unpaid leave in 20 Sep to 19 Oct, approved after posting (15 to 16 Oct, 2 days)",
+        amount_kobo: TWO_DAYS.toString(),
+        pensionable: false,
+      },
+    ]);
     const { data: sources } = await admin
       .from("payslip_sources")
       .select("from_date, to_date")
@@ -393,6 +426,25 @@ describe("November pays each correction once", () => {
       .eq("source_kind", "leave_request")
       .eq("source_id", late);
     expect(sources).toEqual([{ from_date: "2026-10-15", to_date: "2026-10-16" }]);
+  });
+
+  it("(A) recovers Chika's posted days as arrears and deducts November's days, on one payslip", async () => {
+    const arrears = await linesOf(novRun, chika, "leave_arrears");
+    // Thu 16 and Mon 19 Oct... Fri 16, Mon 19: 2 of October's 21 days.
+    expect(sum(arrears.lines)).toBe(TWO_DAYS);
+    const own = await linesOf(novRun, chika, "leave_deduction");
+    expect(sum(own.lines) < 0n).toBe(true);
+    const { data: sources } = await admin
+      .from("payslip_sources")
+      .select("from_date, to_date")
+      .eq("payslip_id", arrears.payslipId)
+      .eq("source_kind", "leave_request")
+      .eq("source_id", leaveA)
+      .order("from_date");
+    expect(sources).toEqual([
+      { from_date: "2026-10-16", to_date: "2026-10-19" },
+      { from_date: "2026-10-20", to_date: "2026-10-21" },
+    ]);
   });
 
   it("pays Bayo's Saturday at the rate in force that day, not his new rate", async () => {
@@ -426,14 +478,34 @@ describe("November pays each correction once", () => {
 
   it("approves November, and December pays none of them again", async () => {
     await submitAndApprove(novRun);
+    // After November posts: (B) Dayo's leave is approved, (C) Emeka's is cancelled.
+    const b = await hr.client.rpc("decide_leave_hr", {
+      p_organisation_id: owner.orgId,
+      p_request_id: leaveB,
+      p_decision: "approved",
+      p_note: "Form found",
+    });
+    expect(b.error).toBeNull();
+    const c = await hr.client.rpc("cancel_leave_request", {
+      p_organisation_id: owner.orgId,
+      p_request_id: leaveC,
+      p_reason: "Came to work after all",
+    });
+    expect(c.error).toBeNull();
     const dec = await runMutation(ctxOf(hr, "hr"), createRunSpec, { periodStart: DEC_START });
     expect(dec.calculated).toBe(true);
-    for (const code of ["leave_refund", "leave_deduction", "arrears"]) {
+    decRun = dec.runId;
+    for (const code of ["leave_refund", "leave_deduction", "leave_arrears", "arrears"]) {
       const { data } = await admin
         .from("payslip_lines")
-        .select("id")
+        .select("id, payslip_id")
         .eq("run_id", dec.runId)
-        .eq("code", code);
+        .eq("code", code)
+        .in("payslip_id", [
+          (await linesOf(dec.runId, ngozi, code)).payslipId,
+          (await linesOf(dec.runId, bayo, code)).payslipId,
+          (await linesOf(dec.runId, chika, code)).payslipId,
+        ]);
       expect(data, code).toEqual([]);
     }
     const { data: paid } = await admin
@@ -444,5 +516,44 @@ describe("November pays each correction once", () => {
       .neq("run_id", octRun);
     expect(paid!.every((p) => p.run_id === novRun)).toBe(true);
     expect(paid).toHaveLength(3);
+  });
+});
+
+describe("December saves the two-period corrections (money review H1)", () => {
+  it("(B) recovers Dayo's leave as two arrears, one per posted period", async () => {
+    const arrears = await linesOf(decRun, dayo, "leave_arrears");
+    expect(arrears.lines).toHaveLength(2);
+    const { data: sources } = await admin
+      .from("payslip_sources")
+      .select("from_date, to_date")
+      .eq("payslip_id", arrears.payslipId)
+      .eq("source_kind", "leave_request")
+      .eq("source_id", leaveB)
+      .order("from_date");
+    expect(sources).toEqual([
+      { from_date: "2026-10-15", to_date: "2026-10-19" },
+      { from_date: "2026-10-20", to_date: "2026-10-21" },
+    ]);
+    // 15, 16 and 19 Oct: 3 of October's 21 days.
+    expect(BigInt(arrears.lines[0]!.amount_kobo)).toBe(roundHalfUp(12_000_000n * 3n, 21n));
+  });
+
+  it("(C) refunds both of Emeka's deductions, October's and November's", async () => {
+    const octTook = sum((await linesOf(octRun, emeka, "leave_deduction")).lines);
+    const novTook = sum((await linesOf(novRun, emeka, "leave_deduction")).lines);
+    expect(octTook < 0n && novTook < 0n).toBe(true);
+    const refund = await linesOf(decRun, emeka, "leave_refund");
+    expect(sum(refund.lines)).toBe(-(octTook + novTook));
+    const { data: sources } = await admin
+      .from("payslip_sources")
+      .select("from_date, to_date")
+      .eq("payslip_id", refund.payslipId)
+      .eq("source_kind", "leave_refund")
+      .eq("source_id", leaveC)
+      .order("from_date");
+    expect(sources).toEqual([
+      { from_date: "2026-10-16", to_date: "2026-10-19" },
+      { from_date: "2026-10-20", to_date: "2026-10-21" },
+    ]);
   });
 });

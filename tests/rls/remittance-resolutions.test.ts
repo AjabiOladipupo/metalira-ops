@@ -47,6 +47,7 @@ let octPension: string;
 let novPaye: string;
 let novPension: string;
 let paymentId: string;
+let novRun: string;
 
 async function addMember(user: TestUser, role: Role) {
   const { error } = await admin
@@ -146,6 +147,7 @@ beforeAll(async () => {
 
   // November: approved, owing Lagos PAYE ₦1,000 and pension.
   const nov = await submitRunFor(admin, owner, worker, "2026-10-20");
+  novRun = nov;
   await approveRun(admin, owner.orgId, nov, finance);
   novPaye = await remittance(nov, "paye");
   novPension = await remittance(nov, "pension");
@@ -274,5 +276,27 @@ describe("refunds and offsets are kept as written", () => {
       recorded_by: finance.id,
     });
     expect(ins.error?.code).toBe(DENIED);
+  });
+});
+
+describe("an offset whose target is reversed stops counting (money review M3)", () => {
+  it("frees the offset amount to be refunded again once November is reversed", async () => {
+    const reversal = await finance.client.rpc("reverse_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: novRun,
+      p_reason: "Wrong pay rate for November",
+    });
+    expect(reversal.error).toBeNull();
+    expect(
+      (
+        await finance2.client.rpc("approve_payroll_reversal", {
+          p_organisation_id: owner.orgId,
+          p_run_id: reversal.data!,
+        })
+      ).error,
+    ).toBeNull();
+    // The ₦600 offset against November no longer resolves October's payment: ₦600 is open again.
+    expect((await refund(finance, "60001")).error?.code).toBe("MLARD");
+    expect((await refund(finance, "60000")).error).toBeNull();
   });
 });

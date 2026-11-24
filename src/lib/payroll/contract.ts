@@ -67,6 +67,11 @@ export interface EarningLine {
 
 /** An after-tax deduction (salary advance repayment, "2 of 3"), in the order it was added. */
 export interface DeductionLine {
+  /**
+   * `deduction` (an adjustment, the default) or `leave_arrears` (slice 5.7c: unpaid leave approved
+   * after its period was posted, recovered after tax, RULES_NIGERIA open point 5's default).
+   */
+  code?: "deduction" | "leave_arrears";
   label: string;
   amountKobo: bigint;
   sources: PaySourceRef[];
@@ -121,6 +126,7 @@ export type PayslipLineCode =
   | "nhf"
   | "deduction"
   | "carried_deduction"
+  | "leave_arrears"
   | "pension_employer"
   | "nsitf"
   | "itf";

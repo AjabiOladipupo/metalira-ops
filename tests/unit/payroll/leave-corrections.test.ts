@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { allocateKobo, roundHalfUp, sumKobo } from "@/lib/money";
+import { roundHalfUp, sumKobo } from "@/lib/money";
 import type { EarningLine } from "@/lib/payroll/earning-lines";
 import {
   computeEarnings,
@@ -28,6 +28,7 @@ import {
   type PayRateInput,
 } from "@/lib/payroll/inputs";
 import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
+import { workerPayslip } from "@/lib/payroll/run";
 
 const SEP = { start: "2026-08-20", end: "2026-09-19" };
 const OCT = { start: "2026-09-20", end: "2026-10-19" };
@@ -102,36 +103,98 @@ const total = (lines: EarningLine[]) => sumKobo(lines.map((l) => l.amountKobo));
 const byCode = (lines: EarningLine[], code: EarningLine["code"]) =>
   lines.filter((l) => l.code === code);
 
-describe("leave approved after posting: arrears in the next run", () => {
-  it("deducts Thu 10 and Fri 11 Sep at September's rate, on September's 22 rostered days", () => {
+describe("leave approved after posting: arrears in the next run, after tax", () => {
+  const arrearsOf = (r: ReturnType<typeof run>) =>
+    (r.deductions ?? []).filter((d) => d.code === "leave_arrears");
+
+  it("works out Thu 10 and Fri 11 Sep at September's rate, on September's 22 rostered days", () => {
     const a = arrears();
     const r = run(worker({ leaveArrears: [a] }));
-    const deducted = byCode(r.lines, "leave_deduction");
     // ₦110,000 (the rate in force on those days) x 2 ÷ 22, rounded once: ₦10,000.
     const expected = roundHalfUp(11_000_000n * 2n, 22n);
     expect(expected).toBe(1_000_000n);
-    expect(total(deducted)).toBe(-expected);
-    expect(deducted.map((l) => l.amountKobo)).toEqual(
-      allocateKobo(expected, [5_000_000n, 3_600_000n, 2_400_000n]).map((k) => -k),
-    );
-    expect(deducted[0]!.label).toBe(
-      "Unpaid leave in 20 Aug to 19 Sep, approved after posting (10 to 11 Sep, 2 days), basic",
-    );
-    expect(deducted[0]).toMatchObject({ pensionable: true, nhfBase: true, taxable: true });
-    expect(deducted[0]!.sources).toEqual([
-      { kind: "leave_request", id: a.requestId, from: "2026-09-10", to: "2026-09-11" },
-    ]);
-    // November's own salary is paid in full beside it, and the old rate counts as used.
-    expect(total(byCode(r.lines, "basic"))).toBe(6_000_000n);
+    const [d] = arrearsOf(r);
+    expect(d).toEqual({
+      code: "leave_arrears",
+      label: "Unpaid leave in 20 Aug to 19 Sep, approved after posting (10 to 11 Sep, 2 days)",
+      amountKobo: expected,
+      sources: [{ kind: "leave_request", id: a.requestId, from: "2026-09-10", to: "2026-09-11" }],
+    });
+    // Not an earning: November's gross, taxable pay and pension base are untouched.
+    expect(byCode(r.lines, "leave_deduction")).toEqual([]);
+    expect(total(r.lines)).toBe(12_000_000n);
     expect(r.payRateIds).toContain(OLD.id);
-    expect(r.days.leaveDeducted).toBe(0);
     expect(r.trace.find((t) => t.step === "leave_arrears")).toMatchObject({
-      valueKobo: -expected,
+      valueKobo: expected,
       inputs: { leave_days: 2, rostered_days: 22, pay_percent: 0 },
     });
   });
 
-  it("deducts exactly what the posted run would have, had the leave been approved before it", () => {
+  it("comes off after tax and pension: PAYE and pension stay as November's own pay sets them", () => {
+    const r = run(worker({ leaveArrears: [arrears()] }));
+    const plain = run(worker());
+    const net = (x: ReturnType<typeof run>) =>
+      workerPayslip(
+        {
+          employmentType: "permanent",
+          earnings: x,
+          adjustments: [],
+          nhfOptIn: false,
+          annualRentKobo: 0n,
+          carriedDeductionKobo: 0n,
+        },
+        NTA_2025_V1,
+        { itfApplies: false, ruleSetId: "test" },
+      );
+    const a = net(r);
+    const b = net(plain);
+    expect(a.payeKobo).toBe(b.payeKobo);
+    expect(a.pensionEmployeeKobo).toBe(b.pensionEmployeeKobo);
+    expect(a.grossKobo).toBe(b.grossKobo);
+    expect(b.netKobo - a.netKobo).toBe(1_000_000n);
+    expect(a.lines.find((l) => l.code === "leave_arrears")).toMatchObject({
+      kind: "deduction",
+      amountKobo: 1_000_000n,
+      taxable: false,
+      pensionable: false,
+    });
+  });
+
+  it("never takes net pay below ₦0: what doesn't fit is carried (open question 6)", () => {
+    // A 15-day unpaid leave from September against a worker earning ₦20,000 now.
+    const small = monthly({
+      effectiveFrom: "2026-09-20",
+      basic: 1_000_000n,
+      housing: 600_000n,
+      transport: 400_000n,
+    });
+    const r = run(
+      worker({
+        payRates: [OLD, small],
+        leaveArrears: [arrears({ from: "2026-08-24", to: "2026-09-11" })],
+      }),
+    );
+    const slip = workerPayslip(
+      {
+        employmentType: "permanent",
+        earnings: r,
+        adjustments: [],
+        nhfOptIn: false,
+        annualRentKobo: 0n,
+        carriedDeductionKobo: 0n,
+      },
+      NTA_2025_V1,
+      { itfApplies: false, ruleSetId: "test" },
+    );
+    const wanted = arrearsOf(r)[0]!.amountKobo;
+    const taken = slip.lines.find((l) => l.code === "leave_arrears")!.amountKobo;
+    expect(slip.netKobo).toBe(0n);
+    expect(taken + slip.carriedForwardKobo).toBe(wanted);
+    expect(slip.carriedForwardKobo > 0n).toBe(true);
+    expect(slip.flags).toContain("deduction_cut");
+  });
+
+  it("works out exactly what the posted run would have deducted, had the leave been approved before it", () => {
     const requestId = randomUUID();
     const inOctober = run(
       worker({
@@ -163,57 +226,107 @@ describe("leave approved after posting: arrears in the next run", () => {
         ],
       }),
     );
-    expect(total(byCode(late.lines, "leave_deduction"))).toBe(
-      total(byCode(inOctober.lines, "leave_deduction")),
-    );
-    expect(total(byCode(late.lines, "leave_deduction"))).toBe(-roundHalfUp(12_000_000n * 3n, 21n));
+    expect(arrearsOf(late)[0]!.amountKobo).toBe(-total(byCode(inOctober.lines, "leave_deduction")));
+    expect(arrearsOf(late)[0]!.amountKobo).toBe(roundHalfUp(12_000_000n * 3n, 21n));
   });
 
-  it("splits a leave across a rate change by the rate on each day", () => {
-    // 18 Sep (old rate, in September) is posted in September; this run deducts it alone.
+  it("prices a day at the rate in force on it", () => {
     const r = run(worker({ leaveArrears: [arrears({ from: "2026-09-18", to: "2026-09-18" })] }));
-    expect(total(byCode(r.lines, "leave_deduction"))).toBe(-roundHalfUp(11_000_000n, 22n));
+    expect(arrearsOf(r)[0]!.amountKobo).toBe(roundHalfUp(11_000_000n, 22n));
   });
 
   it("leaves a public holiday out of a working-day leave's days", () => {
     const r = run(worker({ leaveArrears: [arrears()] }), NOV, ["2026-09-11"]);
-    expect(total(byCode(r.lines, "leave_deduction"))).toBe(-roundHalfUp(11_000_000n, 22n));
+    expect(arrearsOf(r)[0]!.amountKobo).toBe(roundHalfUp(11_000_000n, 22n));
   });
 
   it("follows the worker's shifts in the posted period: an unrostered Friday deducts nothing", () => {
     const shifts = [{ date: "2026-09-10", onLeave: true }];
-    const r = run(
-      worker({
-        lastRostered: "2026-11-30",
-        leaveArrears: [arrears({ shifts })],
-      }),
-    );
-    expect(total(byCode(r.lines, "leave_deduction"))).toBe(-roundHalfUp(11_000_000n, 22n));
+    const r = run(worker({ lastRostered: "2026-11-30", leaveArrears: [arrears({ shifts })] }));
+    expect(arrearsOf(r)[0]!.amountKobo).toBe(roundHalfUp(11_000_000n, 22n));
+  });
+
+  it("never counts more days than the posted payslip's base", () => {
+    // A base of 1 day (a joiner's posted payslip) caps the two leave days at one: the whole month.
+    const r = run(worker({ leaveArrears: [arrears({ rosteredDays: 1 })] }));
+    expect(arrearsOf(r)[0]!.amountKobo).toBe(11_000_000n);
+    expect(r.trace.find((t) => t.step === "leave_arrears")?.inputs).toMatchObject({
+      leave_days: 1,
+    });
+  });
+
+  it("records ₦0 with its days when no working day is left, so it isn't looked at again", () => {
+    const shifts: { date: string; onLeave: boolean }[] = [];
+    const r = run(worker({ lastRostered: "2026-11-30", leaveArrears: [arrears({ shifts })] }));
+    const [d] = arrearsOf(r);
+    expect(d!.amountKobo).toBe(0n);
+    expect(d!.label).toContain("no working days to deduct");
+    expect(d!.sources).toHaveLength(1);
   });
 
   it("deducts half for leave paid at 50%, all of it below the pay's service, nothing at 100%", () => {
-    const half = run(worker({ leaveArrears: [arrears({ payPercent: 50 })] }));
-    expect(total(byCode(half.lines, "leave_deduction"))).toBe(-500_000n);
-    const below = run(
-      worker({ leaveArrears: [arrears({ payPercent: 50, payBelowService: true })] }),
-    );
-    expect(total(byCode(below.lines, "leave_deduction"))).toBe(-1_000_000n);
-    const paid = run(worker({ leaveArrears: [arrears({ payPercent: 100 })] }));
-    expect(byCode(paid.lines, "leave_deduction")).toEqual([]);
+    expect(
+      arrearsOf(run(worker({ leaveArrears: [arrears({ payPercent: 50 })] })))[0]!.amountKobo,
+    ).toBe(500_000n);
+    expect(
+      arrearsOf(
+        run(worker({ leaveArrears: [arrears({ payPercent: 50, payBelowService: true })] })),
+      )[0]!.amountKobo,
+    ).toBe(1_000_000n);
+    expect(arrearsOf(run(worker({ leaveArrears: [arrears({ payPercent: 100 })] })))).toEqual([]);
   });
 
   it("flags leave without its pay record and deducts nothing", () => {
     const r = run(worker({ leaveArrears: [arrears({ payPercent: null })] }));
-    expect(byCode(r.lines, "leave_deduction")).toEqual([]);
+    expect(arrearsOf(r)).toEqual([]);
     expect(r.flags).toContain("leave_pay_missing");
   });
 
-  it("gives a daily worker no leave arrears", () => {
+  it("gives a daily worker no leave arrears to recover (₦0, recorded once)", () => {
     const daily = { ...monthly(), payType: "daily" as const, dailyRate: 800_000n };
     const r = run(
       worker({ employmentType: "daily", payRates: [daily], leaveArrears: [arrears()] }),
     );
-    expect(byCode(r.lines, "leave_deduction")).toEqual([]);
+    expect(arrearsOf(r).map((d) => d.amountKobo)).toEqual([0n]);
+  });
+});
+
+describe("refunding after-tax leave arrears", () => {
+  it("pays an after-tax arrears line back outside tax and pension", () => {
+    const requestId = randomUUID();
+    const r = run(
+      worker({
+        leaveRefunds: [
+          {
+            requestId,
+            from: "2026-09-10",
+            to: "2026-09-11",
+            periodStart: SEP.start,
+            periodEnd: SEP.end,
+            lines: [
+              {
+                code: "leave_arrears",
+                label:
+                  "Unpaid leave in 20 Aug to 19 Sep, approved after posting (10 to 11 Sep, 2 days)",
+                amountKobo: 1_000_000n,
+                pensionable: false,
+                taxable: false,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(byCode(r.lines, "leave_refund")).toEqual([
+      expect.objectContaining({
+        amountKobo: 1_000_000n,
+        pensionable: false,
+        taxable: false,
+        nhfBase: false,
+        label:
+          "Leave refund in 20 Aug to 19 Sep, cancelled after posting (10 to 11 Sep), taken after tax",
+      }),
+    ]);
   });
 });
 
@@ -245,6 +358,7 @@ describe("leave cancelled after posting: a refund in the next run", () => {
       periodStart: OCT.start,
       periodEnd: OCT.end,
       lines: lines.map((l) => ({
+        code: "leave_deduction" as const,
         label: l.label,
         amountKobo: l.amountKobo,
         pensionable: l.pensionable,
@@ -308,7 +422,15 @@ describe("leave cancelled after posting: a refund in the next run", () => {
         leaveRefunds: [
           {
             ...refund,
-            lines: [{ label: "x, basic", amountKobo: 0n, pensionable: true, taxable: true }],
+            lines: [
+              {
+                code: "leave_deduction",
+                label: "x, basic",
+                amountKobo: 0n,
+                pensionable: true,
+                taxable: true,
+              },
+            ],
           },
         ],
       }),

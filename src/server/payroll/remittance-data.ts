@@ -286,7 +286,12 @@ export async function loadRemittances(
       paidKobo: row.payment?.paidAmountKobo ?? null,
     };
     row.runVoid = runVoids.get(r.id) ?? null;
-    row.status = row.runVoid ? "voided" : remittanceStatus(owed, today);
+    row.status = row.runVoid
+      ? "voided"
+      : // A remittance offsets wholly settled shows as paid (money review L1).
+        owed.amountKobo === 0n && row.offsetsInKobo > 0n && row.payment === null
+        ? "paid"
+        : remittanceStatus(owed, today);
     row.outstandingKobo = row.runVoid ? 0n : remittanceOutstanding(owed);
     row.overdue = row.runVoid ? false : remittanceIsOverdue(owed, today);
     byRun.set(r.run_id, [...(byRun.get(r.run_id) ?? []), row]);

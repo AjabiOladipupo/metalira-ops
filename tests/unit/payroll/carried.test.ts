@@ -109,7 +109,7 @@ describe("carried deductions settle across runs", () => {
     expect(carriedOutstanding(ledgers)).toBe(1_150_000n);
   });
 
-  it("orders by pay date then approval, whatever order the rows arrive in", () => {
+  it("orders by period start then approval (the engine's order), whatever order the rows arrive in", () => {
     const rows: CarriedSlip[] = [
       { workerId: "w", ...RUNS[2], approvedAt: "x", settledKobo: 100n, carriedForwardKobo: 0n },
       { workerId: "w", ...RUNS[0], approvedAt: "x", settledKobo: 0n, carriedForwardKobo: 100n },

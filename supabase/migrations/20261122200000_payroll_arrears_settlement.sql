@@ -579,8 +579,28 @@ alter table public.payslip_lines
     'basic', 'housing', 'transport', 'other_allowances', 'daily_pay', 'hourly_pay', 'overtime',
     'off_day', 'public_holiday', 'leave_deduction', 'adjustment_earning', 'arrears', 'paye',
     'pension_employee', 'nhf', 'deduction', 'carried_deduction', 'pension_employer', 'nsitf',
-    'itf', 'leave_refund'
+    'itf', 'leave_refund', 'leave_arrears'
   ));
+
+-- Slice 5.7c (money review M1): leave arrears are recovered after tax, as a deduction line.
+alter table public.payslip_lines drop constraint if exists payslip_lines_kind_matches;
+alter table public.payslip_lines
+  add constraint payslip_lines_kind_matches check (
+    case
+      when code in ('paye', 'pension_employee', 'nhf') then kind = 'statutory'
+      when code in ('deduction', 'carried_deduction', 'leave_arrears') then kind = 'deduction'
+      when code in ('pension_employer', 'nsitf', 'itf') then kind = 'employer'
+      else kind = 'earning'
+    end
+  );
+
+-- Money review H1: one row per source and days per payslip (one leave request can back this
+-- period's leave and an earlier period's arrears). The exclusion constraint across standing
+-- payslips is unchanged.
+alter table public.payslip_sources drop constraint if exists payslip_sources_once_per_payslip;
+alter table public.payslip_sources
+  add constraint payslip_sources_once_per_payslip
+    unique (payslip_id, source_kind, source_id, from_date, to_date);
 
 -- The refund's source: the cancelled leave request and the exact days the deduction covered. The
 -- 5.2 exclusion constraint (organisation, kind, id, days, while standing) keeps it paid once.
@@ -608,8 +628,10 @@ begin
       and r.stands
       and r.run_id <> old.run_id
       and daterange(r.from_date, r.to_date, '[]') && daterange(old.from_date, old.to_date, '[]')
+      -- A draft's refund is worked out again (and refused) at its next calculation.
+      and private.payroll_run_status(r.organisation_id, r.run_id) <> 'draft'
   ) then
-    raise exception 'A later run refunded leave this run deducted, so this run can''t be reversed. Correct it in the next run.'
+    raise exception 'A later run refunded leave this run deducted. Reverse the later run first, or correct it in the next run.'
       using errcode = 'MLAR1';
   end if;
   return new;
@@ -928,6 +950,7 @@ begin
             where o.organisation_id = p_organisation_id and o.source_kind = 'leave_request'
               and o.source_id = v_src_id and o.worker_id = v_worker and o.stands
               and o.run_id <> p_run_id and orun.status in ('approved', 'released')
+              and orun.kind = 'regular'
               and o.from_date = v_from and o.to_date = v_to
           )
           else false
@@ -945,16 +968,13 @@ begin
             raise exception 'A payslip line doesn''t pay its adjustment''s amount.' using errcode = 'MLPR6';
           end if;
         end if;
-        v_key := v_src_kind || ':' || v_src_id::text;
+        -- Slice 5.7c (money review H1): keyed by kind, id and days, so one leave request can back
+        -- this period's leave and an earlier period's arrears on one payslip.
+        v_key := v_src_kind || ':' || v_src_id::text || ':' || v_from::text || ':' || v_to::text;
         if v_src_kind = 'adjustment' and v_sources ? v_key then
           raise exception 'An adjustment is paid on two lines.' using errcode = 'MLPR6';
         end if;
         if v_sources ? v_key then
-          if (v_sources -> v_key ->> 'from')::date <> v_from
-            or (v_sources -> v_key ->> 'to')::date <> v_to then
-            raise exception 'A source appears with two different ranges on one payslip.'
-              using errcode = 'MLPR6';
-          end if;
           v_sources := jsonb_set(
             v_sources, array[v_key],
             (v_sources -> v_key)
@@ -978,22 +998,45 @@ begin
     for v_src in select e.value from jsonb_each(v_sources) e loop
       -- Slice 5.7c: a refund is exactly what the deduction took, never more.
       if v_src ->> 'kind' = 'leave_refund' then
-        select coalesce(sum(l.amount_kobo), 0) into v_refund
-        from public.payslip_lines l
-        where l.organisation_id = p_organisation_id and l.payslip_id = v_slip_id
-          and l.position in (select x::integer from jsonb_array_elements_text(v_src -> 'positions') x);
-        select coalesce(sum(ol.amount_kobo), 0) into v_owed
-        from public.payslip_sources o
-        join public.payroll_runs orun
-          on orun.organisation_id = o.organisation_id and orun.id = o.run_id
-        join public.payslip_lines ol
-          on ol.organisation_id = o.organisation_id and ol.payslip_id = o.payslip_id
-            and ol.position = any (o.line_positions) and ol.code = 'leave_deduction'
-        where o.organisation_id = p_organisation_id and o.source_kind = 'leave_request'
-          and o.source_id = (v_src ->> 'id')::uuid and o.worker_id = v_worker and o.stands
-          and o.run_id <> p_run_id and orun.status in ('approved', 'released')
-          and o.from_date = (v_src ->> 'from')::date and o.to_date = (v_src ->> 'to')::date;
-        if v_refund <= 0 or v_refund <> -v_owed then
+        -- Line by line (money review L3): the refund's lines, in order, pay back the posted lines
+        -- in order; a leave deduction's earning line with its own taxable and pensionable flags, an
+        -- after-tax leave arrears line outside tax and pension.
+        with mine as (
+          select l.amount_kobo, l.taxable, l.pensionable,
+            row_number() over (order by l.position) as n
+          from public.payslip_lines l
+          where l.organisation_id = p_organisation_id and l.payslip_id = v_slip_id
+            and l.position in (select x::integer from jsonb_array_elements_text(v_src -> 'positions') x)
+        ),
+        theirs as (
+          select
+            case when ol.code = 'leave_arrears' then ol.amount_kobo else -ol.amount_kobo end as amount_kobo,
+            case when ol.code = 'leave_arrears' then false else ol.taxable end as taxable,
+            case when ol.code = 'leave_arrears' then false else ol.pensionable end as pensionable,
+            row_number() over (order by ol.position) as n
+          from public.payslip_sources o
+          join public.payroll_runs orun
+            on orun.organisation_id = o.organisation_id and orun.id = o.run_id
+          join public.payslip_lines ol
+            on ol.organisation_id = o.organisation_id and ol.payslip_id = o.payslip_id
+              and ol.position = any (o.line_positions)
+              and ol.code in ('leave_deduction', 'leave_arrears')
+          where o.organisation_id = p_organisation_id and o.source_kind = 'leave_request'
+            and o.source_id = (v_src ->> 'id')::uuid and o.worker_id = v_worker and o.stands
+            and o.run_id <> p_run_id and orun.status in ('approved', 'released')
+            and orun.kind = 'regular'
+            and o.from_date = (v_src ->> 'from')::date and o.to_date = (v_src ->> 'to')::date
+            and (case when ol.code = 'leave_arrears' then ol.amount_kobo else -ol.amount_kobo end) > 0
+        )
+        select coalesce((select sum(amount_kobo) from mine), 0),
+               coalesce((select sum(amount_kobo) from theirs), 0)
+        into v_refund, v_owed;
+        if v_refund <= 0 or v_refund <> v_owed or exists (
+          select 1 from mine full join theirs using (n)
+          where mine.n is null or theirs.n is null
+            or mine.amount_kobo <> theirs.amount_kobo
+            or mine.taxable <> theirs.taxable or mine.pensionable <> theirs.pensionable
+        ) then
           raise exception 'A leave refund isn''t what the leave deduction took.' using errcode = 'MLPR6';
         end if;
       end if;
@@ -1191,7 +1234,8 @@ begin
   if p_period_start is null then
     raise exception 'Choose the pay period.' using errcode = '22023';
   end if;
-  if p_worker_ids is null or cardinality(p_worker_ids) > 2000 then
+  -- Null: every worker of the company (the run's check for corrections pending outside it).
+  if p_worker_ids is not null and cardinality(p_worker_ids) > 2000 then
     raise exception 'Name up to 2000 workers.' using errcode = '22023';
   end if;
   if p_run_id is not null and not exists (
@@ -1249,7 +1293,7 @@ begin
     join public.payslips s
       on s.organisation_id = r.organisation_id and s.run_id = r.id and s.worker_id = q.worker_id
     where q.organisation_id = p_organisation_id
-      and q.worker_id = any (p_worker_ids)
+      and (p_worker_ids is null or q.worker_id = any (p_worker_ids))
       and q.status = 'approved'
       and q.start_date < v_start
       and q.end_date >= v_from
@@ -1273,6 +1317,7 @@ begin
         'lines', (
           select jsonb_agg(
             jsonb_build_object(
+              'code', l.code,
               'label', l.label,
               'amount_kobo', l.amount_kobo::text,
               'pensionable', l.pensionable,
@@ -1282,26 +1327,30 @@ begin
           )
           from public.payslip_lines l
           where l.organisation_id = o.organisation_id and l.payslip_id = o.payslip_id
-            and l.position = any (o.line_positions) and l.code = 'leave_deduction'
+            and l.position = any (o.line_positions)
+            and l.code in ('leave_deduction', 'leave_arrears')
         )
       ) as item
     from public.payslip_sources o
     join public.payroll_runs orun
       on orun.organisation_id = o.organisation_id and orun.id = o.run_id
         and orun.status in ('approved', 'released')
-        and orun.kind in ('regular', 'off_cycle')
+        -- Regular runs only: leave an off-cycle payslip paid stays frozen (5.7b's
+        -- leave_requests_freeze_paid, below), so it is never cancelled and refunded.
+        and orun.kind = 'regular'
     join public.leave_requests q
       on q.organisation_id = o.organisation_id and q.id = o.source_id and q.status = 'cancelled'
     where o.organisation_id = p_organisation_id
       and o.source_kind = 'leave_request'
       and o.stands
-      and o.worker_id = any (p_worker_ids)
+      and (p_worker_ids is null or o.worker_id = any (p_worker_ids))
       and (p_run_id is null or o.run_id <> p_run_id)
       and exists (
         select 1 from public.payslip_lines l
         where l.organisation_id = o.organisation_id and l.payslip_id = o.payslip_id
-          and l.position = any (o.line_positions) and l.code = 'leave_deduction'
-          and l.amount_kobo < 0
+          and l.position = any (o.line_positions)
+          and ((l.code = 'leave_deduction' and l.amount_kobo < 0)
+            or (l.code = 'leave_arrears' and l.amount_kobo > 0))
       )
       and not private.payroll_source_paid(
         p_organisation_id, 'leave_refund', q.id, o.from_date, o.to_date, p_run_id
@@ -1344,7 +1393,7 @@ grant execute on function private.payroll_leave_corrections(uuid, date, uuid[], 
 create function public.payroll_leave_corrections(
   p_organisation_id uuid,
   p_period_start date,
-  p_worker_ids uuid[],
+  p_worker_ids uuid[] default null,
   p_run_id uuid default null
 )
 returns jsonb
@@ -1432,6 +1481,31 @@ $$;
 
 revoke all on function public.payroll_instalments_not_carried(uuid) from public, anon;
 grant execute on function public.payroll_instalments_not_carried(uuid) to authenticated;
+
+-- 5.7b's private.payroll_anomaly_severity (migration 20261122190000, its latest version), with one
+-- warning added (money review M4): leave_correction_pending, a worker with leave arrears or a
+-- refund waiting who isn't in this run (left before the period, or paid by a final-pay or
+-- missed-worker run), so payroll settles it knowingly with a correction run.
+create or replace function private.payroll_anomaly_severity(p_code text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when p_code in (
+      'no_pay_rate', 'no_rostered_days', 'no_tax_state', 'calculation_failed',
+      'previous_not_posted'
+    ) then 'blocking'
+    when p_code in (
+      'roster_pattern_unknown', 'leave_pay_missing', 'open_timesheet_days', 'no_show_days',
+      'bank_missing', 'bank_in_hold', 'bank_not_checked', 'bank_unreadable', 'bank_shared',
+      'bank_shared_unchecked', 'first_pay', 'final_pay', 'net_change', 'deduction_cut',
+      'no_pension_details', 'recurring_not_carried', 'on_off_cycle_run',
+      'leave_correction_pending'
+    ) then 'warning'
+  end
+$$;
 
 -- ---------------------------------------------------------------------------
 -- 5. Supplementary payout files (carried from 5.4)
@@ -2132,6 +2206,10 @@ begin
   if v_supplement.status = 'voided' then
     raise exception 'This file was replaced. Download the current one.' using errcode = 'MLAR2';
   end if;
+  if private.payroll_run_status(p_organisation_id, v_supplement.run_id) is distinct from 'released' then
+    raise exception 'This run isn''t released, so its supplementary file doesn''t open.'
+      using errcode = 'MLAR2';
+  end if;
   if v_reason is not null and (
     char_length(v_reason) > 500 or v_reason ~ '[\x01-\x1f\x7f-\x9f<>]'
     or v_reason ~* '(://|www\.)' or regexp_replace(v_reason, '[^0-9]', '', 'g') ~ '[0-9]{10}'
@@ -2474,7 +2552,24 @@ $$;
 
 revoke all on function private.payment_on_voided_remittance(uuid, uuid) from public, anon, authenticated;
 
--- What a remittance still owes before any payment: its amount less offsets set against it.
+-- A remittance 5.7a voided.
+create function private.remittance_is_voided(p_organisation_id uuid, p_remittance_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.statutory_remittance_voids v
+    where v.organisation_id = p_organisation_id and v.remittance_id = p_remittance_id
+  )
+$$;
+
+revoke all on function private.remittance_is_voided(uuid, uuid) from public, anon, authenticated;
+
+-- What a remittance still owes before any payment: its amount less offsets set against it (an
+-- offset whose target was later voided by a reversal doesn't count: money review M3).
 create function private.remittance_offsets_in(p_organisation_id uuid, p_remittance_id uuid)
 returns bigint
 language sql
@@ -2486,6 +2581,7 @@ as $$
   from public.statutory_payment_resolutions s
   where s.organisation_id = p_organisation_id and s.target_remittance_id = p_remittance_id
     and s.kind = 'offset'
+    and not private.remittance_is_voided(s.organisation_id, s.target_remittance_id)
 $$;
 
 revoke all on function private.remittance_offsets_in(uuid, uuid) from public, anon, authenticated;
@@ -2520,9 +2616,12 @@ begin
     raise exception 'Only a payment recorded against a voided remittance is refunded or offset.'
       using errcode = 'MLARC';
   end if;
+  -- An offset whose target a reversal voided resolves nothing any more (money review M3).
   select coalesce(sum(s.amount_kobo), 0) into v_resolved
   from public.statutory_payment_resolutions s
-  where s.organisation_id = new.organisation_id and s.payment_id = new.payment_id;
+  where s.organisation_id = new.organisation_id and s.payment_id = new.payment_id
+    and not (s.kind = 'offset'
+      and private.remittance_is_voided(s.organisation_id, s.target_remittance_id));
   if v_resolved + new.amount_kobo > v_src.paid_kobo then
     raise exception 'That is more than the payment still to resolve.' using errcode = 'MLARD';
   end if;
@@ -2834,6 +2933,9 @@ begin
     raise exception 'This remittance''s payroll run isn''t posted any more, so nothing is recorded against it.'
       using errcode = 'MLSR9';
   end if;
+  -- Slice 5.7c (money review L2): the lock offsets take, so an offset and a payment can't both
+  -- count the same room.
+  perform pg_advisory_xact_lock(hashtextextended('statutory_remittance:' || p_remittance_id::text, 0));
   if p_paid_amount_kobo is null or p_paid_amount_kobo !~ '^[0-9]{1,15}$' then
     raise exception 'Enter the amount paid.' using errcode = 'MLSR3';
   end if;

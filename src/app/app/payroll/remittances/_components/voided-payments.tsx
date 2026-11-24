@@ -75,7 +75,7 @@ export function VoidedPayments({
                   <li key={r.id}>
                     {r.kind === "refund"
                       ? `Refund of ${formatNaira(r.amountKobo)} received ${formatDate(r.receivedOn ?? "")}${r.reference ? ` · ref ${r.reference}` : ""}`
-                      : `Offset of ${formatNaira(r.amountKobo)} against ${p.targets.find((t) => t.remittanceId === r.targetRemittanceId)?.label ?? "a later remittance"}: ${r.note ?? ""}`}{" "}
+                      : `Offset of ${formatNaira(r.amountKobo)} against ${p.targets.find((t) => t.remittanceId === r.targetRemittanceId)?.label ?? "a later remittance"}: ${r.note ?? ""}${r.lapsed ? " (that run was reversed, so this offset no longer counts)" : ""}`}{" "}
                     · {formatDateTime(r.createdAt)}
                   </li>
                 ))}

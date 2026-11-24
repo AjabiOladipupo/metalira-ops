@@ -250,6 +250,7 @@ const leaveRefundSchema = z
     lines: z
       .array(
         z.object({
+          code: z.enum(["leave_deduction", "leave_arrears"]).default("leave_deduction"),
           label: z.string().min(1).max(300),
           amount_kobo: signedKobo,
           pensionable: z.boolean(),
@@ -265,6 +266,7 @@ const leaveRefundSchema = z
     periodStart: r.period_start,
     periodEnd: r.period_end,
     lines: r.lines.map((l) => ({
+      code: l.code,
       label: l.label,
       amountKobo: l.amount_kobo,
       pensionable: l.pensionable,

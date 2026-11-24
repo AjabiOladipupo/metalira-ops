@@ -40,10 +40,16 @@
  *   cycle.
  * - Absence without leave is flagged (no-show and rejected days), never deducted.
  * - Leave arrears (slice 5.7c): unpaid or part-paid leave approved after its period was posted is
- *   deducted now by the same leave rule, on that period's own rostered days (the posted payslip's
- *   base and the worker's shifts then), one set of lines per leave request and period.
+ *   worked out by the same leave rule, on that period's own rostered days (the posted payslip's
+ *   base and the worker's shifts then), and recovered now as an after-tax deduction (RULES_NIGERIA
+ *   open point 5's default for clawbacks: taxable pay and pension of the later month aren't
+ *   reduced; open point 10 asks the adviser). It is cut to fit net pay like any deduction; the
+ *   rest is carried (open question 6). One deduction per leave request and period, its days the
+ *   source; one with no working days left records ₦0 so it isn't looked at again.
  * - Leave refunds (slice 5.7c): leave cancelled after a posted payslip deducted it is paid back
- *   line by line, exactly what each deduction line took (pensionable and taxable as it was).
+ *   line by line, exactly what each line took: a leave deduction's earning lines as they were
+ *   (pensionable and taxable), an after-tax leave arrears line as an earning outside tax and
+ *   pension.
  */
 
 import { addDays } from "@/lib/dates";
@@ -52,6 +58,7 @@ import { formatLeaveRange } from "@/lib/leave/requests";
 import { allocateKobo, formatNaira, roundHalfUp, type Kobo } from "@/lib/money";
 import { formatMinutes, periodEnd } from "@/lib/timesheets/minutes";
 
+import type { DeductionLine } from "./contract";
 import type { EarningCode, EarningLine, PaySourceRef, TraceStep } from "./earning-lines";
 import {
   outsidePattern,
@@ -136,6 +143,8 @@ export type EarningsFlag =
 export interface EarningsResult {
   workerId: string;
   lines: EarningLine[];
+  /** Slice 5.7c: leave arrears, recovered after tax (before the run's adjustments). */
+  deductions?: DeductionLine[];
   trace: TraceStep[];
   flags: EarningsFlag[];
   days: {
@@ -471,6 +480,8 @@ interface LeaveDeductionArgs {
   label: string;
   /** Closes the label after the day count (arrears put it inside brackets). */
   closeLabel?: string;
+  /** At most this many days (arrears: the posted payslip's rostered days). */
+  maxDays?: number;
   step: "leave_deduction" | "leave_arrears";
 }
 
@@ -498,6 +509,16 @@ function leaveDeduction(a: LeaveDeductionArgs): LeaveDeductionResult | null {
     const entry = perRate.get(rate.id) ?? { rate, days: 0 };
     entry.days += 1;
     perRate.set(rate.id, entry);
+  }
+  if (a.maxDays !== undefined) {
+    // Clamp from the latest days back, so the count never passes the base.
+    let excess = [...perRate.values()].reduce((n, e) => n + e.days, 0) - a.maxDays;
+    for (const e of [...perRate.values()].reverse()) {
+      if (excess <= 0) break;
+      const cut = Math.min(e.days, excess);
+      e.days -= cut;
+      excess -= cut;
+    }
   }
   const days = [...perRate.values()].reduce((n, e) => n + e.days, 0);
   if (days === 0 || a.rostered === 0) return null;
@@ -881,6 +902,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
   }
 
   // --- Leave arrears: approved after its period was posted (slice 5.7c) ---------------------
+  const deductions: DeductionLine[] = [];
   for (const leave of worker.leaveArrears ?? []) {
     if (leave.payPercent === null) {
       flags.add("leave_pay_missing");
@@ -895,6 +917,13 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       input.defaultWorkDays,
     ).filter((d) => d.working && d.employed);
     const what = percent === 0 ? "Unpaid leave" : `Leave paid at ${percent}%`;
+    const range = `${what} in ${formatLeaveRange(leave.periodStart, leave.periodEnd, false)}, approved after posting (${formatLeaveRange(leave.from, leave.to, false)}`;
+    const source: PaySourceRef = {
+      kind: "leave_request",
+      id: leave.requestId,
+      from: leave.from,
+      to: leave.to,
+    };
     const out = leaveDeduction({
       requestId: leave.requestId,
       typeCode: leave.typeCode,
@@ -907,14 +936,36 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       rostered: leave.rosteredDays,
       holidays,
       payRates: worker.payRates,
-      label: `${what} in ${formatLeaveRange(leave.periodStart, leave.periodEnd, false)}, approved after posting (${formatLeaveRange(leave.from, leave.to, false)}`,
+      label: range,
       closeLabel: ")",
       step: "leave_arrears",
+      // Never more days than the posted payslip's base (money review L6).
+      maxDays: leave.rosteredDays,
     });
-    if (!out) continue;
-    for (const id of out.rates) usedRates.add(id);
-    lines.push(...out.lines);
-    trace.push(out.trace);
+    if (!out) {
+      // Nothing to deduct (no working days left in the range, or no base): recorded at ₦0 with
+      // its days, so the leave isn't looked at again every run (money review L5).
+      deductions.push({
+        code: "leave_arrears",
+        label: `${range}, no working days to deduct)`,
+        amountKobo: 0n,
+        sources: [source],
+      });
+      continue;
+    }
+    for (const r of out.rates) usedRates.add(r);
+    const total = -out.lines.reduce((n, l) => n + l.amountKobo, 0n);
+    deductions.push({
+      code: "leave_arrears",
+      label: out.trace.label,
+      amountKobo: total,
+      sources: [source],
+    });
+    trace.push({
+      ...out.trace,
+      formula: `${out.trace.formula}; recovered after tax (RULES_NIGERIA open point 5)`,
+      valueKobo: total,
+    });
   }
 
   // --- Leave refunds: cancelled after a posted payslip deducted it (slice 5.7c) -------------
@@ -923,18 +974,20 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     const days = formatLeaveRange(refund.from, refund.to, false);
     let total = 0n;
     for (const line of refund.lines) {
-      // Each deduction line is paid back as it was posted (never more, never less).
-      if (line.amountKobo >= 0n) continue;
-      const component = componentOf(line.label);
-      const amount = -line.amountKobo;
+      // Each line is paid back as it was posted (never more, never less): a leave deduction's
+      // earning line with its bases; an after-tax leave arrears line outside tax and pension.
+      const afterTax = line.code === "leave_arrears";
+      const amount = afterTax ? line.amountKobo : -line.amountKobo;
+      if (amount <= 0n) continue;
+      const component = afterTax ? null : componentOf(line.label);
       total += amount;
       lines.push({
         code: "leave_refund",
-        label: `Leave refund in ${range}, cancelled after posting (${days})${component ? `, ${component.label.toLowerCase()}` : ""}`,
+        label: `Leave refund in ${range}, cancelled after posting (${days})${component ? `, ${component.label.toLowerCase()}` : afterTax ? ", taken after tax" : ""}`,
         amountKobo: amount,
-        pensionable: line.pensionable,
+        pensionable: afterTax ? false : line.pensionable,
         nhfBase: component?.nhfBase ?? false,
-        taxable: line.taxable,
+        taxable: afterTax ? false : line.taxable,
         sources: [{ kind: "leave_refund", id: refund.requestId, from: refund.from, to: refund.to }],
       });
     }
@@ -943,7 +996,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       step: "leave_refund",
       label: `Leave refund in ${range}, cancelled after posting (${days})`,
       formula: "what the posted payslip's leave deduction took, line by line",
-      inputs: { lines: refund.lines.length, deducted_kobo: (-total).toString() },
+      inputs: { lines: refund.lines.length, refunded_kobo: total.toString() },
       valueKobo: total,
       ruleRef: "earnings.leave_refund",
     });
@@ -959,6 +1012,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
   return {
     workerId: worker.workerId,
     lines,
+    deductions,
     trace,
     flags: [...flags].sort(),
     days: {
