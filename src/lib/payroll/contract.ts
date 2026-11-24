@@ -88,6 +88,22 @@ export interface GrossToNetOptions {
   ruleSetId?: string | null;
   /** Steps from the earnings stage, continued by gross to net. */
   priorTrace?: TraceStep[];
+  /**
+   * Month-aggregate PAYE (owner decision, 24 Nov 2026, slice 5.7b): the worker's other standing
+   * payslips with a pay date in the same calendar month. PAYE is worked out on the month's total
+   * taxable pay and this payslip withholds the month's PAYE less what those already withheld,
+   * never below ₦0. Absent for a regular run with no off-cycle payslip in the month.
+   */
+  monthToDate?: MonthToDate;
+}
+
+export interface MonthToDate {
+  /** How many other payslips. */
+  payslips: number;
+  /** Their taxable pay less employee pension and NHF, summed (monthly kobo). */
+  taxableKobo: bigint;
+  /** The PAYE they withheld, summed. */
+  payeKobo: bigint;
 }
 
 export type PayslipLineKind = "earning" | "deduction" | "statutory" | "employer";

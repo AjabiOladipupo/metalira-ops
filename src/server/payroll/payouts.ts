@@ -322,6 +322,7 @@ export function decryptForFile(
   paid: readonly PayoutPlanRow[],
   ciphertext: ReadonlyMap<string, string>,
   periodEnd: string,
+  offCycle = false,
 ): DecryptedItems {
   const out: DecryptedItems = { items: [], mismatched: [], unreadable: [] };
   for (const row of paid) {
@@ -356,7 +357,7 @@ export function decryptForFile(
       bankCode: row.bankCode ?? "",
       bankName: row.bankName ?? "",
       amountKobo: row.netKobo,
-      narration: salaryNarration(periodEnd, row.staffId),
+      narration: salaryNarration(periodEnd, row.staffId, offCycle),
     });
   }
   return out;
@@ -577,7 +578,13 @@ export const makeBankFileSpec: MutationSpec<typeof makeBankFileSchema, MadeBankF
     }
     const summary = summarisePlan(plan.rows);
 
-    const decrypted = decryptForFile(organisationId, summary.paid, plan.ciphertext, run.periodEnd);
+    const decrypted = decryptForFile(
+      organisationId,
+      summary.paid,
+      plan.ciphertext,
+      run.periodEnd,
+      run.kind === "off_cycle",
+    );
     plan.ciphertext.clear();
     if (decrypted.mismatched.length > 0 || decrypted.unreadable.length > 0) {
       decrypted.items.length = 0;

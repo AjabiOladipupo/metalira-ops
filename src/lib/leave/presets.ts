@@ -45,7 +45,8 @@ export interface Preset {
 }
 
 /** On every preset card and wherever a preset figure is shown. Never presented as advice. */
-export const ADVISER_LINE = "These are starting values, not legal advice. Confirm them with an adviser.";
+export const ADVISER_LINE =
+  "These are starting values, not legal advice. Confirm them with an adviser.";
 
 export const PRESETS: readonly Preset[] = [
   {

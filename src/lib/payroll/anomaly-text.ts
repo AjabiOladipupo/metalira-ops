@@ -50,6 +50,13 @@ export function describeAnomaly(
         body: "PAYE goes to the worker's tax state. Add it on their page, then recalculate. This blocks the run.",
       };
     case "calculation_failed":
+      if (detail.deduction_cut === true) {
+        // Slice 5.7b: a correction or one-off run can't carry a deduction to a later run.
+        return {
+          title: `Deduction larger than the payment · ${name}`,
+          body: "On a correction or one-off run, deductions must fit what the run pays: nothing is carried to a later run. Lower or remove the deduction, or take it in the regular run. This blocks the run.",
+        };
+      }
       return {
         title: `Pay can't be worked out · ${name}`,
         body: "A leave deduction or a statutory deduction is larger than their pay. Check their leave and pay rate, then recalculate. This blocks the run.",
@@ -170,6 +177,12 @@ export function describeAnomaly(
       return {
         title: `Recurring item not carried · ${name}`,
         body: `Instalment ${num(detail, "next")} of ${num(detail, "of")} from the period before isn't on this run, because that run wasn't posted when this one was prepared. Use Carry next instalment below if it's due: it continues the same series, so it is never deducted twice.`,
+      };
+    case "on_off_cycle_run":
+      // Slice 5.7b, money review L4.
+      return {
+        title: `On an off-cycle run not yet approved · ${name}`,
+        body: "Left out of this run because a final-pay or missed-worker run for this period pays them, and that run isn't approved yet. Approve it, or discard it and recalculate this run, so they're paid once.",
       };
     default:
       return {

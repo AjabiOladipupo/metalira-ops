@@ -72,6 +72,8 @@ export interface RemittanceRow {
 
 export interface RemittanceRun {
   id: string;
+  /** "regular" or "off_cycle" (slice 5.7b): an off-cycle run has its own remittances. */
+  kind: string;
   periodStart: string;
   periodEnd: string;
   payDate: string;
@@ -135,7 +137,7 @@ export async function loadRemittances(
 ): Promise<RemittanceRun[]> {
   let runQuery = supabase
     .from("payroll_runs")
-    .select("id, period_start, period_end, pay_date, status")
+    .select("id, kind, period_start, period_end, pay_date, status")
     .eq("organisation_id", organisationId)
     // Reversed runs too (slice 5.7a): their remittances show as voided.
     .in("status", ["approved", "released", "reversed"])
@@ -265,6 +267,7 @@ export async function loadRemittances(
   }
   return runs.map((run) => ({
     id: run.id,
+    kind: run.kind,
     periodStart: run.period_start,
     periodEnd: run.period_end,
     payDate: run.pay_date,

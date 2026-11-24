@@ -237,6 +237,7 @@ async function RemittancesPage({
               <div className="flex flex-col gap-0.5">
                 <h2 id={heading} className="m-0 type-h2">
                   {runMonth(run.periodEnd)}
+                  {run.kind === "off_cycle" ? " · off-cycle" : ""}
                 </h2>
                 <p className="m-0 text-sm text-fg-muted">
                   {formatLeaveRange(run.periodStart, run.periodEnd)} · paid{" "}

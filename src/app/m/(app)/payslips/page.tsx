@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { Illustration } from "@/components/illustration";
+import { formatDate } from "@/lib/dates";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { workerMessages } from "@/lib/messages/worker";
 import {
@@ -176,7 +177,15 @@ async function Payslips({
         {payslips.length > 1 ? (
           <MonthSwitcher
             current={view.payslipId}
-            options={payslips.map((p) => ({ id: p.payslipId, month: p.month }))}
+            options={payslips.map((p) => ({
+              id: p.payslipId,
+              // An off-cycle payslip (slice 5.7b) shares its month with the regular one: the pay
+              // date tells them apart.
+              month:
+                payslips.filter((q) => q.month === p.month).length > 1
+                  ? `${p.month}, ${formatDate(p.payDate)}`
+                  : p.month,
+            }))}
           />
         ) : null}
       </TopBar>
