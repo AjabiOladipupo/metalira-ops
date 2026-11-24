@@ -524,18 +524,18 @@ describe("the period lock", () => {
     await expect(
       db.query("update public.timesheet_lines set status = 'pending' where id = $1", [day]),
     ).rejects.toMatchObject({ code: "MLTA5" });
-    // ENABLE ALWAYS: replica mode doesn't skip the freeze either.
-    await db.query("begin");
-    try {
-      await db.query("set local session_replication_role = replica");
-      await expect(
-        db.query("update public.timesheet_lines set status = 'pending' where id = $1", [day]),
-      ).rejects.toMatchObject({ code: "MLTA5" });
-      await expect(
-        db.query("delete from public.timesheet_lines where id = $1", [day]),
-      ).rejects.toMatchObject({ code: "MLTA5" });
-    } finally {
-      await db.query("rollback");
+    // ENABLE ALWAYS: replica mode doesn't skip the freeze either (each in its own transaction).
+    for (const sql of [
+      "update public.timesheet_lines set status = 'pending' where id = $1",
+      "delete from public.timesheet_lines where id = $1",
+    ]) {
+      await db.query("begin");
+      try {
+        await db.query("set local session_replication_role = replica");
+        await expect(db.query(sql, [day]), sql).rejects.toMatchObject({ code: "MLTA5" });
+      } finally {
+        await db.query("rollback");
+      }
     }
     const { data: line } = await admin
       .from("timesheet_lines")
