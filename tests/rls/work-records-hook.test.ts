@@ -36,6 +36,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "what looks wrong on a payroll run (slice 5.2); a flag about the worker, nothing worked or paid",
   payout_items:
     "a payslip's line in a bank file (slice 5.4); each hangs off a payslip, which is the work record",
+  payout_supplement_items:
+    "a left-out payslip's line in a supplementary bank file (slice 5.7c); each hangs off a payslip, which is the work record",
   payslip_sources:
     "what each payslip pays (slice 5.2); each hangs off a payslip, which is the work record",
   shift_assignments:
