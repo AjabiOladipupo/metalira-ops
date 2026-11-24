@@ -681,6 +681,9 @@ function PostedNote({ d }: { d: RunDetail }) {
         never change; timesheet days in {formatLeaveRange(run.periodStart, run.periodEnd)} are
         locked, and days approved from now on are paid in the next run.
       </span>
+      <Link href={`/app/payroll/${run.id}/payslips`} className="text-signal">
+        Payslips and PDFs
+      </Link>
     </p>
   );
 }

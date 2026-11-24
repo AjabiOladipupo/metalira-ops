@@ -1438,3 +1438,137 @@ $$;
 
 revoke all on function public.record_payroll_file_sweep(uuid, text[]) from public, anon, authenticated;
 grant execute on function public.record_payroll_file_sweep(uuid, text[]) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. The bank on a payslip (closes 5.5's TODO(5.4))
+-- ---------------------------------------------------------------------------
+
+-- 5.5's private.payslip_view (migration 20261122150000), unchanged but for the bank: before a
+-- payslip is frozen (its first PDF, payslip_snapshots), it shows the bank name and last 4 digits
+-- the released run's bank file paid (payout_items of the active batch), and the worker record
+-- only when no item paid it (left out, or the run not released). payslip_take_snapshot freezes
+-- what this view says, so the snapshot takes the payout item's bank too.
+create or replace function private.payslip_view(p_organisation_id uuid, p_payslip_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object(
+    'payslip_id', s.id,
+    'run_id', s.run_id,
+    'worker_id', s.worker_id,
+    'run_status', r.status,
+    'period_start', r.period_start,
+    'period_end', r.period_end,
+    'pay_date', r.pay_date,
+    'currency', s.currency,
+    'gross_kobo', s.gross_kobo::text,
+    'paye_kobo', s.paye_kobo::text,
+    'pension_employee_kobo', s.pension_employee_kobo::text,
+    'pension_employer_kobo', s.pension_employer_kobo::text,
+    'nhf_kobo', s.nhf_kobo::text,
+    'other_deductions_kobo', s.other_deductions_kobo::text,
+    'net_kobo', s.net_kobo::text,
+    'carried_forward_kobo', s.carried_forward_kobo::text,
+    'nsitf_kobo', s.nsitf_kobo::text,
+    'itf_kobo', s.itf_kobo::text,
+    'employment_type', s.employment_type,
+    'tax_state', s.tax_state,
+    'pfa_name', s.pfa_name,
+    'rule_set_name', t.name,
+    'organisation', jsonb_build_object(
+      'name', o.name, 'legal_name', o.legal_name, 'address', o.address, 'logo_path', o.logo_path
+    ),
+    'worker', jsonb_build_object(
+      'first_name', w.first_name,
+      'last_name', w.last_name,
+      'staff_id', w.staff_id,
+      'job_title', w.job_title,
+      -- Frozen with the payslip's first PDF (payslip_snapshots); until then the bank the released
+      -- run's bank file paid (slice 5.4's payout item), else the worker record.
+      'bank_name', case when sp.payslip_id is null then coalesce(pi.bank_name, w.bank_name)
+        else sp.bank_name end,
+      'bank_account_last4', case when sp.payslip_id is null
+        then coalesce(pi.bank_account_last4, w.bank_account_last4)
+        else sp.bank_account_last4 end,
+      'rsa_pin_last4', case when sp.payslip_id is null then w.rsa_pin_last4 else sp.rsa_pin_last4 end
+    ),
+    'annual_rent_kobo', (
+      select st -> 'inputs' ->> 'annual_rent_kobo'
+      from jsonb_array_elements(
+        case when jsonb_typeof(s.trace -> 'steps') = 'array' then s.trace -> 'steps' else '[]'::jsonb end
+      ) st
+      where st ->> 'step' = 'rent_relief'
+      limit 1
+    ),
+    'lines', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'position', l.position, 'code', l.code, 'kind', l.kind, 'label', l.label,
+          'amount_kobo', l.amount_kobo::text
+        )
+        order by l.position
+      )
+      from public.payslip_lines l
+      where l.organisation_id = s.organisation_id and l.payslip_id = s.id
+    ), '[]'::jsonb),
+    -- Year to date (decision "Year to date"): this worker's payslips of RELEASED runs in the
+    -- calendar year of this one's pay date, up to and including this one in the order
+    -- my_payslips lists them (pay date, then approval time, then id). Only released runs, so an
+    -- approved run not released yet never shows through a released payslip's figures. Frozen with
+    -- the payslip's first PDF (payslip_snapshots), so a run released later never changes it.
+    'year_to_date', case when sp.payslip_id is not null then jsonb_build_object(
+        'year', sp.ytd_year,
+        'payslips', sp.ytd_payslips,
+        'gross_kobo', sp.ytd_gross_kobo::text,
+        'paye_kobo', sp.ytd_paye_kobo::text,
+        'pension_employee_kobo', sp.ytd_pension_employee_kobo::text,
+        'nhf_kobo', sp.ytd_nhf_kobo::text,
+        'net_kobo', sp.ytd_net_kobo::text
+      ) else (
+      select jsonb_build_object(
+        'year', extract(year from r.pay_date)::integer,
+        'payslips', count(*)::integer,
+        'gross_kobo', coalesce(sum(y.gross_kobo), 0)::bigint::text,
+        'paye_kobo', coalesce(sum(y.paye_kobo), 0)::bigint::text,
+        'pension_employee_kobo', coalesce(sum(y.pension_employee_kobo), 0)::bigint::text,
+        'nhf_kobo', coalesce(sum(y.nhf_kobo), 0)::bigint::text,
+        'net_kobo', coalesce(sum(y.net_kobo), 0)::bigint::text
+      )
+      from public.payslips y
+      join public.payroll_runs yr on yr.organisation_id = y.organisation_id and yr.id = y.run_id
+      where y.organisation_id = s.organisation_id
+        and y.worker_id = s.worker_id
+        and (y.id = s.id or yr.status = 'released')
+        and yr.pay_date >= make_date(extract(year from r.pay_date)::integer, 1, 1)
+        and (y.id = s.id or (yr.pay_date, yr.approved_at, y.id) <= (r.pay_date, r.approved_at, s.id))
+    ) end,
+    'snapshot_at', sp.taken_at,
+    'document', (
+      select jsonb_build_object('id', d.id, 'made_at', d.made_at)
+      from public.payslip_documents d
+      where d.organisation_id = s.organisation_id and d.payslip_id = s.id
+      order by d.made_at desc, d.id desc
+      limit 1
+    )
+  )
+  from public.payslips s
+  join public.payroll_runs r on r.organisation_id = s.organisation_id and r.id = s.run_id
+  join public.workers w on w.organisation_id = s.organisation_id and w.id = s.worker_id
+  join public.organisations o on o.id = s.organisation_id
+  left join public.tax_rule_sets t on t.organisation_id = s.organisation_id and t.id = s.rule_set_id
+  left join public.payslip_snapshots sp
+    on sp.organisation_id = s.organisation_id and sp.payslip_id = s.id
+  -- The released run's active bank file paid this payslip (an item left out pays nothing).
+  left join lateral (
+    select i.bank_name, i.bank_account_last4
+    from public.payout_items i
+    join public.payout_batches b on b.organisation_id = i.organisation_id and b.id = i.batch_id
+    where i.organisation_id = s.organisation_id and i.payslip_id = s.id
+      and b.status = 'active' and i.status = 'pending' and r.status = 'released'
+    limit 1
+  ) pi on true
+  where s.organisation_id = p_organisation_id and s.id = p_payslip_id
+$$;

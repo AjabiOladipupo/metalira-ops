@@ -37,7 +37,10 @@ export interface NotifyResult {
 
 const idsSchema = z.object({ organisationId: z.uuid(), workerId: z.uuid() });
 
-/** The worker already has the inbox item for this roster publication (slice 3.3). */
+/**
+ * The worker already has the inbox item for this roster publication (slice 3.3) or this payslip
+ * (slice 5.5).
+ */
 export class AlreadyNotifiedError extends Error {
   override name = "AlreadyNotifiedError";
 }
@@ -48,6 +51,12 @@ export interface NotifyOptions {
    * worker per publication, so a second notice for the same version throws AlreadyNotifiedError.
    */
   rosterPublicationId?: string;
+  /**
+   * The payslip this release notice is for (slice 5.5). The database keeps one item per payslip,
+   * only for a payslip of a released run and only to its worker, so a second notice throws
+   * AlreadyNotifiedError.
+   */
+  payslipId?: string;
 }
 
 export async function notifyWorker(
@@ -60,6 +69,7 @@ export async function notifyWorker(
   const publicationId = options.rosterPublicationId
     ? z.uuid().parse(options.rosterPublicationId)
     : null;
+  const payslipId = options.payslipId ? z.uuid().parse(options.payslipId) : null;
   const data = inboxMessageSchema.parse(message);
   const admin = createAdminSupabase({ channel: "system" });
 
@@ -73,11 +83,15 @@ export async function notifyWorker(
       body: data.body,
       link_path: data.link ?? null,
       ...(publicationId ? { roster_publication_id: publicationId } : {}),
+      ...(payslipId ? { payslip_id: payslipId } : {}),
     })
     .select("id")
     .single();
   if (inserted.error?.code === "23505" && publicationId) {
     throw new AlreadyNotifiedError("This worker was already told about this roster version");
+  }
+  if (inserted.error?.code === "23505" && payslipId) {
+    throw new AlreadyNotifiedError("This worker was already told about this payslip");
   }
   if (inserted.error) {
     throw new Error(`Could not add the inbox item (${inserted.error.code})`);

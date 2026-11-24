@@ -1,10 +1,11 @@
 /**
  * Slice 5.4 accept line, in the browser: the owner prepares and submits October 2026 for two
- * golden workers with bank details on file; Finance approves it, then on the Pay step makes the
- * bank file. A worker whose stored last 4 digits don't match their number is refused by name;
- * once fixed, the file's control totals (count, total, SHA-256) equal the run's net pay and count.
- * Finance downloads it through a 60-second link, the owner (who prepared the run) can't release it,
- * and Finance releases. At 1440px, then 390px with no horizontal scroll.
+ * golden workers with bank details on file, and Finance approves it. On the Pay step the owner
+ * makes the bank file: a worker whose stored last 4 digits don't match their number is refused by
+ * name; once fixed, the control totals (count, total, SHA-256) equal the run's net pay and count.
+ * The owner downloads it through a 60-second link and can't release it; Finance releases, and the
+ * release publishes a payslip PDF and notice per worker (slice 5.5). At 1440px, then 390px with
+ * no horizontal scroll.
  * (Isolation, the bucket, insert-only rows and the SQL rules are in tests/rls/payouts.test.ts; the
  * file's bytes and the log are in tests/unit/payroll/bank-file*.test.ts.)
  */
@@ -169,10 +170,11 @@ test("Finance makes the bank file with control totals, downloads it and releases
   await approval.getByRole("button", { name: "Confirm and approve" }).click();
   await expect(fin.getByTestId("posted-note")).toContainText("Approved", { timeout: 30_000 });
 
-  // The Pay step: the preview, then the last-4 mismatch refused by name.
-  await fin.goto(`${runPath}?step=pay`);
-  await expect(fin.getByRole("heading", { level: 2, name: "Make the bank file" })).toBeVisible();
-  const make = fin.getByRole("form", { name: "Make the bank file" });
+  // The owner (who prepared the run) makes the file on the Pay step: the preview, then the
+  // last-4 mismatch refused by name. (P prepares and makes the file; F approves and releases.)
+  await page.goto(`${runPath}?step=pay`);
+  await expect(page.getByRole("heading", { level: 2, name: "Make the bank file" })).toBeVisible();
+  const make = page.getByRole("form", { name: "Make the bank file" });
   await make.getByRole("button", { name: "Preview the file" }).click();
   await expect(make.getByTestId("run-preview")).toContainText("2 workers, ₦220,310; 0 left out", {
     timeout: 30_000,
@@ -193,23 +195,23 @@ test("Finance makes the bank file with control totals, downloads it and releases
   await make.getByRole("button", { name: "Preview the file" }).click();
   await expect(make.getByTestId("run-preview")).toContainText("2 workers", { timeout: 30_000 });
   await make.getByRole("button", { name: "Make the file" }).click();
-  await expect(fin.getByTestId("bank-file-count")).toHaveText("2", { timeout: 30_000 });
-  await fin.reload();
-  await expect(fin.getByTestId("bank-file-count")).toHaveText("2");
-  await expect(fin.getByTestId("bank-file-total")).toHaveText("₦220,310");
-  await expect(fin.getByTestId("bank-file-sha")).toHaveText(/^[0-9a-f]{64}$/);
-  await expect(fin.getByTestId("bank-file-row")).toHaveCount(2);
-  await expect(fin.getByRole("table", { name: "Workers in the bank file" })).toContainText(
+  await expect(page.getByTestId("bank-file-count")).toHaveText("2", { timeout: 30_000 });
+  await page.reload();
+  await expect(page.getByTestId("bank-file-count")).toHaveText("2");
+  await expect(page.getByTestId("bank-file-total")).toHaveText("₦220,310");
+  await expect(page.getByTestId("bank-file-sha")).toHaveText(/^[0-9a-f]{64}$/);
+  await expect(page.getByTestId("bank-file-row")).toHaveCount(2);
+  await expect(page.getByRole("table", { name: "Workers in the bank file" })).toContainText(
     "•••• 5671",
   );
-  await expect(fin.getByRole("table", { name: "Workers in the bank file" })).not.toContainText(
+  await expect(page.getByRole("table", { name: "Workers in the bank file" })).not.toContainText(
     NUMBERS[1],
   );
 
   // Download: a 60-second link the browser opens at once.
   const [download] = await Promise.all([
-    fin.waitForEvent("download"),
-    fin.getByRole("button", { name: "Download the file" }).click(),
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Download the file" }).click(),
   ]);
   const file = readFileSync((await download.path())!, "utf8");
   expect(
@@ -218,15 +220,17 @@ test("Finance makes the bank file with control totals, downloads it and releases
   expect(file).toContain(`MUSA IBRAHIM,${NUMBERS[0]},058,GTBank,104740.00,Salary Oct 2026 PAY-1-`);
   expect(file).toContain(`IBRAHIM SANI,${NUMBERS[1]},058,GTBank,115570.00,Salary Oct 2026 PAY-2-`);
 
-  // The owner prepared the run, so they can't release it.
-  await page.goto(`${runPath}?step=pay`);
+  // The owner prepared the run and made the file, so they can't release it.
+  await page.reload();
   const ownRelease = page.getByRole("form", { name: "Release the run" });
   await ownRelease.getByRole("button", { name: "I uploaded it to the bank" }).click();
   await expect(ownRelease.getByRole("alert")).toContainText("a different person must release it", {
     timeout: 30_000,
   });
 
-  // Finance releases.
+  // Finance (the approver, who didn't make the file) releases.
+  await fin.goto(`${runPath}?step=pay`);
+  await expect(fin.getByTestId("bank-file-downloaded")).toContainText("downloaded by");
   const release = fin.getByRole("form", { name: "Release the run" });
   await release.getByRole("button", { name: "I uploaded it to the bank" }).click();
   await expect(release.getByTestId("run-preview")).toContainText("Releases October 2026 payroll", {
@@ -237,6 +241,37 @@ test("Finance makes the bank file with control totals, downloads it and releases
   await fin.reload();
   await expect(fin.getByTestId("released-note")).toContainText("by Adaeze Okafor");
   await expect(fin.getByRole("form", { name: "Release the run" })).toHaveCount(0);
+
+  // The release publishes the payslips (slice 5.5): a PDF and a notice per worker.
+  const runId = runPath.split("/").pop()!;
+  await expect
+    .poll(
+      async () => {
+        const docs = await adminClient()
+          .from("payslip_documents")
+          .select("payslip_id", { count: "exact", head: true })
+          .eq("run_id", runId);
+        return docs.count ?? 0;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(2);
+  const { data: slips } = await adminClient().from("payslips").select("id").eq("run_id", runId);
+  await expect
+    .poll(
+      async () => {
+        const notices = await adminClient()
+          .from("inbox_items")
+          .select("id", { count: "exact", head: true })
+          .in(
+            "payslip_id",
+            (slips ?? []).map((p) => p.id),
+          );
+        return notices.count ?? 0;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(2);
   await expect(fin.getByRole("form", { name: "Make a new bank file" })).toHaveCount(0);
 
   // 390px: the Pay step fits with no horizontal scroll.

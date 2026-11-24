@@ -34,7 +34,16 @@ export const tables: TableSpec[] = [
     tenantColumn: "organisation_id",
     tenantValue: (side) => side.orgId,
     seed: async ({ admin, side }) => {
-      const runId = await firstId(admin, "payroll_runs", side.orgId);
+      // The October run zz_payroll_runs.ts submitted (zz_payslip_documents.ts releases its own).
+      const { data: run, error: runError } = await admin
+        .from("payroll_runs")
+        .select("id")
+        .eq("organisation_id", side.orgId)
+        .eq("status", "review")
+        .limit(1)
+        .single();
+      if (runError) throw new Error(`payout_batches: ${runError.message}`);
+      const runId = run.id;
       const { data: slip, error } = await admin
         .from("payslips")
         .select("worker_id")

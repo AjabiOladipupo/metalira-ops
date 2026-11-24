@@ -389,14 +389,14 @@ isOneToOne: false
                   ]
                 },"inbox_items": {
                   Row: {
-                    "body": string,"created_at": string,"emailed_at": string | null,"id": string,"kind": string,"link_path": string | null,"organisation_id": string,"read_at": string | null,"roster_publication_id": string | null,"title": string,"worker_id": string
+                    "body": string,"created_at": string,"emailed_at": string | null,"id": string,"kind": string,"link_path": string | null,"organisation_id": string,"payslip_id": string | null,"read_at": string | null,"roster_publication_id": string | null,"title": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "body": string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind": string,"link_path"?: string | null,"organisation_id": string,"read_at"?: string | null,"roster_publication_id"?: string | null,"title": string,"worker_id": string
+                    "body": string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind": string,"link_path"?: string | null,"organisation_id": string,"payslip_id"?: string | null,"read_at"?: string | null,"roster_publication_id"?: string | null,"title": string,"worker_id": string
                   }
                   Update: {
-                    "body"?: string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind"?: string,"link_path"?: string | null,"organisation_id"?: string,"read_at"?: string | null,"roster_publication_id"?: string | null,"title"?: string,"worker_id"?: string
+                    "body"?: string,"created_at"?: string,"emailed_at"?: string | null,"id"?: string,"kind"?: string,"link_path"?: string | null,"organisation_id"?: string,"payslip_id"?: string | null,"read_at"?: string | null,"roster_publication_id"?: string | null,"title"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -405,6 +405,12 @@ isOneToOne: false
 isOneToOne: false
       referencedRelation: "organisations"
       referencedColumns: ["id"]
+    },{
+      foreignKeyName: "inbox_items_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
     },{
       foreignKeyName: "inbox_items_roster_publication_fkey"
       columns: ["organisation_id","roster_publication_id"]
@@ -957,6 +963,38 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"payslip_documents": {
+                  Row: {
+                    "id": string,"made_at": string,"made_by": string | null,"organisation_id": string,"payslip_id": string,"run_id": string,"sha256": string,"size_bytes": number,"storage_path": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "id"?: string,"made_at"?: string,"made_by"?: string | null,"organisation_id": string,"payslip_id": string,"run_id": string,"sha256": string,"size_bytes": number,"storage_path": string
+                  }
+                  Update: {
+                    "id"?: string,"made_at"?: string,"made_by"?: string | null,"organisation_id"?: string,"payslip_id"?: string,"run_id"?: string,"sha256"?: string,"size_bytes"?: number,"storage_path"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslip_documents_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslip_documents_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payslip_documents_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payslip_lines": {
                   Row: {
                     "amount_kobo": number,"code": string,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"taxable": boolean
@@ -980,6 +1018,38 @@ isOneToOne: false
       columns: ["organisation_id","payslip_id"]
 isOneToOne: false
       referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payslip_snapshots": {
+                  Row: {
+                    "bank_account_last4": string | null,"bank_name": string | null,"currency": string,"organisation_id": string,"payslip_id": string,"rsa_pin_last4": string | null,"run_id": string,"taken_at": string,"ytd_gross_kobo": number,"ytd_net_kobo": number,"ytd_nhf_kobo": number,"ytd_paye_kobo": number,"ytd_payslips": number,"ytd_pension_employee_kobo": number,"ytd_year": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "bank_account_last4"?: string | null,"bank_name"?: string | null,"currency"?: string,"organisation_id": string,"payslip_id": string,"rsa_pin_last4"?: string | null,"run_id": string,"taken_at"?: string,"ytd_gross_kobo": number,"ytd_net_kobo": number,"ytd_nhf_kobo": number,"ytd_paye_kobo": number,"ytd_payslips": number,"ytd_pension_employee_kobo": number,"ytd_year": number
+                  }
+                  Update: {
+                    "bank_account_last4"?: string | null,"bank_name"?: string | null,"currency"?: string,"organisation_id"?: string,"payslip_id"?: string,"rsa_pin_last4"?: string | null,"run_id"?: string,"taken_at"?: string,"ytd_gross_kobo"?: number,"ytd_net_kobo"?: number,"ytd_nhf_kobo"?: number,"ytd_paye_kobo"?: number,"ytd_payslips"?: number,"ytd_pension_employee_kobo"?: number,"ytd_year"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslip_snapshots_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslip_snapshots_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: false
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payslip_snapshots_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
       referencedColumns: ["organisation_id","id"]
     }
                   ]
@@ -2247,6 +2317,9 @@ isOneToOne: false
               "has_line_manager": boolean,"name": string
             }[]
                            },
+"my_payslips":
+{ Args: { "p_organisation_id": string }; Returns: Json
+                           },
 "my_published_shifts":
 { Args: { "p_from": string,"p_to": string }; Returns: {
               "assignment_id": string,"ends_at": string,"organisation_id": string,"post_name": string,"shift_date": string,"site_address": string,"site_landmark": string,"site_name": string,"starts_at": string
@@ -2261,6 +2334,9 @@ isOneToOne: false
 { Args: { "p_from": string,"p_organisation_id": string,"p_to": string }; Returns: {
               "can_dispute": boolean,"early_minutes": number,"ends_at": string,"exceptions": (string)[],"in_recorded_at": string,"last_correction_reason": string,"last_decision": string,"last_decision_reason": string,"late_minutes": number,"line_id": string,"ot_minutes": number,"out_recorded_at": string,"post_name": string,"scheduled_minutes": number,"site_name": string,"starts_at": string,"status": string,"work_date": string,"worked_minutes": number
             }[]
+                           },
+"open_payslip_document":
+{ Args: { "p_organisation_id": string,"p_payslip_id": string }; Returns: Json
                            },
 "org_bank_account_as_of":
 { Args: { "p_at"?: string,"p_organisation_id": string }; Returns: {
@@ -2307,6 +2383,9 @@ isOneToOne: false
 "payroll_run_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
+"payslip_pdf_views":
+{ Args: { "p_organisation_id": string,"p_payslip_ids"?: (string)[],"p_run_id": string }; Returns: Json
+                           },
 "preview_timesheet_correction":
 { Args: { "p_corrected_at"?: string,"p_kind": string,"p_line_id": string,"p_minutes"?: number,"p_organisation_id": string,"p_ot_minutes"?: number,"p_punch_id"?: string,"p_reason": string }; Returns: Json
                            },
@@ -2337,6 +2416,9 @@ isOneToOne: false
                            },
 "record_payroll_approval_check":
 { Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_read_started_at": string,"p_run_id": string }; Returns: Json
+                           },
+"record_payslip_document":
+{ Args: { "p_actor": string,"p_organisation_id": string,"p_payslip_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string
                            },
 "record_payroll_file_sweep":
 { Args: { "p_organisation_id": string,"p_paths": (string)[] }; Returns: string

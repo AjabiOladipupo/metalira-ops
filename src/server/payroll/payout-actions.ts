@@ -121,13 +121,18 @@ export async function releaseRunAction(
   _prev: RunFormState,
   formData: FormData,
 ): Promise<RunFormState> {
-  const organisationId = (await getSession())?.active?.organisationId ?? null;
+  const session = await getSession();
+  const organisationId = session?.active?.organisationId ?? null;
+  const actorId = session?.user.id ?? null;
   return twoStep(
     formData,
     previewReleaseSpec as MutationSpec<z.ZodType, CapabilityPreview>,
     releaseRunSpec as MutationSpec<z.ZodType, { runId: string; decisionId: string }>,
     (r) => {
-      if (organisationId) after(() => onPayrollReleased(organisationId, r.runId));
+      // After the response, once release_payroll_run has committed (it returned): publishes the
+      // payslips (slice 5.5). A retried release returns its decision and runs this again;
+      // publication is idempotent.
+      if (organisationId) after(() => onPayrollReleased(organisationId, r.runId, { actorId }));
       revalidatePath(PAYROLL_PATH);
       revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
       return { ok: true, status: 200, message: "Released. The run is closed." };

@@ -279,3 +279,40 @@ export function release(
     p_file_sha256: sha,
   });
 }
+
+/**
+ * Releases an approved run through the real functions, the two-person way: the owner (who
+ * prepared it) makes and downloads the bank file, `releaser` (the approver) confirms it went to
+ * the bank. Workers without usable bank details get them first (the secret key), keeping any bank
+ * name already on file. Returns the batch.
+ */
+export async function releaseThroughBankFile(
+  admin: Client,
+  owner: TenantUser,
+  runId: string,
+  releaser: TestUser,
+): Promise<{ batchId: string }> {
+  const { data: slips, error } = await admin
+    .from("payslips")
+    .select("worker_id")
+    .eq("organisation_id", owner.orgId)
+    .eq("run_id", runId);
+  if (error) throw new Error(`release: ${error.message}`);
+  for (const { worker_id } of slips ?? []) {
+    const { data: w } = await admin
+      .from("workers")
+      .select("bank_account_enc, bank_name")
+      .eq("id", worker_id)
+      .single();
+    if (!w?.bank_account_enc) {
+      await giveBankDetails(admin, owner.orgId, worker_id, w?.bank_name ? { bank_name: w.bank_name } : {});
+    }
+  }
+  const made = await makeBatch(admin, owner.client, owner.orgId, runId);
+  if (made.error) throw new Error(`release: bank file ${made.error.code} ${made.error.message}`);
+  const got = await download(owner.client, owner.orgId, made.batchId);
+  if (got.error) throw new Error(`release: download ${got.error.code}`);
+  const done = await release(releaser.client, owner.orgId, runId, made.batchId);
+  if (done.error) throw new Error(`release: ${done.error.code} ${done.error.message}`);
+  return { batchId: made.batchId };
+}

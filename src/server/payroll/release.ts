@@ -7,6 +7,7 @@ import { runMonth } from "@/lib/payroll/run-format";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
 
+import { publishPayslips } from "./payslip-documents";
 import {
   approvedRun,
   fromPayoutDbError,
@@ -25,8 +26,9 @@ import {
  * row, audited. The approver may release, so P prepares and makes the file, F approves and
  * releases. Metalira moves no money (rule 6): release records what the company did at its bank.
  *
- * After a release the server calls `onPayrollReleased(organisationId, runId)`, the one hook for
- * what follows. Slice 5.5 adds payslip publication there (PDFs, inbox items, emails).
+ * After a release (and a retry of one) the server calls `onPayrollReleased(organisationId, runId,
+ * { actorId })`, the one hook for what follows: slice 5.5's payslip publication (PDFs, inbox
+ * items, emails).
  */
 
 /**
@@ -123,25 +125,36 @@ export const releaseRunSpec: MutationSpec<
   },
 };
 
-/** One thing that follows a release, given the company and the run. */
-export type ReleaseFollowUp = (organisationId: string, runId: string) => Promise<void>;
+/** One thing that follows a release, given the company, the run and who released it. */
+export type ReleaseFollowUp = (
+  organisationId: string,
+  runId: string,
+  options: { actorId: string | null },
+) => Promise<unknown>;
 
 /**
- * What follows a release, in order. Slice 5.5 adds payslip publication here (make the PDFs, then
- * an inbox item per worker and the "Your payslip is ready" email, inside the caps). Each step must
- * be idempotent: a retry may run it again.
+ * What follows a release, in order. Each step must be idempotent: a retried release (money review
+ * M2) runs them again. Slice 5.5's publication: make every payslip PDF, then an inbox item per
+ * worker and the "Your payslip is ready" email, inside the caps.
  */
-export const RELEASE_FOLLOW_UPS: readonly ReleaseFollowUp[] = [];
+export const RELEASE_FOLLOW_UPS: readonly ReleaseFollowUp[] = [
+  (organisationId, runId, { actorId }) => publishPayslips(organisationId, runId, { actorId }),
+];
 
 /**
- * Runs after a release commits (from the Server Action, in `after()`), once per release: the
- * single hook point for what follows (RELEASE_FOLLOW_UPS). Never throws: a failed step is logged
- * by error name only, the others still run, and the run stays released.
+ * Runs after a release commits (from the Server Action, in `after()`, once the database call
+ * returned), on a first release and on a retry of it: the single hook point for what follows
+ * (RELEASE_FOLLOW_UPS). Never throws: a failed step is logged by error name only, the others
+ * still run, and the run stays released (Finance can finish publishing from the Payslips page).
  */
-export async function onPayrollReleased(organisationId: string, runId: string): Promise<void> {
+export async function onPayrollReleased(
+  organisationId: string,
+  runId: string,
+  options: { actorId: string | null } = { actorId: null },
+): Promise<void> {
   for (const step of RELEASE_FOLLOW_UPS) {
     try {
-      await step(organisationId, runId);
+      await step(organisationId, runId, options);
     } catch (error) {
       console.error(
         "payroll.release_followup_failed:",
