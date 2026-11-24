@@ -771,7 +771,8 @@ describe("the rule set and pay rate guards are ENABLE ALWAYS", () => {
       p_organisation_id: c.owner.orgId,
       p_name: "Far ahead",
       p_rules: current!.rules,
-      p_policy: current!.policy,
+      // A figure changes, or a version equal to the one before is not added at all.
+      p_policy: { ...(current!.policy as Record<string, unknown>), off_day_paid_minutes: 470 },
       p_effective_from: "2099-01-01",
       p_reason: "Replica test",
     });
