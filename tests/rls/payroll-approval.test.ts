@@ -163,7 +163,11 @@ describe("two people approve (rule 10)", () => {
     const owner2 = await createTestUser("pappr-ack-owner2");
     const fin = await createTestUser("pappr-ack-fin");
     await addMember(prepHr, "hr", o.orgId);
-    await addMember(owner2, "owner", o.orgId);
+    // A second owner (the secret key can't add owners; the database owner can).
+    await db.query(
+      "insert into public.memberships (organisation_id, user_id, role) values ($1, $2, 'owner')",
+      [o.orgId, owner2.id],
+    );
     await addMember(fin, "finance", o.orgId);
     // The tenant owner creates and saves; owner2 acknowledges; hr submits.
     const run = await seedPayrollRun(admin, o);

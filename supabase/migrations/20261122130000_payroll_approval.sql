@@ -12,7 +12,7 @@
 --    * approve_payroll_run(org, run): owner or finance, trusted session; never anyone in
 --      private.payroll_run_touchers (the preparer, every recalculator, every submitter, adjustment
 --      creators and anomaly acknowledgers, the owner included) (MLPRE); needs the approver's own
---      check made in the last 10 minutes after the latest submission, with the hash the run was
+--      check made in the last 2 minutes after the latest submission, with the hash the run was
 --      submitted with (MLPRF); re-checks the anomalies (MLPR4) and that the totals are the sums of
 --      the payslips (MLPR6); review -> approved; records the decision; audited.
 -- 2. Posting (rule 5, decision 9): once approved, the run, its payslips, lines, sources,
@@ -297,7 +297,8 @@ $$;
 
 revoke all on function private.timesheet_lines_period_lock() from public, anon, authenticated;
 
-create trigger timesheet_lines_period_lock before update on public.timesheet_lines
+-- Named to sort before 4.2's timesheet_lines_guard, so it fires first and says why.
+create trigger timesheet_lines_freeze_posted before update on public.timesheet_lines
   for each row execute function private.timesheet_lines_period_lock();
 
 -- ---------------------------------------------------------------------------
@@ -876,7 +877,7 @@ begin
     raise exception 'The run needs recalculating. Return it to HR.' using errcode = 'MLPRD';
   end if;
 
-  -- Decision 7: the approver's own server check, after the latest submission, in the last 10
+  -- Decision 7: the approver's own server check, after the latest submission, in the last 2
   -- minutes, must have found the inputs the run was worked out from.
   select c.* into v_check
   from public.payroll_approval_checks c
@@ -884,7 +885,7 @@ begin
     and c.created_at >= v_run.submitted_at
   order by c.created_at desc, c.id desc
   limit 1;
-  if v_check.id is null or v_check.created_at < now() - interval '10 minutes' then
+  if v_check.id is null or v_check.created_at < now() - interval '2 minutes' then
     raise exception 'The run''s inputs must be checked again just before approving. Try again.'
       using errcode = 'MLPRF';
   end if;

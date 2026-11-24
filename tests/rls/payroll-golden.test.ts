@@ -337,7 +337,7 @@ describe("October 2026 through run and approval", () => {
     // A no-shift Saturday is off-day work: 8 hours at ₦120,000 ÷ (20 × 8 h) = ₦750 an hour.
     expect(lines).toHaveLength(1);
     expect(BigInt(lines![0]!.amount_kobo)).toBe(600_000n);
-    expect(lines![0]!.label).toContain("20 Sep to 19 Oct 2026");
+    expect(lines![0]!.label).toContain("Arrears, 20 Sep to 19 Oct, approved after posting");
     const { data: sources } = await admin
       .from("payslip_sources")
       .select("source_kind, from_date, to_date, stands")
