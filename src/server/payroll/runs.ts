@@ -740,9 +740,9 @@ export const approveRunSpec: MutationSpec<
       p_run_id: run.id,
     });
     if (error) {
-      if (error.code === "MLPRF" && !/checked again/.test(error.message)) {
-        throw new MutationError("invalid", INPUTS_CHANGED_MESSAGE);
-      }
+      // MLPRF says which: the inputs changed since HR worked the run out ("return it to HR"), or
+      // something changed while this approval ran ("try again").
+      if (error.code === "MLPRF") throw new MutationError("invalid", error.message);
       fromPayrollRunDbError(error);
     }
     return { runId: run.id, decisionId: decisionId! };

@@ -692,6 +692,7 @@ describe("recurring items (money review M-new-1)", () => {
           p_run_id: sep.data!,
           p_actor: finance.id,
           p_inputs_sha256: SHA,
+          p_read_started_at: (await admin.rpc("payroll_clock")).data!,
         })
       ).error,
     ).toBeNull();

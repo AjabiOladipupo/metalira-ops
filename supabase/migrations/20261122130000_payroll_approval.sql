@@ -93,6 +93,9 @@ create table public.payroll_approval_checks (
     constraint payroll_approval_checks_sha_format check (inputs_sha256 ~ '^[0-9a-f]{64}$'),
   -- Whether it equals the hash the run was worked out (and submitted) with.
   matches boolean not null,
+  -- The database's clock just before the server began reading the inputs (payroll_clock()):
+  -- anything written after it may be missing from the hash, so approval compares against it.
+  read_started_at timestamptz not null,
   created_at timestamptz not null default now(),
   constraint payroll_approval_checks_organisation_id_id_key unique (organisation_id, id),
   constraint payroll_approval_checks_run_fkey foreign key (organisation_id, run_id)
@@ -275,10 +278,12 @@ $$;
 
 revoke all on function private.timesheet_period_posted(uuid, date) from public, anon, authenticated;
 
--- BEFORE UPDATE OR DELETE on timesheet_lines: an approved or rejected day in a posted period
--- keeps its status, date and worker and is never deleted, for every role, the secret key and the database owner (reopen and dispute refuse first
--- with the same code). A pending day there may still be approved or rejected: an approval is paid
--- in the next run as arrears (decision 10).
+-- BEFORE INSERT, UPDATE OR DELETE on timesheet_lines (security review L1): an approved or rejected
+-- day in a posted period never changes (except its timestamps and 4.2's one allowance, adding the
+-- late_punch_after_decision exception) and is never deleted, and no approved or rejected day is
+-- written into a posted period. For every role, the secret key and the database owner (reopen
+-- and dispute refuse first with the same code). A pending day there may still be approved or
+-- rejected: an approval is paid in the next run as arrears (decision 10).
 create function private.timesheet_lines_period_lock()
 returns trigger
 language plpgsql
@@ -286,11 +291,28 @@ security definer
 set search_path = ''
 as $$
 begin
+  if tg_op = 'INSERT' then
+    if new.status in ('approved', 'rejected')
+      and private.timesheet_period_posted(new.organisation_id, new.work_date) then
+      raise exception 'Payroll for this period is posted. A decided day can''t be added to it.'
+        using errcode = 'MLTA5';
+    end if;
+    return new;
+  end if;
   if old.status in ('approved', 'rejected')
-    and (tg_op = 'DELETE' or new.status is distinct from old.status
-      or new.work_date is distinct from old.work_date
-      or new.worker_id is distinct from old.worker_id)
-    and private.timesheet_period_posted(old.organisation_id, old.work_date) then
+    and private.timesheet_period_posted(old.organisation_id, old.work_date)
+    and (
+      tg_op = 'DELETE'
+      or (to_jsonb(new) - 'updated_at' - 'decided_at' - 'exceptions')
+        is distinct from (to_jsonb(old) - 'updated_at' - 'decided_at' - 'exceptions')
+      or (
+        new.exceptions is distinct from old.exceptions
+        and not (
+          new.exceptions @> old.exceptions
+          and new.exceptions <@ (old.exceptions || 'late_punch_after_decision'::text)
+        )
+      )
+    ) then
     raise exception 'Payroll for this period is posted. This day can''t be reopened.'
       using errcode = 'MLTA5';
   end if;
@@ -304,7 +326,7 @@ $$;
 revoke all on function private.timesheet_lines_period_lock() from public, anon, authenticated;
 
 -- Named to sort before 4.2's timesheet_lines_guard, so it fires first and says why.
-create trigger timesheet_lines_freeze_posted before update or delete on public.timesheet_lines
+create trigger timesheet_lines_freeze_posted before insert or update or delete on public.timesheet_lines
   for each row execute function private.timesheet_lines_period_lock();
 -- Fires whatever session_replication_role says (the database owner can't skip it). 4.2's
 -- timesheet_lines_guard stays an ordinary trigger: test and seed tooling inserts decided days with
@@ -556,8 +578,10 @@ grant execute on function public.pay_rate_earliest_start(uuid) to authenticated;
 -- * money review M2: once payroll has posted, a version starting after the posted period that no
 --   posted payslip used may have its amounts corrected or be cancelled (if it is the latest),
 --   even in force, so a backdated typo can be fixed;
--- * a version that ended before today stays frozen as before (security review L2), except the
---   one ending on the last posted day, which reopens when the version after it is cancelled.
+-- * a version that ended before today stays frozen as before (security review L2), except that
+--   it may be reopened (its end moved later, as pay_rates_reopen_previous does when the version
+--   after it is cancelled) when it ends on the last posted day, or after it and no posted payslip
+--   used it.
 create or replace function private.pay_rates_guard()
 returns trigger
 language plpgsql
@@ -667,7 +691,17 @@ begin
     end if;
     if new.effective_to is distinct from old.effective_to then
       if old.effective_to is not null and old.effective_to < v_today
-        and not (v_posted is not null and old.effective_to = v_posted) then
+        and not (
+          v_posted is not null
+          and (new.effective_to is null or new.effective_to > old.effective_to)
+          and (
+            old.effective_to = v_posted
+            or (
+              old.effective_to > v_posted
+              and not private.pay_rate_in_posted_payslip(old.organisation_id, old.id)
+            )
+          )
+        ) then
         raise exception 'This pay rate has ended and can''t be changed.' using errcode = 'MLPR1';
       end if;
       if new.effective_to is not null and new.effective_to < v_floor - 1 then
@@ -781,15 +815,32 @@ $$;
 -- 6. Functions: the server's input check and the approval
 -- ---------------------------------------------------------------------------
 
+-- The database's clock, read by the server just before it gathers a run's inputs for approval
+-- (security and money review M1). The secret key only.
+create function public.payroll_clock()
+returns timestamptz
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select clock_timestamp()
+$$;
+
+revoke all on function public.payroll_clock() from public, anon, authenticated;
+grant execute on function public.payroll_clock() to service_role;
+
 -- Records the server's re-gathering of a submitted run's inputs (decision 7). The secret key only
 -- (no signed-in user): the server read the inputs as the approver, hashed them with the engine's
 -- canonical form and names that approver, who must be an owner or finance member of the company.
--- Returns {check_id, matches}.
+-- p_read_started_at is payroll_clock() read just before the inputs were: not in the future, at
+-- most 2 minutes ago. Returns {check_id, matches}.
 create function private.record_payroll_approval_check(
   p_organisation_id uuid,
   p_run_id uuid,
   p_actor uuid,
-  p_inputs_sha256 text
+  p_inputs_sha256 text,
+  p_read_started_at timestamptz
 )
 returns jsonb
 language plpgsql
@@ -811,6 +862,11 @@ begin
   if p_inputs_sha256 is null or p_inputs_sha256 !~ '^[0-9a-f]{64}$' then
     raise exception 'The inputs hash isn''t a SHA-256.' using errcode = '22023';
   end if;
+  if p_read_started_at is null or p_read_started_at > clock_timestamp()
+    or p_read_started_at < clock_timestamp() - interval '2 minutes' then
+    raise exception 'Say when the read began, from the database''s clock, in the last 2 minutes.'
+      using errcode = '22023';
+  end if;
   if not exists (
     select 1 from public.memberships m
     where m.organisation_id = p_organisation_id and m.user_id = p_actor
@@ -830,9 +886,9 @@ begin
   v_matches := v_run.inputs_sha256 is not null and v_run.inputs_sha256 = p_inputs_sha256;
   perform set_config('metalira.audit_channel', 'web', true);
   insert into public.payroll_approval_checks (
-    organisation_id, run_id, actor_id, inputs_sha256, matches
+    organisation_id, run_id, actor_id, inputs_sha256, matches, read_started_at
   )
-  values (p_organisation_id, p_run_id, p_actor, p_inputs_sha256, v_matches)
+  values (p_organisation_id, p_run_id, p_actor, p_inputs_sha256, v_matches, p_read_started_at)
   returning id into v_id;
   insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, before, after)
   values (
@@ -843,15 +899,16 @@ begin
 end;
 $$;
 
-revoke all on function private.record_payroll_approval_check(uuid, uuid, uuid, text)
+revoke all on function private.record_payroll_approval_check(uuid, uuid, uuid, text, timestamptz)
   from public, anon, authenticated;
-grant execute on function private.record_payroll_approval_check(uuid, uuid, uuid, text) to service_role;
+grant execute on function private.record_payroll_approval_check(uuid, uuid, uuid, text, timestamptz) to service_role;
 
 create function public.record_payroll_approval_check(
   p_organisation_id uuid,
   p_run_id uuid,
   p_actor uuid,
-  p_inputs_sha256 text
+  p_inputs_sha256 text,
+  p_read_started_at timestamptz
 )
 returns jsonb
 language sql
@@ -859,12 +916,14 @@ volatile
 security invoker
 set search_path = ''
 as $$
-  select private.record_payroll_approval_check(p_organisation_id, p_run_id, p_actor, p_inputs_sha256)
+  select private.record_payroll_approval_check(
+    p_organisation_id, p_run_id, p_actor, p_inputs_sha256, p_read_started_at
+  )
 $$;
 
-revoke all on function public.record_payroll_approval_check(uuid, uuid, uuid, text)
+revoke all on function public.record_payroll_approval_check(uuid, uuid, uuid, text, timestamptz)
   from public, anon, authenticated;
-grant execute on function public.record_payroll_approval_check(uuid, uuid, uuid, text) to service_role;
+grant execute on function public.record_payroll_approval_check(uuid, uuid, uuid, text, timestamptz) to service_role;
 
 -- Approves a submitted run (owner or finance, trusted session), posting it: its payslips become
 -- final and its pay period is locked. Refused (MLPRE) to anyone who prepared or changed the run,
@@ -887,6 +946,7 @@ declare
   v_acked integer;
   v_totals record;
   v_id uuid;
+  v_worker uuid;
 begin
   v_run := private.payroll_lock_run(p_organisation_id, p_run_id);
   if v_run.status <> 'review' then
@@ -900,15 +960,15 @@ begin
     raise exception 'The run needs recalculating. Return it to HR.' using errcode = 'MLPRD';
   end if;
 
-  -- Decision 7: the approver's own server check, after the latest submission, in the last 2
-  -- minutes, must have found the inputs the run was worked out from.
+  -- Decision 7: the approver's own server check, after the latest submission, read in the last
+  -- 2 minutes, must have found the inputs the run was worked out from.
   select c.* into v_check
   from public.payroll_approval_checks c
   where c.organisation_id = p_organisation_id and c.run_id = p_run_id and c.actor_id = v_uid
     and c.created_at >= v_run.submitted_at
   order by c.created_at desc, c.id desc
   limit 1;
-  if v_check.id is null or v_check.created_at < now() - interval '2 minutes' then
+  if v_check.id is null or v_check.read_started_at < now() - interval '2 minutes' then
     raise exception 'The run''s inputs must be checked again just before approving. Try again.'
       using errcode = 'MLPRF';
   end if;
@@ -917,10 +977,25 @@ begin
       using errcode = 'MLPRF';
   end if;
 
-  -- Money review M1: the check and this approval are separate transactions, so hold what the run
-  -- pays still (FOR SHARE: a reopen, dispute or leave cancellation waits for this transaction),
-  -- refuse if a paid source isn't approved any more, and refuse if anything in the run's scope
-  -- was decided or written after the check.
+  -- Money review M1: the server's read and this approval are separate transactions, so hold what
+  -- the run pays still (the workers' leave locks, as 4.4 takes them, in a fixed order; FOR SHARE on
+  -- the paid timesheet days, leave and pay versions, so a reopen, dispute, cancellation or pay
+  -- change waits for this transaction), refuse if a paid source isn't approved or there any more,
+  -- and refuse if anything in the run's scope was written after the read began.
+  for v_worker in
+    select distinct s.worker_id from public.payslips s
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+    order by s.worker_id
+  loop
+    perform pg_advisory_xact_lock(hashtextextended('leave_requests:' || v_worker::text, 0));
+  end loop;
+  perform 1
+  from public.pay_rates r
+  join public.payslip_sources s
+    on s.organisation_id = r.organisation_id and s.source_id = r.id
+  where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+    and s.source_kind = 'pay_rate'
+  for share of r;
   perform 1
   from public.timesheet_lines l
   join public.payslip_sources s
@@ -944,13 +1019,22 @@ begin
     left join public.leave_requests q
       on s.source_kind = 'leave_request' and q.organisation_id = s.organisation_id
         and q.id = s.source_id
+    left join public.pay_rates r
+      on s.source_kind = 'pay_rate' and r.organisation_id = s.organisation_id
+        and r.id = s.source_id
     where s.organisation_id = p_organisation_id and s.run_id = p_run_id
       and (
         (s.source_kind = 'timesheet_line' and l.status is distinct from 'approved')
         or (s.source_kind = 'leave_request' and q.status is distinct from 'approved')
+        or (s.source_kind = 'pay_rate' and (
+          r.id is null or r.worker_id <> s.worker_id
+          or r.effective_from > s.from_date
+          or (r.effective_to is not null and r.effective_to < s.to_date)
+          or greatest(r.created_at, r.updated_at) > v_check.read_started_at
+        ))
       )
   ) then
-    raise exception 'Something this run was worked out from has changed since (a timesheet day, a pay rate, leave or bank details). Return it to HR to recalculate.'
+    raise exception 'Something changed while you were approving. Try again.'
       using errcode = 'MLPRF';
   end if;
   if exists (
@@ -968,7 +1052,7 @@ begin
     where d.organisation_id = p_organisation_id
       and d.worker_id in (select worker_id from scope)
       and l.work_date between v_run.period_start - 400 and v_run.period_end
-      and d.created_at > v_check.created_at
+      and d.created_at > v_check.read_started_at
     union all
     select 1
     from public.leave_decisions d
@@ -976,20 +1060,20 @@ begin
     where d.organisation_id = p_organisation_id
       and d.worker_id in (select worker_id from scope)
       and q.start_date <= v_run.period_end and q.end_date >= v_run.period_start
-      and d.created_at > v_check.created_at
+      and d.created_at > v_check.read_started_at
     union all
     select 1
     from public.pay_rates r
     where r.organisation_id = p_organisation_id
       and r.worker_id in (select worker_id from scope)
-      and greatest(r.created_at, r.updated_at) > v_check.created_at
+      and greatest(r.created_at, r.updated_at) > v_check.read_started_at
     union all
     select 1
     from public.payroll_adjustments a
     where a.organisation_id = p_organisation_id and a.run_id = p_run_id
-      and a.created_at > v_check.created_at
+      and a.created_at > v_check.read_started_at
   ) then
-    raise exception 'Something this run was worked out from has changed since (a timesheet day, a pay rate, leave or bank details). Return it to HR to recalculate.'
+    raise exception 'Something changed while you were approving. Try again.'
       using errcode = 'MLPRF';
   end if;
 
@@ -1092,7 +1176,8 @@ $$;
 revoke all on function private.leave_in_posted_period(uuid, date, date) from public, anon, authenticated;
 
 -- private.decide_leave_line_manager: the latest version, from 4.7b (20261121210000_supervisor_team.sql), copied exactly except one check
--- after the request is loaded: any of its days in a posted pay period refuses the change (MLTA5).
+-- after the request is loaded: approving (or cancelling approved) leave with any day in a posted
+-- pay period is refused (MLTA5).
 create or replace function private.decide_leave_line_manager(
   p_organisation_id uuid,
   p_request_id uuid,
@@ -1144,8 +1229,10 @@ begin
   if v_request.id is null then
     raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
   end if;
-  -- Slice 5.3: leave in a posted pay period is locked until 5.7's corrections.
-  if private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
+  -- Slice 5.3: approving leave in a posted pay period is locked until 5.7's corrections (declining
+  -- pays nothing differently, so it stays open).
+  if p_decision = 'approved'
+    and private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
     raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
       using errcode = 'MLTA5';
   end if;
@@ -1210,7 +1297,8 @@ end;
 $$;
 
 -- private.decide_leave_hr: the latest version, from 4.5 (20261121190000_leave_roster.sql), copied exactly except one check
--- after the request is loaded: any of its days in a posted pay period refuses the change (MLTA5).
+-- after the request is loaded: approving (or cancelling approved) leave with any day in a posted
+-- pay period is refused (MLTA5).
 create or replace function private.decide_leave_hr(
   p_organisation_id uuid,
   p_request_id uuid,
@@ -1272,8 +1360,10 @@ begin
   if v_request.id is null then
     raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
   end if;
-  -- Slice 5.3: leave in a posted pay period is locked until 5.7's corrections.
-  if private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
+  -- Slice 5.3: approving leave in a posted pay period is locked until 5.7's corrections (declining
+  -- pays nothing differently, so it stays open).
+  if p_decision = 'approved'
+    and private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
     raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
       using errcode = 'MLTA5';
   end if;
@@ -1434,7 +1524,8 @@ end;
 $$;
 
 -- private.cancel_leave_request: the latest version, from 4.4 (20261121180000_leave_requests.sql), copied exactly except one check
--- after the request is loaded: any of its days in a posted pay period refuses the change (MLTA5).
+-- after the request is loaded: approving (or cancelling approved) leave with any day in a posted
+-- pay period is refused (MLTA5).
 create or replace function private.cancel_leave_request(
   p_organisation_id uuid,
   p_request_id uuid,
@@ -1482,8 +1573,10 @@ begin
   if v_request.id is null then
     raise exception 'That leave request wasn''t found.' using errcode = 'P0002';
   end if;
-  -- Slice 5.3: leave in a posted pay period is locked until 5.7's corrections.
-  if private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
+  -- Slice 5.3: cancelling APPROVED leave in a posted pay period is locked until 5.7's corrections
+  -- (a request not approved yet paid nothing, so it can still be withdrawn).
+  if v_request.status = 'approved'
+    and private.leave_in_posted_period(p_organisation_id, v_request.start_date, v_request.end_date) then
     raise exception 'Part of this leave is in a posted pay period. Ask payroll to correct it in the next run.'
       using errcode = 'MLTA5';
   end if;

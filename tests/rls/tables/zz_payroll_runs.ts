@@ -166,15 +166,18 @@ export const tables: TableSpec[] = [
       actor_id: randomUUID(),
       inputs_sha256: SHA,
       matches: true,
+      read_started_at: new Date().toISOString(),
     }),
     { matches: false },
     async ({ admin, side }) => {
       const runId = await firstId(admin, "payroll_runs", side.orgId);
+      const clock = await admin.rpc("payroll_clock");
       const { error } = await admin.rpc("record_payroll_approval_check", {
         p_organisation_id: side.orgId,
         p_run_id: runId,
         p_actor: side.id,
         p_inputs_sha256: SHA,
+        p_read_started_at: clock.data!,
       });
       if (error) throw new Error(`payroll_approval_checks: ${error.message}`);
     },

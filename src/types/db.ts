@@ -817,14 +817,14 @@ isOneToOne: false
                   ]
                 },"payroll_approval_checks": {
                   Row: {
-                    "actor_id": string,"created_at": string,"id": string,"inputs_sha256": string,"matches": boolean,"organisation_id": string,"run_id": string
+                    "actor_id": string,"created_at": string,"id": string,"inputs_sha256": string,"matches": boolean,"organisation_id": string,"read_started_at": string,"run_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "actor_id": string,"created_at"?: string,"id"?: string,"inputs_sha256": string,"matches": boolean,"organisation_id": string,"run_id": string
+                    "actor_id": string,"created_at"?: string,"id"?: string,"inputs_sha256": string,"matches": boolean,"organisation_id": string,"read_started_at": string,"run_id": string
                   }
                   Update: {
-                    "actor_id"?: string,"created_at"?: string,"id"?: string,"inputs_sha256"?: string,"matches"?: boolean,"organisation_id"?: string,"run_id"?: string
+                    "actor_id"?: string,"created_at"?: string,"id"?: string,"inputs_sha256"?: string,"matches"?: boolean,"organisation_id"?: string,"read_started_at"?: string,"run_id"?: string
                   }
                   Relationships: [
                     {
@@ -2202,6 +2202,9 @@ isOneToOne: false
 "pay_rate_earliest_start":
 { Args: { "p_organisation_id": string }; Returns: string
                            },
+"payroll_clock":
+{ Args: Record<PropertyKey, never>; Returns: string
+                           },
 "payroll_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
@@ -2242,7 +2245,7 @@ isOneToOne: false
 { Args: { "p_accuracy_m": number,"p_client_batch_id": string,"p_client_event_ids": (string)[],"p_device_time": string,"p_elapsed_ms": number,"p_expected_actor_id": string,"p_expected_organisation_id": string,"p_has_photo": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_sent_device_time": string,"p_site_id": string,"p_worker_ids": (string)[] }; Returns: Json
                            },
 "record_payroll_approval_check":
-{ Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_run_id": string }; Returns: Json
+{ Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_read_started_at": string,"p_run_id": string }; Returns: Json
                            },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json

@@ -69,12 +69,27 @@ async function addMember(user: TestUser, role: Role, orgId: string, workerId?: s
   expect(error).toBeNull();
 }
 
-const check = (orgId: string, runId: string, actor: string, sha = SHA) =>
+/** The database's clock, as the server reads it before gathering a run's inputs. */
+async function clock(): Promise<string> {
+  const { data, error } = await admin.rpc("payroll_clock");
+  expect(error).toBeNull();
+  return data!;
+}
+
+/** The server's check: read began at `readStartedAt` (now, unless given). */
+const check = async (
+  orgId: string,
+  runId: string,
+  actor: string,
+  sha = SHA,
+  readStartedAt?: string,
+) =>
   admin.rpc("record_payroll_approval_check", {
     p_organisation_id: orgId,
     p_run_id: runId,
     p_actor: actor,
     p_inputs_sha256: sha,
+    p_read_started_at: readStartedAt ?? (await clock()),
   });
 
 const approve = (client: Client, orgId: string, runId: string) =>
@@ -260,9 +275,15 @@ describe("approval re-checks the inputs (decision 7)", () => {
         p_run_id: posted.runId,
         p_actor: finance.id,
         p_inputs_sha256: SHA,
+        p_read_started_at: new Date().toISOString(),
       });
       expect(error?.code).toBe(DENIED);
     }
+    // The read's start comes from the database's clock: not in the future, not stale.
+    const future = await check(owner.orgId, posted.runId, finance.id, SHA, "2099-01-01T00:00:00Z");
+    expect(future.error?.code).toBe("22023");
+    const stale = await check(owner.orgId, posted.runId, finance.id, SHA, "2026-01-01T00:00:00Z");
+    expect(stale.error?.code).toBe("22023");
     // Not for a draft, and not for someone outside the company.
     const o = await createTenantUser("pappr-draft", "Payroll Draft Check Org");
     const draft = await seedPayrollRun(admin, o);
@@ -288,6 +309,7 @@ describe("approval re-checks the inputs (decision 7)", () => {
       actor_id: finance.id,
       inputs_sha256: SHA,
       matches: true,
+      read_started_at: new Date().toISOString(),
     });
     expect(ins.error?.code).toBe(DENIED);
   });
@@ -335,6 +357,7 @@ describe("approval holds what the run pays (money review M1)", () => {
     await seedRaw("update public.timesheet_lines set status = 'pending' where id = $1", [day]);
     const refused = await approve(fin.client, o.orgId, runId);
     expect(refused.error?.code).toBe("MLPRF");
+    expect(refused.error?.message).toBe("Something changed while you were approving. Try again.");
     const { data: run } = await admin
       .from("payroll_runs")
       .select("status")
@@ -366,6 +389,26 @@ describe("approval holds what the run pays (money review M1)", () => {
     expect(added.error).toBeNull();
     expect((await approve(fin.client, o.orgId, run.runId)).error?.code).toBe("MLPRF");
     // A fresh check after the change (the server would find the new hash; here the seed's) passes.
+    await approveSeeded(o, run, fin);
+  });
+
+  it("catches a pay-rate edit committed while the server was reading the inputs", async () => {
+    const o = await createTenantUser("pappr-window", "Payroll Read Window Org");
+    const fin = await createTestUser("pappr-window-fin");
+    await addMember(fin, "finance", o.orgId);
+    const run = await seedPayrollRun(admin, o, { submit: true });
+    // The server reads the clock, then the inputs; meanwhile HR corrects the pay version the run
+    // pays, and the read (here: the seed's hash) doesn't see it. The check is recorded after.
+    const readStartedAt = await clock();
+    // A write that changes nothing still moves updated_at.
+    await db.query("update public.pay_rates set effective_to = effective_to where id = $1", [
+      run.payRateId,
+    ]);
+    expect((await check(o.orgId, run.runId, fin.id, SHA, readStartedAt)).error).toBeNull();
+    const refused = await approve(fin.client, o.orgId, run.runId);
+    expect(refused.error?.code).toBe("MLPRF");
+    expect(refused.error?.message).toBe("Something changed while you were approving. Try again.");
+    // Read again from now: nothing changed since, so it approves.
     await approveSeeded(o, run, fin);
   });
 });
@@ -509,7 +552,9 @@ describe("the period lock", () => {
   });
 
   it("makes 4.3's reopen and dispute refuse with MLTA5, and holds for the database owner", async () => {
-    const day = await addLine(owner.orgId, posted.workerId, "2026-10-06");
+    // Seeded pending and then approved: a decided day can't be added to a posted period.
+    const day = await addLine(owner.orgId, posted.workerId, "2026-10-06", "pending");
+    await seedRaw("update public.timesheet_lines set status = 'approved' where id = $1", [day]);
     const reopen = await owner.client.rpc("reopen_timesheet_line", {
       p_organisation_id: owner.orgId,
       p_line_id: day,
@@ -524,10 +569,18 @@ describe("the period lock", () => {
     await expect(
       db.query("update public.timesheet_lines set status = 'pending' where id = $1", [day]),
     ).rejects.toMatchObject({ code: "MLTA5" });
-    // ENABLE ALWAYS: replica mode doesn't skip the freeze either (each in its own transaction).
+    // ENABLE ALWAYS: replica mode doesn't skip the freeze either (each in its own transaction):
+    // no status change, no other field change, no delete, no decided day added to the period.
     for (const sql of [
       "update public.timesheet_lines set status = 'pending' where id = $1",
+      "update public.timesheet_lines set worked_minutes = 600 where id = $1",
+      "update public.timesheet_lines set exceptions = array['no_show'] where id = $1",
       "delete from public.timesheet_lines where id = $1",
+      `insert into public.timesheet_lines (organisation_id, timesheet_id, worker_id, work_date,
+         no_shift_punch_id, worked_minutes, status)
+       select organisation_id, timesheet_id, worker_id, '2026-10-11', gen_random_uuid(), 480,
+              'approved'
+       from public.timesheet_lines where id = $1`,
     ]) {
       await db.query("begin");
       try {
@@ -572,7 +625,14 @@ describe("leave in a posted period (money review H1)", () => {
     );
   });
 
-  it("refuses cancelling approved leave after posting", async () => {
+  it("refuses cancelling approved leave after posting, and lets a request not approved be withdrawn", async () => {
+    const pending = await leave("2026-10-09", "2026-10-09", "pending_hr");
+    const withdrawn = await hr.client.rpc("cancel_leave_request", {
+      p_organisation_id: owner.orgId,
+      p_request_id: pending,
+      p_reason: "Not needed after all",
+    });
+    expect(withdrawn.error).toBeNull();
     const id = await leave("2026-10-12", "2026-10-13", "approved");
     const { error } = await hr.client.rpc("cancel_leave_request", {
       p_organisation_id: owner.orgId,
@@ -585,19 +645,25 @@ describe("leave in a posted period (money review H1)", () => {
     expect(data).toEqual({ status: "approved" });
   });
 
-  it("refuses approving (or declining) leave in a posted period, even partly", async () => {
+  it("refuses approving leave in a posted period, even partly; declining stays open", async () => {
     const id = await leave("2026-10-16", "2026-10-21", "pending_hr");
-    for (const decision of ["approved", "declined"]) {
-      const { error } = await hr.client.rpc("decide_leave_hr", {
-        p_organisation_id: owner.orgId,
-        p_request_id: id,
-        p_decision: decision,
-        p_note: "Checked",
-      });
-      expect(error?.code, decision).toBe("MLTA5");
-    }
+    const approved = await hr.client.rpc("decide_leave_hr", {
+      p_organisation_id: owner.orgId,
+      p_request_id: id,
+      p_decision: "approved",
+      p_note: "Checked",
+    });
+    expect(approved.error?.code).toBe("MLTA5");
+    expect(approved.error?.message).toBe(LOCKED);
     const { data } = await admin.from("leave_requests").select("status").eq("id", id).single();
     expect(data).toEqual({ status: "pending_hr" });
+    const declined = await hr.client.rpc("decide_leave_hr", {
+      p_organisation_id: owner.orgId,
+      p_request_id: id,
+      p_decision: "declined",
+      p_note: "Payroll for these days is posted",
+    });
+    expect(declined.error).toBeNull();
   });
 });
 
@@ -701,6 +767,46 @@ describe("backdated pay rates (Phase 1 decision 17)", () => {
       p_rate: monthly(addDays(OCT_END, 1)),
     });
     expect(again.error).toBeNull();
+  });
+
+  it("reopens an unposted version when the typo after it is cancelled (L4)", async () => {
+    const o = await createTenantUser("pappr-reopen", "Payroll Reopen Rate Org");
+    const run = await seedPayrollRun(admin, o, { submit: true });
+    const fin = await createTestUser("pappr-reopen-fin");
+    await addMember(fin, "finance", o.orgId);
+    await approveSeeded(o, run, fin);
+    // A (posted) to 19 Oct; B from 20 Oct to 19 Nov (paid by nothing posted); C from 20 Nov.
+    for (const [from, basic] of [
+      [addDays(OCT_END, 1), "6500000"],
+      ["2026-11-20", "6600000"],
+    ] as const) {
+      const added = await o.client.rpc("add_pay_rate", {
+        p_organisation_id: o.orgId,
+        p_worker_id: run.workerId,
+        p_rate: monthly(from, basic),
+      });
+      expect(added.error).toBeNull();
+    }
+    const versions = async () =>
+      (
+        await admin
+          .from("pay_rates")
+          .select("id, effective_from, effective_to")
+          .eq("worker_id", run.workerId)
+          .order("effective_from")
+      ).data!;
+    const before = await versions();
+    expect(before.map((r) => r.effective_to)).toEqual([OCT_END, "2026-11-19", null]);
+    // C was the typo: cancelled, and B (ended 19 Nov, after the posted period) runs on again.
+    const cancelled = await o.client.rpc("cancel_pay_rate", {
+      p_organisation_id: o.orgId,
+      p_pay_rate_id: before[2]!.id,
+    });
+    expect(cancelled.error).toBeNull();
+    expect((await versions()).map((r) => [r.effective_from, r.effective_to])).toEqual([
+      ["2025-01-06", OCT_END],
+      [addDays(OCT_END, 1), null],
+    ]);
   });
 
   it("keeps a version that ended before today frozen (security review L2)", async () => {
