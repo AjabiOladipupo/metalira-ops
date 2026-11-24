@@ -74,7 +74,7 @@ async function PayrollRunsPage() {
       {runs.length === 0 ? (
         <EmptyState message="No payroll runs yet. Approve timesheets to prepare the first run." />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-line">
+        <div className="relative overflow-x-auto rounded-xl border border-line">
           <table className="w-full border-collapse text-sm" aria-label="Payroll runs">
             <thead className="bg-surface">
               <tr>

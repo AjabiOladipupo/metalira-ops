@@ -175,7 +175,7 @@ function TimesheetsStep({ d }: StepProps) {
         acknowledged on the Anomalies step and paid next run.
       </p>
       {open.length > 0 ? (
-        <div className="overflow-x-auto rounded-xl border border-line">
+        <div className="relative overflow-x-auto rounded-xl border border-line">
           <table className="w-full border-collapse text-sm" aria-label="Open days by site">
             <thead className="bg-surface">
               <tr>
@@ -228,7 +228,7 @@ function EarningsStep({ d, canPrepare }: StepProps) {
           changes.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-line">
+        <div className="relative overflow-x-auto rounded-xl border border-line">
           <table className="w-full border-collapse text-sm" aria-label="Earnings and changes">
             <thead className="bg-surface">
               <tr>
@@ -439,7 +439,7 @@ function GrossToNetStep({ d, explain }: StepProps & { explain: string | undefine
           {TAX_ADVISER_LINE}
         </p>
       ) : null}
-      <div className="overflow-x-auto rounded-xl border border-line">
+      <div className="relative overflow-x-auto rounded-xl border border-line">
         <table className="w-full border-collapse text-sm" aria-label="Gross to net">
           <thead className="bg-surface">
             <tr>
