@@ -152,13 +152,14 @@ comment on column public.payslips.rsa_pin_enc is
 alter table public.payslip_lines
   add column sign smallint not null default 1
     constraint payslip_lines_sign_value check (sign in (1, -1)),
-  -- Money review L1: a reversal's line names the one line it copies, once.
+  -- Money review L1: a reversal's line names the one line it copies, once per reversal run.
   add column copies_line_id uuid,
   add constraint payslip_lines_copies_fkey foreign key (organisation_id, copies_line_id)
     references public.payslip_lines (organisation_id, id),
   add constraint payslip_lines_sign_copies check ((sign = -1) = (copies_line_id is not null));
 
-create unique index payslip_lines_copies_key on public.payslip_lines (copies_line_id)
+-- One copy of a line per reversal run (a declined reversal's copies stay; a new one copies again).
+create unique index payslip_lines_copies_key on public.payslip_lines (run_id, copies_line_id)
   where copies_line_id is not null;
 
 -- BEFORE INSERT OR DELETE on payslips (ENABLE ALWAYS): a reversal run's payslips are copies of
