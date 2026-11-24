@@ -9,7 +9,7 @@ import { formatNaira, type Kobo } from "@/lib/money";
 import { RUN_STATUS, runMonth } from "@/lib/payroll/run-format";
 import type { ManagerRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { loadRunPayslipDocuments, PAYSLIP_PUBLISHERS } from "@/server/payroll/payslip-documents";
+import { loadRunPayslipDocuments, PAYSLIP_PUBLISHERS } from "@/server/payroll/payslip-reads";
 import { loadRunDetail } from "@/server/payroll/run-data";
 import { peoplePageContext } from "@/server/people/page-context";
 

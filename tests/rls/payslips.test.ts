@@ -109,7 +109,10 @@ beforeAll(async () => {
   await addMember(hr, "hr", owner.orgId);
   await addMember(finance, "finance", owner.orgId);
   await addMember(lineManager, "line_manager", owner.orgId);
-  musa = await addPayrollWorker(admin, owner.orgId, { pfa_name: "Stanbic IBTC Pension" });
+  musa = await addPayrollWorker(admin, owner.orgId, {
+    pfa_name: "Stanbic IBTC Pension",
+    bank_name: "GTBank",
+  });
   grace = await addPayrollWorker(admin, owner.orgId, { first_name: "Grace", last_name: "Edet" });
   await addMember(musaUser, "worker", owner.orgId, musa.workerId);
   await addMember(graceUser, "worker", owner.orgId, grace.workerId);
@@ -324,10 +327,11 @@ describe("payslip documents", () => {
   });
 
   it("keeps documents as written for every role, the database owner included", async () => {
+    // The secret key has no write grant; the database owner meets the guards.
     const upd = await admin.from("payslip_documents").update({ size_bytes: 99 }).eq("id", docId);
-    expect(upd.error?.code).toBe("MLPD1");
+    expect(upd.error?.code).toBe("42501");
     const del = await admin.from("payslip_documents").delete().eq("id", docId);
-    expect(del.error?.code).toBe("MLPD1");
+    expect(del.error?.code).toBe("42501");
     for (const sql of [
       "update public.payslip_documents set size_bytes = 99 where id = $1",
       "delete from public.payslip_documents where id = $1",
@@ -452,5 +456,111 @@ describe("release notices", () => {
     await expect(
       db.query("update public.inbox_items set payslip_id = null where id = $1", [first.data!.id]),
     ).rejects.toMatchObject({ code: "MLIB1" });
+  });
+});
+
+describe("a released payslip is frozen with its first PDF", () => {
+  async function setBankName(name: string) {
+    await db.query("begin");
+    try {
+      await db.query("set local session_replication_role = replica");
+      await db.query("update public.workers set bank_name = $2 where id = $1", [
+        musa.workerId,
+        name,
+      ]);
+      await db.query("commit");
+    } catch (error) {
+      await db.query("rollback");
+      throw error;
+    }
+  }
+
+  it("keeps September's year to date and bank when October (paid earlier) is released and the bank changes", async () => {
+    const sepSlip = await slipOf(sepRun, musa.workerId);
+    // The server freezes the payslip before making its PDF.
+    const views = await admin.rpc("payslip_pdf_views", {
+      p_organisation_id: owner.orgId,
+      p_run_id: sepRun,
+    });
+    expect(views.error).toBeNull();
+    const frozen = (views.data as unknown as View[])[0]!;
+    expect(frozen.year_to_date).toMatchObject({ payslips: 2, gross_kobo: "24000000" });
+    expect(frozen.worker.bank_name).toBe("GTBank");
+    // Signed-in users can't freeze or read the views.
+    expect(
+      (
+        await finance.client.rpc("payslip_pdf_views", {
+          p_organisation_id: owner.orgId,
+          p_run_id: sepRun,
+        })
+      ).error?.code,
+    ).toBe("42501");
+
+    // October, paid 21 Oct (before September's 25 Oct), is released later; the bank changes.
+    await markReleased(db, octRun, finance.id);
+    await setBankName("Zenith Bank");
+
+    const { data } = await mine(musaUser.client);
+    const list = data as unknown as View[];
+    expect(list.map((v) => v.run_id)).toEqual([sepRun, octRun, augRun]);
+    const sep = list.find((v) => v.run_id === sepRun)!;
+    expect(sep.year_to_date).toMatchObject({
+      payslips: 2,
+      gross_kobo: "24000000",
+      net_kobo: "21880000",
+    });
+    expect(sep.worker.bank_name).toBe("GTBank");
+    // October isn't frozen yet: live figures (August and October) and today's bank.
+    const oct = list.find((v) => v.run_id === octRun)!;
+    expect(oct.year_to_date).toMatchObject({ payslips: 2, gross_kobo: "24000000" });
+    expect(oct.worker.bank_name).toBe("Zenith Bank");
+
+    // The snapshot never changes, for anyone.
+    for (const sql of [
+      "update public.payslip_snapshots set ytd_net_kobo = 1 where payslip_id = $1",
+      "delete from public.payslip_snapshots where payslip_id = $1",
+    ]) {
+      await expect(db.query(sql, [sepSlip])).rejects.toMatchObject({ code: "MLPD1" });
+    }
+    await expect(db.query("truncate public.payslip_snapshots")).rejects.toMatchObject({
+      code: "MLPD1",
+    });
+  });
+});
+
+describe("year to date on the same pay date", () => {
+  it("counts a run paid the same day only on the payslip approved after it", async () => {
+    const o = await createTenantUser("pslip-tie-owner", "Payslips Tie Org");
+    const fin = await createTestUser("pslip-tie-fin");
+    const { error } = await admin
+      .from("memberships")
+      .insert({ organisation_id: o.orgId, user_id: fin.id, role: "finance" });
+    expect(error).toBeNull();
+    const w = await addPayrollWorker(admin, o.orgId);
+    const wUser = await createTestUser("pslip-tie-worker");
+    const member = await admin
+      .from("memberships")
+      .insert({
+        organisation_id: o.orgId,
+        user_id: wUser.id,
+        role: "worker",
+        worker_id: w.workerId,
+      });
+    expect(member.error).toBeNull();
+    // September pays 25 Oct; October is set to pay the same day, approved after September.
+    const sep = await submitRunFor(admin, o, w, "2026-09-20");
+    await approveRun(admin, o.orgId, sep, fin);
+    await markReleased(db, sep, fin.id);
+    const oct = await submitRunFor(admin, o, w, "2026-10-20", "2026-10-25");
+    await approveRun(admin, o.orgId, oct, fin);
+    await markReleased(db, oct, fin.id);
+    const { data, error: readError } = await wUser.client.rpc("my_payslips", {
+      p_organisation_id: o.orgId,
+    });
+    expect(readError).toBeNull();
+    const list = data as unknown as View[];
+    expect(list.map((v) => v.run_id)).toEqual([oct, sep]);
+    expect(list[0]!.year_to_date).toMatchObject({ payslips: 2, gross_kobo: "24000000" });
+    expect(list[1]!.year_to_date).toMatchObject({ payslips: 1, gross_kobo: "12000000" });
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Isolation registry for slice 5.5: payslip_documents. Each side gets a June 2026 run for a new
+ * Isolation registry for slice 5.5: payslip_documents and payslip_snapshots. Each side gets a June 2026 run for a new
  * worker, posted through the functions and approved by a Finance member made for the seed, marked
  * released (TODO(5.4): release_payroll_run), with one PDF uploaded and recorded with the secret
  * key. Signed-in roles have no write grant on the table, so every attack is refused.
@@ -44,6 +44,11 @@ export const tables: TableSpec[] = [
       const db = await pgClient();
       try {
         await markReleased(db, runId, finance.id);
+        // The side keeps only its owner as a member (isolation.test.ts checks the memberships).
+        await db.query(
+          "delete from public.memberships where organisation_id = $1 and user_id = $2",
+          [side.orgId, finance.id],
+        );
       } finally {
         await db.end();
       }
@@ -53,6 +58,12 @@ export const tables: TableSpec[] = [
         .eq("run_id", runId)
         .single();
       if (error) throw new Error(`payslip_documents: ${error.message}`);
+      // Freezes the payslip (payslip_snapshots), as the server does before making the PDF.
+      const views = await admin.rpc("payslip_pdf_views", {
+        p_organisation_id: side.orgId,
+        p_run_id: runId,
+      });
+      if (views.error) throw new Error(`payslip_snapshots: ${views.error.message}`);
       await recordDocument(admin, side.orgId, runId, slip.id, finance.id);
     },
     rowOf: ({ admin, side }) => firstId(admin, "payslip_documents", side.orgId),
@@ -69,5 +80,35 @@ export const tables: TableSpec[] = [
       };
     },
     patch: { size_bytes: 2 },
+  },
+  {
+    // Seeded above (payslip_pdf_views freezes the side's released payslip).
+    table: "payslip_snapshots",
+    key: "payslip_id",
+    tenantColumn: "organisation_id",
+    tenantValue: (side) => side.orgId,
+    rowOf: async ({ admin, side }) => {
+      const { data, error } = await (admin as unknown as SupabaseClient)
+        .from("payslip_snapshots")
+        .select("payslip_id")
+        .eq("organisation_id", side.orgId)
+        .limit(1)
+        .single();
+      if (error) throw new Error(`payslip_snapshots: ${error.message}`);
+      return (data as { payslip_id: string }).payslip_id;
+    },
+    attackInsert: ({ victim }) => ({
+      payslip_id: randomUUID(),
+      organisation_id: victim.orgId,
+      run_id: randomUUID(),
+      ytd_year: 2026,
+      ytd_payslips: 1,
+      ytd_gross_kobo: 1,
+      ytd_paye_kobo: 0,
+      ytd_pension_employee_kobo: 0,
+      ytd_nhf_kobo: 0,
+      ytd_net_kobo: 1,
+    }),
+    patch: { ytd_net_kobo: 2 },
   },
 ];

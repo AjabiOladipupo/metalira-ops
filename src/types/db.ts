@@ -951,6 +951,38 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payslip_snapshots": {
+                  Row: {
+                    "bank_account_last4": string | null,"bank_name": string | null,"currency": string,"organisation_id": string,"payslip_id": string,"rsa_pin_last4": string | null,"run_id": string,"taken_at": string,"ytd_gross_kobo": number,"ytd_net_kobo": number,"ytd_nhf_kobo": number,"ytd_paye_kobo": number,"ytd_payslips": number,"ytd_pension_employee_kobo": number,"ytd_year": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "bank_account_last4"?: string | null,"bank_name"?: string | null,"currency"?: string,"organisation_id": string,"payslip_id": string,"rsa_pin_last4"?: string | null,"run_id": string,"taken_at"?: string,"ytd_gross_kobo": number,"ytd_net_kobo": number,"ytd_nhf_kobo": number,"ytd_paye_kobo": number,"ytd_payslips": number,"ytd_pension_employee_kobo": number,"ytd_year": number
+                  }
+                  Update: {
+                    "bank_account_last4"?: string | null,"bank_name"?: string | null,"currency"?: string,"organisation_id"?: string,"payslip_id"?: string,"rsa_pin_last4"?: string | null,"run_id"?: string,"taken_at"?: string,"ytd_gross_kobo"?: number,"ytd_net_kobo"?: number,"ytd_nhf_kobo"?: number,"ytd_paye_kobo"?: number,"ytd_payslips"?: number,"ytd_pension_employee_kobo"?: number,"ytd_year"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payslip_snapshots_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payslip_snapshots_payslip_fkey"
+      columns: ["organisation_id","payslip_id"]
+isOneToOne: true
+      referencedRelation: "payslips"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payslip_snapshots_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payslip_sources": {
                   Row: {
                     "created_at": string,"from_date": string,"id": string,"line_positions": (number)[],"off_day": boolean,"organisation_id": string,"payslip_id": string,"run_id": string,"source_id": string,"source_kind": string,"stands": boolean,"to_date": string,"worker_id": string

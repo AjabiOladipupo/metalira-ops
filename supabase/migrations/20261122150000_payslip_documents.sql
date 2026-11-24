@@ -26,7 +26,9 @@
 --      whether its PDF is made. Drafts, runs in review and approved runs not released yet are
 --      never returned. No manager ids, no TIN, NIN, BVN or full numbers.
 --    * payslip_pdf_views(org, run, payslip_ids): the same view for the server making the PDFs
---      (the secret key only; released runs only).
+--      (the secret key only; released runs only). It first freezes each payslip's year to date,
+--      bank name and last 4 and RSA PIN last 4 in payslip_snapshots (insert-only), which the view
+--      reads from then on, so the screen and every later PDF agree.
 --    * open_payslip_document(org, payslip): yes or no to a download, before the server signs a
 --      60-second URL: the worker their own payslip of a released run; owner, hr and finance any.
 --      Audited (payroll.payslip_downloaded: ids only, never the path or URL).
@@ -147,6 +149,94 @@ create policy payslip_documents_no_delete on public.payslip_documents for delete
 
 revoke all on table public.payslip_documents from anon, authenticated, service_role;
 grant select on table public.payslip_documents to authenticated, service_role;
+
+-- ---------------------------------------------------------------------------
+-- 1b. payslip_snapshots: what a released payslip says, frozen at its first PDF
+-- ---------------------------------------------------------------------------
+
+-- One row per payslip (insert-only), taken when its PDF is first made: the year-to-date figures
+-- and the bank name and last 4 digits and RSA PIN last 4 as they were then, so the screen and
+-- every later PDF say the same thing whatever is released or changed later. Before a snapshot
+-- exists the view works them out live. TODO(5.4): take the bank from the payout item the bank
+-- file paid instead of the worker record.
+create table public.payslip_snapshots (
+  payslip_id uuid primary key,
+  organisation_id uuid not null references public.organisations (id),
+  run_id uuid not null,
+  currency text not null default 'NGN' constraint payslip_snapshots_currency check (currency = 'NGN'),
+  ytd_year integer not null constraint payslip_snapshots_year check (ytd_year between 2000 and 2200),
+  ytd_payslips integer not null constraint payslip_snapshots_count check (ytd_payslips >= 1),
+  ytd_gross_kobo bigint not null constraint payslip_snapshots_gross check (ytd_gross_kobo >= 0),
+  ytd_paye_kobo bigint not null constraint payslip_snapshots_paye check (ytd_paye_kobo >= 0),
+  ytd_pension_employee_kobo bigint not null
+    constraint payslip_snapshots_pension check (ytd_pension_employee_kobo >= 0),
+  ytd_nhf_kobo bigint not null constraint payslip_snapshots_nhf check (ytd_nhf_kobo >= 0),
+  ytd_net_kobo bigint not null constraint payslip_snapshots_net check (ytd_net_kobo >= 0),
+  bank_name text constraint payslip_snapshots_bank_name check (char_length(bank_name) between 1 and 200),
+  bank_account_last4 text constraint payslip_snapshots_bank_last4 check (bank_account_last4 ~ '^[0-9]{4}$'),
+  rsa_pin_last4 text constraint payslip_snapshots_rsa_last4 check (rsa_pin_last4 ~ '^[0-9]{4}$'),
+  taken_at timestamptz not null default now(),
+  constraint payslip_snapshots_organisation_id_payslip_key unique (organisation_id, payslip_id),
+  constraint payslip_snapshots_payslip_fkey foreign key (organisation_id, payslip_id)
+    references public.payslips (organisation_id, id),
+  constraint payslip_snapshots_run_fkey foreign key (organisation_id, run_id)
+    references public.payroll_runs (organisation_id, id)
+);
+
+comment on table public.payslip_snapshots is
+  'A released payslip''s year to date and masked bank and RSA PIN, frozen when its PDF is first made (slice 5.5). Insert-only.';
+
+-- BEFORE INSERT/UPDATE/DELETE: a snapshot is of a payslip of a released run, and never changes.
+create function private.payslip_snapshots_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_run uuid;
+  v_status text;
+begin
+  if tg_op <> 'INSERT' then
+    raise exception 'Payslip snapshots are kept as written.' using errcode = 'MLPD1';
+  end if;
+  select s.run_id, r.status into v_run, v_status
+  from public.payslips s
+  join public.payroll_runs r on r.organisation_id = s.organisation_id and r.id = s.run_id
+  where s.organisation_id = new.organisation_id and s.id = new.payslip_id;
+  if v_run is null or v_run <> new.run_id then
+    raise exception 'That snapshot doesn''t match its payslip.' using errcode = 'MLPD4';
+  end if;
+  if v_status is distinct from 'released' then
+    raise exception 'A payslip is frozen once the run is released.' using errcode = 'MLPD2';
+  end if;
+  new.taken_at := now();
+  return new;
+end;
+$$;
+
+revoke all on function private.payslip_snapshots_guard() from public, anon, authenticated;
+
+create trigger payslip_snapshots_guard before insert or update or delete on public.payslip_snapshots
+  for each row execute function private.payslip_snapshots_guard();
+create trigger payslip_snapshots_no_truncate before truncate on public.payslip_snapshots
+  for each statement execute function private.payslip_documents_no_truncate();
+alter table public.payslip_snapshots enable always trigger payslip_snapshots_guard;
+alter table public.payslip_snapshots enable always trigger payslip_snapshots_no_truncate;
+
+alter table public.payslip_snapshots enable row level security;
+
+create policy payslip_snapshots_select on public.payslip_snapshots for select to authenticated
+  using (organisation_id in (select private.role_org_ids(array['owner', 'hr', 'finance'])));
+create policy payslip_snapshots_no_insert on public.payslip_snapshots for insert to authenticated
+  with check (false);
+create policy payslip_snapshots_no_update on public.payslip_snapshots for update to authenticated
+  using (false) with check (false);
+create policy payslip_snapshots_no_delete on public.payslip_snapshots for delete to authenticated
+  using (false);
+
+revoke all on table public.payslip_snapshots from anon, authenticated, service_role;
+grant select on table public.payslip_snapshots to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2. The private bucket
@@ -291,9 +381,11 @@ as $$
       'last_name', w.last_name,
       'staff_id', w.staff_id,
       'job_title', w.job_title,
-      'bank_name', w.bank_name,
-      'bank_account_last4', w.bank_account_last4,
-      'rsa_pin_last4', w.rsa_pin_last4
+      -- Frozen with the payslip's first PDF (payslip_snapshots); live until then.
+      'bank_name', case when sp.payslip_id is null then w.bank_name else sp.bank_name end,
+      'bank_account_last4',
+        case when sp.payslip_id is null then w.bank_account_last4 else sp.bank_account_last4 end,
+      'rsa_pin_last4', case when sp.payslip_id is null then w.rsa_pin_last4 else sp.rsa_pin_last4 end
     ),
     'annual_rent_kobo', (
       select st -> 'inputs' ->> 'annual_rent_kobo'
@@ -317,8 +409,17 @@ as $$
     -- Year to date (decision "Year to date"): this worker's payslips of RELEASED runs in the
     -- calendar year of this one's pay date, up to and including this one in the order
     -- my_payslips lists them (pay date, then approval time, then id). Only released runs, so an
-    -- approved run not released yet never shows through a released payslip's figures.
-    'year_to_date', (
+    -- approved run not released yet never shows through a released payslip's figures. Frozen with
+    -- the payslip's first PDF (payslip_snapshots), so a run released later never changes it.
+    'year_to_date', case when sp.payslip_id is not null then jsonb_build_object(
+        'year', sp.ytd_year,
+        'payslips', sp.ytd_payslips,
+        'gross_kobo', sp.ytd_gross_kobo::text,
+        'paye_kobo', sp.ytd_paye_kobo::text,
+        'pension_employee_kobo', sp.ytd_pension_employee_kobo::text,
+        'nhf_kobo', sp.ytd_nhf_kobo::text,
+        'net_kobo', sp.ytd_net_kobo::text
+      ) else (
       select jsonb_build_object(
         'year', extract(year from r.pay_date)::integer,
         'payslips', count(*)::integer,
@@ -335,7 +436,8 @@ as $$
         and (y.id = s.id or yr.status = 'released')
         and yr.pay_date >= make_date(extract(year from r.pay_date)::integer, 1, 1)
         and (y.id = s.id or (yr.pay_date, yr.approved_at, y.id) <= (r.pay_date, r.approved_at, s.id))
-    ),
+    ) end,
+    'snapshot_at', sp.taken_at,
     'document', (
       select jsonb_build_object('id', d.id, 'made_at', d.made_at)
       from public.payslip_documents d
@@ -349,6 +451,8 @@ as $$
   join public.workers w on w.organisation_id = s.organisation_id and w.id = s.worker_id
   join public.organisations o on o.id = s.organisation_id
   left join public.tax_rule_sets t on t.organisation_id = s.organisation_id and t.id = s.rule_set_id
+  left join public.payslip_snapshots sp
+    on sp.organisation_id = s.organisation_id and sp.payslip_id = s.id
   where s.organisation_id = p_organisation_id and s.id = p_payslip_id
 $$;
 
@@ -412,8 +516,50 @@ $$;
 revoke all on function public.my_payslips(uuid) from public, anon;
 grant execute on function public.my_payslips(uuid) to authenticated;
 
+-- Freezes a released payslip's year to date and masked bank and RSA PIN, once (the view as it
+-- stands now). No role check: only payslip_pdf_views calls it, before rendering.
+create function private.payslip_take_snapshot(p_organisation_id uuid, p_payslip_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v jsonb := private.payslip_view(p_organisation_id, p_payslip_id);
+begin
+  if v is null then
+    raise exception 'That payslip wasn''t found.' using errcode = 'P0002';
+  end if;
+  if v ->> 'run_status' <> 'released' then
+    raise exception 'A payslip is frozen once the run is released.' using errcode = 'MLPD2';
+  end if;
+  if v ->> 'snapshot_at' is not null then
+    return;
+  end if;
+  insert into public.payslip_snapshots (
+    payslip_id, organisation_id, run_id, ytd_year, ytd_payslips, ytd_gross_kobo, ytd_paye_kobo,
+    ytd_pension_employee_kobo, ytd_nhf_kobo, ytd_net_kobo, bank_name, bank_account_last4,
+    rsa_pin_last4
+  )
+  values (
+    p_payslip_id, p_organisation_id, (v ->> 'run_id')::uuid,
+    (v -> 'year_to_date' ->> 'year')::integer, (v -> 'year_to_date' ->> 'payslips')::integer,
+    (v -> 'year_to_date' ->> 'gross_kobo')::bigint, (v -> 'year_to_date' ->> 'paye_kobo')::bigint,
+    (v -> 'year_to_date' ->> 'pension_employee_kobo')::bigint,
+    (v -> 'year_to_date' ->> 'nhf_kobo')::bigint, (v -> 'year_to_date' ->> 'net_kobo')::bigint,
+    v -> 'worker' ->> 'bank_name', v -> 'worker' ->> 'bank_account_last4',
+    v -> 'worker' ->> 'rsa_pin_last4'
+  )
+  on conflict (payslip_id) do nothing;
+end;
+$$;
+
+revoke all on function private.payslip_take_snapshot(uuid, uuid) from public, anon, authenticated, service_role;
+
 -- The views the server renders PDFs from (the secret key only): payslips of a released run, all
--- of them or the ids given. MLPD2 when the run isn't released.
+-- of them or the ids given, each frozen first (payslip_take_snapshot) so the PDF and the screen
+-- say the same thing from then on. MLPD2 when the run isn't released.
 create function private.payslip_pdf_views(
   p_organisation_id uuid,
   p_run_id uuid,
@@ -421,12 +567,13 @@ create function private.payslip_pdf_views(
 )
 returns jsonb
 language plpgsql
-stable
+volatile
 security definer
 set search_path = ''
 as $$
 declare
   v_status text;
+  v_id uuid;
 begin
   if coalesce(auth.role(), '') <> 'service_role' or auth.uid() is not null then
     raise exception 'Only the server makes payslip PDFs.' using errcode = '42501';
@@ -440,6 +587,14 @@ begin
   if v_status <> 'released' then
     raise exception 'Payslip PDFs are made once the run is released.' using errcode = 'MLPD2';
   end if;
+  for v_id in
+    select s.id from public.payslips s
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+      and (p_payslip_ids is null or s.id = any (p_payslip_ids))
+    order by s.id
+  loop
+    perform private.payslip_take_snapshot(p_organisation_id, v_id);
+  end loop;
   return coalesce((
     select jsonb_agg(private.payslip_view(p_organisation_id, s.id) order by s.id)
     from public.payslips s
@@ -459,7 +614,7 @@ create function public.payslip_pdf_views(
 )
 returns jsonb
 language sql
-stable
+volatile
 security invoker
 set search_path = ''
 as $$

@@ -14,10 +14,11 @@ import {
 } from "@react-pdf/renderer";
 
 import { formatDate } from "@/lib/dates";
-import { maskAccount, maskRsaPin } from "@/lib/mask";
+import { maskAccount } from "@/lib/mask";
 import { formatNaira, type Kobo } from "@/lib/money";
 import {
   lessNaira,
+  pensionLine,
   periodLine,
   rentLine,
   signedNaira,
@@ -178,7 +179,7 @@ export function PayslipDocument({
   options: PayslipPdfOptions;
 }) {
   const bank = maskAccount(view.worker.bankLast4);
-  const pin = maskRsaPin(view.worker.rsaPinLast4);
+  const pension = pensionLine(view);
   const rent = rentLine(view, money);
   const ytd = view.yearToDate;
   return (
@@ -266,16 +267,14 @@ export function PayslipDocument({
 
         <View style={s.columns}>
           <View style={s.column}>
-            <View style={s.box}>
-              <Text style={s.label}>Your employer also paid</Text>
-              <Lines lines={view.employer} sign="plain" />
-              {view.pfaName ? (
-                <Text style={[s.small, { marginTop: 6 }]}>
-                  Your pension goes to {view.pfaName}
-                  {pin ? ` · RSA ${pin}` : ""}.
-                </Text>
-              ) : null}
-            </View>
+            {/* As the screen: the box only when the employer paid something. */}
+            {view.employer.length > 0 ? (
+              <View style={s.box}>
+                <Text style={s.label}>Your employer also paid</Text>
+                <Lines lines={view.employer} sign="plain" />
+                {pension ? <Text style={[s.small, { marginTop: 6 }]}>{pension}</Text> : null}
+              </View>
+            ) : null}
           </View>
           <View style={s.column}>
             <View style={s.section}>

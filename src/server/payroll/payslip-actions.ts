@@ -10,7 +10,8 @@ import { formFields } from "@/server/identity/schemas";
 import { ownContext, runOwnChangeRequest } from "@/server/people/own-requests";
 import type { WorkerActionState } from "@/server/workforce/action-state";
 
-import { loadMyPayslips, payslipDownloadLink, type PayslipLink } from "./payslip-documents";
+import { payslipDownloadLink, type PayslipLink } from "./payslip-documents";
+import { loadMyPayslips } from "./payslip-reads";
 import {
   askHrSchema,
   downloadPayslipSpec,

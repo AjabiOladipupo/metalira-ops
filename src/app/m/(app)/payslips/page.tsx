@@ -16,7 +16,7 @@ import {
 } from "@/lib/payroll/payslip-view";
 import { cn } from "@/lib/utils";
 import { requireWorkerPageSession } from "@/server/identity/worker-session";
-import { loadMyPayslips } from "@/server/payroll/payslip-documents";
+import { loadMyPayslips } from "@/server/payroll/payslip-reads";
 
 import { WorkerTopBar } from "../../_components/worker-top-bar";
 import { AskHrButton, DownloadPdfButton, MonthSwitcher } from "./payslip-controls";
