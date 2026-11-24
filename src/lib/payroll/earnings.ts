@@ -49,7 +49,7 @@
  * - Leave refunds (slice 5.7c): leave cancelled after a posted payslip deducted it is paid back
  *   line by line, exactly what each line took: a leave deduction's earning lines as they were
  *   (pensionable and taxable), an after-tax leave arrears line as an earning outside tax and
- *   pension.
+ *   pension, in full (what it took plus what it carried, so the carried rest nets to ₦0).
  */
 
 import { addDays } from "@/lib/dates";
@@ -977,7 +977,9 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       // Each line is paid back as it was posted (never more, never less): a leave deduction's
       // earning line with its bases; an after-tax leave arrears line outside tax and pension.
       const afterTax = line.code === "leave_arrears";
-      const amount = afterTax ? line.amountKobo : -line.amountKobo;
+      // An after-tax arrears line is refunded in full, what it took plus what it carried, so the
+      // carried rest still collected nets to ₦0 for the cancelled days.
+      const amount = afterTax ? (line.wantedKobo ?? line.amountKobo) : -line.amountKobo;
       if (amount <= 0n) continue;
       const component = afterTax ? null : componentOf(line.label);
       total += amount;

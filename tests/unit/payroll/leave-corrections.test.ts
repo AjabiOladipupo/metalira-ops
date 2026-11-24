@@ -359,6 +359,7 @@ describe("leave cancelled after posting: a refund in the next run", () => {
       periodEnd: OCT.end,
       lines: lines.map((l) => ({
         code: "leave_deduction" as const,
+        wantedKobo: null,
         label: l.label,
         amountKobo: l.amountKobo,
         pensionable: l.pensionable,
@@ -496,5 +497,88 @@ describe("parseLeaveCorrections", () => {
 
   it("refuses a shape it doesn't know", () => {
     expect(() => parseLeaveCorrections({ version: 2, workers: [] })).toThrow();
+  });
+});
+
+describe("partly recovered arrears, then cancelled (net ₦0 for the days)", () => {
+  it("refunds the full amount owed, so the carried rest still collected nets to ₦0", () => {
+    // November: the ₦100,000 arrears (10 working days of September at ₦220,000 ÷ 22) against a
+    // ₦20,000 salary: some is taken, the rest carried.
+    const small = monthly({
+      effectiveFrom: "2026-09-20",
+      basic: 1_000_000n,
+      housing: 600_000n,
+      transport: 400_000n,
+    });
+    const big = monthly({
+      effectiveTo: "2026-09-19",
+      basic: 11_000_000n,
+      housing: 6_600_000n,
+      transport: 4_400_000n,
+    });
+    const slipOf = (earnings: ReturnType<typeof run>, carried: bigint) =>
+      workerPayslip(
+        {
+          employmentType: "daily",
+          earnings,
+          adjustments: [],
+          nhfOptIn: false,
+          annualRentKobo: 0n,
+          carriedDeductionKobo: carried,
+        },
+        NTA_2025_V1,
+        { itfApplies: false, ruleSetId: "test" },
+      );
+    const leave = arrears({ from: "2026-08-31", to: "2026-09-11" });
+    const nov = run(worker({ payRates: [big, small], leaveArrears: [leave] }));
+    const novSlip = slipOf(nov, 0n);
+    const wanted = nov.deductions![0]!.amountKobo;
+    const taken = novSlip.lines.find((l) => l.code === "leave_arrears")!.amountKobo;
+    expect(taken + novSlip.carriedForwardKobo).toBe(wanted);
+    expect(novSlip.carriedForwardKobo > 0n).toBe(true);
+    // The trace keeps the full amount the line wanted (what the database reads for the refund).
+    const step = novSlip.trace.find(
+      (t) => t.step === "leave_arrears" && t.label === `Less ${nov.deductions![0]!.label}`,
+    );
+    expect(step?.inputs.wanted_kobo).toBe(wanted.toString());
+
+    // December: the leave was cancelled. The refund is the full amount; the carried rest is taken.
+    const dec = run(
+      worker({
+        payRates: [big, small],
+        leaveRefunds: [
+          {
+            requestId: leave.requestId,
+            from: leave.from,
+            to: leave.to,
+            periodStart: SEP.start,
+            periodEnd: SEP.end,
+            lines: [
+              {
+                code: "leave_arrears",
+                label: nov.deductions![0]!.label,
+                amountKobo: taken,
+                wantedKobo: wanted,
+                pensionable: false,
+                taxable: false,
+              },
+            ],
+          },
+        ],
+      }),
+      { start: "2026-11-20", end: "2026-12-19" },
+    );
+    const decSlip = slipOf(dec, novSlip.carriedForwardKobo);
+    const refunded = sumKobo(
+      decSlip.lines.filter((l) => l.code === "leave_refund").map((l) => l.amountKobo),
+    );
+    const carriedTaken = sumKobo(
+      decSlip.lines.filter((l) => l.code === "carried_deduction").map((l) => l.amountKobo),
+    );
+    expect(refunded).toBe(wanted);
+    expect(carriedTaken).toBe(novSlip.carriedForwardKobo);
+    // Over the two runs: taken + carried taken − refunded = ₦0 for the cancelled days.
+    expect(taken + carriedTaken - refunded).toBe(0n);
+    expect(decSlip.carriedForwardKobo).toBe(0n);
   });
 });

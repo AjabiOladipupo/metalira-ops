@@ -81,6 +81,8 @@ let emeka: string;
 let leaveA: string;
 let leaveB: string;
 let leaveC: string;
+let femi: string;
+let leaveD: string;
 
 async function addMember(user: TestUser, role: Role) {
   const { error } = await admin
@@ -230,6 +232,10 @@ beforeAll(async () => {
   leaveA = await leave(chika, "2026-10-16", "2026-10-21", "pending_hr");
   leaveB = await leave(dayo, "2026-10-15", "2026-10-21", "pending_hr");
   leaveC = await leave(emeka, "2026-10-16", "2026-10-21", "approved");
+  // (D) Femi Ade's unpaid leave 23 Sep to 19 Oct, approved after October posted: more than
+  // November's net pay, so part is taken and the rest carried; then cancelled.
+  femi = await addWorker("Femi", "Ade");
+  leaveD = await leave(femi, "2026-09-23", "2026-10-19", "pending_hr");
 
   // Bayo's Saturday, still waiting for his manager when October is prepared.
   await asOwnerWithTriggersOff(
@@ -298,6 +304,13 @@ describe("after posting: corrections, not MLTA5", () => {
       p_note: "Form found",
     });
     expect(aa.error).toBeNull();
+    const dd = await hr.client.rpc("decide_leave_hr", {
+      p_organisation_id: owner.orgId,
+      p_request_id: leaveD,
+      p_decision: "approved",
+      p_note: "Form found",
+    });
+    expect(dd.error).toBeNull();
     // Bayo's Saturday is approved too (as the database owner, with its decision), and his pay
     // rises from 20 Oct.
     await asOwnerWithTriggersOff(
@@ -492,6 +505,12 @@ describe("November pays each correction once", () => {
       p_reason: "Came to work after all",
     });
     expect(c.error).toBeNull();
+    const d = await hr.client.rpc("cancel_leave_request", {
+      p_organisation_id: owner.orgId,
+      p_request_id: leaveD,
+      p_reason: "Entered against the wrong worker",
+    });
+    expect(d.error).toBeNull();
     const dec = await runMutation(ctxOf(hr, "hr"), createRunSpec, { periodStart: DEC_START });
     expect(dec.calculated).toBe(true);
     decRun = dec.runId;
@@ -555,5 +574,28 @@ describe("December saves the two-period corrections (money review H1)", () => {
       { from_date: "2026-10-16", to_date: "2026-10-19" },
       { from_date: "2026-10-20", to_date: "2026-10-21" },
     ]);
+  });
+});
+
+describe("partly recovered arrears, then cancelled (coordinator, 24 Nov 2026)", () => {
+  it("(D) nets to ₦0 for the cancelled days: the full amount refunded, the carried rest taken", async () => {
+    const { data: novSlip } = await admin
+      .from("payslips")
+      .select("id, net_kobo::text, carried_forward_kobo::text, trace")
+      .eq("run_id", novRun)
+      .eq("worker_id", femi)
+      .single();
+    const taken = sum((await linesOf(novRun, femi, "leave_arrears")).lines);
+    const carriedOn = BigInt(novSlip!.carried_forward_kobo);
+    // November could take only part (net pay ₦0), carrying the rest.
+    expect(BigInt(novSlip!.net_kobo)).toBe(0n);
+    expect(carriedOn > 0n).toBe(true);
+    const owed = taken + carriedOn;
+    // December refunds the full amount owed and takes the carried rest: ₦0 net for those days.
+    const refunded = sum((await linesOf(decRun, femi, "leave_refund")).lines);
+    const carriedTaken = sum((await linesOf(decRun, femi, "carried_deduction")).lines);
+    expect(refunded).toBe(owed);
+    expect(carriedTaken).toBe(carriedOn);
+    expect(taken + carriedTaken - refunded).toBe(0n);
   });
 });

@@ -253,6 +253,8 @@ const leaveRefundSchema = z
           code: z.enum(["leave_deduction", "leave_arrears"]).default("leave_deduction"),
           label: z.string().min(1).max(300),
           amount_kobo: signedKobo,
+          /** An after-tax arrears line's full amount, taken plus carried (its refund). */
+          wanted_kobo: signedKobo.nullable().optional(),
           pensionable: z.boolean(),
           taxable: z.boolean(),
         }),
@@ -268,6 +270,7 @@ const leaveRefundSchema = z
     lines: r.lines.map((l) => ({
       code: l.code,
       label: l.label,
+      wantedKobo: l.wanted_kobo ?? null,
       amountKobo: l.amount_kobo,
       pensionable: l.pensionable,
       taxable: l.taxable,

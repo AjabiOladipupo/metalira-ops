@@ -646,6 +646,33 @@ create trigger payslip_sources_refund_guard
 -- As 5.3's payroll guards: fires whatever session_replication_role says.
 alter table public.payslip_sources enable always trigger payslip_sources_refund_guard;
 
+
+-- The full amount a posted leave_arrears line was owed (coordinator, 24 Nov 2026): what the
+-- engine wanted to take, before the line was cut to fit net pay and the rest carried. The engine
+-- records it on the payslip's trace (gross to net's "Less <line label>" step, `wanted_kobo`). A
+-- cancelled leave's refund pays back this full amount, so what was carried and is still collected
+-- nets to ₦0. Null when the trace doesn't hold it (the line's own amount stands then).
+create function private.leave_arrears_wanted(p_organisation_id uuid, p_payslip_id uuid, p_label text)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (st -> 'inputs' ->> 'wanted_kobo')::bigint
+  from public.payslips p
+  cross join lateral jsonb_array_elements(
+    case when jsonb_typeof(p.trace -> 'steps') = 'array' then p.trace -> 'steps' else '[]'::jsonb end
+  ) st
+  where p.organisation_id = p_organisation_id and p.id = p_payslip_id
+    and st ->> 'step' = 'leave_arrears'
+    and st ->> 'label' = 'Less ' || p_label
+    and coalesce(st -> 'inputs' ->> 'wanted_kobo', '') ~ '^[0-9]{1,15}$'
+  limit 1
+$$;
+
+revoke all on function private.leave_arrears_wanted(uuid, uuid, text) from public, anon, authenticated;
+
 -- private.save_payroll_results: its latest version (5.2's, migration
 -- 20261122120000_payroll_runs.sql), copied exactly except for three additions marked "Slice 5.7c":
 -- a leave_refund line pays exactly one leave_refund source (and only refund lines pay one); the
@@ -702,6 +729,7 @@ declare
   -- Slice 5.7c: a leave refund pays back exactly what the leave deduction took.
   v_refund bigint;
   v_owed bigint;
+  v_mismatch boolean;
 begin
   if coalesce(auth.role(), '') <> 'service_role' or auth.uid() is not null then
     raise exception 'Only the server saves payroll results.' using errcode = '42501';
@@ -1010,7 +1038,14 @@ begin
         ),
         theirs as (
           select
-            case when ol.code = 'leave_arrears' then ol.amount_kobo else -ol.amount_kobo end as amount_kobo,
+            case
+              when ol.code = 'leave_arrears'
+                then coalesce(
+                  private.leave_arrears_wanted(ol.organisation_id, ol.payslip_id, ol.label),
+                  ol.amount_kobo
+                )
+              else -ol.amount_kobo
+            end as amount_kobo,
             case when ol.code = 'leave_arrears' then false else ol.taxable end as taxable,
             case when ol.code = 'leave_arrears' then false else ol.pensionable end as pensionable,
             row_number() over (order by ol.position) as n
@@ -1026,17 +1061,26 @@ begin
             and o.run_id <> p_run_id and orun.status in ('approved', 'released')
             and orun.kind = 'regular'
             and o.from_date = (v_src ->> 'from')::date and o.to_date = (v_src ->> 'to')::date
-            and (case when ol.code = 'leave_arrears' then ol.amount_kobo else -ol.amount_kobo end) > 0
+            and (case
+              when ol.code = 'leave_arrears'
+                then coalesce(
+                  private.leave_arrears_wanted(ol.organisation_id, ol.payslip_id, ol.label),
+                  ol.amount_kobo
+                )
+              else -ol.amount_kobo
+            end) > 0
         )
+        -- One statement: the CTEs above are visible to it alone.
         select coalesce((select sum(amount_kobo) from mine), 0),
-               coalesce((select sum(amount_kobo) from theirs), 0)
-        into v_refund, v_owed;
-        if v_refund <= 0 or v_refund <> v_owed or exists (
-          select 1 from mine full join theirs using (n)
-          where mine.n is null or theirs.n is null
-            or mine.amount_kobo <> theirs.amount_kobo
-            or mine.taxable <> theirs.taxable or mine.pensionable <> theirs.pensionable
-        ) then
+               coalesce((select sum(amount_kobo) from theirs), 0),
+               exists (
+                 select 1 from mine m full join theirs t on t.n = m.n
+                 where m.n is null or t.n is null
+                   or m.amount_kobo <> t.amount_kobo
+                   or m.taxable <> t.taxable or m.pensionable <> t.pensionable
+               )
+        into v_refund, v_owed, v_mismatch;
+        if v_refund <= 0 or v_refund <> v_owed or v_mismatch then
           raise exception 'A leave refund isn''t what the leave deduction took.' using errcode = 'MLPR6';
         end if;
       end if;
@@ -1320,6 +1364,10 @@ begin
               'code', l.code,
               'label', l.label,
               'amount_kobo', l.amount_kobo::text,
+              -- An after-tax arrears line's full amount (taken plus carried): its refund.
+              'wanted_kobo', case when l.code = 'leave_arrears'
+                then private.leave_arrears_wanted(l.organisation_id, l.payslip_id, l.label)::text
+              end,
               'pensionable', l.pensionable,
               'taxable', l.taxable
             )
@@ -1350,7 +1398,10 @@ begin
         where l.organisation_id = o.organisation_id and l.payslip_id = o.payslip_id
           and l.position = any (o.line_positions)
           and ((l.code = 'leave_deduction' and l.amount_kobo < 0)
-            or (l.code = 'leave_arrears' and l.amount_kobo > 0))
+            or (l.code = 'leave_arrears' and coalesce(
+              private.leave_arrears_wanted(l.organisation_id, l.payslip_id, l.label),
+              l.amount_kobo
+            ) > 0))
       )
       and not private.payroll_source_paid(
         p_organisation_id, 'leave_refund', q.id, o.from_date, o.to_date, p_run_id
