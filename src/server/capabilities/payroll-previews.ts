@@ -14,6 +14,12 @@ import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payr
 import { previewMakeBankFile, type makeBankFileSchema } from "@/server/payroll/payouts";
 import { previewRelease, type releaseRunSchema } from "@/server/payroll/release";
 import {
+  previewOffset,
+  previewRefund,
+  type offsetSchema,
+  type recordRefundSchema,
+} from "@/server/payroll/remittance-resolutions";
+import {
   previewConfirmSupplement,
   previewMakeSupplement,
   type confirmSupplementSchema,
@@ -130,3 +136,12 @@ export const previewRecordRemittancePayment: PreviewFn<typeof recordPaymentSchem
   previewRecordPayment(ctx, ctx.data);
 export const previewVoidRemittancePayment: PreviewFn<typeof voidPaymentSchema> = (ctx) =>
   previewVoidPayment(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// Refunds and offsets of payments on voided remittances (slice 5.7c)
+// ---------------------------------------------------------------------------
+
+export const previewRemittanceRefund: PreviewFn<typeof recordRefundSchema> = (ctx) =>
+  previewRefund(ctx, ctx.data);
+export const previewRemittanceOffset: PreviewFn<typeof offsetSchema> = (ctx) =>
+  previewOffset(ctx, ctx.data);

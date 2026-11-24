@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { toKobo, type Kobo } from "@/lib/money";
+import { dueAfterOffsets } from "@/lib/payroll/remittance-offsets";
 import {
   remittanceIsOverdue,
   remittanceOutstanding,
@@ -56,6 +57,11 @@ export interface RemittanceRow {
   /** Past due with something still owed. */
   overdue: boolean;
   amountKobo: Kobo;
+  /**
+   * Slice 5.7c: payments on remittances a reversal voided, offset against this one; it owes that
+   * much less (status and outstanding are worked out on the amount less these).
+   */
+  offsetsInKobo: Kobo;
   workerCount: number;
   dueDate: string | null;
   status: RemittanceStatus;
@@ -176,6 +182,25 @@ export async function loadRemittances(
       for (const r of receipts ?? []) receiptExt.set(r.id, r.file_ext);
     }
   }
+  const offsetsIn = new Map<string, Kobo>();
+  if (remIds.length > 0) {
+    const { data: offsets, error: offsetError } = await supabase
+      .from("statutory_payment_resolutions")
+      .select("target_remittance_id, amount_kobo::text")
+      .eq("organisation_id", organisationId)
+      .eq("kind", "offset")
+      .in("target_remittance_id", remIds);
+    if (offsetError) throw new Error(`Could not read offsets (${offsetError.code})`);
+    for (const o of (offsets ?? []) as unknown as {
+      target_remittance_id: string;
+      amount_kobo: string;
+    }[]) {
+      offsetsIn.set(
+        o.target_remittance_id,
+        (offsetsIn.get(o.target_remittance_id) ?? 0n) + toKobo(o.amount_kobo),
+      );
+    }
+  }
   const names = await profileNames(
     supabase,
     payRows.map((p) => p.recorded_by),
@@ -213,6 +238,7 @@ export async function loadRemittances(
       outstandingKobo: 0n,
       overdue: false,
       amountKobo: toKobo(r.amount_kobo),
+      offsetsInKobo: offsetsIn.get(r.id) ?? 0n,
       workerCount: r.worker_count,
       dueDate: r.due_date,
       status: "due",
@@ -234,7 +260,7 @@ export async function loadRemittances(
     };
     const owed = {
       dueDate: row.dueDate,
-      amountKobo: row.amountKobo,
+      amountKobo: dueAfterOffsets(row.amountKobo, row.offsetsInKobo),
       paidKobo: row.payment?.paidAmountKobo ?? null,
     };
     row.status = remittanceStatus(owed, today);

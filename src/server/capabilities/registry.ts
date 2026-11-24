@@ -251,6 +251,12 @@ import { loadPayoutSummary } from "@/server/payroll/payouts-data";
 import { releaseRunSpec } from "@/server/payroll/release";
 import { loadCarriedDeductionsSummary } from "@/server/payroll/carried-data";
 import {
+  previewRefundSchema,
+  recordOffsetSpec,
+  recordRefundSpec,
+  startRefundReceiptSpec,
+} from "@/server/payroll/remittance-resolutions";
+import {
   confirmSupplementSpec,
   downloadSupplementSpec,
   makeSupplementSpec,
@@ -338,6 +344,8 @@ import {
   previewReleasePayrollRun,
   previewRemovePayrollAdjustment,
   previewRecordRemittancePayment,
+  previewRemittanceOffset,
+  previewRemittanceRefund,
   previewReturnPayrollRun,
   previewSubmitPayrollRun,
   previewVoidRemittancePayment,
@@ -3161,6 +3169,57 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "Schedules carry TINs and RSA PINs; Lira never downloads payroll files (docs/PHASE_5.md decision 8).",
+  },
+  {
+    name: "payroll.preview_remittance_refund",
+    description:
+      "Works out what recording a refund of a payment on a voided remittance will do, without saving.",
+    kind: "read",
+    audience: "manager",
+    roles: REMITTANCE_RECORDERS,
+    input: previewRefundSchema,
+    changes: "none",
+    action: at("payroll/remittance-actions", "previewRemittanceRefundAction"),
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.start_refund_receipt",
+    description: "Prepares the upload of a refund's receipt to the private evidence store.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(startRefundReceiptSpec),
+    changes: "none",
+    action: at("payroll/remittance-actions", "startRefundReceiptAction"),
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.record_remittance_refund",
+    description:
+      "Records a refund an authority sent back for a payment on a remittance a reversal voided, with its receipt.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recordRefundSpec),
+    changes: "one",
+    action: at("payroll/remittance-actions", "recordRemittanceRefundAction"),
+    preview: previewRemittanceRefund,
+    agent: false,
+    agentNote: REMITTANCE_NOTE,
+  },
+  {
+    name: "payroll.offset_remittance_payment",
+    description:
+      "Offsets a payment on a voided remittance against a later remittance to the same authority.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recordOffsetSpec),
+    changes: "many",
+    action: at("payroll/remittance-actions", "offsetRemittancePaymentAction"),
+    preview: previewRemittanceOffset,
+    agent: false,
+    agentNote:
+      "Whether an authority accepts an offset is a person's call with the adviser (RULES_NIGERIA open point 5); Lira never records payments or offsets.",
   },
   {
     name: "payroll.open_remittance_receipt",

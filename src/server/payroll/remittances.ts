@@ -199,6 +199,8 @@ interface RemittanceTarget {
   authorityKey: string | null;
   authorityName: string | null;
   amountKobo: Kobo;
+  /** Slice 5.7c: offsets set against it; it owes its amount less these. */
+  offsetsInKobo: Kobo;
   standingPaymentId: string | null;
   runStatus: string;
   periodStart: string;
@@ -227,7 +229,11 @@ async function readRemittance(
     amount_kobo: string;
   } | null;
   if (!rem) throw new MutationError("invalid", "That remittance wasn't found. Reload the page.");
-  const [{ data: run, error: runError }, { data: pays, error: payError }] = await Promise.all([
+  const [
+    { data: run, error: runError },
+    { data: pays, error: payError },
+    { data: offsets, error: offsetError },
+  ] = await Promise.all([
     supabase
       .from("payroll_runs")
       .select("period_start, period_end, pay_date, status")
@@ -239,8 +245,16 @@ async function readRemittance(
       .select("id, entry, voids_payment_id")
       .eq("organisation_id", organisationId)
       .eq("remittance_id", id),
+    supabase
+      .from("statutory_payment_resolutions")
+      .select("amount_kobo::text")
+      .eq("organisation_id", organisationId)
+      .eq("kind", "offset")
+      .eq("target_remittance_id", id),
   ]);
-  if (runError || payError) throw new Error("Could not read the remittance's run or payments");
+  if (runError || payError || offsetError) {
+    throw new Error("Could not read the remittance's run or payments");
+  }
   if (!run) throw new MutationError("invalid", "That remittance wasn't found. Reload the page.");
   const voided = new Set(
     (pays ?? []).flatMap((p) => (p.voids_payment_id ? [p.voids_payment_id] : [])),
@@ -256,6 +270,10 @@ async function readRemittance(
     authorityKey: rem.authority_key,
     authorityName: rem.authority_name,
     amountKobo: toKobo(rem.amount_kobo),
+    offsetsInKobo: ((offsets ?? []) as unknown as { amount_kobo: string }[]).reduce(
+      (n, o) => n + toKobo(o.amount_kobo),
+      0n,
+    ),
     standingPaymentId: standing?.id ?? null,
     runStatus: run.status,
     periodStart: run.period_start,
@@ -298,11 +316,12 @@ function checkPayment(
       },
     );
   }
-  if (data.amount !== r.amountKobo && !data.amountDiffers) {
-    const gap = data.amount - r.amountKobo;
+  const due = r.amountKobo - r.offsetsInKobo;
+  if (data.amount !== due && !data.amountDiffers) {
+    const gap = data.amount - due;
     throw new MutationError(
       "invalid",
-      `That is ${money(gap < 0n ? -gap : gap)} ${gap < 0n ? "less" : "more"} than the ${money(r.amountKobo)} due. Tick "The amount paid differs from the amount due" to record it as it is.`,
+      `That is ${money(gap < 0n ? -gap : gap)} ${gap < 0n ? "less" : "more"} than the ${money(due)} due. Tick "The amount paid differs from the amount due" to record it as it is.`,
       { amountDiffers: "Tick this to record an amount that isn't the amount due" },
     );
   }
@@ -318,9 +337,13 @@ export async function previewRecordPayment(
 ): Promise<CapabilityPreview> {
   const r = await readRemittance(ctx.supabase, ctx.organisationId, data.remittanceId);
   checkPayment(r, data);
-  const difference = data.amount - r.amountKobo;
+  const due = r.amountKobo - r.offsetsInKobo;
+  const difference = data.amount - due;
   const changes: CapabilityPreview["changes"] = [
-    { label: "Amount due", after: money(r.amountKobo) },
+    { label: "Amount due", after: money(due) },
+    ...(r.offsetsInKobo > 0n
+      ? [{ label: "Offset from a voided payment", after: money(r.offsetsInKobo) }]
+      : []),
     { label: "Amount paid", after: money(data.amount) },
     { label: "Paid on", after: formatDate(data.paidOn) },
   ];

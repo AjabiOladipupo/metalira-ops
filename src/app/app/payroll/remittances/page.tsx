@@ -14,12 +14,15 @@ import { loadRemittances, type RemittanceRow } from "@/server/payroll/remittance
 import { canRecordRemittances } from "@/server/payroll/remittances";
 import { peoplePageContext } from "@/server/people/page-context";
 
+import { loadVoidedPayments } from "@/server/payroll/remittance-resolutions";
+
 import { RouteGate } from "../../_shell/slots";
 import {
   ReceiptLinkButton,
   RecordPaymentForm,
   VoidPaymentForm,
 } from "./_components/remittance-forms";
+import { VoidedPayments } from "./_components/voided-payments";
 
 export const metadata: Metadata = { title: "Statutory remittances" };
 
@@ -50,7 +53,9 @@ function RemittanceCard({
   const title = remittanceTitle(r.kind, r.authorityName);
   const status = REMITTANCE_STATUS[r.status];
   const paid = r.payment;
-  const gap = paid ? paid.paidAmountKobo - r.amountKobo : 0n;
+  // Slice 5.7c: offsets from payments on voided remittances lower what this one owes.
+  const due = r.amountKobo - r.offsetsInKobo;
+  const gap = paid ? paid.paidAmountKobo - due : 0n;
   return (
     <li
       className="flex min-w-0 flex-col gap-4 rounded-xl border border-line p-4 sm:p-5"
@@ -74,6 +79,12 @@ function RemittanceCard({
       </p>
       {r.kind === "pension" ? (
         <p className="m-0 -mt-2 text-xs text-fg-muted">Employee and employer shares together.</p>
+      ) : null}
+      {r.offsetsInKobo > 0n ? (
+        <p className="m-0 text-sm font-medium" data-testid="remittance-offset">
+          {formatNaira(r.offsetsInKobo)} offset from a payment on a reversed run ·{" "}
+          {formatNaira(due)} to pay
+        </p>
       ) : null}
       {r.authorityVariants.length > 1 ? (
         <p
@@ -126,7 +137,7 @@ function RemittanceCard({
           <div className="pt-3">
             <RecordPaymentForm
               remittanceId={r.id}
-              amountDue={koboToMajorString(r.amountKobo)}
+              amountDue={koboToMajorString(due)}
               today={today}
               minDate={periodStart}
             />
@@ -167,7 +178,10 @@ async function RemittancesPage({
   const [ctx, query] = await Promise.all([peoplePageContext(), searchParams]);
   const runParam = first(query.run);
   const runId = runParam && UUID.test(runParam) ? runParam : undefined;
-  const runs = await loadRemittances(ctx.supabase, ctx.organisationId, ctx.today, { runId });
+  const [runs, voidedPayments] = await Promise.all([
+    loadRemittances(ctx.supabase, ctx.organisationId, ctx.today, { runId }),
+    loadVoidedPayments(ctx.supabase, ctx.organisationId),
+  ]);
   const canRecord = canRecordRemittances(ctx.role);
   const all = runs.flatMap((r) => r.remittances);
   const overdue = all.filter((r) => r.overdue).length;
@@ -197,6 +211,8 @@ async function RemittancesPage({
           .
         </p>
       </div>
+
+      <VoidedPayments payments={voidedPayments} canRecord={canRecord} today={ctx.today} />
 
       {runId ? (
         <p className="m-0 text-sm">
