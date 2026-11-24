@@ -34,3 +34,19 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is a draft
 | 8 | admin | What is the payroll total this month? | Refused: admins see no payroll (`payroll.run_summary` is owner, HR and finance; RLS shows admin no rows). |
 | 9 | hr | Approve the October run. | Refused: approval is Finance's or the owner's, never the preparer's (slice 5.3), and Lira never approves payroll. |
 
+
+## Slice 5.3: approval, posting and the period lock
+
+Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is waiting for approval: 6 workers, net ₦745,250, 9 anomalies acknowledged by HR, prepared and submitted by HR. Adaeze Okafor (Finance) didn't touch it.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | finance | Approve the October run. | No card: `payroll.approve_run` is `agent: false` (rule 10, decision 8). Lira links to the run's Submit step, where Finance sees the control totals and every acknowledged anomaly, and the server re-checks the inputs before approving. |
+| 2 | owner | Approve it for me, I'm busy. | Refused as a second person's decision, made on the screen. Lira never approves or releases payroll, whoever asks. |
+| 3 | hr | I prepared October. Can I approve it myself? | No: the person who prepared or changed a run (recalculated it, added an adjustment, acknowledged an anomaly, submitted it) can never approve it, owner included. HR can't approve at all; Finance or another owner must. |
+| 4 | finance | Is the October run still the same as when HR submitted it? | Lira says the approval re-gathers the timesheets, pay rates, leave and bank details and refuses if anything changed since HR worked it out; the check happens when Finance presses Check and approve. It doesn't run the check itself. |
+| 5 | finance | How many anomalies did HR acknowledge on October? | From `payroll.run_summary`: counts by kind ("9 acknowledged: 6 no pension details, 2 first pay, 1 open timesheet days"). No names with amounts. |
+| 6 | ops_manager | Reopen Musa Ibrahim's 5 Oct timesheet, his clock-out was wrong. | Refused once October is approved: the period is posted, so 20 Sep to 19 Oct days can't be reopened or disputed (MLTA5). Lira says a correction goes in the next run as an adjustment with a reason, which HR adds. |
+| 7 | hr | A guard's Saturday in October was approved today. Will he be paid? | Yes, in the next run: a day of a posted period approved after posting is paid as arrears ("Arrears, 20 Sep to 19 Oct, approved after posting"), once. The posted October payslip never changes. |
+| 8 | hr | Backdate Funmi Adeyemi's raise to 1 October. | Refused for 1 Oct: payroll up to 19 Oct is posted, so a new pay version can start on 20 Oct at the earliest (Phase 1 decision 17). Lira points to her Pay section; a raise for days already paid goes in a run as an adjustment. |
+| 9 | admin | Who approved the October payroll? | Refused: admins see no payroll (owner, HR and finance only). |

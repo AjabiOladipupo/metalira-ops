@@ -33,12 +33,14 @@ export interface PayrollRunRow {
   preparedBy: string;
   submittedAt: string | null;
   submittedBy: string | null;
+  approvedAt: string | null;
+  approvedBy: string | null;
   createdAt: string;
   totals: RunTotals;
 }
 
 const RUN_COLUMNS =
-  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
+  "id, kind, status, period_start, period_end, pay_date, rule_set_id, itf_applies, inputs_sha256, needs_recalculation, calculated_at, calculated_by, prepared_by, submitted_at, submitted_by, approved_at, approved_by, created_at, worker_count, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, pension_employer_kobo::text, nhf_kobo::text, other_deductions_kobo::text, net_kobo::text, nsitf_kobo::text, itf_kobo::text, employer_cost_kobo::text, carried_forward_kobo::text" as const;
 
 type RunRecord = {
   id: string;
@@ -56,6 +58,8 @@ type RunRecord = {
   prepared_by: string;
   submitted_at: string | null;
   submitted_by: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
   created_at: string;
   worker_count: number;
   gross_kobo: string;
@@ -88,6 +92,8 @@ function toRun(r: RunRecord): PayrollRunRow {
     preparedBy: r.prepared_by,
     submittedAt: r.submitted_at,
     submittedBy: r.submitted_by,
+    approvedAt: r.approved_at,
+    approvedBy: r.approved_by,
     createdAt: r.created_at,
     totals: {
       grossKobo: toKobo(r.gross_kobo),
@@ -204,7 +210,7 @@ export interface AdjustmentRow {
 
 export interface DecisionRow {
   id: string;
-  decision: "submitted" | "returned";
+  decision: "submitted" | "returned" | "approved" | "released";
   reason: string | null;
   actorId: string;
   actorName: string | null;
@@ -372,7 +378,9 @@ export async function loadRunDetail(
   const people = await profileNames(supabase, [
     run.preparedBy,
     ...(run.submittedBy ? [run.submittedBy] : []),
+    ...(run.approvedBy ? [run.approvedBy] : []),
     ...(adjustments.data ?? []).map((a) => a.created_by),
+    ...(anomalies.data ?? []).flatMap((a) => (a.acknowledged_by ? [a.acknowledged_by] : [])),
     ...(decisions.data ?? []).map((d) => d.actor_id),
   ]);
 
@@ -441,7 +449,9 @@ export async function loadRunDetail(
     })),
     decisions: (decisions.data ?? []).map((d) => ({
       id: d.id,
-      decision: d.decision === "returned" ? "returned" : "submitted",
+      decision:
+        (["returned", "approved", "released"] as const).find((x) => x === d.decision) ??
+        "submitted",
       reason: d.reason,
       actorId: d.actor_id,
       actorName: people.get(d.actor_id) ?? null,
@@ -555,4 +565,20 @@ export async function loadRunSummary(
       grossKobo: latest.totals.grossKobo.toString(),
     },
   };
+}
+
+/**
+ * The earliest start a new pay version may have for a worker who already has one (Phase 1
+ * decision 17, slice 5.3): the day after the latest posted pay period once payroll has posted,
+ * else today. Owner, hr and finance; null for anyone else (the screen then keeps "today").
+ */
+export async function loadPayRateEarliestStart(
+  supabase: Client,
+  organisationId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.rpc("pay_rate_earliest_start", {
+    p_organisation_id: organisationId,
+  });
+  if (error || typeof data !== "string") return null;
+  return data;
 }

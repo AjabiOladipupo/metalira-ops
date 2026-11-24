@@ -28,7 +28,12 @@ import type { OwnContext } from "./own-requests";
  */
 
 /** Who may open step 1 at all; the database narrows it to the right person per request. */
-export const STEP1_ROLES = ["owner", "admin", "ops_manager", "line_manager"] as const satisfies readonly ManagerRole[];
+export const STEP1_ROLES = [
+  "owner",
+  "admin",
+  "ops_manager",
+  "line_manager",
+] as const satisfies readonly ManagerRole[];
 export const HR_ROLES = ["owner", "admin", "hr"] as const satisfies readonly ManagerRole[];
 /** Who reads the Leave board (ops_manager: dates and type only). */
 export const LEAVE_READERS = [
@@ -39,7 +44,12 @@ export const LEAVE_READERS = [
   "line_manager",
 ] as const satisfies readonly ManagerRole[];
 /** Who reads balances. */
-export const BALANCE_READERS = ["owner", "admin", "hr", "line_manager"] as const satisfies readonly ManagerRole[];
+export const BALANCE_READERS = [
+  "owner",
+  "admin",
+  "hr",
+  "line_manager",
+] as const satisfies readonly ManagerRole[];
 
 /** Database refusals in plain English. */
 export function fromLeaveRequestError(error: PostgrestError): never {
@@ -57,6 +67,7 @@ export function fromLeaveRequestError(error: PostgrestError): never {
     case "MLLQ3":
     case "MLLQ4":
     case "MLLQ7":
+    case "MLTA5":
     case "22023":
     case "23514":
       throw new MutationError("invalid", error.message);
@@ -66,7 +77,10 @@ export function fromLeaveRequestError(error: PostgrestError): never {
     case "40001":
       throw new MutationError("invalid", "Someone else changed this at the same time. Try again.");
     case "MLCN1":
-      throw new MutationError("forbidden", "Only the worker can do this, signed in to the worker app.");
+      throw new MutationError(
+        "forbidden",
+        "Only the worker can do this, signed in to the worker app.",
+      );
     case "MLCN2":
       throw new MutationError("forbidden", "You have left this company.");
   }
@@ -104,7 +118,10 @@ function parseOrThrow<S extends z.ZodType>(schema: S, input: unknown): z.output<
 }
 
 /** The worker asks for leave, as themselves. */
-export async function runRequestLeave(ctx: OwnContext, input: unknown): Promise<RequestLeaveResult> {
+export async function runRequestLeave(
+  ctx: OwnContext,
+  input: unknown,
+): Promise<RequestLeaveResult> {
   const data = parseOrThrow(requestLeaveSchema, input);
   const { data: result, error } = await ctx.supabase.rpc("request_leave", {
     p_organisation_id: ctx.organisationId,

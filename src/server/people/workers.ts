@@ -118,6 +118,7 @@ function fromDbError(error: PostgrestError, fields: { effectiveFrom?: string } =
     case "MLPR1":
     case "MLPR2":
     case "MLPR3":
+    case "MLPRG":
       return invalid(effectiveFrom, error.message);
     case "23P01":
       return invalid(effectiveFrom, "This pay rate overlaps another version for the same dates.");

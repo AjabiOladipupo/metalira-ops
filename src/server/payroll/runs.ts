@@ -13,17 +13,19 @@ import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
 import type { Database } from "@/types/db";
 
-import { calculateRun, saveCalculation, type RunCalculation } from "./run";
+import { calculateRun, checkInputsForApproval, saveCalculation, type RunCalculation } from "./run";
 import { loadLastPostedRun, loadRun, type PayrollRunRow } from "./run-data";
 
 /**
- * The payroll run's writes (slice 5.2; docs/PHASE_5.md "Roles and access"): owner and hr prepare,
- * recalculate, adjust, acknowledge and submit; owner and finance return a submitted run (and
- * approve it in 5.3). Admins, ops managers and line managers see nothing. The preparer is
- * recorded on the run (prepared_by), so 5.3 can refuse them as approver. Every write is one SQL
- * function called as the user, which checks the role again; the calculation runs here on the
- * server and is saved with `save_payroll_results` (the secret key), never sent by the client.
- * Every money write has a preview (src/server/capabilities/payroll-previews.ts). Module: payroll.
+ * The payroll run's writes (slices 5.2 and 5.3; docs/PHASE_5.md "Roles and access"): owner and hr
+ * prepare, recalculate, adjust, acknowledge and submit; owner and finance return or approve a
+ * submitted run, never someone who prepared or changed it (rule 10, checked in SQL against
+ * private.payroll_run_touchers). Admins, ops managers and line managers see nothing. Every write
+ * is one SQL function called as the user, which checks the role again; the calculation runs here
+ * on the server and is saved with `save_payroll_results` (the secret key), never sent by the
+ * client. Approval first re-gathers the inputs on the server and records their hash
+ * (`checkInputsForApproval`); the database refuses an approval whose inputs changed. Every money
+ * write has a preview (src/server/capabilities/payroll-previews.ts). Module: payroll.
  */
 
 type Client = SupabaseClient<Database>;
@@ -119,8 +121,17 @@ export const returnRunSchema = z.object({
   reason: text(500, "Say why"),
 });
 
+/** Rule 10's refusal, as the approver reads it. */
+export const TWO_PERSON_MESSAGE =
+  "You prepared or changed this run, so a different person must approve it. Ask Finance or another owner.";
+
+/** The refusal when the inputs changed after the run was worked out (decision 7). */
+export const INPUTS_CHANGED_MESSAGE =
+  "Something this run was worked out from has changed since (a timesheet day, a pay rate, leave or bank details). Return it to HR to recalculate.";
+
 /** Database refusals in plain English. */
 export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "message">): never {
+  if (error.code === "MLPRE") throw new MutationError("invalid", TWO_PERSON_MESSAGE);
   if (error.code === "42501") {
     throw new MutationError(
       "forbidden",
@@ -129,7 +140,7 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
   }
   if (error.code === "P0002")
     throw new MutationError("invalid", `${error.message} Reload the page.`);
-  if (/^MLPR[46ABCD]$/.test(error.code) || error.code === "22023") {
+  if (/^MLPR[46ABCDF]$/.test(error.code) || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code})`);
@@ -409,6 +420,115 @@ export async function previewReturn(
   };
 }
 
+/**
+ * Who prepared or changed the run, as far as the signed-in approver can read it (the preparer, the
+ * last recalculator, the submitters, adjusters and acknowledgers). The database checks the full
+ * list (private.payroll_run_touchers, with every earlier recalculation from the audit log); this
+ * only lets the preview say so before anything is worked out.
+ */
+async function visibleTouchers(
+  supabase: Client,
+  organisationId: string,
+  run: PayrollRunRow,
+): Promise<Set<string>> {
+  const [adjustments, anomalies, decisions] = await Promise.all([
+    supabase
+      .from("payroll_adjustments")
+      .select("created_by")
+      .eq("organisation_id", organisationId)
+      .eq("run_id", run.id),
+    supabase
+      .from("payroll_anomalies")
+      .select("acknowledged_by")
+      .eq("organisation_id", organisationId)
+      .eq("run_id", run.id)
+      .not("acknowledged_by", "is", null),
+    supabase
+      .from("payroll_run_decisions")
+      .select("actor_id")
+      .eq("organisation_id", organisationId)
+      .eq("run_id", run.id)
+      .eq("decision", "submitted"),
+  ]);
+  if (adjustments.error) fromPayrollRunDbError(adjustments.error);
+  if (anomalies.error) fromPayrollRunDbError(anomalies.error);
+  if (decisions.error) fromPayrollRunDbError(decisions.error);
+  return new Set(
+    [
+      run.preparedBy,
+      run.calculatedBy,
+      run.submittedBy,
+      ...(adjustments.data ?? []).map((a) => a.created_by),
+      ...(anomalies.data ?? []).map((a) => a.acknowledged_by),
+      ...(decisions.data ?? []).map((d) => d.actor_id),
+    ].filter((id): id is string => typeof id === "string"),
+  );
+}
+
+async function runInReview(
+  supabase: Client,
+  organisationId: string,
+  runId: string,
+): Promise<PayrollRunRow> {
+  const run = await loadRun(supabase, organisationId, runId);
+  if (!run) throw new MutationError("invalid", "That payroll run wasn't found. Reload the page.");
+  if (run.status !== "review") {
+    throw new MutationError("invalid", "This run isn't waiting for approval. Reload the page.");
+  }
+  return run;
+}
+
+/**
+ * "Approve": the control totals and every acknowledged anomaly, after re-gathering the inputs (as
+ * approval does, without recording anything). Refused up front to someone who prepared or
+ * changed the run, and when the inputs changed since it was worked out.
+ */
+export async function previewApprove(
+  ctx: Pick<MutationContext, "supabase" | "organisationId" | "userId">,
+  data: z.output<typeof runIdSchema>,
+): Promise<CapabilityPreview> {
+  const run = await runInReview(ctx.supabase, ctx.organisationId, data.runId);
+  if ((await visibleTouchers(ctx.supabase, ctx.organisationId, run)).has(ctx.userId)) {
+    throw new MutationError("invalid", TWO_PERSON_MESSAGE);
+  }
+  const [calc, anomalies] = await Promise.all([
+    calculateRun(ctx.supabase, ctx.organisationId, targetOf(run)),
+    ctx.supabase
+      .from("payroll_anomalies")
+      .select("code, acknowledged_at")
+      .eq("organisation_id", ctx.organisationId)
+      .eq("run_id", run.id),
+  ]);
+  if (anomalies.error) fromPayrollRunDbError(anomalies.error);
+  if (calc.inputsSha256 !== run.inputsSha256) {
+    throw new MutationError("invalid", INPUTS_CHANGED_MESSAGE);
+  }
+  const acked = (anomalies.data ?? []).filter((a) => a.acknowledged_at !== null);
+  const byCode = new Map<string, number>();
+  for (const a of acked) byCode.set(a.code, (byCode.get(a.code) ?? 0) + 1);
+  const t = run.totals;
+  const workers = `${t.workerCount} ${t.workerCount === 1 ? "worker" : "workers"}`;
+  const ackText = `${acked.length} ${acked.length === 1 ? "anomaly was" : "anomalies were"} acknowledged by HR`;
+  return {
+    summary: `Approves ${formatLeaveRange(run.periodStart, run.periodEnd)}: net pay ${money(t.netKobo)} to ${workers}, paid ${formatDate(run.payDate)}. Nothing it was worked out from has changed. ${ackText}. Approving posts the payslips (they never change after) and locks the period's timesheets.`,
+    changes: [
+      { label: "Workers", after: String(t.workerCount) },
+      { label: "Gross pay", after: money(t.grossKobo) },
+      { label: "PAYE", after: money(t.payeKobo) },
+      { label: "Pension (8% + 10%)", after: money(t.pensionEmployeeKobo + t.pensionEmployerKobo) },
+      { label: "NHF", after: money(t.nhfKobo) },
+      { label: "NSITF and ITF", after: money(t.nsitfKobo + t.itfKobo) },
+      { label: "Net pay", after: money(t.netKobo) },
+      { label: "Employer cost", after: money(t.employerCostKobo) },
+      { label: "Anomalies acknowledged", after: String(acked.length) },
+      ...[...byCode].map(([code, n]) => ({
+        label: `Acknowledged: ${code.replace(/_/g, " ")}`,
+        after: String(n),
+      })),
+    ],
+  };
+}
+
 export function previewAcknowledge(
   _ctx: unknown,
   data: z.output<typeof acknowledgeSchema>,
@@ -567,17 +687,64 @@ export const submitRunSpec: MutationSpec<
   },
 };
 
-export const returnRunSpec: MutationSpec<typeof returnRunSchema, { runId: string }> = {
+export const returnRunSpec: MutationSpec<
+  typeof returnRunSchema,
+  { runId: string; decisionId: string }
+> = {
   module: "payroll",
   schema: returnRunSchema,
   roles: PAYROLL_APPROVERS,
   run: async ({ supabase, organisationId, data }) => {
-    const { error } = await supabase.rpc("return_payroll_run", {
+    const { data: decisionId, error } = await supabase.rpc("return_payroll_run", {
       p_organisation_id: organisationId,
       p_run_id: data.runId,
       p_reason: data.reason,
     });
     if (error) fromPayrollRunDbError(error);
-    return { runId: data.runId };
+    return { runId: data.runId, decisionId: decisionId! };
+  },
+};
+
+/**
+ * Approves a submitted run (owner or finance; never someone who prepared or changed it): the
+ * server re-gathers the inputs as the approver and records their hash, then the database approves
+ * only when that hash is the one the run was worked out with (decision 7). Posting: the payslips
+ * never change after, and the period's timesheets lock.
+ */
+export const approveRunSpec: MutationSpec<
+  typeof runIdSchema,
+  { runId: string; decisionId: string }
+> = {
+  module: "payroll",
+  schema: runIdSchema,
+  roles: PAYROLL_APPROVERS,
+  run: async (ctx) => {
+    const run = await runInReview(ctx.supabase, ctx.organisationId, ctx.data.runId);
+    if ((await visibleTouchers(ctx.supabase, ctx.organisationId, run)).has(ctx.userId)) {
+      throw new MutationError("invalid", TWO_PERSON_MESSAGE);
+    }
+    try {
+      await checkInputsForApproval(ctx.supabase, ctx.organisationId, run, ctx.userId);
+    } catch (error) {
+      const e = error as { code?: string };
+      if (e.code === "MLPRD" || e.code === "P0002") {
+        throw new MutationError("invalid", "This run isn't waiting for approval. Reload the page.");
+      }
+      if (e.code === "42501") {
+        throw new MutationError("forbidden", "Only Finance or an owner approves payroll.");
+      }
+      throw error;
+    }
+    const { data: decisionId, error } = await ctx.supabase.rpc("approve_payroll_run", {
+      p_organisation_id: ctx.organisationId,
+      p_run_id: run.id,
+    });
+    if (error) {
+      // MLPRF says which: the inputs changed since HR worked the run out ("return it to HR"), or
+      // something changed while this approval ran ("try again").
+      if (error.code === "MLPRF") throw new MutationError("invalid", error.message);
+      fromPayrollRunDbError(error);
+    }
+    return { runId: run.id, decisionId: decisionId! };
   },
 };

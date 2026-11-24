@@ -196,6 +196,7 @@ function fromDbError(error: PostgrestError): never {
     case "MLPR1":
     case "MLPR2":
     case "MLPR3":
+    case "MLPRG":
       throw new MutationError("invalid", error.message);
     case "23505":
       if (text.includes("workers_staff_id_key")) {

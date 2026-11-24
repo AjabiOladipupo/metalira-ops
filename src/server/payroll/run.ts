@@ -563,3 +563,59 @@ export async function saveCalculation(
   const out = (data ?? {}) as { payslips?: number; anomalies?: number };
   return { payslips: out.payslips ?? 0, anomalies: out.anomalies ?? 0 };
 }
+
+export interface ApprovalCheck {
+  checkId: string;
+  matches: boolean;
+  inputsSha256: string;
+}
+
+/**
+ * Decision 7 (slice 5.3): re-gathers a submitted run's inputs as the approver (their own client,
+ * so the database checks their role and session), hashes them with the engine's canonical form,
+ * and records the hash with the secret key (`record_payroll_approval_check`, naming the approver).
+ * `approve_payroll_run` then needs this check, by the same person, made in the last few minutes,
+ * with the hash the run was submitted with. Nothing here changes the run.
+ */
+export async function checkInputsForApproval(
+  supabase: Client,
+  organisationId: string,
+  run: { id: string; periodStart: string; payDate: string; ruleSetId: string },
+  actorId: string,
+): Promise<ApprovalCheck> {
+  const admin = createAdminSupabase({ channel: "web" });
+  // The database's clock before the read: approval refuses anything in the run's scope written
+  // after it, which the read may have missed (money review M1).
+  const clock = await admin.rpc("payroll_clock");
+  if (clock.error || typeof clock.data !== "string") {
+    throw new Error(`Could not read the database clock (${clock.error?.code ?? "no value"})`);
+  }
+  const calc = await calculateRun(supabase, organisationId, {
+    runId: run.id,
+    periodStart: run.periodStart,
+    payDate: run.payDate,
+    ruleSetId: run.ruleSetId,
+  });
+  const { data, error } = await admin.rpc("record_payroll_approval_check", {
+    p_organisation_id: organisationId,
+    p_run_id: run.id,
+    p_actor: actorId,
+    p_inputs_sha256: calc.inputsSha256,
+    p_read_started_at: clock.data,
+  });
+  if (error) {
+    const err = new Error(`Could not check the run's inputs (${error.code})`) as Error & {
+      code?: string;
+      detail?: string;
+    };
+    err.code = error.code;
+    err.detail = error.message;
+    throw err;
+  }
+  const out = (data ?? {}) as { check_id?: string; matches?: boolean };
+  return {
+    checkId: out.check_id ?? "",
+    matches: out.matches === true,
+    inputsSha256: calc.inputsSha256,
+  };
+}

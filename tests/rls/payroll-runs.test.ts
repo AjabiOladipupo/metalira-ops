@@ -673,19 +673,37 @@ describe("recurring items (money review M-new-1)", () => {
       ),
     );
     expect(saved.error).toBeNull();
-    // September is approved (5.3 does this; here as the database owner with triggers off).
-    await db.query("begin");
-    try {
-      await db.query("set local session_replication_role = replica");
-      await db.query(
-        "update public.payroll_runs set status = 'approved', submitted_at = now(), submitted_by = $2 where id = $1",
-        [sep.data!, o.id],
-      );
-      await db.query("commit");
-    } catch (error) {
-      await db.query("rollback");
-      throw error;
-    }
+    // September is submitted and approved by a second person (slice 5.3's functions: the posting
+    // guards fire always, so the database owner can no longer set the status with triggers off).
+    const finance = await createTestUser("prun-loan-fin");
+    await addMember(finance, "finance", o.orgId);
+    expect(
+      (
+        await o.client.rpc("submit_payroll_run", {
+          p_organisation_id: o.orgId,
+          p_run_id: sep.data!,
+        })
+      ).error,
+    ).toBeNull();
+    expect(
+      (
+        await admin.rpc("record_payroll_approval_check", {
+          p_organisation_id: o.orgId,
+          p_run_id: sep.data!,
+          p_actor: finance.id,
+          p_inputs_sha256: SHA,
+          p_read_started_at: (await admin.rpc("payroll_clock")).data!,
+        })
+      ).error,
+    ).toBeNull();
+    expect(
+      (
+        await finance.client.rpc("approve_payroll_run", {
+          p_organisation_id: o.orgId,
+          p_run_id: sep.data!,
+        })
+      ).error,
+    ).toBeNull();
     const { data: series } = await admin
       .from("payroll_adjustments")
       .select("series_id")
@@ -721,8 +739,6 @@ describe("recurring items (money review M-new-1)", () => {
       p_series_id: seriesId,
     });
     expect(again.error?.code).toBe("MLPRD");
-    const finance = await createTestUser("prun-loan-fin");
-    await addMember(finance, "finance", o.orgId);
     const byFinance = await finance.client.rpc("carry_payroll_instalment", {
       p_organisation_id: o.orgId,
       p_run_id: nov.data!,

@@ -815,6 +815,32 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payroll_approval_checks": {
+                  Row: {
+                    "actor_id": string,"created_at": string,"id": string,"inputs_sha256": string,"matches": boolean,"organisation_id": string,"read_started_at": string,"run_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "actor_id": string,"created_at"?: string,"id"?: string,"inputs_sha256": string,"matches": boolean,"organisation_id": string,"read_started_at": string,"run_id": string
+                  }
+                  Update: {
+                    "actor_id"?: string,"created_at"?: string,"id"?: string,"inputs_sha256"?: string,"matches"?: boolean,"organisation_id"?: string,"read_started_at"?: string,"run_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_approval_checks_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_approval_checks_run_fkey"
+      columns: ["organisation_id","run_id"]
+isOneToOne: false
+      referencedRelation: "payroll_runs"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payroll_run_decisions": {
                   Row: {
                     "actor_id": string,"created_at": string,"decision": string,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"net_kobo": number,"organisation_id": string,"reason": string | null,"run_id": string,"worker_count": number
@@ -843,14 +869,14 @@ isOneToOne: false
                   ]
                 },"payroll_runs": {
                   Row: {
-                    "calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
+                    "approved_at": string | null,"approved_by": string | null,"calculated_at": string | null,"calculated_by": string | null,"carried_forward_kobo": number,"created_at": string,"currency": string,"employer_cost_kobo": number,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"itf_applies": boolean,"itf_kobo": number,"kind": string,"needs_recalculation": boolean,"net_kobo": number,"nhf_kobo": number,"nsitf_kobo": number,"organisation_id": string,"other_deductions_kobo": number,"pay_date": string,"paye_kobo": number,"pension_employee_kobo": number,"pension_employer_kobo": number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status": string,"submitted_at": string | null,"submitted_by": string | null,"updated_at": string,"worker_count": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id": string,"other_deductions_kobo"?: number,"pay_date": string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end": string,"period_start": string,"prepared_by": string,"rule_set_id": string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
                   }
                   Update: {
-                    "calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
+                    "approved_at"?: string | null,"approved_by"?: string | null,"calculated_at"?: string | null,"calculated_by"?: string | null,"carried_forward_kobo"?: number,"created_at"?: string,"currency"?: string,"employer_cost_kobo"?: number,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"itf_applies"?: boolean,"itf_kobo"?: number,"kind"?: string,"needs_recalculation"?: boolean,"net_kobo"?: number,"nhf_kobo"?: number,"nsitf_kobo"?: number,"organisation_id"?: string,"other_deductions_kobo"?: number,"pay_date"?: string,"paye_kobo"?: number,"pension_employee_kobo"?: number,"pension_employer_kobo"?: number,"period_end"?: string,"period_start"?: string,"prepared_by"?: string,"rule_set_id"?: string,"status"?: string,"submitted_at"?: string | null,"submitted_by"?: string | null,"updated_at"?: string,"worker_count"?: number
                   }
                   Relationships: [
                     {
@@ -1912,6 +1938,9 @@ isOneToOne: false
 "approve_clean_timesheet_lines":
 { Args: { "p_dry_run"?: boolean,"p_line_ids": (string)[],"p_organisation_id": string }; Returns: Json
                            },
+"approve_payroll_run":
+{ Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
+                           },
 "approve_timesheet_line":
 { Args: { "p_line_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
                            },
@@ -2170,6 +2199,12 @@ isOneToOne: false
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
                            },
+"pay_rate_earliest_start":
+{ Args: { "p_organisation_id": string }; Returns: string
+                           },
+"payroll_clock":
+{ Args: Record<PropertyKey, never>; Returns: string
+                           },
 "payroll_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
@@ -2208,6 +2243,9 @@ isOneToOne: false
                            },
 "record_crew_punch":
 { Args: { "p_accuracy_m": number,"p_client_batch_id": string,"p_client_event_ids": (string)[],"p_device_time": string,"p_elapsed_ms": number,"p_expected_actor_id": string,"p_expected_organisation_id": string,"p_has_photo": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_sent_device_time": string,"p_site_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
+"record_payroll_approval_check":
+{ Args: { "p_actor": string,"p_inputs_sha256": string,"p_organisation_id": string,"p_read_started_at": string,"p_run_id": string }; Returns: Json
                            },
 "record_punch":
 { Args: { "p_accuracy_m": number,"p_client_event_id": string,"p_device_time": string,"p_elapsed_ms": number,"p_expected_organisation_id": string,"p_expected_worker_id": string,"p_has_selfie": boolean,"p_kind": string,"p_latitude": number,"p_longitude": number,"p_outside_note": string,"p_outside_reason": string,"p_sent_device_time": string,"p_site_id": string }; Returns: Json

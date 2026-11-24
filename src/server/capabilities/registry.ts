@@ -249,6 +249,7 @@ import { loadPayslipTrace, loadRunSummary } from "@/server/payroll/run-data";
 import {
   acknowledgeSpec,
   addAdjustmentSpec,
+  approveRunSpec,
   carryInstalmentSpec,
   createRunSpec,
   recalculateRunSpec,
@@ -299,6 +300,7 @@ import {
   previewAcknowledgePayrollAnomalies,
   previewAddPayrollAdjustment,
   previewAddRuleSetVersion,
+  previewApprovePayrollRun,
   previewCarryPayrollInstalment,
   previewCreatePayrollRun,
   previewRecalculatePayrollRun,
@@ -2837,6 +2839,20 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "A decision on a submitted payroll run is a person's (docs/PHASE_5.md decision 8), made on the screen.",
+  },
+  {
+    name: "payroll.approve_run",
+    description:
+      "Finance or the owner approves a submitted run after re-checking its inputs, posting payslips and locking the period.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(approveRunSpec),
+    changes: "many",
+    action: at("payroll/run-actions", "approveRunAction"),
+    preview: previewApprovePayrollRun,
+    agent: false,
+    agentNote:
+      "Approving payroll is a second person's decision (docs/PHASE_5.md decision 8, rule 10), made on the screen; Lira never approves or releases payroll.",
   },
   // -------------------------------------------------------------------------
   // Leave requests and balances (people/leave-request-actions.ts, own-leave-actions.ts, 4.4)

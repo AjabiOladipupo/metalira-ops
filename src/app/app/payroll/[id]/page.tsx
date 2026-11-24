@@ -21,6 +21,7 @@ import { RouteGate } from "../../_shell/slots";
 import {
   AcknowledgeForm,
   AddAdjustmentForm,
+  ApproveRunForm,
   CarryInstalmentForm,
   RecalculateForm,
   RemoveAdjustmentForm,
@@ -36,6 +37,12 @@ const TH = "px-3 py-2.5 text-left font-semibold whitespace-nowrap";
 const THN = "px-3 py-2.5 text-right font-semibold whitespace-nowrap";
 const TD = "px-3 py-3 whitespace-nowrap";
 const TDN = "px-3 py-3 text-right tabular-nums whitespace-nowrap";
+const DECISION_LABEL = {
+  submitted: "Submitted",
+  returned: "Returned",
+  approved: "Approved",
+  released: "Released",
+} as const;
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -117,6 +124,7 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
           </p>
         </div>
       ) : null}
+      {run.status === "approved" || run.status === "released" ? <PostedNote d={d} /> : null}
       {run.status === "draft" && canPrepare ? (
         <div className="flex flex-col gap-2 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">Recalculate</h3>
@@ -131,8 +139,7 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
         <div className="flex flex-col gap-2 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">Return to HR</h3>
           <p className="m-0 text-sm text-fg-muted">
-            Sends the run back as a draft with your reason. Approval comes in the next step of Phase
-            5.
+            Sends the run back as a draft with your reason. To approve it, open the Submit step.
           </p>
           <ReturnRunForm runId={run.id} />
         </div>
@@ -145,8 +152,8 @@ function PeriodStep({ d, canPrepare, canDecide }: StepProps) {
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {d.decisions.map((x) => (
               <li key={x.id} className="rounded-lg border border-line px-3 py-2.5 text-sm">
-                {x.decision === "submitted" ? "Submitted" : "Returned"} by{" "}
-                {x.actorName ?? "a manager"} · {formatDateTime(x.createdAt)}
+                {DECISION_LABEL[x.decision]} by {x.actorName ?? "a manager"} ·{" "}
+                {formatDateTime(x.createdAt)}
                 {x.reason ? <span className="block text-fg-muted">{x.reason}</span> : null}
               </li>
             ))}
@@ -528,7 +535,7 @@ function GrossToNetStep({ d, explain }: StepProps & { explain: string | undefine
   );
 }
 
-function SubmitStep({ d, canPrepare }: StepProps) {
+function SubmitStep({ d, canPrepare, canDecide }: StepProps) {
   const { run } = d;
   const t = run.totals;
   const byState = new Map<string, Kobo>();
@@ -546,7 +553,7 @@ function SubmitStep({ d, canPrepare }: StepProps) {
   return (
     <section aria-labelledby="submit" className="flex max-w-3xl flex-col gap-4">
       <h2 id="submit" className="m-0 type-h2">
-        Submit for approval
+        {run.status === "draft" ? "Submit for approval" : "Approval"}
       </h2>
       <dl
         className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2.5 rounded-xl border border-line p-5 text-[15px]"
@@ -597,7 +604,82 @@ function SubmitStep({ d, canPrepare }: StepProps) {
           ) : null}
         </p>
       ) : null}
+      {run.status === "review" && canDecide ? <ApprovalPanel d={d} /> : null}
+      {run.status === "approved" || run.status === "released" ? <PostedNote d={d} /> : null}
     </section>
+  );
+}
+
+/** What the approver checks: every acknowledged anomaly, then Approve or Return. */
+function ApprovalPanel({ d }: { d: RunDetail }) {
+  const acked = d.anomalies.filter((a) => a.acknowledgedAt !== null);
+  return (
+    <section
+      aria-labelledby="approve"
+      className="flex flex-col gap-4 rounded-xl border border-line p-5"
+      data-testid="approval-panel"
+    >
+      <h3 id="approve" className="m-0 type-h3">
+        Approve or return
+      </h3>
+      <p className="m-0 text-sm text-fg-muted">
+        Check the control totals above and every anomaly HR acknowledged. Approving re-checks the
+        timesheets, pay rates, leave and bank details the run was worked out from, then posts the
+        payslips: they never change after, and the period&apos;s timesheets lock. Only someone who
+        didn&apos;t prepare or change the run can approve it.
+      </p>
+      {acked.length > 0 ? (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Acknowledged anomalies">
+          {acked.map((a) => {
+            const text = describeAnomaly(
+              a.code,
+              a.detail,
+              a.workerName,
+              (id) => d.names.get(id) ?? "A worker",
+            );
+            return (
+              <li key={a.id} className="rounded-lg border border-line px-3 py-2.5 text-sm">
+                <span className="block font-medium">{text.title}</span>
+                <span className="block text-fg-muted">
+                  Acknowledged by{" "}
+                  {(a.acknowledgedBy && d.names.get(a.acknowledgedBy)) ?? "a manager"}
+                  {a.acknowledgedAt ? ` · ${formatDateTime(a.acknowledgedAt)}` : ""}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="m-0 text-sm">No anomalies were acknowledged on this run.</p>
+      )}
+      <ApproveRunForm runId={d.run.id} />
+      <details className="rounded-lg border border-line px-3 py-2.5">
+        <summary className="cursor-pointer text-sm font-medium">Return to HR instead</summary>
+        <div className="pt-3">
+          <ReturnRunForm runId={d.run.id} />
+        </div>
+      </details>
+    </section>
+  );
+}
+
+/** A posted run: who approved it and what that means. */
+function PostedNote({ d }: { d: RunDetail }) {
+  const { run } = d;
+  return (
+    <p
+      role="status"
+      className="m-0 flex flex-wrap items-center gap-2 rounded-xl border border-line p-4 text-sm"
+      data-testid="posted-note"
+    >
+      <Status tone="done">Approved</Status>
+      <span>
+        by {(run.approvedBy && d.names.get(run.approvedBy)) ?? "a manager"}
+        {run.approvedAt ? ` · ${formatDateTime(run.approvedAt)}` : ""}. The payslips are posted and
+        never change; timesheet days in {formatLeaveRange(run.periodStart, run.periodEnd)} are
+        locked, and days approved from now on are paid in the next run.
+      </span>
+    </p>
   );
 }
 

@@ -1,9 +1,11 @@
 /**
- * Isolation registry for slice 5.2 (the payroll run). One October run per side is made through
- * the functions (create, an allowance, results saved with the secret key, the anomaly
- * acknowledged, submitted), which fills all seven tables: payroll_runs, payslips, payslip_lines,
- * payslip_sources, payroll_adjustments, payroll_anomalies and payroll_run_decisions. Signed-in
- * roles have no write grants on any of them (the functions write), so every attack is 42501.
+ * Isolation registry for slice 5.2 (the payroll run) and 5.3 (approval). One October run per side
+ * is made through the functions (create, an allowance, results saved with the secret key, the
+ * anomaly acknowledged, submitted), which fills seven tables: payroll_runs, payslips,
+ * payslip_lines, payslip_sources, payroll_adjustments, payroll_anomalies and
+ * payroll_run_decisions; the server's input check before approval (record_payroll_approval_check,
+ * the secret key) fills payroll_approval_checks. Signed-in roles have no write grants on any of
+ * them (the functions write), so every attack is 42501.
  *
  * Named to sort last: its seed adds a worker, and earlier seeds pick a company's first worker
  * (`firstId(admin, "workers", ...)` in people.ts) for rows that must match their own worker.
@@ -13,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { TableSpec } from "../helpers/registry";
-import { OCT_END, OCT_START, seedPayrollRun } from "../helpers/payroll";
+import { OCT_END, OCT_START, seedPayrollRun, SHA } from "../helpers/payroll";
 import type { Client } from "../helpers/supabase";
 
 async function firstId(admin: Client, table: string, orgId: string): Promise<string> {
@@ -155,5 +157,29 @@ export const tables: TableSpec[] = [
       worker_count: 0,
     }),
     { reason: "Changed" },
+  ),
+  spec(
+    "payroll_approval_checks",
+    (orgId) => ({
+      organisation_id: orgId,
+      run_id: randomUUID(),
+      actor_id: randomUUID(),
+      inputs_sha256: SHA,
+      matches: true,
+      read_started_at: new Date().toISOString(),
+    }),
+    { matches: false },
+    async ({ admin, side }) => {
+      const runId = await firstId(admin, "payroll_runs", side.orgId);
+      const clock = await admin.rpc("payroll_clock");
+      const { error } = await admin.rpc("record_payroll_approval_check", {
+        p_organisation_id: side.orgId,
+        p_run_id: runId,
+        p_actor: side.id,
+        p_inputs_sha256: SHA,
+        p_read_started_at: clock.data!,
+      });
+      if (error) throw new Error(`payroll_approval_checks: ${error.message}`);
+    },
   ),
 ];
