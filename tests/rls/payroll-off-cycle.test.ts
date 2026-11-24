@@ -384,7 +384,8 @@ describe("no double payment", () => {
       runId,
       resultsFor({ workerId, payRateId, adjustmentId: bonus.data! }),
     );
-    expect(withSalary.error?.code).toBe("MLOC6");
+    // The salary line is refused first (MLOC9); its pay-version source would be too (MLOC6).
+    expect(withSalary.error?.code).toBe("MLOC9");
     const notOnRun = await saveResults(
       admin,
       owner,
