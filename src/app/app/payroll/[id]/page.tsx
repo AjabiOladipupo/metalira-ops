@@ -683,6 +683,9 @@ function PostedNote({ d }: { d: RunDetail }) {
           Statutory remittances
         </Link>
       </span>
+      <Link href={`/app/payroll/${run.id}/payslips`} className="text-signal">
+        Payslips and PDFs
+      </Link>
     </p>
   );
 }

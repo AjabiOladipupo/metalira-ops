@@ -50,6 +50,7 @@ Phase 5 defaults (docs/PHASE_5.md, built in slice 5.1; owner may change; **confi
 - **Daily and hourly workers get no leave pay** (and no leave deduction): they are paid for days or minutes worked. Leave still counts against their balance.
 - **Public holidays are left out of an unpaid or part-paid working-day leave deduction**, as the leave counter leaves them out of a working-day request; they stay in the rostered-day base, so a monthly worker keeps the holiday's pay. Calendar-day leave (maternity) keeps them in the deduction.
 - **Holiday minutes are paid once at the overtime rate**: every minute worked on a public holiday (worked plus overtime) is paid at the overtime rate on top of normal pay; its overtime minutes are not paid again as overtime. A monthly worker rostered on a holiday who doesn't work keeps full pay (open question 1).
+- **Tax year = the calendar year of the pay date** (slice 5.5): a payslip's "This year so far" sums the worker's released payslips whose pay date falls in the same calendar year, up to that payslip. Assumes the Nigeria Tax Act 2025's tax year is the calendar year; **confirm with a tax adviser**.
 
 Open points (ask before Phase 5 code depends on them):
 

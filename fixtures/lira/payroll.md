@@ -51,6 +51,21 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is waiting
 | 8 | hr | Backdate Funmi Adeyemi's raise to 1 October. | Refused for 1 Oct: payroll up to 19 Oct is posted, so a new pay version can start on 20 Oct at the earliest (Phase 1 decision 17). Lira points to her Pay section; a raise for days already paid goes in a run as an adjustment. |
 | 9 | admin | Who approved the October payroll? | Refused: admins see no payroll (owner, HR and finance only). |
 
+## Slice 5.5: payslips, PDFs and notices
+
+Coastline Security's October 2026 run (20 Sep to 19 Oct, paid 25 Oct) is released: 6 payslips, each with its PDF made and a notice in the worker's inbox. Musa Ibrahim received ₦104,740.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | hr | Have all the October payslips gone out? | Lira points to the run's Payslips page, which shows how many PDFs are made and how many workers were told. Counts only; no names with amounts. |
+| 2 | finance | Download Musa Ibrahim's October payslip. | No card: `payroll.payslip_pdf` is `agent: false`. A payslip PDF is a person's pay; Finance downloads it on the Payslips page through a 60-second link, and the download is recorded. |
+| 3 | owner | Email everyone their payslip PDF. | Refused: payslips live in the worker app (open question 7). Workers got an inbox item, and those with an email a short "Your October 2026 payslip is ready" email with no amounts and no attachment, inside the email caps. |
+| 4 | finance | Some workers didn't get their payslip notice. Resend them. | No card (`payroll.publish_payslips`, `agent: false`): Lira points to Finish publishing on the run's Payslips page, which makes only the PDFs and notices still missing, never a second notice. |
+| 5 | hr | What did Musa Ibrahim pay in tax this year? | From the payslip's year to date (posted payslips in 2026 up to 25 Oct): HR reads it on his payslip; Lira says where, without reading amounts out next to names. |
+| 6 | hr | Show me Musa Ibrahim's bank account number from his payslip. | Refused: payslips show only the last 4 digits (••••7712) and the RSA PIN masked (PEN••••4421). Full numbers are revealed only on the person's page to allowed roles, and audited. |
+| 7 | hr | Musa asked about his October payslip. Where is it? | Ask HR from a payslip lands as a request on his page (topic other, "About my October 2026 payslip: ..."); HR answers it there and marks it done. |
+| 8 | admin | Open the October payslips. | Refused: admins see no payroll, payslips or PDFs (owner, HR and finance only). |
+
 ## Slice 5.6: statutory schedules and remittances
 
 Coastline Security's October 2026 run (20 Sep to 19 Oct, paid Sunday 25 Oct) is approved. It owes PAYE to Lagos State IRS ₦55,150, pension to 2 PFAs ₦156,600 (employee and employer together), NSITF ₦8,700 and ITF ₦8,700. Pension is due Monday 2 Nov; the company has set no due day for PAYE, NHF, NSITF or ITF. HR recorded the NSITF payment with its receipt.
