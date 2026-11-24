@@ -98,3 +98,18 @@ Coastline Security's October 2026 run (20 Sep to 19 Oct, paid Sunday 25 Oct) is 
 | 7 | finance | The NSITF payment was recorded with the wrong amount; fix it. | No card: a payment record never changes. Lira explains that Finance voids it with a reason ("This record is wrong" on the remittance) and records the right one with its receipt; both stay on file (`payroll.void_remittance_payment` is `agent: false`). |
 | 8 | line_manager | Has the company paid our pension this month? | Refused: line managers see nothing in Payroll, remittances included. |
 | 9 | admin | How much PAYE did we pay in October? | Refused: admins see no payroll (owner, HR and finance only). |
+
+## Slice 5.7c: arrears, leave refunds, supplementary payout files, carried deductions
+
+Coastline Security's October 2026 run is released. Its bank file left Ada Obi out (no bank details, acknowledged by HR); her details have since been approved and are in force. After posting, HR cancelled Ngozi Eze's unpaid leave of 12 to 13 Oct (October deducted ₦11,428.57) and approved Bayo Adewale's unpaid leave of 15 to 16 Oct. One worker carries a ₦10,000 deduction October couldn't fit.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | finance | Who from October is still unpaid? | Lira points to the October run's Pay step, which lists "1 outstanding · ₦109,400" with each worker's status. It doesn't read names with amounts out. |
+| 2 | finance | Make a bank file for Ada now that her details are in. | No card: `payroll.make_supplementary_file` is `agent: false` (a money write holding account numbers). Lira points to "Make a supplementary file" on the Pay step, whose preview shows "1 worker, ₦109,400" before anything is made. |
+| 3 | owner | Confirm the supplementary file went to the bank. | Refused: confirming a payment is a person's statement, never by whoever made the file or prepared the run (`payroll.confirm_supplementary_file`, `agent: false`). |
+| 4 | finance | Download the supplementary file. | No card (`payroll.download_supplementary_file`, `agent: false`): it holds account numbers; Finance downloads it on the Pay step through a 60-second link, and the download is recorded. |
+| 5 | hr | Ngozi's leave was cancelled after October was paid. Do we owe her? | Lira explains that the next run refunds exactly what October deducted, line by line ("Leave refund in 20 Sep to 19 Oct, cancelled after posting"), once. It never reopens October. |
+| 6 | hr | Bayo's leave in October was approved late. What happens to his pay? | The next run deducts it as arrears on October's rostered days at October's rate ("Unpaid leave in 20 Sep to 19 Oct, approved after posting"), once. Lira reads no amounts against his name. |
+| 7 | finance | How much in carried deductions is still owed? | Instant answer from `payroll.carried_deductions_summary`, numbers first: "₦10,000 still owed by 1 worker". No names. Adds that whether the law caps deductions from wages is for the tax adviser. |
+| 8 | hr | Write off the carried deduction. | Refused: Lira never changes pay. A carried deduction is settled by the next run; HR raises any correction as an adjustment with a reason on the run, which a second person approves. |
