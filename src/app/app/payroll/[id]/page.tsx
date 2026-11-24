@@ -478,10 +478,11 @@ async function ExplainPanel({ d, payslipId }: { d: RunDetail; payslipId: string 
 }
 
 /**
- * "Confirm with a tax adviser before the first live payroll", beside every statutory figure a
- * manager sees on the run (Gross to net, Submit, the approval panel, a reversal), until the
- * adviser's confirmation is recorded on the run's rule set (slice 5.8, owner decision). A run
- * with no saved rule set yet (the starting values) shows it too. Never on the worker's payslip.
+ * "Confirm with a tax adviser before the first live payroll", once per step beside the statutory
+ * figures a manager sees on the run (Gross to net; Submit, which holds the approval panel; a
+ * reversal), until the adviser's confirmation is recorded on the run's rule set (slice 5.8, owner
+ * decision). A run with no saved rule set yet (the starting values) shows it too. Never on the
+ * worker's payslip.
  */
 function AdviserLine({ d }: { d: RunDetail }) {
   if (d.ruleSet?.adviserConfirmed) return null;
@@ -887,7 +888,6 @@ function ApprovalPanel({ d }: { d: RunDetail }) {
         payslips: they never change after, and the period&apos;s timesheets lock. Only someone who
         didn&apos;t prepare or change the run can approve it.
       </p>
-      <AdviserLine d={d} />
       {acked.length > 0 ? (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Acknowledged anomalies">
           {acked.map((a) => {

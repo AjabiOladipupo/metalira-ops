@@ -544,16 +544,21 @@ export function refundUncollectedKobo(
   return rest < carried ? rest : carried;
 }
 
+/** Whole naira in thousands groups ("1,000,000,000"), so a stored detail never holds 10 digits. */
+function groupedNaira(naira: bigint): string {
+  return naira.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 /**
  * "Refund includes ₦X not yet recovered from carried deductions": a warning HR acknowledges
- * (owner decision; the one anomaly whose detail holds an amount, kept as whole naira and kobo so
- * no run of 10 digits is stored).
+ * (owner decision; the one anomaly whose detail holds an amount, kept as whole naira in thousands
+ * groups and kobo, so no run of 10 digits is stored whatever the amount: money review L2).
  */
 export function refundUncollectedAnomalies(workerId: string, uncollectedKobo: Kobo): RunAnomaly[] {
   if (uncollectedKobo <= 0n) return [];
   return [
     anomaly("refund_uncollected_carry", workerId, {
-      naira: (uncollectedKobo / 100n).toString(),
+      naira: groupedNaira(uncollectedKobo / 100n),
       kobo: Number(uncollectedKobo % 100n),
     }),
   ];

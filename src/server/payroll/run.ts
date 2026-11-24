@@ -572,18 +572,25 @@ async function laterCarrying(
   }));
   if (list.length === 0) return new Map();
   const slips: { runId: string; workerId: string }[] = [];
+  // Paged (money review L4): one row per payslip, so no row is dropped past a page's end.
+  const PAGE = 1000;
   for (let i = 0; i < workerIds.length; i += 200) {
-    const { data, error: slipError } = await supabase
-      .from("payslips")
-      .select("run_id, worker_id")
-      .eq("organisation_id", organisationId)
-      .in(
-        "run_id",
-        list.map((r) => r.id),
-      )
-      .in("worker_id", workerIds.slice(i, i + 200));
-    if (slipError) throw new Error(`Could not read later payslips (${slipError.code})`);
-    for (const x of data ?? []) slips.push({ runId: x.run_id, workerId: x.worker_id });
+    for (let from = 0; ; from += PAGE) {
+      const { data, error: slipError } = await supabase
+        .from("payslips")
+        .select("id, run_id, worker_id")
+        .eq("organisation_id", organisationId)
+        .in(
+          "run_id",
+          list.map((r) => r.id),
+        )
+        .in("worker_id", workerIds.slice(i, i + 200))
+        .order("id")
+        .range(from, from + PAGE - 1);
+      if (slipError) throw new Error(`Could not read later payslips (${slipError.code})`);
+      for (const x of data ?? []) slips.push({ runId: x.run_id, workerId: x.worker_id });
+      if ((data ?? []).length < PAGE) break;
+    }
   }
   return carrySettledLater(periodStart, list, slips);
 }
@@ -907,12 +914,14 @@ export async function calculateRun(
       );
     }
     // Slice 5.8 (owner decision): a leave refund paying back arrears still carried is shown.
+    // Capped at the carried balance as it stood before an off-cycle run's override (money review
+    // M2): a run whose carry a later run settled takes none, but the balance is still owed.
     anomalies.push(
       ...refundUncollectedAnomalies(
         w.workerId,
         refundUncollectedKobo(
           corrections.parsed.byWorker.get(w.workerId)?.leaveRefunds ?? [],
-          historyOf(w.workerId).carriedKobo,
+          workerHistory(w.workerId, history.previous, history.latestPosted).carriedKobo,
         ),
       ),
     );

@@ -20,7 +20,8 @@
 --    already settled the worker's carried deduction takes none) and refund_uncollected_carry (a
 --    leave refund pays back arrears part of which is still in the carried balance).
 --
--- Refusal codes: MLFX1 (a later run depends on the run being reversed).
+-- Refusal codes: MLFX1 (a later run depends on the run being reversed), MLFX2 (pay rates can't be
+-- truncated).
 
 -- ---------------------------------------------------------------------------
 -- 1. The audit log: no pay for anyone but the owner
@@ -50,11 +51,17 @@ alter policy audit_log_select on public.audit_log
 -- or null. Depending means any of:
 --   (a) a later-period run holding a standing source dated inside the run's period (arrears or a
 --       refund paid later);
---   (b) a later-period run with a payslip for one of the run's workers (its history could have
---       read this run: the carried deduction, first pay, instalments). Conservative on purpose;
+--   (b) a later-period run with a payslip for one of the run's workers, approved after this run
+--       or not approved yet (its history could have read this run: the carried deduction, first
+--       pay, instalments; a run approved before this one was re-checked without it). Conservative
+--       on purpose;
 --   (c) a run with a payslip for one of the run's workers and a pay date in the same calendar
 --       month, approved after this run or not approved yet (month-aggregate PAYE, 5.7b, counted
---       this run's payslip).
+--       this run's payslip);
+--   (d) an earlier-period final-pay or missed-worker run with a payslip for one of the run's
+--       workers, approved after this run or not approved yet (money review H1: it took no carried
+--       deduction because this run had settled it; with this run reversed, the period's new run
+--       would carry on from that payslip and the carry would be lost).
 -- No role check: the trigger and the checked read below call it.
 create function private.payroll_reversal_blocker(p_organisation_id uuid, p_run_id uuid)
 returns text
@@ -102,6 +109,17 @@ as $$
       )
       or (
         x.period_start > o.period_start
+        and (x.approved_at is null or o.approved_at is null or x.approved_at > o.approved_at)
+        and exists (
+          select 1 from public.payslips s
+          where s.organisation_id = x.organisation_id and s.run_id = x.id
+            and s.worker_id in (select w.worker_id from w)
+        )
+      )
+      or (
+        x.period_start < o.period_start
+        and x.kind = 'off_cycle' and x.off_cycle_reason in ('final_pay', 'missed_worker')
+        and (x.approved_at is null or o.approved_at is null or x.approved_at > o.approved_at)
         and exists (
           select 1 from public.payslips s
           where s.organisation_id = x.organisation_id and s.run_id = x.id
@@ -749,6 +767,33 @@ alter table public.tax_rule_sets enable always trigger tax_rule_sets_guard;
 alter table public.tax_rule_sets enable always trigger tax_rule_sets_no_truncate;
 alter table public.tax_rule_sets enable always trigger tax_rule_sets_used_by_run;
 alter table public.pay_rates enable always trigger pay_rates_guard;
+
+-- Security review L4 (defence in depth): pay rates can't be truncated, and the Phase 4 pay-input
+-- truncate and insert-only guards fire in replica mode too. timesheet_lines_guard and
+-- leave_requests_guard stay ordinary triggers on purpose (5.3): the test suites seed decided days
+-- and leave with triggers off, and what payroll relies on is held by the ENABLE ALWAYS freezes
+-- (timesheet_lines_freeze_posted, timesheet_lines_freeze_paid, leave_requests_freeze_paid).
+create function private.pay_rates_no_truncate()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  raise exception 'Pay rates are kept as dated versions.' using errcode = 'MLFX2';
+end;
+$$;
+
+revoke all on function private.pay_rates_no_truncate() from public, anon, authenticated;
+
+create trigger pay_rates_no_truncate before truncate on public.pay_rates
+  for each statement execute function private.pay_rates_no_truncate();
+alter table public.pay_rates enable always trigger pay_rates_no_truncate;
+alter table public.timesheets enable always trigger timesheets_no_truncate;
+alter table public.timesheet_lines enable always trigger timesheet_lines_no_truncate;
+alter table public.leave_requests enable always trigger leave_requests_no_truncate;
+alter table public.leave_request_pay enable always trigger leave_request_pay_insert_only;
+alter table public.leave_request_pay enable always trigger leave_request_pay_no_truncate;
 
 -- ---------------------------------------------------------------------------
 -- 5. Two warnings

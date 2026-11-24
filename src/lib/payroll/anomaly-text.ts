@@ -209,7 +209,8 @@ export function describeAnomaly(
     }
     case "refund_uncollected_carry": {
       // Slice 5.8 (owner decision): a leave refund pays back arrears never recovered.
-      const naira = str(detail, "naira");
+      // Whole naira in thousands groups ("20,000"), and kobo.
+      const naira = str(detail, "naira")?.replace(/,/g, "") ?? null;
       const amount =
         naira !== null && /^\d{1,15}$/.test(naira)
           ? BigInt(naira) * 100n + BigInt(Math.trunc(num(detail, "kobo")))

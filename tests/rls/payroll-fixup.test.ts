@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { calculateRun } from "@/server/payroll/run";
 import type { Database } from "@/types/db";
 
 import {
@@ -33,6 +34,7 @@ import {
   adminClient,
   createTenantUser,
   createTestUser,
+  loadLocalEnv,
   pgClient,
   type Client,
   type TenantUser,
@@ -42,11 +44,18 @@ import {
 type Role = Database["public"]["Enums"]["membership_role"];
 
 const NOV_START = "2026-10-20";
+const SEP_START = "2026-08-20";
+const AUG_START = "2026-07-20";
 
 let admin: Client;
 let db: pg.Client;
 
 beforeAll(async () => {
+  // The server engine's reads (calculateRun, the bank check with the secret key) read these.
+  const env = loadLocalEnv();
+  process.env.NEXT_PUBLIC_SUPABASE_URL = env.apiUrl;
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = env.publishableKey;
+  process.env.SUPABASE_SECRET_KEY = env.secretKey;
   admin = adminClient();
   db = await pgClient();
 });
@@ -324,6 +333,35 @@ async function submitWith(
   return runId;
 }
 
+/** A September missed-worker run for the worker, paid 2 November, worked out and submitted. */
+async function missedWorkerRun(
+  c: Company,
+  worker: { workerId: string; payRateId: string },
+): Promise<string> {
+  const created = await c.owner.client.rpc("create_off_cycle_run", {
+    p_organisation_id: c.owner.orgId,
+    p_period_start: SEP_START,
+    p_pay_date: "2026-11-02",
+    p_reason: "missed_worker",
+    p_note: "Left off the September run",
+    p_worker_ids: [worker.workerId],
+  });
+  expect(created.error).toBeNull();
+  const runId = created.data!;
+  const saved = await saveResults(
+    admin,
+    c.owner,
+    runId,
+    resultsFor(
+      { ...worker, adjustmentId: null },
+      { period: { start: SEP_START, end: periodEnd(SEP_START) } },
+    ),
+  );
+  expect(saved.error).toBeNull();
+  await acknowledgeAndSubmit(c.owner, runId);
+  return runId;
+}
+
 describe("a reversal waits for the later runs that depend on it (MLFX1)", () => {
   it("(a) refuses while a later run pays arrears dated in the run's period", async () => {
     const c = await company("rev-a");
@@ -379,6 +417,70 @@ describe("a reversal waits for the later runs that depend on it (MLFX1)", () => 
     const { error } = await reverse(c.finance.client, c.owner.orgId, oct);
     expect(error?.code).toBe("MLFX1");
     expect(error?.message).toBe("Reverse the later run first: September 2026");
+  });
+
+  it("(d) refuses while an earlier-period missed-worker run approved after it holds a worker", async () => {
+    const c = await company("rev-d");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const oct = await submitRunFor(admin, c.owner, worker, OCT_START);
+    await approveRun(admin, c.owner.orgId, oct, c.finance);
+    // September's missed-worker run for the same worker, paid in November, waiting.
+    await missedWorkerRun(c, worker);
+    const { error } = await reverse(c.finance.client, c.owner.orgId, oct);
+    expect(error?.code).toBe("MLFX1");
+    expect(error?.message).toBe(
+      "Reverse the later run first: September 2026 off-cycle: A worker the regular run missed",
+    );
+  });
+
+  it("(d) refuses the approval, and allows it once the missed-worker run is reversed first", async () => {
+    const c = await company("rev-d2");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const oct = await submitRunFor(admin, c.owner, worker, OCT_START);
+    await approveRun(admin, c.owner.orgId, oct, c.finance);
+    const asked = await reverse(c.finance.client, c.owner.orgId, oct);
+    expect(asked.error).toBeNull();
+    // September's missed-worker run (which would take no carry October settled) is approved
+    // after October.
+    const missed = await missedWorkerRun(c, worker);
+    await approveRun(admin, c.owner.orgId, missed, c.finance);
+    const refused = await approveReversal(c.finance2.client, c.owner.orgId, asked.data!);
+    expect(refused.error?.code).toBe("MLFX1");
+    expect(refused.error?.message).toBe(
+      "Reverse the later run first: September 2026 off-cycle: A worker the regular run missed",
+    );
+    // The missed-worker run reverses (October, approved before it, never read it)...
+    const missedAsked = await reverse(c.finance.client, c.owner.orgId, missed);
+    expect(missedAsked.error).toBeNull();
+    expect(
+      (await approveReversal(c.finance2.client, c.owner.orgId, missedAsked.data!)).error,
+    ).toBeNull();
+    // ...then October's waiting reversal goes through.
+    expect((await approveReversal(c.finance2.client, c.owner.orgId, asked.data!)).error).toBeNull();
+    const { data: runs } = await admin
+      .from("payroll_runs")
+      .select("status")
+      .in("id", [oct, missed]);
+    expect(runs!.map((r) => r.status)).toEqual(["reversed", "reversed"]);
+  });
+
+  it("answers the blocker read for payroll readers of the run's own company only (42501)", async () => {
+    const c = await company("rev-x");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const oct = await submitRunFor(admin, c.owner, worker, OCT_START);
+    const stranger = await createTenantUser("pfx-rev-x-other", "Fix-up Other Org");
+    const theirs = await stranger.client.rpc("payroll_reversal_blocker", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: oct,
+    });
+    expect(theirs.error?.code).toBe("42501");
+    // Named under their own company, the run isn't there: nothing blocks and nothing leaks.
+    const own = await stranger.client.rpc("payroll_reversal_blocker", {
+      p_organisation_id: stranger.orgId,
+      p_run_id: oct,
+    });
+    expect(own.error).toBeNull();
+    expect(own.data).toBeNull();
   });
 
   it("refuses the approval too, and allows it once the later run is reversed first", async () => {
@@ -636,6 +738,9 @@ describe("the rule set and pay rate guards are ENABLE ALWAYS", () => {
       ["select set_config('metalira.tax_rule_set_closing', 'on', true)"],
     );
     expect(error?.code).toBe("MLPR8");
+    expect(error?.message).toBe(
+      "A version closes only when a new version is added from the next day.",
+    );
     const { data } = await admin
       .from("tax_rule_sets")
       .select("effective_to")
@@ -645,14 +750,259 @@ describe("the rule set and pay rate guards are ENABLE ALWAYS", () => {
   });
 
   it("keeps the closing record out of every API role's reach", async () => {
-    const { rows } = await db.query<{ role: string; can: boolean }>(
-      `select r as role, has_table_privilege(r, 'private.tax_rule_set_closings', 'insert') as can
-       from unnest(array['anon', 'authenticated', 'service_role']) r order by r`,
+    const { rows } = await db.query<{ role: string; privilege: string; can: boolean }>(
+      `select r as role, p as privilege,
+              has_table_privilege(r, 'private.tax_rule_set_closings', p) as can
+       from unnest(array['anon', 'authenticated', 'service_role']) r
+       cross join unnest(array['select', 'insert', 'update', 'delete', 'truncate']) p`,
     );
-    expect(rows).toEqual([
-      { role: "anon", can: false },
-      { role: "authenticated", can: false },
-      { role: "service_role", can: false },
+    expect(rows).toHaveLength(15);
+    expect(rows.filter((r) => r.can)).toEqual([]);
+  });
+
+  it("keeps a scheduled version a run uses, in replica mode (tax_rule_sets_used_by_run)", async () => {
+    // A version far ahead, which the guard alone would let go (not in force, no posted run).
+    const { data: current } = await admin
+      .from("tax_rule_sets")
+      .select("rules, policy")
+      .eq("id", ruleSetId)
+      .single();
+    const added = await c.owner.client.rpc("add_tax_rule_set_version", {
+      p_organisation_id: c.owner.orgId,
+      p_name: "Far ahead",
+      p_rules: current!.rules,
+      p_policy: current!.policy,
+      p_effective_from: "2099-01-01",
+      p_reason: "Replica test",
+    });
+    expect(added.error).toBeNull();
+    const { data: ahead } = await admin
+      .from("tax_rule_sets")
+      .select("id")
+      .eq("organisation_id", c.owner.orgId)
+      .eq("effective_from", "2099-01-01")
+      .single();
+    // A draft run paid in January 2099 snapshots it.
+    const run = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: "2098-12-20",
+    });
+    expect(run.error).toBeNull();
+    const { data: snap } = await admin
+      .from("payroll_runs")
+      .select("rule_set_id")
+      .eq("id", run.data!)
+      .single();
+    expect(snap!.rule_set_id).toBe(ahead!.id);
+    const { error } = await asDbOwner(
+      "delete from public.tax_rule_sets where id = $1",
+      [ahead!.id],
+      true,
+    );
+    expect(error?.code).toBe("MLPR8");
+    expect(error?.message).toBe("A payroll run uses this version of the rules; it is kept.");
+  });
+
+  it("refuses truncating pay rates, and the Phase 4 pay-input guards fire always", async () => {
+    const truncated = await asDbOwner("truncate public.pay_rates", [], true);
+    expect(truncated.error?.code).toBe("MLFX2");
+    const { rows } = await db.query<{ tgname: string; tgenabled: string }>(
+      `select tgname, tgenabled from pg_trigger
+       where tgname in ('pay_rates_no_truncate', 'timesheets_no_truncate',
+                        'timesheet_lines_no_truncate', 'leave_requests_no_truncate',
+                        'leave_request_pay_insert_only', 'leave_request_pay_no_truncate')
+       order by tgname`,
+    );
+    expect(rows).toEqual(
+      [
+        "leave_request_pay_insert_only",
+        "leave_request_pay_no_truncate",
+        "leave_requests_no_truncate",
+        "pay_rates_no_truncate",
+        "timesheet_lines_no_truncate",
+        "timesheets_no_truncate",
+      ].map((tgname) => ({ tgname, tgenabled: "A" })),
+    );
+    const pay = await asDbOwner("delete from public.leave_request_pay", [], true);
+    expect(pay.error).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. The server engine: a carry settled later, and a refund of carried arrears
+// ---------------------------------------------------------------------------
+
+describe("the server engine takes a carried deduction once (money review M1, M2)", () => {
+  // August carries ₦10,600 for Wale: an after-tax leave arrears line wanted ₦120,000 and could
+  // take ₦109,400. He is missed in September; October holds him. A September missed-worker run,
+  // paid 2 November, is worked out by the real calculation (calculateRun, as the owner).
+  const X = 1_060_000n;
+  let c: Company;
+  let wale: { workerId: string; payRateId: string };
+  let leaveId: string;
+  let oct: string;
+  let missed: string;
+  let ruleSetId: string;
+  let firstHash: string;
+
+  const calc = () =>
+    calculateRun(c.owner.client, c.owner.orgId, {
+      runId: missed,
+      periodStart: SEP_START,
+      payDate: "2026-11-02",
+      ruleSetId,
+    });
+
+  beforeAll(async () => {
+    c = await company("engine");
+    wale = await addPayrollWorker(admin, c.owner.orgId, { first_name: "Wale" });
+    const other = await addPayrollWorker(admin, c.owner.orgId, { first_name: "Ada" });
+    const typeId = randomUUID();
+    await asDbOwner(
+      `insert into public.leave_types (id, organisation_id, code, name, counting, paid)
+       values ($1, $2, 'unpaid', 'Unpaid', 'working_days', false)`,
+      [typeId, c.owner.orgId],
+      true,
+    );
+    leaveId = randomUUID();
+    const leave = await asDbOwner(
+      `insert into public.leave_requests (id, organisation_id, worker_id, leave_type_id,
+         leave_year, start_date, end_date, days, status, decided_at)
+       values ($1, $2, $3, $4, 2026, '2026-08-03', '2026-08-04', 2, 'approved', now())`,
+      [leaveId, c.owner.orgId, wale.workerId, typeId],
+      true,
+    );
+    expect(leave.error).toBeNull();
+    const pay = await asDbOwner(
+      `insert into public.leave_request_pay (request_id, organisation_id, pay_percent,
+         pay_below_service)
+       values ($1, $2, 0, false)`,
+      [leaveId, c.owner.orgId],
+      true,
+    );
+    expect(pay.error).toBeNull();
+
+    // August: the arrears line takes ₦109,400 of ₦120,000 (net ₦0) and carries ₦10,600.
+    const label = "Unpaid leave, approved after posting (3 to 4 Aug, 2 days)";
+    const aug = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: AUG_START,
+    });
+    expect(aug.error).toBeNull();
+    const doc = resultsFor(
+      { ...wale, adjustmentId: null },
+      {
+        period: { start: AUG_START, end: periodEnd(AUG_START) },
+        mutate: (d) => {
+          const slip = (d.payslips as Record<string, unknown>[])[0]!;
+          (slip.lines as Record<string, unknown>[]).push({
+            code: "leave_arrears",
+            kind: "deduction",
+            label,
+            amount_kobo: "10940000",
+            pensionable: false,
+            taxable: false,
+            sources: [{ kind: "leave_request", id: leaveId, from: "2026-08-03", to: "2026-08-04" }],
+          });
+          slip.trace = {
+            trace_version: 1,
+            steps: [
+              {
+                step: "leave_arrears",
+                label: `Less ${label}`,
+                formula: "cut to fit net pay",
+                inputs: { wanted_kobo: "12000000" },
+                value_kobo: "10940000",
+                rule_ref: "gross_to_net.deductions",
+              },
+            ],
+          };
+          Object.assign(slip, {
+            other_deductions_kobo: "10940000",
+            net_kobo: "0",
+            carried_forward_kobo: X.toString(),
+          });
+          Object.assign(d.totals as Record<string, unknown>, {
+            other_deductions_kobo: "10940000",
+            net_kobo: "0",
+            carried_forward_kobo: X.toString(),
+          });
+        },
+      },
+    );
+    const saved = await saveResults(admin, c.owner, aug.data!, doc);
+    expect(saved.error).toBeNull();
+    await acknowledgeAndSubmit(c.owner, aug.data!);
+    await approveRun(admin, c.owner.orgId, aug.data!, c.finance);
+    // September's regular run pays Ada only; October holds Wale (waiting for approval).
+    const sep = await submitRunFor(admin, c.owner, other, SEP_START);
+    await approveRun(admin, c.owner.orgId, sep, c.finance);
+    oct = await submitRunFor(admin, c.owner, wale, OCT_START);
+
+    const created = await c.owner.client.rpc("create_off_cycle_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: SEP_START,
+      p_pay_date: "2026-11-02",
+      p_reason: "missed_worker",
+      p_note: "Left off the September run",
+      p_worker_ids: [wale.workerId],
+    });
+    expect(created.error).toBeNull();
+    missed = created.data!;
+    const { data: run } = await admin
+      .from("payroll_runs")
+      .select("rule_set_id")
+      .eq("id", missed)
+      .single();
+    ruleSetId = run!.rule_set_id!;
+  });
+
+  it("takes August's carry while October isn't posted", async () => {
+    const r = await calc();
+    const slip = r.workers.find((w) => w.workerId === wale.workerId)!.payslip;
+    const carried = slip.lines.filter((l) => l.code === "carried_deduction");
+    expect(carried.map((l) => l.amountKobo)).toEqual([X]);
+    expect(r.anomalies.some((a) => a.code === "carry_settled_later")).toBe(false);
+    firstHash = r.inputsSha256;
+  });
+
+  it("takes none once October posts, says so, and its inputs hash changes", async () => {
+    await approveRun(admin, c.owner.orgId, oct, c.finance);
+    const r = await calc();
+    const slip = r.workers.find((w) => w.workerId === wale.workerId)!.payslip;
+    expect(slip.lines.filter((l) => l.code === "carried_deduction")).toEqual([]);
+    expect(slip.carriedForwardKobo).toBe(0n);
+    expect(r.anomalies.filter((a) => a.code === "carry_settled_later")).toEqual([
+      {
+        workerId: wale.workerId,
+        code: "carry_settled_later",
+        severity: "warning",
+        detail: { period_start: OCT_START },
+      },
+    ]);
+    // A run worked out before October posted fails its approval re-check.
+    expect(r.inputsSha256).not.toBe(firstHash);
+  });
+
+  it("flags a refund of the arrears against the carry as it stood, not the ₦0 the run takes", async () => {
+    const cancelled = await c.hr.client.rpc("cancel_leave_request", {
+      p_organisation_id: c.owner.orgId,
+      p_request_id: leaveId,
+      p_reason: "Came to work after all",
+    });
+    expect(cancelled.error).toBeNull();
+    const r = await calc();
+    const slip = r.workers.find((w) => w.workerId === wale.workerId)!.payslip;
+    expect(slip.lines.filter((l) => l.code === "leave_refund").map((l) => l.amountKobo)).toEqual([
+      12_000_000n,
+    ]);
+    expect(r.anomalies.filter((a) => a.code === "refund_uncollected_carry")).toEqual([
+      {
+        workerId: wale.workerId,
+        code: "refund_uncollected_carry",
+        severity: "warning",
+        detail: { naira: "10,600", kobo: 0 },
+      },
     ]);
   });
 });

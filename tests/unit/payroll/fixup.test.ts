@@ -7,6 +7,9 @@
  * - A leave refund that pays back arrears still in the carried balance is flagged ("Refund
  *   includes ₦X not yet recovered from carried deductions"; owner decision), acknowledgeable.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { describeAnomaly } from "@/lib/payroll/anomaly-text";
@@ -163,7 +166,7 @@ describe("a refund paying back arrears still carried is flagged (owner decision)
       workerId: W,
       code: "refund_uncollected_carry",
       severity: "warning",
-      detail: { naira: "20000", kobo: 50 },
+      detail: { naira: "20,000", kobo: 50 },
     });
     expect(ANOMALY_SEVERITY.refund_uncollected_carry).toBe("warning");
     expect(describeAnomaly(a!.code, a!.detail, "Grace Edet").title).toBe(
@@ -171,8 +174,37 @@ describe("a refund paying back arrears still carried is flagged (owner decision)
     );
   });
 
-  it("never stores a run of 10 digits, even for a large amount", () => {
-    const [a] = refundUncollectedAnomalies(W, 99_999_999_999n);
+  it("never stores a run of 10 digits, even for ₦1,000,000,000 (money review L2)", () => {
+    const [a] = refundUncollectedAnomalies(W, 100_000_000_000n);
+    expect(a!.detail).toEqual({ naira: "1,000,000,000", kobo: 0 });
+    // The database's anomaly detail check: no run of 10 digits outside ids.
     expect(JSON.stringify(a!.detail)).not.toMatch(/[0-9]{10}/);
+    expect(describeAnomaly(a!.code, a!.detail, "Grace Edet").title).toContain("₦1,000,000,000.00");
+  });
+});
+
+describe("the tax adviser line stays off the worker's payslip (owner decision)", () => {
+  /** Every source file under a folder. */
+  function sources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory()
+        ? sources(join(dir, e.name))
+        : /\.(ts|tsx)$/.test(e.name)
+          ? [join(dir, e.name)]
+          : [],
+    );
+  }
+
+  it("is in no worker-app screen, nor the payslip PDF or its view", () => {
+    const files = [
+      ...sources(join(process.cwd(), "src/app/m")),
+      join(process.cwd(), "src/server/payroll/payslip-pdf.tsx"),
+      join(process.cwd(), "src/lib/payroll/payslip-view.ts"),
+    ];
+    expect(files.some((f) => f.includes("payslips"))).toBe(true);
+    for (const f of files) {
+      const text = readFileSync(f, "utf8");
+      expect(text, f).not.toMatch(/TAX_ADVISER_LINE|tax adviser/i);
+    }
   });
 });
