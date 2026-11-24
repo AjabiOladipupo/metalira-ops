@@ -156,6 +156,7 @@ export type AnomalyCode =
   | "no_rostered_days"
   | "no_tax_state"
   | "calculation_failed"
+  | "previous_not_posted"
   | "roster_pattern_unknown"
   | "leave_pay_missing"
   | "open_timesheet_days"
@@ -170,7 +171,8 @@ export type AnomalyCode =
   | "final_pay"
   | "net_change"
   | "deduction_cut"
-  | "no_pension_details";
+  | "no_pension_details"
+  | "recurring_not_carried";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -178,6 +180,7 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   no_rostered_days: "blocking",
   no_tax_state: "blocking",
   calculation_failed: "blocking",
+  previous_not_posted: "blocking",
   roster_pattern_unknown: "warning",
   leave_pay_missing: "warning",
   open_timesheet_days: "warning",
@@ -193,6 +196,7 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   net_change: "warning",
   deduction_cut: "warning",
   no_pension_details: "warning",
+  recurring_not_carried: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;
@@ -332,7 +336,6 @@ export function workerAnomalies(w: WorkerAnomalyInput): RunAnomaly[] {
 /** Open (pending or disputed) timesheet days at one site in the period. */
 export interface OpenDaysAtSite {
   siteId: string | null;
-  siteName: string;
   days: number;
   reasons: string[];
 }
@@ -347,11 +350,12 @@ export function runAnomalies(
   sharedAccounts: readonly (readonly string[])[],
 ): RunAnomaly[] {
   const out: RunAnomaly[] = [];
-  for (const site of [...openDays].sort((a, b) => a.siteName.localeCompare(b.siteName))) {
+  // The site's name isn't stored (the screen reads it by id), so free text never reaches the
+  // detail document.
+  for (const site of [...openDays].sort((a, b) => (a.siteId ?? "").localeCompare(b.siteId ?? ""))) {
     out.push(
       anomaly("open_timesheet_days", null, {
         ...(site.siteId ? { site_id: site.siteId } : {}),
-        site_name: site.siteName,
         days: site.days,
         reasons: [...site.reasons].sort(),
       }),
@@ -359,9 +363,88 @@ export function runAnomalies(
   }
   for (const group of sharedAccounts) {
     const ids = [...group].sort();
-    out.push(anomaly("bank_shared", null, { worker_ids: ids, workers: ids.length }));
+    out.push(
+      anomaly("bank_shared", null, {
+        worker_ids: ids.slice(0, SHARED_IDS_SHOWN),
+        workers: ids.length,
+      }),
+    );
   }
   return out;
+}
+
+/** A shared-account anomaly names at most this many workers (and gives the full count). */
+export const SHARED_IDS_SHOWN = 20;
+
+/** The latest posted payslip's figures for one worker. */
+export interface PostedSlip {
+  netKobo: Kobo;
+  carriedForwardKobo: Kobo;
+}
+
+/** The regular run of the period just before this one, if there is one. */
+export interface PreviousPeriodRun {
+  periodStart: string;
+  posted: boolean;
+  slips: ReadonlyMap<string, PostedSlip>;
+}
+
+/**
+ * What a worker brings from earlier runs (open question 6, money review M3): the net of their
+ * payslip in the period just before (for the 10% check) only when that run is posted, and the
+ * carried deduction from that payslip, else from their own latest posted payslip, so a carry is
+ * never lost when they had no payslip in the period before.
+ */
+export function workerHistory(
+  workerId: string,
+  previous: PreviousPeriodRun | null,
+  latestPosted: ReadonlyMap<string, PostedSlip>,
+): { previousNetKobo: Kobo | null; carriedKobo: Kobo; paidBefore: boolean } {
+  const prev = previous?.posted ? previous.slips.get(workerId) : undefined;
+  const own = latestPosted.get(workerId);
+  return {
+    previousNetKobo: prev?.netKobo ?? null,
+    carriedKobo: prev ? prev.carriedForwardKobo : (own?.carriedForwardKobo ?? 0n),
+    paidBefore: own !== undefined || prev !== undefined,
+  };
+}
+
+/**
+ * "Previous period not posted" (blocking): the period before has a run that isn't approved yet,
+ * so this run can't know what it carries or how far net pay moved.
+ */
+export function previousPeriodAnomalies(previous: PreviousPeriodRun | null): RunAnomaly[] {
+  return previous && !previous.posted
+    ? [anomaly("previous_not_posted", null, { period_start: previous.periodStart })]
+    : [];
+}
+
+/** A recurring adjustment of the period before whose next instalment isn't on this run. */
+export interface RecurringSeries {
+  seriesId: string;
+  workerId: string;
+  instalmentNumber: number;
+  instalmentCount: number;
+}
+
+/**
+ * Recurring items not carried (money review L4): instalments are carried only from posted runs
+ * (create_payroll_run), so a change to an unposted run can never pay twice; any series of the
+ * period before with instalments left and no next instalment here is flagged for HR to add.
+ */
+export function recurringAnomalies(
+  previous: readonly RecurringSeries[],
+  carriedSeries: ReadonlySet<string>,
+): RunAnomaly[] {
+  return previous
+    .filter((s) => s.instalmentNumber < s.instalmentCount && !carriedSeries.has(s.seriesId))
+    .map((s) =>
+      anomaly("recurring_not_carried", s.workerId, {
+        series_id: s.seriesId,
+        next: s.instalmentNumber + 1,
+        of: s.instalmentCount,
+      }),
+    );
 }
 
 /** Groups of worker ids holding the same value (account numbers compared in memory only). */

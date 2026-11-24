@@ -70,7 +70,7 @@ export function describeAnomaly(
         ? (detail.reasons as unknown[]).filter((r): r is string => typeof r === "string")
         : [];
       return {
-        title: `${plural(days, "timesheet day")} still open · ${str(detail, "site_name") ?? "A site"}`,
+        title: `${plural(days, "timesheet day")} still open · ${str(detail, "site_name") ?? (str(detail, "site_id") ? "A site" : "No site")}`,
         body: `Pending or disputed days aren't paid in this run.${reasons.length > 0 ? ` Flags: ${reasons.join(", ").replace(/_/g, " ")}.` : ""} Acknowledge to pay them next run.`,
       };
     }
@@ -107,10 +107,12 @@ export function describeAnomaly(
       const ids = Array.isArray(detail.worker_ids)
         ? (detail.worker_ids as unknown[]).filter((r): r is string => typeof r === "string")
         : [];
+      const count = Math.max(num(detail, "workers"), ids.length);
       const who2 = ids.map(names);
+      const more = count > ids.length ? ` and ${count - ids.length} more` : "";
       return {
-        title: `Shared bank account · ${plural(ids.length, "worker")}`,
-        body: `${who2.join(" and ")} share one account number. Check before approving.`,
+        title: `Shared bank account · ${plural(count, "worker")}`,
+        body: `${who2.join(more ? ", " : " and ")}${more} share one account number. Check before approving.`,
       };
     }
     case "bank_shared_unchecked":
@@ -157,6 +159,18 @@ export function describeAnomaly(
         body: "Pension is due this month. Add the details on their page before the pension schedule.",
       };
     }
+    case "previous_not_posted": {
+      const start = str(detail, "period_start");
+      return {
+        title: "The period before isn't posted",
+        body: `The run${start ? ` from ${formatDate(start)}` : ""} isn't approved yet, so carried deductions and the 10% check can't be known. Approve it first, then recalculate. This blocks the run.`,
+      };
+    }
+    case "recurring_not_carried":
+      return {
+        title: `Recurring item not carried · ${name}`,
+        body: `Instalment ${num(detail, "next")} of ${num(detail, "of")} from the period before isn't on this run, because that run wasn't posted when this one was prepared. Add it if it's due.`,
+      };
     default:
       return {
         title: `${code.replace(/_/g, " ")} · ${name}`,

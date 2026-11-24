@@ -22,11 +22,11 @@ async function PayrollRunsPage() {
   const runs = await listRuns(ctx.supabase, ctx.organisationId);
   const canPrepare = canPreparePayroll(ctx.role);
 
-  // The period holding today and the two before it, without a run yet.
+  // The period holding today and the five before it, without a run yet.
   const periods: { value: string; label: string; payDate: string }[] = [];
   if (canPrepare) {
     let date = ctx.today;
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       const { data } = await ctx.supabase.rpc("payroll_period", {
         p_organisation_id: ctx.organisationId,
         p_date: date,

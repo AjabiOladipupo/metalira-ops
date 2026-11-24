@@ -2788,7 +2788,7 @@ export const CAPABILITIES: readonly Capability[] = [
     name: "payroll.acknowledge_anomalies",
     description:
       "Acknowledges warnings on a draft run, such as open timesheet days paid next run; blocking ones are fixed.",
-    kind: "write",
+    kind: "money",
     audience: "manager",
     ...fromSpec(acknowledgeSpec),
     changes: "many",
@@ -2813,7 +2813,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "payroll.return_run",
     description: "Finance or the owner returns a submitted run to HR as a draft, with a reason.",
-    kind: "write",
+    kind: "money",
     audience: "manager",
     ...fromSpec(returnRunSpec),
     changes: "many",

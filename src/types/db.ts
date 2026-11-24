@@ -2180,12 +2180,15 @@ isOneToOne: false
             }[]
                            },
 "payroll_inputs":
-{ Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id"?: string,"p_worker_ids"?: (string)[] }; Returns: Json
+{ Args: { "p_organisation_id": string,"p_period_start": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
 "payroll_period":
 { Args: { "p_date": string,"p_organisation_id": string }; Returns: {
               "pay_date": string,"period_end": string,"period_start": string
             }[]
+                           },
+"payroll_run_inputs":
+{ Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
 "preview_timesheet_correction":
 { Args: { "p_corrected_at"?: string,"p_kind": string,"p_line_id": string,"p_minutes"?: number,"p_organisation_id": string,"p_ot_minutes"?: number,"p_punch_id"?: string,"p_reason": string }; Returns: Json

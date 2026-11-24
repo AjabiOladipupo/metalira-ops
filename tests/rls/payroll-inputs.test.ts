@@ -9,6 +9,10 @@
  * - Owner decision, 23 Nov 2026: pay_rates reads for owner, hr and finance only (people.test.ts
  *   covers writes).
  *
+ * - Slice 5.2: arrears leave out lines already paid on a standing payslip, count the off days
+ *   already paid in the week, and count a week running into the cycle only up to the cycle; the
+ *   inputs come back in the same order every time.
+ *
  * Timesheet lines, shifts and leave are seeded as the database owner with triggers off for the
  * transaction (session_replication_role = replica), as timesheet-approval.test.ts does: the read
  * is under test here, not how those rows are made.
@@ -21,8 +25,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sumKobo } from "@/lib/money";
 import { computeEarnings, POLICY_DEFAULTS } from "@/lib/payroll/earnings";
 import { parsePayrollInputs } from "@/lib/payroll/inputs";
+import { canonicalJson } from "@/lib/payroll/run";
 import type { Database } from "@/types/db";
 
+import { resultsFor, saveResults } from "./helpers/payroll";
 import {
   adminClient,
   anonClient,
@@ -353,12 +359,237 @@ describe("what the inputs carry", () => {
 });
 
 describe("arrears are paid once", () => {
-  // TODO(5.2): un-skip once payslip_sources exists. Decision 10: a timesheet line recorded as a
-  // source of a standing payslip must never come back from payroll_inputs as arrears.
-  it.skip("TODO(5.2): a line already paid on a standing payslip never comes back as arrears", () => {
-    expect.fail(
-      "Slice 5.2: seed a posted run whose payslip_sources holds an approved line, then check payroll_inputs leaves it out of arrears.",
+  // Slice 5.2 (decision 10): a timesheet line recorded as a source of a standing payslip never
+  // comes back as arrears; the off days already paid in a week are counted from those sources;
+  // and a week that runs into the cycle counts only its days before the cycle (money review M1).
+  // timesheet_period_posted returns false until 5.3, so each check runs in a transaction that
+  // replaces it (days before 20 Sep are "posted") and is rolled back.
+  let arrearsOwner: TenantUser;
+  let paidWorker: string;
+  let paidRate: string;
+  const lineIds: Record<string, string> = {};
+
+  async function addLineIn(orgId: string, workerId: string, workDate: string, ot = 0) {
+    const sheet = randomUUID();
+    await seedRaw(
+      `insert into public.timesheets (id, organisation_id, worker_id, period_start, period_end)
+       values ($1, $2, $3, private.timesheet_period_start($4::date, 20),
+               private.timesheet_period_end(private.timesheet_period_start($4::date, 20)))
+       on conflict (organisation_id, worker_id, period_start) do nothing`,
+      [sheet, orgId, workerId, workDate],
     );
+    const { rows } = await db.query<{ id: string }>(
+      `select id from public.timesheets where organisation_id = $1 and worker_id = $2
+         and period_start = private.timesheet_period_start($3::date, 20)`,
+      [orgId, workerId, workDate],
+    );
+    const id = randomUUID();
+    await seedRaw(
+      `insert into public.timesheet_lines (id, organisation_id, timesheet_id, worker_id, work_date,
+         shift_assignment_id, shift_id, post_id, scheduled_minutes, worked_minutes, ot_minutes, status)
+       values ($1, $2, $3, $4, $5, gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 480, 480,
+               $6, 'approved')`,
+      [id, orgId, rows[0]!.id, workerId, workDate, ot],
+    );
+    return id;
+  }
+
+  /** payroll_run_inputs as the secret key with days before 20 Sep "posted", rolled back. */
+  async function postedInputs(orgId: string, workerIds: string[]) {
+    await db.query("begin");
+    try {
+      await db.query(
+        `create or replace function private.timesheet_period_posted(p_organisation_id uuid, p_work_date date)
+         returns boolean language sql stable set search_path = '' as $$ select p_work_date < date '2026-09-20' $$`,
+      );
+      await db.query("select set_config('request.jwt.claims', $1, true)", [
+        JSON.stringify({ role: "service_role" }),
+      ]);
+      const { rows } = await db.query<{ doc: unknown }>(
+        "select private.payroll_run_inputs($1, $2, $3::uuid[], null) as doc",
+        [orgId, OCT_START, workerIds],
+      );
+      return parsePayrollInputs(rows[0]!.doc);
+    } finally {
+      await db.query("rollback");
+    }
+  }
+
+  beforeAll(async () => {
+    arrearsOwner = await createTenantUser("pi-arrears", "Pay Inputs Arrears Org");
+    paidWorker = await addWorker(arrearsOwner.orgId, "2025-01-06");
+    const { data: rate } = await admin
+      .from("pay_rates")
+      .select("id")
+      .eq("worker_id", paidWorker)
+      .single();
+    paidRate = rate!.id;
+    // 10 Sep was paid on the September run (its overtime); 11 Sep was approved after posting.
+    lineIds.paid = await addLineIn(arrearsOwner.orgId, paidWorker, "2026-09-10", 30);
+    lineIds.late = await addLineIn(arrearsOwner.orgId, paidWorker, "2026-09-11", 30);
+    const created = await arrearsOwner.client.rpc("create_payroll_run", {
+      p_organisation_id: arrearsOwner.orgId,
+      p_period_start: "2026-08-20",
+    });
+    expect(created.error).toBeNull();
+    const saved = await saveResults(
+      admin,
+      arrearsOwner,
+      created.data!,
+      resultsFor(
+        { workerId: paidWorker, payRateId: paidRate, adjustmentId: null },
+        {
+          period: { start: "2026-08-20", end: "2026-09-19" },
+          extra: [
+            {
+              code: "overtime",
+              label: "Overtime, 30 min at ₦750.00 an hour",
+              amount: 37_500,
+              sources: [
+                {
+                  kind: "timesheet_line",
+                  id: lineIds.paid,
+                  from: "2026-09-10",
+                  to: "2026-09-10",
+                  off_day: false,
+                },
+              ],
+            },
+          ],
+          anomalies: [],
+        },
+      ),
+    );
+    expect(saved.error).toBeNull();
+  });
+
+  it("leaves out a line already paid on a standing payslip, and keeps the one approved late", async () => {
+    const parsed = await postedInputs(arrearsOwner.orgId, [paidWorker]);
+    const ids = parsed.workers[0]!.arrears.map((a) => a.id);
+    expect(ids).toContain(lineIds.late);
+    expect(ids).not.toContain(lineIds.paid);
+  });
+
+  it("pays a week's off day once when the week runs into the cycle (Mon 14 Sep and Sun 20 Sep)", async () => {
+    const w = await addWorker(arrearsOwner.orgId, "2025-01-06");
+    // Mon 14 to Fri 18 Sep approved after September posted (arrears), Sun 20 Sep in the cycle:
+    // six shift days in the ISO week, so one off day, paid by the current cycle's rule on Sunday.
+    for (const d of [
+      "2026-09-14",
+      "2026-09-15",
+      "2026-09-16",
+      "2026-09-17",
+      "2026-09-18",
+      "2026-09-20",
+    ]) {
+      await addLineIn(arrearsOwner.orgId, w, d);
+    }
+    const parsed = await postedInputs(arrearsOwner.orgId, [w]);
+    const worker = parsed.workers[0]!;
+    expect(worker.arrears).toHaveLength(5);
+    expect(worker.arrears.every((a) => a.weekShiftDays === 5)).toBe(true);
+    const result = computeEarnings(
+      {
+        period: parsed.period,
+        holidays: parsed.holidays,
+        defaultWorkDays: parsed.organisation.defaultWorkDays,
+        worker,
+      },
+      {
+        standardShiftMinutes: parsed.organisation.standardShiftMinutes,
+        hourlyRateDivisorDays: parsed.organisation.hourlyRateDivisorDays,
+        workDaysPerWeek: parsed.organisation.workDaysPerWeek,
+        ...POLICY_DEFAULTS,
+      },
+    );
+    const offDayPay = sumKobo(
+      result.lines
+        .filter((l) => l.code === "off_day" || l.code === "arrears")
+        .map((l) => l.amountKobo),
+    );
+    expect(offDayPay).toBe(600_000n);
+  });
+
+  it("counts the off days other runs already paid in an arrears day's week", async () => {
+    const w = await addWorker(arrearsOwner.orgId, "2025-01-06");
+    const { data: rate } = await admin.from("pay_rates").select("id").eq("worker_id", w).single();
+    // Mon 7 to Sat 12 Sep: Sat 12 was paid as off-day work on a standing payslip; Mon 7 is late.
+    const sat = await addLineIn(arrearsOwner.orgId, w, "2026-09-12");
+    for (const d of ["2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11"]) {
+      await addLineIn(arrearsOwner.orgId, w, d);
+    }
+    const mon = await addLineIn(arrearsOwner.orgId, w, "2026-09-07");
+    const run = await admin
+      .from("payroll_runs")
+      .select("id")
+      .eq("organisation_id", arrearsOwner.orgId)
+      .eq("period_start", "2026-08-20")
+      .single();
+    // Recalculate the September draft with both workers: the second one's off day on Saturday.
+    const doc = resultsFor(
+      { workerId: paidWorker, payRateId: paidRate, adjustmentId: null },
+      {
+        period: { start: "2026-08-20", end: "2026-09-19" },
+        extra: [
+          {
+            code: "overtime",
+            label: "Overtime",
+            amount: 37_500,
+            sources: [
+              { kind: "timesheet_line", id: lineIds.paid, from: "2026-09-10", to: "2026-09-10" },
+            ],
+          },
+        ],
+        anomalies: [],
+      },
+    );
+    const second = resultsFor(
+      { workerId: w, payRateId: rate!.id, adjustmentId: null },
+      {
+        period: { start: "2026-08-20", end: "2026-09-19" },
+        extra: [
+          {
+            code: "off_day",
+            label: "Off-day work, 1 day of 8 h",
+            amount: 600_000,
+            sources: [
+              {
+                kind: "timesheet_line",
+                id: sat,
+                from: "2026-09-12",
+                to: "2026-09-12",
+                off_day: true,
+              },
+            ],
+          },
+        ],
+        anomalies: [],
+      },
+    );
+    const both = {
+      ...doc,
+      payslips: [...(doc.payslips as unknown[]), ...(second.payslips as unknown[])],
+      totals: Object.fromEntries(
+        Object.entries(doc.totals as Record<string, string | number>).map(([k, v]) => [
+          k,
+          k === "worker_count"
+            ? 2
+            : String(BigInt(v as string) + BigInt((second.totals as Record<string, string>)[k]!)),
+        ]),
+      ),
+    };
+    expect((await saveResults(admin, arrearsOwner, run.data!.id, both)).error).toBeNull();
+    const parsed = await postedInputs(arrearsOwner.orgId, [w]);
+    const monday = parsed.workers[0]!.arrears.find((a) => a.id === mon)!;
+    expect(monday).toMatchObject({ weekShiftDays: 6, weekOffDaysPaid: 1 });
+    expect(parsed.workers[0]!.arrears.map((a) => a.id)).not.toContain(sat);
+  });
+
+  it("gives the same inputs, in the same order, every time (the hash is stable)", async () => {
+    const a = await inputs(staff.hr.client);
+    const b = await inputs(staff.hr.client);
+    expect(JSON.stringify(a.data)).toBe(JSON.stringify(b.data));
+    expect(canonicalJson(a.data)).toBe(canonicalJson(b.data));
   });
 });
 

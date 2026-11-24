@@ -163,6 +163,13 @@ export async function recalculateAndSave(
     if (e.code && /^MLPR[CD]$/.test(e.code)) {
       throw new MutationError("invalid", e.detail ?? "The run changed. Reload the page.");
     }
+    if (e.code === "MLPR6") {
+      // The database refused figures the engine produced: nothing was saved.
+      throw new MutationError(
+        "invalid",
+        `The new figures didn't pass the database's payroll checks, so nothing was saved (${e.detail ?? "invariant"}). Reload and recalculate; if it happens again, tell Metalira support.`,
+      );
+    }
     throw error;
   }
   return calc;

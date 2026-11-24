@@ -239,6 +239,16 @@ export interface RunDetail {
   names: Map<string, string>;
 }
 
+/** The display copy of an anomaly's detail, with its site's name (never stored). */
+function withSiteName(
+  detail: Record<string, unknown>,
+  siteNames: ReadonlyMap<string, string>,
+): Record<string, unknown> {
+  const id = detail.site_id;
+  if (typeof id !== "string") return detail;
+  return { ...detail, site_name: siteNames.get(id) ?? "A site" };
+}
+
 const fullName = (w: { first_name: string; last_name: string }) =>
   `${w.first_name} ${w.last_name}`.trim();
 
@@ -341,6 +351,24 @@ export async function loadRunDetail(
     }
   }
   const names = new Map([...workerRows].map(([id, w]) => [id, w.name] as const));
+  // Open timesheet days name their site by id only; the name is read here for the screen.
+  const siteIds = [
+    ...new Set(
+      (anomalies.data ?? []).flatMap((a) => {
+        const id = (a.detail as { site_id?: unknown } | null)?.site_id;
+        return typeof id === "string" ? [id] : [];
+      }),
+    ),
+  ];
+  const siteNames = new Map<string, string>();
+  if (siteIds.length > 0) {
+    const { data: sites } = await supabase
+      .from("sites")
+      .select("id, name")
+      .eq("organisation_id", organisationId)
+      .in("id", siteIds);
+    for (const site of sites ?? []) siteNames.set(site.id, site.name);
+  }
   const people = await profileNames(supabase, [
     run.preparedBy,
     ...(run.submittedBy ? [run.submittedBy] : []),
@@ -391,7 +419,7 @@ export async function loadRunDetail(
       workerName: a.worker_id ? (names.get(a.worker_id) ?? "A worker") : null,
       code: a.code,
       severity: a.severity === "blocking" ? "blocking" : "warning",
-      detail: (a.detail ?? {}) as Record<string, unknown>,
+      detail: withSiteName((a.detail ?? {}) as Record<string, unknown>, siteNames),
       acknowledgedAt: a.acknowledged_at,
       acknowledgedBy: a.acknowledged_by,
     })),

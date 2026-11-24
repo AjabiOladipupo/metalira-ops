@@ -22,13 +22,17 @@
 --      and released), for every role, the secret key and the database owner included.
 --    Who reads: owner, hr and finance. Workers see no payslip here (5.5 publishes released ones).
 --    Nobody writes the tables directly: the functions below do.
--- 2. `private.payroll_inputs` gains p_run_id and closes slice 5.1's TODO(5.2): arrears leave out
+-- 2. Pay inputs close slice 5.1's TODO(5.2): `private.payroll_run_inputs` (and `public.payroll_run_inputs`
+--    for a run, which leaves that run's own draft out; 5.1's payroll_inputs keeps its signature and
+--    calls it with no run). Arrears leave out
 --    a timesheet line already recorded as a source of a standing payslip of another run, the
 --    off days already paid in an arrears day's ISO week come from those sources, and leave
 --    whose days in the cycle another standing payslip already covers is left out.
 -- 3. `private.worker_has_work_records` checks payslips of runs past draft (payslips are work
 --    records; a draft is replaced at each recalculation and pays nothing).
--- 4. Functions (private security definer behind public invoker wrappers, search_path ''):
+-- 4. `private.payroll_run_touchers(org, run)`: everyone who prepared or changed the run, so 5.3's
+--    approval refuses each of them (rule 10).
+-- 5. Functions (private security definer behind public invoker wrappers, search_path ''):
 --    create_payroll_run (hr, owner), save_payroll_results (the secret key only: the server ran
 --    the engine; every invariant is checked again here), add_payroll_adjustment and
 --    remove_payroll_adjustment (hr, owner; draft only), acknowledge_payroll_anomalies (hr,
@@ -480,12 +484,7 @@ declare
   v_status text;
 begin
   if tg_op = 'UPDATE' then
-    if tg_table_name = 'payslip_sources'
-      and (to_jsonb(new) - 'stands') = (to_jsonb(old) - 'stands')
-      and coalesce(current_setting('metalira.payroll_sources_release', true), '') = 'on' then
-      -- 5.7's reversal frees sources through its own function; nothing sets this flag yet.
-      return new;
-    end if;
+    -- 5.7's reversal will free sources (stands) through a function-owned path of its own.
     raise exception 'Payslips, their lines, sources and adjustments never change. Recalculate the draft.'
       using errcode = 'MLPRD';
   end if;
@@ -672,22 +671,21 @@ $$;
 revoke all on function private.payroll_source_paid(uuid, text, uuid, date, date, uuid)
   from public, anon, authenticated;
 
-drop function public.payroll_inputs(uuid, date, uuid[]);
-drop function private.payroll_inputs(uuid, date, uuid[]);
-
 -- As slice 5.1's read (migration 20261122110000, section 3), plus p_run_id (the run being
--- calculated, or null) and decision 10:
+-- calculated, or null; its own draft never hides what it pays) and decision 10:
 -- * arrears leave out a line already recorded as a source of a standing payslip of another run
 --   (one timesheet line is paid once, whatever lines of a payslip it backs);
+-- * week_shift_days counts only the week's shift days before the cycle (a week running into the
+--   cycle has its off day worked out by the current run's own rule, which sees the whole week);
 -- * week_off_days_paid: the distinct shift days of that ISO week already paid as off-day work by
 --   another standing payslip, so an arrears day owes an off day only when the week's approved
 --   shift days less work_days_per_week exceed the off days already paid;
 -- * leave whose days in the cycle another standing payslip already covers is left out.
-create function private.payroll_inputs(
+create function private.payroll_run_inputs(
   p_organisation_id uuid,
   p_period_start date,
-  p_worker_ids uuid[] default null,
-  p_run_id uuid default null
+  p_worker_ids uuid[],
+  p_run_id uuid
 )
 returns jsonb
 language plpgsql
@@ -806,7 +804,7 @@ begin
                 'hourly_rate_kobo', r.hourly_rate_kobo::text,
                 'effective_from', r.effective_from,
                 'effective_to', r.effective_to
-              ) order by r.effective_from
+              ) order by r.effective_from, r.id
             )
             from public.pay_rates r
             where r.organisation_id = p_organisation_id and r.worker_id = w.id
@@ -816,7 +814,7 @@ begin
           'shifts', coalesce((
             select jsonb_agg(
               jsonb_build_object('date', a.shift_date, 'on_leave', a.status = 'removed')
-              order by a.shift_date
+              order by a.shift_date, a.id
             )
             from public.shift_assignments a
             where a.organisation_id = p_organisation_id and a.worker_id = w.id
@@ -867,6 +865,8 @@ begin
                     and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
                     and l2.work_date <= l.work_date
                 ),
+                -- Only days before the cycle: a week that runs into the cycle has its off day paid by
+                -- the current run's own off-day rule (money review M1).
                 'week_shift_days', (
                   select count(distinct l2.work_date)
                   from public.timesheet_lines l2
@@ -875,6 +875,7 @@ begin
                     and l2.shift_assignment_id is not null
                     and l2.worked_minutes + l2.ot_minutes > 0
                     and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
+                    and l2.work_date < v_start
                 ),
                 -- Shift days of this ISO week another standing payslip paid as off-day work.
                 'week_off_days_paid', (
@@ -926,7 +927,7 @@ begin
                 'end_date', q.end_date,
                 'pay_percent', p.pay_percent,
                 'pay_below_service', p.pay_below_service
-              ) order by q.start_date
+              ) order by q.start_date, q.id
             )
             from public.leave_requests q
             join public.leave_types t
@@ -952,14 +953,14 @@ begin
 end;
 $$;
 
-revoke all on function private.payroll_inputs(uuid, date, uuid[], uuid) from public, anon;
-grant execute on function private.payroll_inputs(uuid, date, uuid[], uuid) to authenticated, service_role;
+revoke all on function private.payroll_run_inputs(uuid, date, uuid[], uuid) from public, anon;
+grant execute on function private.payroll_run_inputs(uuid, date, uuid[], uuid) to authenticated, service_role;
 
-create function public.payroll_inputs(
+-- Slice 5.1's read keeps its signature and now leaves out what standing payslips paid.
+create or replace function private.payroll_inputs(
   p_organisation_id uuid,
   p_period_start date,
-  p_worker_ids uuid[] default null,
-  p_run_id uuid default null
+  p_worker_ids uuid[] default null
 )
 returns jsonb
 language sql
@@ -967,11 +968,27 @@ stable
 security invoker
 set search_path = ''
 as $$
-  select private.payroll_inputs(p_organisation_id, p_period_start, p_worker_ids, p_run_id)
+  select private.payroll_run_inputs(p_organisation_id, p_period_start, p_worker_ids, null)
 $$;
 
-revoke all on function public.payroll_inputs(uuid, date, uuid[], uuid) from public, anon;
-grant execute on function public.payroll_inputs(uuid, date, uuid[], uuid) to authenticated, service_role;
+-- The run's own read (the server, recalculating a run): the same, leaving that run's draft out.
+create function public.payroll_run_inputs(
+  p_organisation_id uuid,
+  p_period_start date,
+  p_run_id uuid,
+  p_worker_ids uuid[] default null
+)
+returns jsonb
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select private.payroll_run_inputs(p_organisation_id, p_period_start, p_worker_ids, p_run_id)
+$$;
+
+revoke all on function public.payroll_run_inputs(uuid, date, uuid, uuid[]) from public, anon;
+grant execute on function public.payroll_run_inputs(uuid, date, uuid, uuid[]) to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. Work records: payslips
@@ -1013,6 +1030,30 @@ $$;
 -- ---------------------------------------------------------------------------
 -- 6. Shared checks
 -- ---------------------------------------------------------------------------
+
+-- The severity of an anomaly code (mirrors ANOMALY_SEVERITY in src/lib/payroll/run.ts; the RLS
+-- suite compares them). Null for a code payroll doesn't know.
+create function private.payroll_anomaly_severity(p_code text)
+returns text
+language sql
+immutable
+set search_path = ''
+as $$
+  select case
+    when p_code in (
+      'no_pay_rate', 'no_rostered_days', 'no_tax_state', 'calculation_failed',
+      'previous_not_posted'
+    ) then 'blocking'
+    when p_code in (
+      'roster_pattern_unknown', 'leave_pay_missing', 'open_timesheet_days', 'no_show_days',
+      'bank_missing', 'bank_in_hold', 'bank_not_checked', 'bank_unreadable', 'bank_shared',
+      'bank_shared_unchecked', 'first_pay', 'final_pay', 'net_change', 'deduction_cut',
+      'no_pension_details', 'recurring_not_carried'
+    ) then 'warning'
+  end
+$$;
+
+revoke all on function private.payroll_anomaly_severity(text) from public, anon, authenticated;
 
 -- Owner or hr of the organisation, in a trusted session: prepares, recalculates and submits.
 create function private.require_payroll_preparer(p_organisation_id uuid)
@@ -1095,7 +1136,7 @@ begin
     raise exception 'The results are missing %.', p_what using errcode = 'MLPR6';
   end if;
   v := p_value #>> '{}';
-  if v !~ case when p_negative then '^-?[0-9]{1,15}$' else '^[0-9]{1,15}$' end then
+  if v !~ (case when p_negative then '^-?[0-9]{1,15}$' else '^[0-9]{1,15}$' end) then
     raise exception 'The results give % as something other than whole kobo.', p_what
       using errcode = 'MLPR6';
   end if;
@@ -1104,6 +1145,50 @@ end;
 $$;
 
 revoke all on function private.payroll_kobo(jsonb, boolean, text) from public, anon, authenticated;
+
+-- Everyone who prepared or changed a run, for 5.3's two-person rule (rule 10): its preparer, every
+-- person who saved its results (the audit log keeps each recalculation's actor; calculated_by is
+-- the latest), its submitters, anyone who added an adjustment or acknowledged an anomaly on it.
+-- Each of these is taken from the session where they acted (prepared_by, submitted_by, the
+-- decisions' actor, created_by, acknowledged_by), or, for a recalculation, from the actor the
+-- server named after checking the signed-in user (calculated_by). No role check: definers call it.
+create function private.payroll_run_touchers(p_organisation_id uuid, p_run_id uuid)
+returns uuid[]
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(array_agg(distinct t.uid) filter (where t.uid is not null), '{}')
+  from (
+    select r.prepared_by as uid from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.id = p_run_id
+    union all
+    select r.calculated_by from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.id = p_run_id
+    union all
+    select r.submitted_by from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.id = p_run_id
+    union all
+    select d.actor_id from public.payroll_run_decisions d
+    where d.organisation_id = p_organisation_id and d.run_id = p_run_id
+      and d.decision = 'submitted'
+    union all
+    select a.created_by from public.payroll_adjustments a
+    where a.organisation_id = p_organisation_id and a.run_id = p_run_id
+    union all
+    select a.acknowledged_by from public.payroll_anomalies a
+    where a.organisation_id = p_organisation_id and a.run_id = p_run_id
+    union all
+    select l.actor_id from public.audit_log l
+    where l.organisation_id = p_organisation_id and l.entity = 'payroll_runs'
+      and l.entity_id = p_run_id
+      and l.action in ('payroll.results_saved', 'payroll.run_created', 'payroll.run_submitted',
+        'payroll.adjustment_added', 'payroll.adjustment_removed', 'payroll.anomalies_acknowledged')
+  ) t
+$$;
+
+revoke all on function private.payroll_run_touchers(uuid, uuid) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 7. Functions
@@ -1293,6 +1378,8 @@ declare
   v_slip_count integer := 0;
   v_sources jsonb;
   v_key text;
+  v_severity text;
+  v_adj public.payroll_adjustments%rowtype;
 begin
   if coalesce(auth.role(), '') <> 'service_role' or auth.uid() is not null then
     raise exception 'Only the server saves payroll results.' using errcode = '42501';
@@ -1387,6 +1474,20 @@ begin
     if not (v_slip ->> 'employment_type') in ('permanent', 'contract', 'casual', 'daily') then
       raise exception 'A payslip has no employment type.' using errcode = 'MLPR6';
     end if;
+    begin
+      if exists (
+        select 1 from jsonb_array_elements_text(v_slip -> 'pay_rate_ids') x
+        where not exists (
+          select 1 from public.pay_rates r
+          where r.organisation_id = p_organisation_id and r.worker_id = v_worker
+            and r.id = x::uuid
+        )
+      ) then
+        raise exception 'A payslip names a pay rate that isn''t this worker''s.' using errcode = 'MLPR6';
+      end if;
+    exception when invalid_text_representation then
+      raise exception 'A payslip names a pay rate that isn''t an id.' using errcode = 'MLPR6';
+    end;
 
     begin
       insert into public.payslips (
@@ -1472,7 +1573,7 @@ begin
         if v_src_id is null or v_from is null or v_to is null or v_to < v_from then
           raise exception 'A payslip source isn''t in the expected shape.' using errcode = 'MLPR6';
         end if;
-        if not case v_src_kind
+        if not (case v_src_kind
           when 'timesheet_line' then v_from = v_to and exists (
             select 1 from public.timesheet_lines l
             where l.organisation_id = p_organisation_id and l.id = v_src_id
@@ -1496,9 +1597,19 @@ begin
               and a.run_id = p_run_id and a.worker_id = v_worker
           ) and v_from = v_run.period_start and v_to = v_run.period_end
           else false
-        end then
+        end) then
           raise exception 'A payslip pays a source that isn''t this worker''s to pay (%).', v_src_kind
             using errcode = 'MLPR6';
+        end if;
+        if v_src_kind = 'adjustment' then
+          select a.* into v_adj from public.payroll_adjustments a
+          where a.organisation_id = p_organisation_id and a.id = v_src_id;
+          if not (
+            (v_code = 'adjustment_earning' and v_adj.kind = 'earning' and v_amount = v_adj.amount_kobo)
+            or (v_code = 'deduction' and v_adj.kind = 'deduction' and v_amount <= v_adj.amount_kobo)
+          ) then
+            raise exception 'A payslip line doesn''t pay its adjustment''s amount.' using errcode = 'MLPR6';
+          end if;
         end if;
         v_key := v_src_kind || ':' || v_src_id::text;
         if v_sources ? v_key then
@@ -1556,19 +1667,6 @@ begin
     end if;
   end loop;
 
-  -- Every adjustment of the run is paid on its worker's payslip.
-  if exists (
-    select 1 from public.payroll_adjustments a
-    where a.organisation_id = p_organisation_id and a.run_id = p_run_id
-      and not exists (
-        select 1 from public.payslip_sources s
-        where s.organisation_id = p_organisation_id and s.run_id = p_run_id
-          and s.source_kind = 'adjustment' and s.source_id = a.id and s.worker_id = a.worker_id
-      )
-  ) then
-    raise exception 'An adjustment of this run isn''t on its worker''s payslip.' using errcode = 'MLPR6';
-  end if;
-
   select
     coalesce(sum(s.gross_kobo), 0) as gross, coalesce(sum(s.paye_kobo), 0) as paye,
     coalesce(sum(s.pension_employee_kobo), 0) as pee, coalesce(sum(s.pension_employer_kobo), 0) as per,
@@ -1608,7 +1706,11 @@ begin
     end if;
     v_ack_by := null;
     v_ack_at := null;
-    if v_anomaly ->> 'severity' = 'warning' then
+    v_severity := private.payroll_anomaly_severity(v_anomaly ->> 'code');
+    if v_severity is null then
+      raise exception 'An anomaly has a code payroll doesn''t know.' using errcode = 'MLPR6';
+    end if;
+    if v_severity = 'warning' then
       select (o ->> 'by')::uuid, (o ->> 'at')::timestamptz into v_ack_by, v_ack_at
       from jsonb_array_elements(v_old_acks) o
       where (o ->> 'worker_id') is not distinct from v_worker::text
@@ -1622,7 +1724,7 @@ begin
         acknowledged_at
       )
       values (
-        p_organisation_id, p_run_id, v_worker, v_anomaly ->> 'code', v_anomaly ->> 'severity',
+        p_organisation_id, p_run_id, v_worker, v_anomaly ->> 'code', v_severity,
         v_detail, v_ack_by, v_ack_at
       );
     exception
@@ -1631,6 +1733,32 @@ begin
     end;
     v_anomaly_count := v_anomaly_count + 1;
   end loop;
+
+  -- Every adjustment of the run is paid on its worker's payslip, unless the engine refused that
+  -- worker (no payslip and a blocking anomaly naming them): the run can't be submitted then.
+  if exists (
+    select 1 from public.payroll_adjustments a
+    where a.organisation_id = p_organisation_id and a.run_id = p_run_id
+      and not exists (
+        select 1 from public.payslip_sources s
+        where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+          and s.source_kind = 'adjustment' and s.source_id = a.id and s.worker_id = a.worker_id
+      )
+      and not (
+        not exists (
+          select 1 from public.payslips p
+          where p.organisation_id = p_organisation_id and p.run_id = p_run_id
+            and p.worker_id = a.worker_id
+        )
+        and exists (
+          select 1 from public.payroll_anomalies x
+          where x.organisation_id = p_organisation_id and x.run_id = p_run_id
+            and x.worker_id = a.worker_id and x.severity = 'blocking'
+        )
+      )
+  ) then
+    raise exception 'An adjustment of this run isn''t on its worker''s payslip.' using errcode = 'MLPR6';
+  end if;
 
   update public.payroll_runs r
   set gross_kobo = v_totals.gross, paye_kobo = v_totals.paye,
@@ -1749,6 +1877,15 @@ begin
   ) then
     raise exception 'That worker wasn''t found.' using errcode = 'P0002';
   end if;
+  -- Only a worker the run pays: employed on some day of the period.
+  if not exists (
+    select 1 from public.workers w
+    where w.organisation_id = p_organisation_id and w.id = p_worker_id
+      and w.start_date <= v_run.period_end
+      and (w.end_date is null or w.end_date >= v_run.period_start)
+  ) then
+    raise exception 'That worker isn''t employed in this pay period.' using errcode = '22023';
+  end if;
 
   insert into public.payroll_adjustments (
     id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
@@ -1762,9 +1899,9 @@ begin
   );
   update public.payroll_runs r set needs_recalculation = true where r.id = p_run_id;
   perform private.log_audit_impl(
-    p_organisation_id, 'payroll.adjustment_added', 'payroll_adjustments', v_id, null,
+    p_organisation_id, 'payroll.adjustment_added', 'payroll_runs', p_run_id, null,
     jsonb_build_object(
-      'run_id', p_run_id, 'worker_id', p_worker_id, 'kind', p_kind, 'label', v_label,
+      'adjustment_id', v_id, 'worker_id', p_worker_id, 'kind', p_kind, 'label', v_label,
       'amount_kobo', v_amount::text, 'instalments', p_instalments
     ),
     v_reason
@@ -1845,9 +1982,9 @@ begin
   delete from public.payroll_adjustments a where a.id = v_row.id;
   update public.payroll_runs r set needs_recalculation = true where r.id = v_row.run_id;
   perform private.log_audit_impl(
-    p_organisation_id, 'payroll.adjustment_removed', 'payroll_adjustments', v_row.id,
+    p_organisation_id, 'payroll.adjustment_removed', 'payroll_runs', v_row.run_id,
     jsonb_build_object(
-      'run_id', v_row.run_id, 'worker_id', v_row.worker_id, 'kind', v_row.kind,
+      'adjustment_id', v_row.id, 'worker_id', v_row.worker_id, 'kind', v_row.kind,
       'label', v_row.label, 'amount_kobo', v_row.amount_kobo::text
     ),
     null,
@@ -1985,12 +2122,12 @@ begin
   where a.organisation_id = p_organisation_id and a.run_id = p_run_id;
   if v_blocking > 0 then
     raise exception '% blocking % must be fixed before submitting.', v_blocking,
-      case when v_blocking = 1 then 'anomaly' else 'anomalies' end
+      (case when v_blocking = 1 then 'anomaly' else 'anomalies' end)
       using errcode = 'MLPR4';
   end if;
   if v_open > 0 then
     raise exception 'Acknowledge % more % before submitting.', v_open,
-      case when v_open = 1 then 'anomaly' else 'anomalies' end
+      (case when v_open = 1 then 'anomaly' else 'anomalies' end)
       using errcode = 'MLPR4';
   end if;
 

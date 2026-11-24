@@ -4,7 +4,8 @@ import { createHash } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { toKobo, type Kobo } from "@/lib/money";
+import { addDays } from "@/lib/dates";
+import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
 import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
 import { parsePayrollInputs, type PayrollInputs } from "@/lib/payroll/inputs";
@@ -12,6 +13,9 @@ import { NTA_2025_V1, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set"
 import {
   canonicalJson,
   itfAppliesTo,
+  previousPeriodAnomalies,
+  recurringAnomalies,
+  workerHistory,
   PayrollInputError,
   resultsPayload,
   runAnomalies,
@@ -19,6 +23,9 @@ import {
   workerAnomalies,
   workerPayslip,
   type OpenDaysAtSite,
+  type PostedSlip,
+  type PreviousPeriodRun,
+  type RecurringSeries,
   type ResultsPayload,
   type RunAdjustment,
   type RunAnomaly,
@@ -145,58 +152,112 @@ async function runAdjustments(
   }));
 }
 
-interface PostedHistory {
-  paidBefore: Set<string>;
-  previousNet: Map<string, Kobo>;
-  carried: Map<string, Kobo>;
-  latestRunId: string | null;
+interface History {
+  previous: PreviousPeriodRun | null;
+  previousRunId: string | null;
+  latestPosted: Map<string, PostedSlip>;
+  /** Recurring series of the period before (to flag instalments not carried). */
+  previousSeries: RecurringSeries[];
 }
 
-/** The latest posted run before this period: each worker's net and carried deduction. */
-async function postedHistory(
+const POSTED = new Set(["approved", "released"]);
+
+/**
+ * What workers bring from earlier runs (money review M3): the regular run of the period just
+ * before (its payslips when posted; a blocking anomaly when it isn't), and each worker's own
+ * latest posted payslip for the carried deduction when they had none in the period before.
+ */
+async function runHistory(
   supabase: Client,
   organisationId: string,
   periodStart: string,
   workerIds: readonly string[],
-): Promise<PostedHistory> {
-  const history: PostedHistory = {
-    paidBefore: new Set(),
-    previousNet: new Map(),
-    carried: new Map(),
-    latestRunId: null,
+): Promise<History> {
+  const history: History = {
+    previous: null,
+    previousRunId: null,
+    latestPosted: new Map(),
+    previousSeries: [],
   };
   const { data: runs, error } = await supabase
     .from("payroll_runs")
-    .select("id, period_start")
+    .select("id, kind, status, period_start, period_end")
     .eq("organisation_id", organisationId)
-    .in("status", ["approved", "released"])
     .lt("period_start", periodStart)
-    .order("period_start", { ascending: false });
+    .order("period_start", { ascending: false })
+    .limit(400);
   if (error) throw new Error(`Could not read earlier runs (${error.code})`);
-  if (!runs || runs.length === 0 || workerIds.length === 0) return history;
-  const latest = runs[0]!.id;
-  history.latestRunId = latest;
-  for (let i = 0; i < workerIds.length; i += 200) {
-    const chunk = workerIds.slice(i, i + 200);
-    const { data, error: slipError } = await supabase
-      .from("payslips")
-      .select("run_id, worker_id, net_kobo::text, carried_forward_kobo::text")
-      .eq("organisation_id", organisationId)
-      .in(
-        "run_id",
-        runs.map((r) => r.id),
-      )
-      .in("worker_id", chunk);
-    if (slipError) throw new Error(`Could not read earlier payslips (${slipError.code})`);
-    for (const s of data ?? []) {
-      history.paidBefore.add(s.worker_id);
-      if (s.run_id === latest) {
-        history.previousNet.set(s.worker_id, toKobo(s.net_kobo));
-        history.carried.set(s.worker_id, toKobo(s.carried_forward_kobo));
+  const all = runs ?? [];
+  const prev = all.find((r) => r.kind === "regular" && r.period_end === addDays(periodStart, -1));
+  const posted = all.filter((r) => POSTED.has(r.status));
+  const order = new Map(posted.map((r, i) => [r.id, i] as const));
+  const prevSlips = new Map<string, PostedSlip>();
+  const ranks = new Map<string, number>();
+
+  const ids = [...new Set([...posted.map((r) => r.id), ...(prev ? [prev.id] : [])])];
+  if (ids.length > 0 && workerIds.length > 0) {
+    for (let i = 0; i < workerIds.length; i += 200) {
+      const chunk = workerIds.slice(i, i + 200);
+      const { data, error: slipError } = await supabase
+        .from("payslips")
+        .select("run_id, worker_id, net_kobo::text, carried_forward_kobo::text")
+        .eq("organisation_id", organisationId)
+        .in("run_id", ids)
+        .in("worker_id", chunk);
+      if (slipError) throw new Error(`Could not read earlier payslips (${slipError.code})`);
+      for (const s of data ?? []) {
+        const slip = {
+          netKobo: toKobo(s.net_kobo),
+          carriedForwardKobo: toKobo(s.carried_forward_kobo),
+        };
+        if (prev && s.run_id === prev.id) prevSlips.set(s.worker_id, slip);
+        const rank = order.get(s.run_id);
+        if (rank === undefined) continue;
+        if (rank < (ranks.get(s.worker_id) ?? Infinity)) {
+          ranks.set(s.worker_id, rank);
+          history.latestPosted.set(s.worker_id, slip);
+        }
       }
     }
   }
+
+  if (prev) {
+    history.previousRunId = prev.id;
+    history.previous = {
+      periodStart: prev.period_start,
+      posted: POSTED.has(prev.status),
+      slips: prevSlips,
+    };
+    const { data: series, error: seriesError } = await supabase
+      .from("payroll_adjustments")
+      .select("series_id, worker_id, instalment_number, instalment_count")
+      .eq("organisation_id", organisationId)
+      .eq("run_id", prev.id);
+    if (seriesError) throw new Error(`Could not read earlier adjustments (${seriesError.code})`);
+    history.previousSeries = (series ?? []).map((x) => ({
+      seriesId: x.series_id,
+      workerId: x.worker_id,
+      instalmentNumber: x.instalment_number,
+      instalmentCount: x.instalment_count,
+    }));
+  }
   return history;
+}
+
+/** Series this run already carries (to compare with the period before's). */
+async function carriedSeries(
+  supabase: Client,
+  organisationId: string,
+  runId: string | null,
+): Promise<Set<string>> {
+  if (!runId) return new Set();
+  const { data, error } = await supabase
+    .from("payroll_adjustments")
+    .select("series_id")
+    .eq("organisation_id", organisationId)
+    .eq("run_id", runId);
+  if (error) throw new Error(`Could not read the run's adjustments (${error.code})`);
+  return new Set((data ?? []).map((x) => x.series_id));
 }
 
 /** Pending and disputed timesheet days in the period, by site ("5 timesheets still block"). */
@@ -222,20 +283,8 @@ async function openDaysBySite(
     for (const e of l.exceptions ?? []) entry.reasons.add(e);
     bySite.set(key, entry);
   }
-  const siteIds = [...bySite.keys()].filter((k) => k !== "");
-  const names = new Map<string, string>();
-  if (siteIds.length > 0) {
-    const { data: sites, error: siteError } = await supabase
-      .from("sites")
-      .select("id, name")
-      .eq("organisation_id", organisationId)
-      .in("id", siteIds);
-    if (siteError) throw new Error(`Could not read sites (${siteError.code})`);
-    for (const s of sites ?? []) names.set(s.id, s.name);
-  }
   return [...bySite.entries()].map(([siteId, e]) => ({
     siteId: siteId === "" ? null : siteId,
-    siteName: siteId === "" ? "No site" : (names.get(siteId) ?? "A site"),
     days: e.days,
     reasons: [...e.reasons],
   }));
@@ -252,12 +301,19 @@ export async function calculateRun(
   target: RunTarget,
   options: CalculateOptions = {},
 ): Promise<RunCalculation> {
-  const { data: raw, error } = await supabase.rpc("payroll_inputs", {
-    p_organisation_id: organisationId,
-    p_period_start: target.periodStart,
-    ...(options.workerIds ? { p_worker_ids: [...options.workerIds] } : {}),
-    ...(target.runId ? { p_run_id: target.runId } : {}),
-  });
+  const workerArg = options.workerIds ? { p_worker_ids: [...options.workerIds] } : {};
+  const { data: raw, error } = target.runId
+    ? await supabase.rpc("payroll_run_inputs", {
+        p_organisation_id: organisationId,
+        p_period_start: target.periodStart,
+        p_run_id: target.runId,
+        ...workerArg,
+      })
+    : await supabase.rpc("payroll_inputs", {
+        p_organisation_id: organisationId,
+        p_period_start: target.periodStart,
+        ...workerArg,
+      });
   // The code only: the message can name the period or the company.
   if (error) throw new Error(`Could not read pay inputs (${error.code})`);
   const inputs: PayrollInputs = parsePayrollInputs(raw);
@@ -293,11 +349,14 @@ export async function calculateRun(
   ].filter((a) => !removed.has(a.id));
 
   const workerIds = inputs.workers.map((w) => w.workerId);
-  const [history, bank, openDays] = await Promise.all([
-    postedHistory(supabase, organisationId, period.start, workerIds),
+  const [history, bank, openDays, carried] = await Promise.all([
+    runHistory(supabase, organisationId, period.start, workerIds),
     checkBankDetails(organisationId, workerIds),
     options.workerIds ? Promise.resolve([]) : openDaysBySite(supabase, organisationId, period),
+    carriedSeries(supabase, organisationId, target.runId),
   ]);
+  const historyOf = (workerId: string) =>
+    workerHistory(workerId, history.previous, history.latestPosted);
 
   // Earnings for everyone first; ITF depends on the run's levy base.
   const earnings = new Map<string, EarningsResult>();
@@ -330,7 +389,7 @@ export async function calculateRun(
               adjustments: adjustments.filter((a) => a.workerId === w.workerId),
               nhfOptIn: w.statutory.nhfOptIn,
               annualRentKobo: w.statutory.annualRentKobo,
-              carriedDeductionKobo: history.carried.get(w.workerId) ?? 0n,
+              carriedDeductionKobo: historyOf(w.workerId).carriedKobo,
             },
             rules,
             { itfApplies, ruleSetId: ruleSetId ?? "starting values, not yet saved" },
@@ -388,13 +447,22 @@ export async function calculateRun(
         noShowDates: e.days.noShowDates,
         payslip: slip,
         bank: bank.byWorker.get(w.workerId) ?? null,
-        previousNetKobo: history.previousNet.get(w.workerId) ?? null,
-        paidBefore: history.paidBefore.has(w.workerId),
+        previousNetKobo: historyOf(w.workerId).previousNetKobo,
+        paidBefore: historyOf(w.workerId).paidBefore,
         rules,
       }),
     );
   }
   anomalies.push(...runAnomalies(openDays, bank.shared));
+  if (!options.workerIds) {
+    anomalies.push(...previousPeriodAnomalies(history.previous));
+    anomalies.push(
+      ...recurringAnomalies(
+        history.previousSeries.filter((x) => workerIds.includes(x.workerId)),
+        carried,
+      ),
+    );
+  }
   if (!bank.sharedCheck && workerIds.length > 0) {
     anomalies.push({
       workerId: null,
@@ -424,9 +492,14 @@ export async function calculateRun(
       adjustments: [...adjustments].sort((a, b) => a.id.localeCompare(b.id)),
       bank: bank.fingerprint,
       previous: {
-        run: history.latestRunId,
-        net: Object.fromEntries(history.previousNet),
-        carried: Object.fromEntries(history.carried),
+        run: history.previousRunId,
+        posted: history.previous?.posted ?? null,
+        workers: Object.fromEntries(
+          workerIds.map((id) => {
+            const h = historyOf(id);
+            return [id, { net: h.previousNetKobo, carried: h.carriedKobo, paid: h.paidBefore }];
+          }),
+        ),
       },
     }),
   );
