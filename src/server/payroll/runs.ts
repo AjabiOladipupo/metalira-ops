@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { formatDate } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
-import { formatNaira, parseNairaToKobo, type Kobo } from "@/lib/money";
+import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { PAYROLL_READERS } from "@/lib/pay-access";
 import type { RunTotals } from "@/lib/payroll/run";
 import type { ManagerRole } from "@/lib/roles";
@@ -94,6 +94,11 @@ export const adjustmentSchema = z.object({
     .max(60, "Instalments are 1 to 60")
     .default(1),
   reason: text(500, "Give a reason"),
+});
+
+export const carryInstalmentSchema = z.object({
+  runId: z.uuid(reload),
+  seriesId: z.uuid(reload),
 });
 
 export const removeAdjustmentSchema = z.object({
@@ -323,6 +328,48 @@ export async function previewRemoveAdjustment(
   };
 }
 
+/** The series' latest instalment in an earlier run (what "Carry next instalment" continues). */
+async function lastInstalment(
+  supabase: Client,
+  organisationId: string,
+  run: PayrollRunRow,
+  seriesId: string,
+) {
+  const { data, error } = await supabase
+    .from("payroll_adjustments")
+    .select(
+      "worker_id, kind, label, amount_kobo::text, instalment_number, instalment_count, payroll_runs!payroll_adjustments_run_fkey ( period_start )",
+    )
+    .eq("organisation_id", organisationId)
+    .eq("series_id", seriesId)
+    .order("instalment_number", { ascending: false });
+  if (error) fromPayrollRunDbError(error);
+  return (
+    (data ?? []).find(
+      (a) => a.payroll_runs !== null && a.payroll_runs.period_start < run.periodStart,
+    ) ?? null
+  );
+}
+
+export async function previewCarryInstalment(
+  ctx: Pick<MutationContext, "supabase" | "organisationId">,
+  data: z.output<typeof carryInstalmentSchema>,
+): Promise<CapabilityPreview> {
+  const run = await draftRun(ctx.supabase, ctx.organisationId, data.runId);
+  const last = await lastInstalment(ctx.supabase, ctx.organisationId, run, data.seriesId);
+  if (!last)
+    throw new MutationError("invalid", "That recurring item wasn't found. Reload the page.");
+  if (last.instalment_number >= last.instalment_count) {
+    throw new MutationError("invalid", "Every instalment of that item is already paid.");
+  }
+  const amount = money(toKobo(last.amount_kobo));
+  const next = last.instalment_number + 1;
+  return {
+    summary: `Carries instalment ${next} of ${last.instalment_count} of ${last.label} (${last.kind === "deduction" ? "a deduction" : "an earning"} of ${amount}) onto this run, in the same series, so it is never deducted twice. The run is recalculated.`,
+    changes: [{ label: last.label, after: `${amount} · ${next} of ${last.instalment_count}` }],
+  };
+}
+
 export async function previewSubmit(
   ctx: Pick<MutationContext, "supabase" | "organisationId">,
   data: z.output<typeof runIdSchema>,
@@ -441,6 +488,23 @@ export const addAdjustmentSpec: MutationSpec<typeof adjustmentSchema, { runId: s
     const run = await draftRun(ctx.supabase, ctx.organisationId, d.runId);
     await recalculateAndSave(ctx, run);
     return { runId: d.runId };
+  },
+};
+
+export const carryInstalmentSpec: MutationSpec<typeof carryInstalmentSchema, { runId: string }> = {
+  module: "payroll",
+  schema: carryInstalmentSchema,
+  roles: PAYROLL_PREPARERS,
+  run: async (ctx) => {
+    const { error } = await ctx.supabase.rpc("carry_payroll_instalment", {
+      p_organisation_id: ctx.organisationId,
+      p_run_id: ctx.data.runId,
+      p_series_id: ctx.data.seriesId,
+    });
+    if (error) fromPayrollRunDbError(error);
+    const run = await draftRun(ctx.supabase, ctx.organisationId, ctx.data.runId);
+    await recalculateAndSave(ctx, run);
+    return { runId: run.id };
   },
 };
 

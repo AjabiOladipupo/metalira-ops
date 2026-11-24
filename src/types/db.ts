@@ -2025,6 +2025,9 @@ isOneToOne: false
 "create_organisation":
 { Args: { "p_name": string }; Returns: string
                            },
+"carry_payroll_instalment":
+{ Args: { "p_organisation_id": string,"p_run_id": string,"p_series_id": string }; Returns: string
+                           },
 "create_payroll_run":
 { Args: { "p_organisation_id": string,"p_pay_date"?: string,"p_period_start": string }; Returns: string
                            },

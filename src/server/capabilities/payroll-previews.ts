@@ -8,6 +8,7 @@ import { previewRuleSetVersion, type RuleSetVersionPreview } from "@/server/payr
 import {
   previewAcknowledge,
   previewAddAdjustment,
+  previewCarryInstalment,
   previewCreateRun,
   previewRecalculate,
   previewRemoveAdjustment,
@@ -15,6 +16,7 @@ import {
   previewSubmit,
   type acknowledgeSchema,
   type adjustmentSchema,
+  type carryInstalmentSchema,
   type createRunSchema,
   type removeAdjustmentSchema,
   type returnRunSchema,
@@ -74,6 +76,8 @@ export const previewRecalculatePayrollRun: PreviewFn<typeof runIdSchema> = (ctx)
   previewRecalculate(ctx, ctx.data);
 export const previewAddPayrollAdjustment: PreviewFn<typeof adjustmentSchema> = (ctx) =>
   previewAddAdjustment(ctx, ctx.data);
+export const previewCarryPayrollInstalment: PreviewFn<typeof carryInstalmentSchema> = (ctx) =>
+  previewCarryInstalment(ctx, ctx.data);
 export const previewRemovePayrollAdjustment: PreviewFn<typeof removeAdjustmentSchema> = (ctx) =>
   previewRemoveAdjustment(ctx, ctx.data);
 export const previewAcknowledgePayrollAnomalies: PreviewFn<typeof acknowledgeSchema> = (ctx) =>

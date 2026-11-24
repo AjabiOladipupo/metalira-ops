@@ -425,6 +425,26 @@ describe("save_payroll_results", () => {
       },
     ],
     ["another worker's pay version", (d) => (slip(d).pay_rate_ids = [submitted.payRateId])],
+    ["pay versions that aren't a list", (d) => (slip(d).pay_rate_ids = submitted.payRateId)],
+    [
+      "an adjustment paid on two lines",
+      (d) => {
+        const all = lines(d);
+        const allowance = all.find((x) => x.code === "adjustment_earning")!;
+        all.push({ ...allowance, label: "Supervisor allowance again" });
+        all[0]!.amount_kobo = "4500000";
+      },
+    ],
+    [
+      "an adjustment line with a second source",
+      (d) => {
+        const allowance = lines(d).find((x) => x.code === "adjustment_earning")!;
+        allowance.sources = [
+          ...(allowance.sources as unknown[]),
+          { kind: "pay_rate", id: draft.payRateId, from: OCT_START, to: OCT_END },
+        ];
+      },
+    ],
     [
       "a source that isn't the worker's",
       (d) =>
@@ -594,6 +614,133 @@ describe("save_payroll_results", () => {
       );
       expect(rows[0]!.s, code).toBe(severity);
     }
+  });
+});
+
+describe("recurring items (money review M-new-1)", () => {
+  /** A deduction line paying `adjustmentId` added to a results document. */
+  function withDeduction(doc: Record<string, unknown>, adjustmentId: string, amount: number) {
+    const s = slip(doc);
+    lines(doc).push({
+      code: "deduction",
+      kind: "deduction",
+      label: "Loan repayment",
+      amount_kobo: String(amount),
+      pensionable: false,
+      taxable: false,
+      sources: [{ kind: "adjustment", id: adjustmentId, from: "2026-08-20", to: "2026-09-19" }],
+    });
+    s.other_deductions_kobo = String(amount);
+    s.net_kobo = String(BigInt(s.net_kobo as string) - BigInt(amount));
+    const t = doc.totals as Record<string, unknown>;
+    t.other_deductions_kobo = String(amount);
+    t.net_kobo = String(BigInt(t.net_kobo as string) - BigInt(amount));
+    return doc;
+  }
+
+  it("carries a ₦30,000 loan as 3 × ₦10,000 across Sep, Oct and Nov, never more", async () => {
+    const o = await createTenantUser("prun-loan", "Payroll Loan Org");
+    const { workerId, payRateId } = await addPayrollWorker(admin, o.orgId);
+    const sep = await o.client.rpc("create_payroll_run", {
+      p_organisation_id: o.orgId,
+      p_period_start: "2026-08-20",
+    });
+    expect(sep.error).toBeNull();
+    const loan = await o.client.rpc("add_payroll_adjustment", {
+      p_organisation_id: o.orgId,
+      p_run_id: sep.data!,
+      p_worker_id: workerId,
+      p_kind: "deduction",
+      p_label: "Loan repayment",
+      p_amount_kobo: "1000000",
+      p_pensionable: false,
+      p_taxable: false,
+      p_instalments: 3,
+      p_reason: "₦30,000 loan of 1 Aug",
+    });
+    expect(loan.error).toBeNull();
+    const saved = await saveResults(
+      admin,
+      o,
+      sep.data!,
+      withDeduction(
+        resultsFor(
+          { workerId, payRateId, adjustmentId: null },
+          { period: { start: "2026-08-20", end: "2026-09-19" }, anomalies: [] },
+        ),
+        loan.data!,
+        1_000_000,
+      ),
+    );
+    expect(saved.error).toBeNull();
+    // September is approved (5.3 does this; here as the database owner with triggers off).
+    await db.query("begin");
+    try {
+      await db.query("set local session_replication_role = replica");
+      await db.query(
+        "update public.payroll_runs set status = 'approved', submitted_at = now(), submitted_by = $2 where id = $1",
+        [sep.data!, o.id],
+      );
+      await db.query("commit");
+    } catch (error) {
+      await db.query("rollback");
+      throw error;
+    }
+    const { data: series } = await admin
+      .from("payroll_adjustments")
+      .select("series_id")
+      .eq("id", loan.data!)
+      .single();
+    const seriesId = series!.series_id;
+
+    // October is prepared after September posted: instalment 2 is carried automatically.
+    const oct = await o.client.rpc("create_payroll_run", {
+      p_organisation_id: o.orgId,
+      p_period_start: OCT_START,
+    });
+    expect(oct.error).toBeNull();
+    // November is prepared while October is still a draft: nothing carried automatically.
+    const nov = await o.client.rpc("create_payroll_run", {
+      p_organisation_id: o.orgId,
+      p_period_start: "2026-10-20",
+    });
+    expect(nov.error).toBeNull();
+    const before = await admin.from("payroll_adjustments").select("id").eq("run_id", nov.data!);
+    expect(before.data).toEqual([]);
+
+    // HR carries it: the same series, instalment 3 of 3.
+    const carried = await o.client.rpc("carry_payroll_instalment", {
+      p_organisation_id: o.orgId,
+      p_run_id: nov.data!,
+      p_series_id: seriesId,
+    });
+    expect(carried.error).toBeNull();
+    const again = await o.client.rpc("carry_payroll_instalment", {
+      p_organisation_id: o.orgId,
+      p_run_id: nov.data!,
+      p_series_id: seriesId,
+    });
+    expect(again.error?.code).toBe("MLPRD");
+    const finance = await createTestUser("prun-loan-fin");
+    await addMember(finance, "finance", o.orgId);
+    const byFinance = await finance.client.rpc("carry_payroll_instalment", {
+      p_organisation_id: o.orgId,
+      p_run_id: nov.data!,
+      p_series_id: seriesId,
+    });
+    expect(byFinance.error?.code).toBe(DENIED);
+
+    const { data: all } = await admin
+      .from("payroll_adjustments")
+      .select("run_id, instalment_number, instalment_count, amount_kobo")
+      .eq("series_id", seriesId)
+      .order("instalment_number");
+    expect(all!.map((a) => [a.run_id, a.instalment_number, a.instalment_count])).toEqual([
+      [sep.data!, 1, 3],
+      [oct.data!, 2, 3],
+      [nov.data!, 3, 3],
+    ]);
+    expect(all!.reduce((n, a) => n + a.amount_kobo, 0)).toBe(3_000_000);
   });
 });
 

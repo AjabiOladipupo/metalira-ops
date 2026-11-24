@@ -1211,7 +1211,8 @@ as $$
     where l.organisation_id = p_organisation_id and l.entity = 'payroll_runs'
       and l.entity_id = p_run_id
       and l.action in ('payroll.results_saved', 'payroll.run_created', 'payroll.run_submitted',
-        'payroll.adjustment_added', 'payroll.adjustment_removed', 'payroll.anomalies_acknowledged')
+        'payroll.adjustment_added', 'payroll.adjustment_removed', 'payroll.anomalies_acknowledged',
+        'payroll.instalment_carried')
   ) t
 $$;
 
@@ -1588,6 +1589,12 @@ begin
         when v_code = 'itf' then v_sum_itf := v_sum_itf + v_amount;
       end case;
 
+      if v_code in ('adjustment_earning', 'deduction') and not (
+        jsonb_array_length(v_line -> 'sources') = 1
+        and v_line -> 'sources' -> 0 ->> 'kind' = 'adjustment'
+      ) then
+        raise exception 'An adjustment line pays exactly one adjustment.' using errcode = 'MLPR6';
+      end if;
       for v_src in select e from jsonb_array_elements(v_line -> 'sources') e loop
         v_src_kind := v_src ->> 'kind';
         begin
@@ -1639,6 +1646,9 @@ begin
           end if;
         end if;
         v_key := v_src_kind || ':' || v_src_id::text;
+        if v_src_kind = 'adjustment' and v_sources ? v_key then
+          raise exception 'An adjustment is paid on two lines.' using errcode = 'MLPR6';
+        end if;
         if v_sources ? v_key then
           if (v_sources -> v_key ->> 'from')::date <> v_from
             or (v_sources -> v_key ->> 'to')::date <> v_to then
@@ -1974,6 +1984,104 @@ revoke all on function public.add_payroll_adjustment(
 grant execute on function public.add_payroll_adjustment(
   uuid, uuid, uuid, text, text, text, boolean, boolean, integer, text
 ) to authenticated;
+
+-- Carries a recurring item's next instalment onto a draft run (owner or hr): the same series,
+-- instalment n + 1 of m, where n is the series' latest instalment in a run of an earlier period
+-- (posted or not). Refused when the series has no instalment left, when that instalment already
+-- exists anywhere, or when the worker isn't employed in the period. Instalments are carried
+-- automatically only from posted runs (create_payroll_run); this is the safe manual path the
+-- `recurring_not_carried` warning points at, so a series is never started twice. Returns the id.
+create function private.carry_payroll_instalment(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_series_id uuid
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_payroll_preparer(p_organisation_id);
+  v_run public.payroll_runs%rowtype;
+  v_last public.payroll_adjustments%rowtype;
+  v_id uuid := gen_random_uuid();
+begin
+  v_run := private.payroll_lock_run(p_organisation_id, p_run_id);
+  if v_run.status <> 'draft' then
+    raise exception 'Adjustments change only while the run is a draft.' using errcode = 'MLPRD';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('payroll_series:' || coalesce(p_series_id::text, ''), 0));
+  select a.* into v_last
+  from public.payroll_adjustments a
+  join public.payroll_runs r on r.organisation_id = a.organisation_id and r.id = a.run_id
+  where a.organisation_id = p_organisation_id and a.series_id = p_series_id
+    and r.period_start < v_run.period_start
+  order by a.instalment_number desc
+  limit 1;
+  if v_last.id is null then
+    raise exception 'That recurring item wasn''t found in an earlier run.' using errcode = 'P0002';
+  end if;
+  if v_last.instalment_number >= v_last.instalment_count then
+    raise exception 'Every instalment of that item is already paid.' using errcode = 'MLPRD';
+  end if;
+  if exists (
+    select 1 from public.payroll_adjustments a
+    where a.series_id = p_series_id and a.instalment_number = v_last.instalment_number + 1
+  ) then
+    raise exception 'That instalment is already on a run.' using errcode = 'MLPRD';
+  end if;
+  if not exists (
+    select 1 from public.workers w
+    where w.organisation_id = p_organisation_id and w.id = v_last.worker_id
+      and w.start_date <= v_run.period_end
+      and (w.end_date is null or w.end_date >= v_run.period_start)
+  ) then
+    raise exception 'That worker isn''t employed in this pay period.' using errcode = '22023';
+  end if;
+  insert into public.payroll_adjustments (
+    id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
+    series_id, instalment_number, instalment_count, reason, created_by
+  )
+  values (
+    v_id, p_organisation_id, p_run_id, v_last.worker_id, v_last.kind, v_last.label,
+    v_last.amount_kobo, v_last.pensionable, v_last.taxable, p_series_id,
+    v_last.instalment_number + 1, v_last.instalment_count, v_last.reason, v_uid
+  );
+  update public.payroll_runs r set needs_recalculation = true where r.id = p_run_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.instalment_carried', 'payroll_runs', p_run_id, null,
+    jsonb_build_object(
+      'adjustment_id', v_id, 'series_id', p_series_id, 'worker_id', v_last.worker_id,
+      'instalment', v_last.instalment_number + 1, 'of', v_last.instalment_count,
+      'amount_kobo', v_last.amount_kobo::text
+    ),
+    null
+  );
+  return v_id;
+end;
+$$;
+
+revoke all on function private.carry_payroll_instalment(uuid, uuid, uuid) from public, anon;
+grant execute on function private.carry_payroll_instalment(uuid, uuid, uuid) to authenticated;
+
+create function public.carry_payroll_instalment(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_series_id uuid
+)
+returns uuid
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.carry_payroll_instalment(p_organisation_id, p_run_id, p_series_id)
+$$;
+
+revoke all on function public.carry_payroll_instalment(uuid, uuid, uuid) from public, anon;
+grant execute on function public.carry_payroll_instalment(uuid, uuid, uuid) to authenticated;
 
 -- Removes an adjustment from a draft run (owner or hr), with a reason. The run then needs
 -- recalculating.

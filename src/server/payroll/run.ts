@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { addDays } from "@/lib/dates";
 import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
 import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
@@ -188,7 +187,8 @@ async function runHistory(
     .limit(400);
   if (error) throw new Error(`Could not read earlier runs (${error.code})`);
   const all = runs ?? [];
-  const prev = all.find((r) => r.kind === "regular" && r.period_end === addDays(periodStart, -1));
+  // The latest regular run of an earlier period, whatever its exact end (money review L-new-3).
+  const prev = all.find((r) => r.kind === "regular");
   const posted = all.filter((r) => POSTED.has(r.status));
   const order = new Map(posted.map((r, i) => [r.id, i] as const));
   const prevSlips = new Map<string, PostedSlip>();
@@ -452,6 +452,19 @@ export async function calculateRun(
         rules,
       }),
     );
+  }
+  // An adjustment for a worker the inputs don't hold (left before the period, or not in a
+  // one-worker preview's scope) blocks the run instead of stranding it (money review L-new-2).
+  const inInputs = new Set(workerIds);
+  for (const a of adjustments) {
+    if (!inInputs.has(a.workerId) && !options.workerIds) {
+      anomalies.push({
+        workerId: a.workerId,
+        code: "calculation_failed",
+        severity: "blocking",
+        detail: { adjustment_id: a.id },
+      });
+    }
   }
   anomalies.push(...runAnomalies(openDays, bank.shared));
   if (!options.workerIds) {

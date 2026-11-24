@@ -7,6 +7,7 @@ import type { CapabilityPreview } from "@/server/capabilities/types";
 import {
   acknowledgeAnomaliesAction,
   addAdjustmentAction,
+  carryInstalmentAction,
   createRunAction,
   recalculateRunAction,
   removeAdjustmentAction,
@@ -84,7 +85,11 @@ function TwoStepForm({
         <input key={name} type="hidden" name={name} value={value} />
       ))}
       <input type="hidden" name="intent" value={confirming ? "save" : "preview"} />
-      {children?.(state)}
+      {/* React resets a form after its action, to the defaults the inputs mounted with; remount
+          the fields with what was sent, so the confirm press sends what the preview showed. */}
+      <div key={JSON.stringify(state?.values ?? null)} className="contents">
+        {children?.(state)}
+      </div>
       {confirming && preview ? <PreviewCard preview={preview} /> : null}
       <FormAlert message={state && !state.ok ? state.formError : undefined} />
       {state?.ok && state.message ? (
@@ -248,6 +253,27 @@ export function AddAdjustmentForm({
         );
       }}
     </TwoStepForm>
+  );
+}
+
+export function CarryInstalmentForm({
+  runId,
+  seriesId,
+  label,
+}: {
+  runId: string;
+  seriesId: string;
+  label: string;
+}) {
+  return (
+    <TwoStepForm
+      action={carryInstalmentAction}
+      hidden={{ runId, seriesId }}
+      label={label}
+      previewLabel="Carry next instalment"
+      confirmLabel="Carry and recalculate"
+      pendingLabel="Working it out…"
+    />
   );
 }
 

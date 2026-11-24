@@ -21,6 +21,7 @@ import { RouteGate } from "../../_shell/slots";
 import {
   AcknowledgeForm,
   AddAdjustmentForm,
+  CarryInstalmentForm,
   RecalculateForm,
   RemoveAdjustmentForm,
   ReturnRunForm,
@@ -320,6 +321,24 @@ function AnomaliesStep({ d, canPrepare }: StepProps) {
           canAcknowledge={canPrepare && d.run.status === "draft"}
         />
       ) : null}
+      {canPrepare && d.run.status === "draft"
+        ? d.anomalies
+            .filter(
+              (a) => a.code === "recurring_not_carried" && typeof a.detail.series_id === "string",
+            )
+            .map((a) => (
+              <div key={a.id} className="flex flex-col gap-2 rounded-xl border border-line p-4">
+                <p className="m-0 text-sm font-semibold">
+                  Recurring item not carried · {a.workerName ?? "A worker"}
+                </p>
+                <CarryInstalmentForm
+                  runId={d.run.id}
+                  seriesId={String(a.detail.series_id)}
+                  label={`Carry the next instalment for ${a.workerName ?? "a worker"}`}
+                />
+              </div>
+            ))
+        : null}
     </section>
   );
 }

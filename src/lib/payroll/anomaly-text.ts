@@ -169,7 +169,7 @@ export function describeAnomaly(
     case "recurring_not_carried":
       return {
         title: `Recurring item not carried · ${name}`,
-        body: `Instalment ${num(detail, "next")} of ${num(detail, "of")} from the period before isn't on this run, because that run wasn't posted when this one was prepared. Add it if it's due.`,
+        body: `Instalment ${num(detail, "next")} of ${num(detail, "of")} from the period before isn't on this run, because that run wasn't posted when this one was prepared. Use Carry next instalment below if it's due: it continues the same series, so it is never deducted twice.`,
       };
     default:
       return {

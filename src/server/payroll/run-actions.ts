@@ -17,11 +17,14 @@ import {
   acknowledgeSpec,
   addAdjustmentSpec,
   adjustmentSchema,
+  carryInstalmentSchema,
+  carryInstalmentSpec,
   createRunSchema,
   createRunSpec,
   PAYROLL_APPROVERS,
   PAYROLL_PREPARERS,
   previewAddAdjustment,
+  previewCarryInstalment,
   previewCreateRun,
   previewRecalculate,
   previewRemoveAdjustment,
@@ -94,6 +97,11 @@ const previewRemoveSpec = previewSpec(
   removeAdjustmentSchema,
   PAYROLL_PREPARERS,
   previewRemoveAdjustment,
+);
+const previewCarrySpec = previewSpec(
+  carryInstalmentSchema,
+  PAYROLL_PREPARERS,
+  previewCarryInstalment,
 );
 const previewSubmitSpec = previewSpec(runIdSchema, PAYROLL_PREPARERS, previewSubmit);
 const previewReturnSpec = previewSpec(returnRunSchema, PAYROLL_APPROVERS, previewReturn);
@@ -172,6 +180,24 @@ export async function addAdjustmentAction(
     (r) => {
       revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
       return { ok: true, status: 200, message: "Added and recalculated" };
+    },
+  );
+}
+
+/** "Carry next instalment": preview, then carry the same series and recalculate. */
+export async function carryInstalmentAction(
+  _prev: RunFormState,
+  formData: FormData,
+): Promise<RunFormState> {
+  const input = formFields(formData);
+  return twoStep(
+    formData,
+    input,
+    previewCarrySpec as MutationSpec<z.ZodType, CapabilityPreview>,
+    carryInstalmentSpec as MutationSpec<z.ZodType, { runId: string }>,
+    (r) => {
+      revalidatePath(`${PAYROLL_PATH}/${r.runId}`);
+      return { ok: true, status: 200, message: "Carried and recalculated" };
     },
   );
 }
