@@ -12,6 +12,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import golden from "../../fixtures/october-2026-golden.json";
 import { adminClient } from "../rls/helpers/supabase";
+import { signedInClient, verifyDeclaredRents } from "../rls/helpers/reliefs";
 import {
   NEEDS_SUPABASE,
   addMembership,
@@ -82,6 +83,12 @@ test("the preparer can't approve their own run; Finance approves it after seeing
   const finance = await createAccount("pappr-fin", "Adaeze Okafor");
   await addMembership(owner.orgId, finance.userId, "finance");
   await seedGoldenWorkers(owner.orgId);
+  // Slice 5.9a: rent relief needs verified proof under NTA 2025 v2 (the tax adviser).
+  await verifyDeclaredRents(
+    adminClient(),
+    { client: await signedInClient(owner.email, owner.password), userId: owner.userId },
+    owner.orgId,
+  );
 
   // The owner prepares the run, acknowledges every anomaly and submits it.
   await page.setViewportSize({ width: 1440, height: 1000 });

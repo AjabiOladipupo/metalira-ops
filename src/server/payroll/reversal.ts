@@ -3,9 +3,12 @@ import "server-only";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { lagosToday } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { negatedTotals } from "@/lib/payroll/reversal";
+import { parseRuleSet } from "@/lib/payroll/rule-set";
+import { overpaymentTooOld } from "@/lib/payroll/ytd";
 import type { RunTotals } from "@/lib/payroll/run";
 import { runMonth } from "@/lib/payroll/run-format";
 import type { CapabilityPreview } from "@/server/capabilities/types";
@@ -109,6 +112,8 @@ export function fromReversalDbError(error: Pick<PostgrestError, "code" | "messag
     throw new MutationError("invalid", error.message, { repeat: error.message });
   }
   if (/^MLRV[1236789AB]$/.test(error.code)) throw new MutationError("invalid", error.message);
+  // Slice 5.9a: an overpayment older than the limit (Labour Act s.5(5)) needs a manual route.
+  if (error.code === "MLYA1") throw new MutationError("invalid", error.message);
   // Slice 5.8: a later run depends on this one ("Reverse the later run first: November 2026").
   if (error.code === "MLFX1") throw new MutationError("invalid", error.message);
   if (error.code === "42501") {
@@ -355,6 +360,26 @@ export async function previewCorrection(
   if (corrected.status !== "released" || corrected.kind === "reversal") {
     throw new MutationError("invalid", "A correction names a released payslip.");
   }
+  // Slice 5.9a (Labour Act s.5(5), tax adviser): an overpayment older than the run's rule set's
+  // limit can't be deducted from wages (add_payroll_correction refuses it too, MLYA1).
+  if (data.kind === "deduction") {
+    const { data: set, error: setError } = await ctx.supabase
+      .from("tax_rule_sets")
+      .select("name, rules, policy")
+      .eq("organisation_id", ctx.organisationId)
+      .eq("id", run.ruleSetId)
+      .maybeSingle();
+    if (setError) fromReversalDbError(setError);
+    const months = set
+      ? parseRuleSet(set.name, set.rules, set.policy).rules.adviser?.clawback.maxAgeMonths
+      : undefined;
+    if (months !== undefined && overpaymentTooOld(corrected.payDate, lagosToday(), months)) {
+      throw new MutationError(
+        "invalid",
+        `This overpayment was paid more than ${months} months ago, so it can't be deducted from wages (Labour Act s.5(5)). Recover it another way, outside payroll.`,
+      );
+    }
+  }
   // Money review M4a: the payslip's earlier corrections, with their amounts. One in this run is
   // refused; one in another run that stands needs the explicit statement.
   const { data: earlier, error: earlierError } = await ctx.supabase
@@ -396,10 +421,12 @@ export async function previewCorrection(
     kind: data.kind,
     label: data.label,
     amountKobo: data.amount,
-    pensionable: data.kind === "earning" && data.pensionable,
+    // Slice 5.9a: a deduction keeps the pensionable flag of the earning it claws back.
+    pensionable: data.pensionable,
     taxable: data.kind === "earning",
     instalmentNumber: 1,
     instalmentCount: 1,
+    correctsPayslipId: data.payslipId,
   } as const;
   const [before, after] = await Promise.all([
     calculateRun(ctx.supabase, ctx.organisationId, targetOf(run), options),
@@ -485,7 +512,7 @@ export const addCorrectionSpec: MutationSpec<typeof correctionSchema, { runId: s
       p_label: d.label,
       // Whole kobo as text: no number ever holds kobo.
       p_amount_kobo: d.amount.toString(),
-      p_pensionable: d.kind === "earning" && d.pensionable,
+      p_pensionable: d.pensionable,
       p_reason: d.reason,
       p_repeat: d.repeat,
     });

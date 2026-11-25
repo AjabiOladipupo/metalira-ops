@@ -28,6 +28,18 @@ import {
   type recordRefundSchema,
 } from "@/server/payroll/remittance-resolutions";
 import {
+  previewDeclareRelief,
+  previewImportOpening,
+  previewItfFlag,
+  previewOpeningBalance,
+  previewVerifyRelief,
+  type declareReliefSchema,
+  type importOpeningSchema,
+  type itfFlagSchema,
+  type openingBalanceSchema,
+  type verifyReliefSchema,
+} from "@/server/payroll/tax-records";
+import {
   previewConfirmSupplement,
   previewMakeSupplement,
   type confirmSupplementSchema,
@@ -172,3 +184,18 @@ export const previewRemittanceRefund: PreviewFn<typeof recordRefundSchema> = (ct
   previewRefund(ctx, ctx.data);
 export const previewRemittanceOffset: PreviewFn<typeof offsetSchema> = (ctx) =>
   previewOffset(ctx, ctx.data);
+
+// ---------------------------------------------------------------------------
+// Payroll tax records (slice 5.9a)
+// ---------------------------------------------------------------------------
+
+export const previewRecordOpeningBalance: PreviewFn<typeof openingBalanceSchema> = (ctx) =>
+  previewOpeningBalance(ctx, ctx.data);
+export const previewImportOpeningBalances: PreviewFn<typeof importOpeningSchema> = (ctx) =>
+  previewImportOpening(ctx, ctx.data);
+export const previewDeclarePayrollRelief: PreviewFn<typeof declareReliefSchema> = (ctx) =>
+  previewDeclareRelief(ctx, ctx.data);
+export const previewVerifyPayrollRelief: PreviewFn<typeof verifyReliefSchema> = (ctx) =>
+  previewVerifyRelief(ctx, ctx.data);
+export const previewSetItfTurnover: PreviewFn<typeof itfFlagSchema> = (ctx) =>
+  previewItfFlag(ctx, ctx.data);

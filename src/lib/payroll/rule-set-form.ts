@@ -5,6 +5,8 @@ import { parseNairaToKobo } from "@/lib/money";
 import {
   PUBLIC_HOLIDAY_MODES,
   SALARY_COMPONENTS,
+  adviserJson,
+  adviserJsonSchema,
   payPolicyJsonSchema,
   taxRulesJsonSchema,
   type RuleSet,
@@ -18,9 +20,9 @@ import {
  * Rates are typed as percentages ("2.5"), amounts as naira ("2,200,000"), and become whole basis
  * points and kobo strings for the jsonb. Pure; the database checks the shape again.
  *
- * The bases (what pension and NHF are taken on), the daily-worker exemption and the
- * public-holiday mode travel as hidden fields carried from the version before: the form changes
- * rates and amounts only.
+ * The bases (what pension and NHF are taken on), the daily-worker exemption, the public-holiday
+ * mode and (slice 5.9a) the tax adviser's part, as JSON, travel as hidden fields carried from the
+ * version before: the form changes rates and amounts only.
  */
 
 export const MAX_BANDS = 12;
@@ -89,6 +91,7 @@ export function ruleSetFormValues(set: RuleSet): Record<string, string> {
     overtimeMultiplier: multiplierText(set.policy.overtimeMultiplierBps),
     offDayPaidMinutes: String(set.policy.offDayPaidMinutes),
     publicHolidayMode: set.policy.publicHolidayMode,
+    adviser: r.adviser ? JSON.stringify(adviserJson(r.adviser)) : "",
   };
   r.payeBands.forEach((band, i) => {
     out[`band${i}Rate`] = bpsToPercentText(band.rateBps);
@@ -213,6 +216,21 @@ export const ruleSetVersionSchema = z
       issue("publicHolidayMode", "The public-holiday rule is missing. Reload the page.");
     }
 
+    // Slice 5.9a: the adviser's part, carried as it was (empty on a version made before it).
+    let adviser: TaxRulesJson["adviser"];
+    const adviserText = (fields.adviser ?? "").trim();
+    if (adviserText !== "") {
+      let raw: unknown = null;
+      try {
+        raw = JSON.parse(adviserText);
+      } catch {
+        raw = null;
+      }
+      const parsed = adviserJsonSchema.safeParse(raw);
+      if (parsed.success) adviser = raw as TaxRulesJson["adviser"];
+      else issue("bandCount", "The tax adviser's figures are missing. Reload the page.");
+    }
+
     const rules: TaxRulesJson = {
       paye_bands: bands,
       rent_relief: {
@@ -231,6 +249,7 @@ export const ruleSetVersionSchema = z
         min_staff: Number.isFinite(minStaff) ? minStaff : 1,
       },
       daily_workers_exempt: fields.dailyWorkersExempt !== "false",
+      ...(adviser ? { adviser } : {}),
     };
     const policy: PayPolicyJson = {
       overtime_multiplier_bps: multiplier ?? 10_000,

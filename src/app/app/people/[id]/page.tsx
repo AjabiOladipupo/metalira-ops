@@ -60,6 +60,7 @@ import { BankChangeRequestForm, CheckBankDetails } from "../_components/bank-cha
 import { CancelPayButton } from "../_components/cancel-pay-button";
 import { ChangeRequestCard } from "../_components/change-request-card";
 import { DetailList, NotSet, Section } from "../_components/display";
+import { TaxReliefsSection } from "../_components/tax-reliefs";
 import { EndEmploymentForm } from "../_components/end-employment-form";
 import { HrFileQueries } from "../_components/hr-file";
 import { HrFileLeave } from "../_components/hr-file-leave";
@@ -389,6 +390,13 @@ function Profile({
                 />
               ) : null}
             </Section>
+          ) : null}
+
+          {/* Slice 5.9a: opening balance, reliefs with proof, NHF number (owner, hr, finance). */}
+          {canSeePay ? (
+            <Suspense fallback={<p className="m-0 text-sm text-fg-muted">Loading tax records…</p>}>
+              <TaxReliefsSection workerId={worker.id} ctx={ctx} active={active} />
+            </Suspense>
           ) : null}
 
           <Section

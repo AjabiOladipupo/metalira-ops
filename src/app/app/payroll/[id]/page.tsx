@@ -401,16 +401,35 @@ function AnomaliesStep({ d, canPrepare }: StepProps) {
   );
 }
 
+// Slice 5.9a: cumulative year-to-date PAYE and the tax adviser's steps join the summary.
 const PAYE_STEPS = new Set([
+  "pension_threshold",
+  "nhf_not_deducted",
+  "clawback",
+  "year_to_date",
   "annual_gross",
   "annual_pension",
   "annual_nhf",
   "rent_relief",
+  "nhis_relief",
+  "life_assurance_relief",
   "taxable",
+  "minimum_wage",
   "paye_band",
+  "tax_to_date",
+  "paye_withheld",
   "paye",
+  "paye_overwithheld",
+  "deduction_cap",
 ]);
-const LESS_STEPS = new Set(["annual_pension", "annual_nhf", "rent_relief"]);
+const LESS_STEPS = new Set([
+  "annual_pension",
+  "annual_nhf",
+  "rent_relief",
+  "nhis_relief",
+  "life_assurance_relief",
+  "paye_withheld",
+]);
 
 async function ExplainPanel({ d, payslipId }: { d: RunDetail; payslipId: string }) {
   const ctx = await peoplePageContext();
@@ -430,20 +449,21 @@ async function ExplainPanel({ d, payslipId }: { d: RunDetail; payslipId: string 
         <h3 id="explain" className="m-0 type-h3">
           How {explained.workerName}&apos;s PAYE is worked out
         </h3>
-        <span className="type-label text-fg-muted">Yearly figures, then ÷ 12</span>
+        <span className="type-label text-fg-muted">The tax year so far, scaled to a year</span>
       </div>
       {exempt ? (
         <p className="m-0 text-sm">Daily worker: no PAYE, pension, NHF, NSITF or ITF.</p>
       ) : (
         <dl className="m-0 grid max-w-2xl grid-cols-[minmax(0,1fr)_auto] gap-x-6 gap-y-2 text-sm">
           {paye.map((s, i) => {
-            const v = value(s.value_kobo) ?? 0n;
+            const raw = value(s.value_kobo);
+            const v = raw ?? 0n;
             const strong = s.step === "taxable" || s.step === "paye";
             return (
               <div key={`${s.step}-${i}`} className="contents">
                 <dt className={cn(strong && "font-semibold")}>{s.label}</dt>
                 <dd className={cn("m-0 text-right tabular-nums", strong && "font-semibold")}>
-                  {LESS_STEPS.has(s.step) ? traceLess(v) : traceNaira(v)}
+                  {raw === null ? "" : LESS_STEPS.has(s.step) ? traceLess(v) : traceNaira(v)}
                 </dd>
               </div>
             );
