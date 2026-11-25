@@ -604,6 +604,50 @@ export async function loadMappingTargets(
   };
 }
 
+/** A site or project for the bulk mapping sheet (slice U.3), with its client to pair them. */
+export interface BulkMappingTarget {
+  value: string;
+  label: string;
+  clientId: string;
+}
+
+/**
+ * The open sites and projects for "Map to site and project" (slice U.3): the same list the
+ * mapping panel offers (archived sites and clients left out), each with its client, so the sheet
+ * offers only the chosen site's client's projects.
+ */
+export async function loadBulkMappingTargets(
+  supabase: Client,
+  organisationId: string,
+): Promise<{ sites: BulkMappingTarget[]; projects: BulkMappingTarget[] }> {
+  const [targets, sites, projects] = await Promise.all([
+    loadMappingTargets(supabase, organisationId),
+    readAll<{ id: string; client_id: string }>("sites", (from, to) =>
+      supabase
+        .from("sites")
+        .select("id, client_id")
+        .eq("organisation_id", organisationId)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll<{ id: string; client_id: string }>("projects", (from, to) =>
+      supabase
+        .from("projects")
+        .select("id, client_id")
+        .eq("organisation_id", organisationId)
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+  const clientOf = new Map([...sites, ...projects].map((row) => [row.id, row.client_id]));
+  const withClient = (options: readonly Option[]): BulkMappingTarget[] =>
+    options.flatMap((o) => {
+      const clientId = clientOf.get(o.value);
+      return clientId ? [{ value: o.value, label: o.label, clientId }] : [];
+    });
+  return { sites: withClient(targets.sites), projects: withClient(targets.projects) };
+}
+
 // ---------------------------------------------------------------------------
 // Choices for the forms
 // ---------------------------------------------------------------------------

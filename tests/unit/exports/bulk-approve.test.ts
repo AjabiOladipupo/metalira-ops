@@ -18,6 +18,9 @@ import {
   LIST_CHANGED,
   ListChanged,
   NotInList,
+  PREVIEW_EXPIRED,
+  PREVIEW_TTL_MS,
+  PreviewExpired,
   confirmPlan,
   idSet,
   previewedSet,
@@ -199,6 +202,28 @@ describe("the selection guard (security review M1)", () => {
         ListChanged,
       );
     }
+  });
+
+  it("expires a preview after 15 minutes (security review of U.3, L2)", () => {
+    const at = Date.UTC(2026, 10, 25, 9, 0);
+    const preview = previewedSet(scope, [A, B], [A, B], at);
+    expect(preview.digest).toMatch(new RegExp(`^${at}\.[0-9a-f]{64}$`));
+    // Within 15 minutes it confirms.
+    expect(
+      confirmPlan(scope, [A, B], visible, [A, B], preview.digest, at + PREVIEW_TTL_MS).act,
+    ).toHaveLength(2);
+    // A minute later it has expired, with its own message (and is still a "preview again").
+    const late = () =>
+      confirmPlan(scope, [A, B], visible, [A, B], preview.digest, at + PREVIEW_TTL_MS + 60_000);
+    expect(late).toThrow(PreviewExpired);
+    expect(late).toThrow(PREVIEW_EXPIRED);
+    expect(late).toThrow(ListChanged);
+    // The time is signed: moving it forward breaks the digest instead of reviving the preview.
+    const [, mac] = preview.digest.split(".");
+    const forged = `${at + PREVIEW_TTL_MS}.${mac}`;
+    expect(() =>
+      confirmPlan(scope, [A, B], visible, [A, B], forged, at + PREVIEW_TTL_MS + 60_000),
+    ).toThrow(LIST_CHANGED);
   });
 
   it("refuses with 'the list changed' when the ticked set differs or a row is gone", () => {
