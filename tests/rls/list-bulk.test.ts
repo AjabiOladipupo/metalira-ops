@@ -553,11 +553,23 @@ describe("bulk approve leave", () => {
     expect(preview.selection.act).toEqual([okReq]);
     expect(preview.skipped.map((s) => s.code).sort()).toEqual(["certificate", "certificate"]);
 
-    // Both become clean before the confirm.
-    await db.query(
-      "update public.leave_requests set certificate_seen = true where id = any($1::uuid[])",
-      [[sickA, sickB]],
-    );
+    // Both become clean before the confirm (the certificate seen), seeded as the database owner
+    // with the request guard off for this transaction only.
+    await db.query("begin");
+    try {
+      await db.query("set local session_replication_role = replica");
+      await db.query(
+        "update public.leave_requests set certificate_seen = true where id = any($1::uuid[])",
+        [[sickA, sickB]],
+      );
+      await db.query("commit");
+    } catch (error) {
+      await db.query("rollback");
+      throw error;
+    }
+    // They would pass now: a fresh preview would approve them.
+    const fresh = await previewBulkLeaveSpec.run({ ...ctx, data: { requestIds: ids } });
+    expect([...fresh.selection.act].sort()).toEqual([...ids].sort());
 
     // A confirm can't add them to the signed set...
     await expect(
