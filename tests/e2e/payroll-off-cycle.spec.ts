@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
 import { adminClient } from "../rls/helpers/supabase";
+import { signedInClient, verifyDeclaredRents } from "../rls/helpers/reliefs";
 import {
   NEEDS_SUPABASE,
   addMembership,
@@ -82,6 +83,12 @@ test("an off-cycle final pay goes from the worker picker to Finance's approval",
   const finance = await createAccount("poff-fin", "Adaeze Okafor");
   await addMembership(owner.orgId, finance.userId, "finance");
   await seedWorkers(owner.orgId);
+  // Slice 5.9a: rent relief needs verified proof under NTA 2025 v2 (the tax adviser).
+  await verifyDeclaredRents(
+    adminClient(),
+    { client: await signedInClient(owner.email, owner.password), userId: owner.userId },
+    owner.orgId,
+  );
 
   // New off-cycle run: final pay, October 2026, paid 16 Oct, Musa Ibrahim only.
   await page.setViewportSize({ width: 1440, height: 1000 });

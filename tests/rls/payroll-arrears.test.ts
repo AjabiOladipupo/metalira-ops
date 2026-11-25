@@ -41,6 +41,7 @@ import {
 } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
+import { giveRuleSetV1 } from "./helpers/payroll";
 import {
   adminClient,
   createTenantUser,
@@ -209,6 +210,8 @@ beforeAll(async () => {
   admin = adminClient();
   db = await pgClient();
   owner = await createTenantUser("parr-owner", "Arrears Payroll Org");
+  // Written against NTA 2025 v1 (after-tax arrears, 5.7c); slice 5.9a's v2 is tested elsewhere.
+  await giveRuleSetV1(admin, owner.orgId);
   hr = await createTestUser("parr-hr", "Oluwaseun Adeyemi");
   finance = await createTestUser("parr-finance", "Adaeze Okafor");
   lineManager = await createTestUser("parr-lm");

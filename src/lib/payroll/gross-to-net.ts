@@ -85,7 +85,8 @@ const REF = {
 function assertInput(input: GrossToNetInput): void {
   for (const line of input.earnings) {
     if (isNegativeEarning(line.code)) {
-      if (line.amountKobo > 0n) throw new PayrollInputError(`A ${line.code} line is never positive.`);
+      if (line.amountKobo > 0n)
+        throw new PayrollInputError(`A ${line.code} line is never positive.`);
     } else if (line.amountKobo < 0n) {
       throw new PayrollInputError(`An earning line (${line.code}) is never negative.`);
     }
@@ -201,7 +202,9 @@ export function grossToNet(
   }
   const gross = sumKobo(earnings.map((e) => e.amountKobo));
   if (gross < 0n)
-    throw new PayrollInputError("Gross pay is below ₦0: a leave deduction or clawback exceeds pay.");
+    throw new PayrollInputError(
+      "Gross pay is below ₦0: a leave deduction or clawback exceeds pay.",
+    );
   trace.push(
     traceStep("gross", "Gross pay", `${earnings.length} earning lines added`, gross, REF.gross, {
       lines: earnings.length,

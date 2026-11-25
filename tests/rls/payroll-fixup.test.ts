@@ -28,6 +28,7 @@ import {
   resultsFor,
   saveResults,
   SHA,
+  giveRuleSetV1,
 } from "./helpers/payroll";
 import { approveRun, periodEnd, submitRunFor } from "./helpers/payslips";
 import {
@@ -74,6 +75,9 @@ interface Company {
 
 async function company(label: string): Promise<Company> {
   const owner = await createTenantUser(`pfx-${label}-owner`, `Fix-up ${label} Org`);
+  // Written against NTA 2025 v1 (after-tax arrears, carried deductions); 5.9a's v2 is tested
+  // in payroll-adviser.test.ts.
+  await giveRuleSetV1(admin, owner.orgId);
   const add = async (suffix: string, role: Role) => {
     const user = await createTestUser(`pfx-${label}-${suffix}`);
     const { error } = await admin
@@ -529,16 +533,20 @@ describe("a reversal waits for the later runs that depend on it (MLFX1)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// 3. Approval and month-aggregate PAYE
+// 3. Approval and the year's PAYE (5.8's month checks, extended to the tax year by slice 5.9a)
 // ---------------------------------------------------------------------------
 
-describe("approving with month-aggregate PAYE (5.7b) checks the month again", () => {
+// Slice 5.9a: cumulative year-to-date PAYE replaced 5.7b's month aggregate, so the payslip's trace
+// records the year so far (`year_to_date`, with the payslips it counted) and approval compares it
+// with the tax year's standing payslips. The intended behaviour moved from the month to the year;
+// these cases check the same two refusals on the new step.
+describe("approving with year-to-date PAYE checks the tax year again", () => {
   let c: Company;
   let worker: { workerId: string; payRateId: string };
   let oct: string;
 
   /** A one-off run for the worker paid 16 Oct: a ₦15,000 award, its trace's PAYE steps given. */
-  async function oneOff(monthToDate: number | null): Promise<string> {
+  async function oneOff(yearPayslips: number): Promise<string> {
     const run = await c.owner.client.rpc("create_off_cycle_run", {
       p_organisation_id: c.owner.orgId,
       p_period_start: OCT_START,
@@ -572,16 +580,14 @@ describe("approving with month-aggregate PAYE (5.7b) checks the month again", ()
         rule_ref: "paye",
       },
     ];
-    if (monthToDate !== null) {
-      steps.push({
-        step: "month_to_date",
-        label: "Plus this month's other payslip",
-        formula: "Taxable pay less pension and NHF already paid this month",
-        inputs: { payslips: monthToDate, monthly_kobo: "11040000" },
-        value_kobo: "132480000",
-        rule_ref: "paye.month_aggregate",
-      });
-    }
+    steps.unshift({
+      step: "year_to_date",
+      label: "Tax year so far: 1 month from October 2026",
+      formula: "Earlier payslips this year",
+      inputs: { months: 1, payslips: yearPayslips, opening_balance_id: "", relief_ids: "" },
+      value_kobo: "1500000",
+      rule_ref: "ytd",
+    });
     const doc = resultsFor(
       { ...worker, adjustmentId: null },
       {
@@ -650,7 +656,7 @@ describe("approving with month-aggregate PAYE (5.7b) checks the month again", ()
 
   it("refuses when another run for the worker in the month was approved after the read", async () => {
     // Worked out before October posted, so its PAYE counted no other payslip.
-    const award = await oneOff(null);
+    const award = await oneOff(0);
     const read = await clock();
     await check(c.owner.orgId, award, c.finance2.id, read);
     // October (pay date 25 Oct) is approved after the award's read began.
@@ -658,7 +664,7 @@ describe("approving with month-aggregate PAYE (5.7b) checks the month again", ()
     const { error } = await approve(c.finance2.client, c.owner.orgId, award);
     expect(error?.code).toBe("MLPRF");
 
-    // A fresh read doesn't help: the award's PAYE didn't count October's payslip.
+    // A fresh read doesn't help: the award's PAYE didn't count October's payslip (same year).
     await check(c.owner.orgId, award, c.finance2.id);
     const again = await approve(c.finance2.client, c.owner.orgId, award);
     expect(again.error?.code).toBe("MLPRF");
@@ -666,7 +672,7 @@ describe("approving with month-aggregate PAYE (5.7b) checks the month again", ()
     expect(data).toEqual({ status: "review" });
   });
 
-  it("approves a run whose PAYE counted the month's standing payslips", async () => {
+  it("approves a run whose PAYE counted the year's standing payslips", async () => {
     const award = await oneOff(1);
     await check(c.owner.orgId, award, c.finance2.id);
     const { error } = await approve(c.finance2.client, c.owner.orgId, award);

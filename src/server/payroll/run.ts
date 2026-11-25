@@ -822,7 +822,10 @@ export async function calculateRun(
     ].sort(),
   );
   const adjustments: RunAdjustment[] = gathered.map((a) => {
-    const paid = a.kind === "deduction" && a.correctsPayslipId ? corrected.get(a.correctsPayslipId) : undefined;
+    const paid =
+      a.kind === "deduction" && a.correctsPayslipId
+        ? corrected.get(a.correctsPayslipId)
+        : undefined;
     if (!paid || !adviser?.clawback.preTaxSameTaxYear) return a;
     const year = Number(paid.slice(0, 4));
     return year === taxYear ? { ...a, preTax: true } : { ...a, priorTaxYear: year };
@@ -839,21 +842,22 @@ export async function calculateRun(
       )
     : inputs.workers;
   const workerIds = runWorkers.map((w) => w.workerId);
-  const [history, bank, openDays, carried, regulars, year, settledLater, taxContext] = await Promise.all([
-    runHistory(supabase, organisationId, period.start, workerIds, target.runId),
-    checkBankDetails(organisationId, workerIds),
-    options.workerIds || adjustmentsOnly
-      ? Promise.resolve([])
-      : openDaysBySite(supabase, organisationId, period, offCycle ? workerIds : null),
-    carriedSeries(supabase, organisationId, target.runId),
-    offCycle ? regularItf(supabase, organisationId, period.start) : Promise.resolve([]),
-    yearPayslips(supabase, organisationId, target.payDate, workerIds, target.runId),
-    // Slice 5.8: only a final-pay or missed-worker run takes a carry for an earlier period.
-    fullPay
-      ? laterCarrying(supabase, organisationId, period.start, workerIds)
-      : Promise.resolve(new Map<string, string>()),
-    loadTaxContext(supabase, organisationId, target.payDate, workerIds),
-  ]);
+  const [history, bank, openDays, carried, regulars, year, settledLater, taxContext] =
+    await Promise.all([
+      runHistory(supabase, organisationId, period.start, workerIds, target.runId),
+      checkBankDetails(organisationId, workerIds),
+      options.workerIds || adjustmentsOnly
+        ? Promise.resolve([])
+        : openDaysBySite(supabase, organisationId, period, offCycle ? workerIds : null),
+      carriedSeries(supabase, organisationId, target.runId),
+      offCycle ? regularItf(supabase, organisationId, period.start) : Promise.resolve([]),
+      yearPayslips(supabase, organisationId, target.payDate, workerIds, target.runId),
+      // Slice 5.8: only a final-pay or missed-worker run takes a carry for an earlier period.
+      fullPay
+        ? laterCarrying(supabase, organisationId, period.start, workerIds)
+        : Promise.resolve(new Map<string, string>()),
+      loadTaxContext(supabase, organisationId, target.payDate, workerIds),
+    ]);
   // Cumulative year-to-date PAYE (slice 5.9a, tax adviser): every payslip's PAYE counts the
   // worker's standing payslips of the tax year, the opening balance in force and the verified
   // reliefs (src/lib/payroll/ytd.ts). It replaces 5.7b's month aggregate, which it subsumes.

@@ -28,6 +28,7 @@ import { MutationError, runMutation } from "@/server/identity/mutate";
 import { approveRunSpec, createRunSpec, INPUTS_CHANGED_MESSAGE } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
+import { verifyGoldenRents } from "./helpers/reliefs";
 import {
   adminClient,
   createTenantUser,
@@ -148,6 +149,18 @@ beforeAll(async () => {
     if (rate.error) throw new Error(rate.error.message);
     workers[w.name] = data.id;
   }
+
+  // Slice 5.9a: the rent the golden workers declared counts only once its proof is verified (the
+  // tax adviser, NTA 2025 v2, the company's starting rule set). October is their first payroll in
+  // the app, with no opening balance, so cumulative PAYE is the month annualised: the fixture
+  // holds exactly.
+  await verifyGoldenRents(
+    admin,
+    { client: hr.client, userId: hr.id },
+    owner.orgId,
+    workers,
+    golden,
+  );
 
   // A full cycle of approved days: every Monday to Friday, 8 hours, no overtime, on a shift.
   const ids = Object.values(workers);

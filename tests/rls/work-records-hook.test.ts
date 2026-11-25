@@ -34,6 +34,15 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "earnings and deductions on a payroll run (slice 5.2); each is paid through a payslip, which is the work record",
   payroll_anomalies:
     "what looks wrong on a payroll run (slice 5.2); a flag about the worker, nothing worked or paid",
+  payroll_nhf_numbers:
+    "a worker's NHF number on file (slice 5.9a); a statutory detail, nothing worked or paid",
+  payroll_opening_balances:
+    "a worker's tax year before go-live (slice 5.9a), entered by HR; pay made outside the app, not a payslip",
+  payroll_relief_declarations:
+    "reliefs a worker declares for a tax year (slice 5.9a); tax inputs, nothing worked or paid",
+  payroll_relief_proofs: "proof files of a relief declaration (slice 5.9a); nothing worked or paid",
+  payroll_relief_verifications:
+    "HR's check of a relief's proof (slice 5.9a); nothing worked or paid",
   payroll_run_workers:
     "the workers an off-cycle payroll run pays (slice 5.7b); each is paid through a payslip, which is the work record",
   payout_items:

@@ -981,7 +981,9 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     const priorYear = input.preTaxArrearsYear != null && arrearsYear < input.preTaxArrearsYear;
     deductions.push({
       code: "leave_arrears",
-      label: priorYear ? `${out.trace.label}, recovered after tax (${arrearsYear})` : out.trace.label,
+      label: priorYear
+        ? `${out.trace.label}, recovered after tax (${arrearsYear})`
+        : out.trace.label,
       amountKobo: total,
       sources: [source],
     });
