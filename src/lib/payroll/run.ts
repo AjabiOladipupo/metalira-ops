@@ -643,6 +643,8 @@ export interface RefundedLine {
   code: string;
   amountKobo: Kobo;
   wantedKobo: Kobo | null;
+  /** Slice 5.9a: a pre-tax leave deduction's rest carried after tax. */
+  carriedKobo?: Kobo | null;
 }
 
 /**
@@ -658,6 +660,11 @@ export function refundUncollectedKobo(
   let rest = 0n;
   for (const r of refunds) {
     for (const l of r.lines) {
+      // Slice 5.9a: a pre-tax line's carried rest is refunded too (case D under v2).
+      if (l.code === "leave_deduction" && l.carriedKobo && l.carriedKobo > 0n) {
+        rest += l.carriedKobo;
+        continue;
+      }
       if (l.code !== "leave_arrears" || l.wantedKobo === null) continue;
       if (l.wantedKobo > l.amountKobo) rest += l.wantedKobo - l.amountKobo;
     }

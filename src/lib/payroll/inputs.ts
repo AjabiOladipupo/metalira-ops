@@ -255,6 +255,8 @@ const leaveRefundSchema = z
           amount_kobo: signedKobo,
           /** An after-tax arrears line's full amount, taken plus carried (its refund). */
           wanted_kobo: signedKobo.nullable().optional(),
+          /** Slice 5.9a: a pre-tax leave deduction's rest carried after tax (refunded after tax). */
+          carried_kobo: signedKobo.nullable().optional(),
           pensionable: z.boolean(),
           taxable: z.boolean(),
         }),
@@ -271,6 +273,7 @@ const leaveRefundSchema = z
       code: l.code,
       label: l.label,
       wantedKobo: l.wanted_kobo ?? null,
+      carriedKobo: l.carried_kobo ?? null,
       amountKobo: l.amount_kobo,
       pensionable: l.pensionable,
       taxable: l.taxable,

@@ -370,6 +370,20 @@ describe("leave cancelled after posting: a refund in the next run", () => {
     return { requestId, lines, refund };
   }
 
+  it("refunds a pre-tax line's carried rest after tax, after the pre-tax lines (5.9a, case D)", () => {
+    const { lines, refund } = octoberDeduction();
+    const [first, ...rest] = refund.lines;
+    const withCarry = {
+      ...refund,
+      lines: [{ ...first!, carriedKobo: 50_000n }, ...rest.map((l) => ({ ...l, carriedKobo: 0n }))],
+    };
+    const r = run(worker({ leaveRefunds: [withCarry] }));
+    const back = byCode(r.lines, "leave_refund");
+    expect(back.map((l) => l.amountKobo)).toEqual([...lines.map((l) => -l.amountKobo), 50_000n]);
+    expect(back.at(-1)).toMatchObject({ taxable: false, pensionable: false, nhfBase: false });
+    expect(back.slice(0, -1).every((l) => l.taxable)).toBe(true);
+  });
+
   it("pays back each deduction line exactly, with its bases, naming the deduction's days", () => {
     const { requestId, lines, refund } = octoberDeduction();
     const r = run(worker({ leaveRefunds: [refund] }));

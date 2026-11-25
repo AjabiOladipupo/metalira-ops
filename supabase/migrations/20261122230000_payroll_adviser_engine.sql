@@ -2255,19 +2255,11 @@ begin
           where l.organisation_id = p_organisation_id and l.payslip_id = v_slip_id
             and l.position in (select x::integer from jsonb_array_elements_text(v_src -> 'positions') x)
         ),
-        theirs as (
-          select
-            case
-              when ol.code = 'leave_arrears'
-                then coalesce(
-                  private.leave_arrears_wanted(ol.organisation_id, ol.payslip_id, ol.label),
-                  ol.amount_kobo
-                )
-              else -ol.amount_kobo
-            end as amount_kobo,
-            case when ol.code = 'leave_arrears' then false else ol.taxable end as taxable,
-            case when ol.code = 'leave_arrears' then false else ol.pensionable end as pensionable,
-            row_number() over (order by ol.position) as n
+        -- Slice 5.9a: a pre-tax leave deduction cut to fit (money review M2) carried its rest after
+        -- tax; its refund pays that rest back after tax, after the pre-tax lines, so the worker
+        -- nets ₦0 for the cancelled days (5.7c's case D under NTA 2025 v2).
+        posted as (
+          select ol.*
           from public.payslip_sources o
           join public.payroll_runs orun
             on orun.organisation_id = o.organisation_id and orun.id = o.run_id
@@ -2280,14 +2272,32 @@ begin
             and o.run_id <> p_run_id and orun.status in ('approved', 'released')
             and orun.kind = 'regular'
             and o.from_date = (v_src ->> 'from')::date and o.to_date = (v_src ->> 'to')::date
-            and (case
-              when ol.code = 'leave_arrears'
+        ),
+        expected as (
+          select 0 as grp, p.position,
+            case
+              when p.code = 'leave_arrears'
                 then coalesce(
-                  private.leave_arrears_wanted(ol.organisation_id, ol.payslip_id, ol.label),
-                  ol.amount_kobo
+                  private.leave_arrears_wanted(p.organisation_id, p.payslip_id, p.label),
+                  p.amount_kobo
                 )
-              else -ol.amount_kobo
-            end) > 0
+              else -p.amount_kobo
+            end as amount_kobo,
+            case when p.code = 'leave_arrears' then false else p.taxable end as taxable,
+            case when p.code = 'leave_arrears' then false else p.pensionable end as pensionable
+          from posted p
+          union all
+          select 1 as grp, p.position,
+            private.recovery_carried_kobo(p.organisation_id, p.payslip_id, p.label),
+            false, false
+          from posted p
+          where p.code = 'leave_deduction'
+        ),
+        theirs as (
+          select e.amount_kobo, e.taxable, e.pensionable,
+            row_number() over (order by e.grp, e.position) as n
+          from expected e
+          where e.amount_kobo > 0
         )
         -- One statement: the CTEs above are visible to it alone.
         select coalesce((select sum(amount_kobo) from mine), 0),
@@ -3120,5 +3130,228 @@ begin
     v_reason
   );
   return v_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 10. Refunds of pre-tax leave deductions cut to fit (5.7c's case D under NTA 2025 v2)
+-- ---------------------------------------------------------------------------
+
+-- The rest of a pre-tax recovery line that didn't fit its month and was carried after tax (money
+-- review M2): the engine records it on the payslip's trace (`recovery_carried`, with the line's
+-- label and what it wanted and took). 0 when the line wasn't cut. No role check: definers only.
+create function private.recovery_carried_kobo(
+  p_organisation_id uuid,
+  p_payslip_id uuid,
+  p_label text
+)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select (st -> 'inputs' ->> 'wanted_kobo')::bigint - (st -> 'inputs' ->> 'taken_kobo')::bigint
+    from public.payslips p
+    cross join lateral jsonb_array_elements(
+      case when jsonb_typeof(p.trace -> 'steps') = 'array' then p.trace -> 'steps' else '[]'::jsonb end
+    ) st
+    where p.organisation_id = p_organisation_id and p.id = p_payslip_id
+      and st ->> 'step' = 'recovery_carried'
+      and st -> 'inputs' ->> 'label' = p_label
+      and coalesce(st -> 'inputs' ->> 'wanted_kobo', '') ~ '^[0-9]{1,15}$'
+      and coalesce(st -> 'inputs' ->> 'taken_kobo', '') ~ '^[0-9]{1,15}$'
+    limit 1
+  ), 0)
+$$;
+
+revoke all on function private.recovery_carried_kobo(uuid, uuid, text) from public, anon, authenticated;
+
+-- 5.7c's private.payroll_leave_corrections (its only version), with a leave deduction line's
+-- carried rest added to its refund item (marked "Slice 5.9a"). Grants stand.
+create or replace function private.payroll_leave_corrections(
+  p_organisation_id uuid,
+  p_period_start date,
+  p_worker_ids uuid[],
+  p_run_id uuid
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_start date;
+  v_end date;
+  v_from date;
+  v_result jsonb;
+begin
+  perform private.require_payroll_reader(p_organisation_id);
+  if p_period_start is null then
+    raise exception 'Choose the pay period.' using errcode = '22023';
+  end if;
+  -- Null: every worker of the company (the run's check for corrections pending outside it).
+  if p_worker_ids is not null and cardinality(p_worker_ids) > 2000 then
+    raise exception 'Name up to 2000 workers.' using errcode = '22023';
+  end if;
+  if p_run_id is not null and not exists (
+    select 1 from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.id = p_run_id
+  ) then
+    raise exception 'That payroll run wasn''t found.' using errcode = '22023';
+  end if;
+  select p.period_start, p.period_end into v_start, v_end
+  from private.payroll_period_for(p_organisation_id, p_period_start) p;
+  if v_start is null or v_start <> p_period_start then
+    raise exception 'That isn''t the start of a pay period.' using errcode = '22023';
+  end if;
+  v_from := v_start - 400;
+
+  with arrears as (
+    select
+      q.worker_id,
+      r.period_start as sort_period,
+      q.start_date as sort_start,
+      q.id as sort_id,
+      jsonb_build_object(
+        'request_id', q.id,
+        'type_code', t.code,
+        'counting', t.counting,
+        'pay_percent', lp.pay_percent,
+        'pay_below_service', lp.pay_below_service,
+        'period_start', r.period_start,
+        'period_end', r.period_end,
+        'from', greatest(q.start_date, r.period_start),
+        'to', least(q.end_date, r.period_end),
+        'rostered_days', s.rostered_days,
+        'shifts', coalesce((
+          select jsonb_agg(
+            jsonb_build_object('date', a.shift_date, 'on_leave', a.status = 'removed')
+            order by a.shift_date, a.id
+          )
+          from public.shift_assignments a
+          where a.organisation_id = p_organisation_id and a.worker_id = q.worker_id
+            and a.shift_date between r.period_start and r.period_end
+            and (a.status = 'assigned' or a.removed_reason = 'on_leave')
+        ), '[]'::jsonb)
+      ) as item
+    from public.leave_requests q
+    join public.leave_types t
+      on t.organisation_id = q.organisation_id and t.id = q.leave_type_id
+    left join public.leave_request_pay lp
+      on lp.organisation_id = q.organisation_id and lp.request_id = q.id
+    join public.payroll_runs r
+      on r.organisation_id = q.organisation_id
+        and r.kind = 'regular'
+        and r.status in ('approved', 'released')
+        and r.period_end < v_start
+        and r.period_start <= q.end_date and r.period_end >= q.start_date
+    join public.payslips s
+      on s.organisation_id = r.organisation_id and s.run_id = r.id and s.worker_id = q.worker_id
+    where q.organisation_id = p_organisation_id
+      and (p_worker_ids is null or q.worker_id = any (p_worker_ids))
+      and q.status = 'approved'
+      and q.start_date < v_start
+      and q.end_date >= v_from
+      and (lp.request_id is null or lp.pay_percent < 100 or lp.pay_below_service)
+      and not private.payroll_source_paid(
+        p_organisation_id, 'leave_request', q.id,
+        greatest(q.start_date, r.period_start), least(q.end_date, r.period_end), p_run_id
+      )
+  ),
+  refunds as (
+    select
+      o.worker_id,
+      o.from_date as sort_from,
+      q.id as sort_id,
+      jsonb_build_object(
+        'request_id', q.id,
+        'from', o.from_date,
+        'to', o.to_date,
+        'period_start', orun.period_start,
+        'period_end', orun.period_end,
+        'lines', (
+          select jsonb_agg(
+            jsonb_build_object(
+              'code', l.code,
+              'label', l.label,
+              'amount_kobo', l.amount_kobo::text,
+              -- An after-tax arrears line's full amount (taken plus carried): its refund.
+              'wanted_kobo', case when l.code = 'leave_arrears'
+                then private.leave_arrears_wanted(l.organisation_id, l.payslip_id, l.label)::text
+              end,
+              -- Slice 5.9a: a pre-tax leave deduction's rest carried after tax (its refund too).
+              'carried_kobo', case when l.code = 'leave_deduction'
+                then private.recovery_carried_kobo(l.organisation_id, l.payslip_id, l.label)::text
+              end,
+              'pensionable', l.pensionable,
+              'taxable', l.taxable
+            )
+            order by l.position
+          )
+          from public.payslip_lines l
+          where l.organisation_id = o.organisation_id and l.payslip_id = o.payslip_id
+            and l.position = any (o.line_positions)
+            and l.code in ('leave_deduction', 'leave_arrears')
+        )
+      ) as item
+    from public.payslip_sources o
+    join public.payroll_runs orun
+      on orun.organisation_id = o.organisation_id and orun.id = o.run_id
+        and orun.status in ('approved', 'released')
+        -- Regular runs only: leave an off-cycle payslip paid stays frozen (5.7b's
+        -- leave_requests_freeze_paid, below), so it is never cancelled and refunded.
+        and orun.kind = 'regular'
+    join public.leave_requests q
+      on q.organisation_id = o.organisation_id and q.id = o.source_id and q.status = 'cancelled'
+    where o.organisation_id = p_organisation_id
+      and o.source_kind = 'leave_request'
+      and o.stands
+      and (p_worker_ids is null or o.worker_id = any (p_worker_ids))
+      and (p_run_id is null or o.run_id <> p_run_id)
+      and exists (
+        select 1 from public.payslip_lines l
+        where l.organisation_id = o.organisation_id and l.payslip_id = o.payslip_id
+          and l.position = any (o.line_positions)
+          and ((l.code = 'leave_deduction' and (l.amount_kobo < 0
+              or private.recovery_carried_kobo(l.organisation_id, l.payslip_id, l.label) > 0))
+            or (l.code = 'leave_arrears' and coalesce(
+              private.leave_arrears_wanted(l.organisation_id, l.payslip_id, l.label),
+              l.amount_kobo
+            ) > 0))
+      )
+      and not private.payroll_source_paid(
+        p_organisation_id, 'leave_refund', q.id, o.from_date, o.to_date, p_run_id
+      )
+  ),
+  people as (
+    select a.worker_id from arrears a
+    union
+    select f.worker_id from refunds f
+  )
+  select jsonb_build_object(
+    'version', 1,
+    'period', jsonb_build_object('start', v_start, 'end', v_end),
+    'workers', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'worker_id', p.worker_id,
+          'leave_arrears', coalesce((
+            select jsonb_agg(a.item order by a.sort_period, a.sort_start, a.sort_id)
+            from arrears a where a.worker_id = p.worker_id
+          ), '[]'::jsonb),
+          'leave_refunds', coalesce((
+            select jsonb_agg(f.item order by f.sort_from, f.sort_id)
+            from refunds f where f.worker_id = p.worker_id
+          ), '[]'::jsonb)
+        )
+        order by p.worker_id
+      )
+      from people p
+    ), '[]'::jsonb)
+  ) into v_result;
+  return v_result;
 end;
 $$;

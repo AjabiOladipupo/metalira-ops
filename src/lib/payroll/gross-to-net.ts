@@ -233,7 +233,8 @@ export function grossToNet(
             "More than this month's pay can bear: the rest comes off after tax in later runs",
             wanted - taken,
             REF.recovery,
-            { wanted_kobo: wanted.toString(), taken_kobo: taken.toString() },
+            // The line's label: a later refund of the leave reads the carried rest by it.
+            { wanted_kobo: wanted.toString(), taken_kobo: taken.toString(), label: e.label },
           ),
         );
       }

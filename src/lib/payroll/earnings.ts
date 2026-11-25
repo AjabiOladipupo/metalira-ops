@@ -1031,6 +1031,24 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         regular: !afterTax,
       });
     }
+    // Slice 5.9a (5.7c's case D under NTA 2025 v2): a pre-tax leave deduction cut to fit carried
+    // its rest after tax; that rest is refunded after tax, after the pre-tax lines, so the worker
+    // nets ₦0 for the cancelled days while the carried balance is still collected.
+    for (const line of refund.lines) {
+      const carried = line.code === "leave_deduction" ? (line.carriedKobo ?? 0n) : 0n;
+      if (carried <= 0n) continue;
+      total += carried;
+      lines.push({
+        code: "leave_refund",
+        label: `Leave refund in ${range}, cancelled after posting (${days}), carried part, after tax`,
+        amountKobo: carried,
+        pensionable: false,
+        nhfBase: false,
+        taxable: false,
+        sources: [{ kind: "leave_refund", id: refund.requestId, from: refund.from, to: refund.to }],
+        regular: false,
+      });
+    }
     if (total === 0n) continue;
     trace.push({
       step: "leave_refund",
