@@ -7,13 +7,18 @@
  * "Lagos State" are one remittance. The database makes the same grouping at approval
  * (`private.statutory_amounts`, migration 20261122160000); `groupStatutory` mirrors it.
  *
- * Due dates: pension by the 7th working day counting the pay date as the first, after rolling a
- * pay date that isn't a working day back to the working day before (RULES_NIGERIA "Pension":
- * within 7 working days of paying salary; money review M3 took the earlier, safer reading),
- * skipping Saturdays, Sundays and the company's public holidays. PAYE, NHF, NSITF and ITF have a
- * due date only when the company sets its own day of the month after the pay date (open question
- * 13); RULES_NIGERIA.md has no rule for them. Every figure here is to be confirmed with a tax
- * adviser before the first live payroll.
+ * Due dates (slice 5.9b; the tax adviser's answers of 24 Nov 2026, docs/PHASE_5.md 5.9b): pension
+ * by the 7th working day counting the day salary is actually paid (the upload date given at
+ * release; the scheduled pay date, provisionally, until then) as day 1, or the next working day
+ * when it isn't one; PAYE the 10th of the month after the pay-date month (penalty after the 21st);
+ * NHF the same day of the month after the pay date (the month's last day when it has none); NSITF
+ * the 15th of the month after the pay-date month; ITF 1 April of the year after the pay-date year
+ * (money review M1: these key on the pay date, never the upload date). Working days are Monday to
+ * Friday less the platform's official holidays (federal, and the tax state's for PAYE), never the
+ * company's own list. A fixed date that isn't a working day comes back to the working day before:
+ * our conservative choice until the adviser confirms it (money review M3). The company's own day,
+ * brought back to a working day too, applies only when earlier. `private.statutory_due_date`
+ * (migration 20261122240000) mirrors this.
  */
 import { NIGERIAN_STATES } from "@/lib/company";
 import { addDays } from "@/lib/dates";
@@ -29,9 +34,6 @@ export const REMITTANCE_KIND_LABELS: Record<RemittanceKind, string> = {
   nsitf: "NSITF",
   itf: "ITF",
 };
-
-/** Pension is due by this working day, counting the (rolled back) pay date as the first. */
-export const PENSION_DUE_WORKING_DAYS = 7;
 
 /** The payslip line codes each kind sums. */
 const KIND_OF_CODE: Readonly<Record<string, RemittanceKind>> = {
@@ -157,9 +159,13 @@ function isWorkingDay(iso: string, holidays: ReadonlySet<string>): boolean {
   return isoWeekday(iso) < 6 && !holidays.has(iso);
 }
 
+/** A working-day search gives up after a year (security review L4), as the SQL does (22023). */
+const MAX_SEARCH_DAYS = 366;
+const NO_WORKING_DAY = "No working day found within a year.";
+
 /**
- * `days` working days after `from`: Monday to Friday, leaving out `holidays` (the company's live
- * public holidays, `YYYY-MM-DD`). Mirrors `private.add_working_days`.
+ * `days` working days after `from`: Monday to Friday, leaving out `holidays` (`YYYY-MM-DD`).
+ * Mirrors `private.deadline_add_working_days`.
  */
 export function addWorkingDays(from: string, days: number, holidays: ReadonlySet<string>): string {
   if (!Number.isInteger(days) || days < 0 || days > 60) {
@@ -167,18 +173,159 @@ export function addWorkingDays(from: string, days: number, holidays: ReadonlySet
   }
   let date = from;
   let left = days;
+  let steps = 0;
   while (left > 0) {
     date = addDays(date, 1);
+    if (++steps > MAX_SEARCH_DAYS) throw new RangeError(NO_WORKING_DAY);
     if (isWorkingDay(date, holidays)) left -= 1;
   }
   return date;
 }
 
-/** The working day on or before `date`. Mirrors `private.working_day_on_or_before`. */
+/** The working day on or before `date`. Mirrors `private.deadline_on_or_before`. */
 export function workingDayOnOrBefore(date: string, holidays: ReadonlySet<string>): string {
   let d = date;
-  while (!isWorkingDay(d, holidays)) d = addDays(d, -1);
+  for (let steps = 0; !isWorkingDay(d, holidays); steps += 1) {
+    if (steps >= MAX_SEARCH_DAYS) throw new RangeError(NO_WORKING_DAY);
+    d = addDays(d, -1);
+  }
   return d;
+}
+
+/** The working day on or after `date`. Mirrors `private.deadline_on_or_after`. */
+export function workingDayOnOrAfter(date: string, holidays: ReadonlySet<string>): string {
+  let d = date;
+  for (let steps = 0; !isWorkingDay(d, holidays); steps += 1) {
+    if (steps >= MAX_SEARCH_DAYS) throw new RangeError(NO_WORKING_DAY);
+    d = addDays(d, 1);
+  }
+  return d;
+}
+
+/**
+ * The platform's official holiday calendar (slice 5.9b, `public.official_holidays`): federal
+ * holidays for every deadline, and each state's own (keyed by `normaliseTaxState`) for that
+ * state's PAYE. A company's own holiday list is for pay only and never moves a deadline.
+ */
+export interface OfficialCalendar {
+  federal: ReadonlySet<string>;
+  states: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+export const EMPTY_CALENDAR: OfficialCalendar = { federal: new Set(), states: new Map() };
+
+/** Standing calendar rows (withdrawn ones left out) as an `OfficialCalendar`. */
+export function officialCalendar(
+  rows: readonly { date: string; scope: "federal" | "state"; stateKey: string | null }[],
+): OfficialCalendar {
+  const federal = new Set<string>();
+  const states = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (r.scope === "federal") federal.add(r.date);
+    else if (r.stateKey) {
+      const set = states.get(r.stateKey) ?? new Set<string>();
+      set.add(r.date);
+      states.set(r.stateKey, set);
+    }
+  }
+  return { federal, states };
+}
+
+/**
+ * The days that aren't working days for a kind's deadline: the federal holidays, and for PAYE
+ * also the tax state's (adviser, 24 Nov 2026).
+ */
+export function deadlineHolidays(
+  calendar: OfficialCalendar,
+  kind: RemittanceKind,
+  authorityKey: string | null,
+): ReadonlySet<string> {
+  const state = kind === "paye" && authorityKey ? calendar.states.get(authorityKey) : undefined;
+  if (!state || state.size === 0) return calendar.federal;
+  return new Set([...calendar.federal, ...state]);
+}
+
+/** Pension is due by this working day, counting the day salary is paid (or the next) as the first. */
+export const PENSION_DUE_WORKING_DAYS = 7;
+/** PAYE: target the 10th of the following month; a statutory penalty after the 21st. */
+export const PAYE_TARGET_DAY = 10;
+export const PAYE_PENALTY_AFTER_DAY = 21;
+/** NSITF: on or before the 15th of the following month. */
+export const NSITF_DUE_DAY = 15;
+
+/** Where each kind's deadline comes from (adviser, 24 Nov 2026). */
+export const DEADLINE_RULES: Record<RemittanceKind, string> = {
+  pension:
+    "Pension: within 7 working days of the day salary is paid, counting that day (or the next working day) as day 1 (PRA 2014 s.11(3)(b)).",
+  paye: "PAYE: by the 10th of the following month; a statutory penalty applies after the 21st (NTAA 2025 s.107).",
+  nhf: "NHF: within 1 month of the deduction, the same day of the next month (NHF Act s.9(2)).",
+  nsitf: "NSITF: on or before the 15th of the following month (ECA 2010 s.33(1)).",
+  itf: "ITF: by 1 April of the following year; it builds up monthly (ITF Act s.6(2)).",
+};
+
+function ymd(y: number, m: number, d: number): string {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** Year and month (1 to 12) of the month after `iso`'s. */
+function nextMonth(iso: string): [number, number] {
+  const [y, m] = iso.split("-").map(Number) as [number, number];
+  return m === 12 ? [y + 1, 1] : [y, m + 1];
+}
+
+function daysInMonth(y: number, m: number): number {
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+/**
+ * A fixed-date kind's deadline as the law states it, before any working-day adjustment: PAYE the
+ * 10th and NSITF the 15th of the month after the pay date, NHF the same day of that month (or its
+ * last day), ITF 1 April of the next year.
+ */
+export function fixedDeadline(kind: Exclude<RemittanceKind, "pension">, payDate: string): string {
+  const [ny, nm] = nextMonth(payDate);
+  switch (kind) {
+    case "paye":
+      return ymd(ny, nm, PAYE_TARGET_DAY);
+    case "nhf":
+      return ymd(ny, nm, Math.min(Number(payDate.slice(8, 10)), daysInMonth(ny, nm)));
+    case "nsitf":
+      return ymd(ny, nm, NSITF_DUE_DAY);
+    case "itf":
+      return ymd(Number(payDate.slice(0, 4)) + 1, 4, 1);
+  }
+}
+
+/**
+ * A kind's statutory deadline, before any company day. `paidOn` is the day salary was paid for
+ * pension (the upload date, or the pay date provisionally) and the pay date for the other kinds.
+ * A fixed date that isn't a working day comes back to the working day before (money review M3:
+ * our conservative choice until confirmed). Mirrors `private.statutory_deadline`.
+ */
+export function statutoryDeadline(
+  kind: RemittanceKind,
+  paidOn: string,
+  holidays: ReadonlySet<string>,
+): string {
+  if (kind === "pension") {
+    return addWorkingDays(
+      workingDayOnOrAfter(paidOn, holidays),
+      PENSION_DUE_WORKING_DAYS - 1,
+      holidays,
+    );
+  }
+  return workingDayOnOrBefore(fixedDeadline(kind, paidOn), holidays);
+}
+
+/** PAYE's statutory penalty applies after this day: the 21st of the month after `paidOn`. */
+export function payePenaltyAfter(paidOn: string): string {
+  const [y, m] = nextMonth(paidOn);
+  return ymd(y, m, PAYE_PENALTY_AFTER_DAY);
+}
+
+/** The annual PAYE return (Form H1) for a tax year is due 31 January of the next year. */
+export function annualPayeReturnDue(taxYear: number): string {
+  return ymd(taxYear + 1, 1, 31);
 }
 
 /** The company's own due days (1 to 28 of the month after the pay date), or null for none. */
@@ -189,26 +336,86 @@ export interface RemitDueDays {
   itf: number | null;
 }
 
-/** A remittance's due date, as `private.statutory_due_date` works it out. */
-export function remittanceDueDate(
-  kind: RemittanceKind,
-  payDate: string,
-  dueDays: RemitDueDays,
-  holidays: ReadonlySet<string>,
-): string | null {
+export interface RemittanceDeadline {
+  /** The date to pay by: the statutory deadline, or the company's day when earlier. */
+  dueDate: string;
+  statutoryDate: string;
+  /**
+   * The day the deadline counts from: pension's upload date (or the pay date provisionally), and
+   * the pay date for the other kinds.
+   */
+  paidOn: string;
+  /** Pension counted from the scheduled pay date: no upload date has been given yet. */
+  provisional: boolean;
+  /**
+   * Pension with an upload date that gives a different deadline from the pay date's: the
+   * provisional date it replaced, shown beside the actual one.
+   */
+  provisionalDueDate: string | null;
+  /**
+   * The fixed date as the law states it, when it isn't a working day and the statutory date was
+   * brought back to the working day before ("earlier working day used until confirmed").
+   */
+  rolledBackFrom: string | null;
+  /** The company's own day, and whether it applies (only when earlier than the statutory date). */
+  customDay: { day: number; date: string; applied: boolean } | null;
+  /** PAYE only: the statutory penalty applies after this day. */
+  penaltyAfter: string | null;
+}
+
+/**
+ * A remittance's due date (adviser, 24 Nov 2026), worked out on read. Pension counts from the
+ * date the bank file was uploaded (given at release), or provisionally from the scheduled pay date
+ * until one is given; the other kinds key on the pay date (money review M1). Mirrors
+ * `private.statutory_due_date`, which stamps the provisional date at approval.
+ */
+export function remittanceDeadline(input: {
+  kind: RemittanceKind;
+  authorityKey: string | null;
+  payDate: string;
+  /** The upload date given at release, or null when none was given. */
+  uploadedOn: string | null;
+  dueDays: RemitDueDays;
+  calendar: OfficialCalendar;
+}): RemittanceDeadline {
+  const { kind, payDate, uploadedOn } = input;
+  const holidays = deadlineHolidays(input.calendar, kind, input.authorityKey);
   if (kind === "pension") {
-    return addWorkingDays(
-      workingDayOnOrBefore(payDate, holidays),
-      PENSION_DUE_WORKING_DAYS - 1,
-      holidays,
-    );
+    const paidOn = uploadedOn ?? payDate;
+    const statutoryDate = statutoryDeadline(kind, paidOn, holidays);
+    const fromPayDate =
+      uploadedOn === null ? statutoryDate : statutoryDeadline(kind, payDate, holidays);
+    return {
+      dueDate: statutoryDate,
+      statutoryDate,
+      paidOn,
+      provisional: uploadedOn === null,
+      provisionalDueDate: fromPayDate === statutoryDate ? null : fromPayDate,
+      rolledBackFrom: null,
+      customDay: null,
+      penaltyAfter: null,
+    };
   }
-  const day = dueDays[kind];
-  if (day === null) return null;
-  const [y, m] = payDate.split("-").map(Number) as [number, number];
-  const year = m === 12 ? y + 1 : y;
-  const month = m === 12 ? 1 : m + 1;
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const fixed = fixedDeadline(kind, payDate);
+  const statutoryDate = workingDayOnOrBefore(fixed, holidays);
+  const day = input.dueDays[kind];
+  let customDay: RemittanceDeadline["customDay"] = null;
+  if (day !== null) {
+    const [y, m] = nextMonth(payDate);
+    // Money review L1: the company's day, brought back to a working day, then compared.
+    const date = workingDayOnOrBefore(ymd(y, m, day), holidays);
+    customDay = { day, date, applied: date < statutoryDate };
+  }
+  return {
+    dueDate: customDay?.applied ? customDay.date : statutoryDate,
+    statutoryDate,
+    paidOn: payDate,
+    provisional: false,
+    provisionalDueDate: null,
+    rolledBackFrom: fixed === statutoryDate ? null : fixed,
+    customDay,
+    penaltyAfter: kind === "paye" ? payePenaltyAfter(payDate) : null,
+  };
 }
 
 export type RemittanceStatus =
@@ -217,7 +424,6 @@ export type RemittanceStatus =
   | "overpaid"
   | "overdue"
   | "due"
-  | "no_due_date"
   /** Its run was reversed (slice 5.7a): nothing is owed; a payment made needs a refund or offset. */
   | "voided";
 
@@ -226,14 +432,13 @@ export type RemittanceStatus =
  * H1): paid only when they are equal; part paid when less; overpaid when more.
  */
 export function remittanceStatus(
-  remittance: { dueDate: string | null; amountKobo: Kobo; paidKobo: Kobo | null },
+  remittance: { dueDate: string; amountKobo: Kobo; paidKobo: Kobo | null },
   today: string,
 ): RemittanceStatus {
   if (remittance.paidKobo !== null) {
     if (remittance.paidKobo === remittance.amountKobo) return "paid";
     return remittance.paidKobo < remittance.amountKobo ? "part_paid" : "overpaid";
   }
-  if (remittance.dueDate === null) return "no_due_date";
   return remittance.dueDate < today ? "overdue" : "due";
 }
 
@@ -243,12 +448,23 @@ export function remittanceOutstanding(r: { amountKobo: Kobo; paidKobo: Kobo | nu
   return r.paidKobo < r.amountKobo ? r.amountKobo - r.paidKobo : 0n;
 }
 
-/** Past its due date with something still owed (unpaid, or part paid). */
-export function remittanceIsOverdue(
-  r: { dueDate: string | null; amountKobo: Kobo; paidKobo: Kobo | null },
+/**
+ * PAYE past the statutory penalty date (after the 21st of the month after payment, NTAA 2025
+ * s.107) with something still owed.
+ */
+export function remittanceIsPastPenalty(
+  r: { penaltyAfter: string | null; amountKobo: Kobo; paidKobo: Kobo | null },
   today: string,
 ): boolean {
-  return r.dueDate !== null && r.dueDate < today && remittanceOutstanding(r) > 0n;
+  return r.penaltyAfter !== null && r.penaltyAfter < today && remittanceOutstanding(r) > 0n;
+}
+
+/** Past its due date with something still owed (unpaid, or part paid). */
+export function remittanceIsOverdue(
+  r: { dueDate: string; amountKobo: Kobo; paidKobo: Kobo | null },
+  today: string,
+): boolean {
+  return r.dueDate < today && remittanceOutstanding(r) > 0n;
 }
 
 export const REMITTANCE_STATUS: Record<
@@ -261,7 +477,6 @@ export const REMITTANCE_STATUS: Record<
   overpaid: { label: "Overpaid", tone: "action" },
   overdue: { label: "Overdue", tone: "action" },
   due: { label: "Due", tone: "pending" },
-  no_due_date: { label: "No due date set", tone: "partial" },
 };
 
 /**

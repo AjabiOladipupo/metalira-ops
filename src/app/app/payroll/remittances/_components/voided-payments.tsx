@@ -6,9 +6,10 @@ import { OffsetPaymentForm, RecordRefundForm } from "./resolution-forms";
 
 /**
  * Payments made against remittances a reversal voided (slice 5.7c): the money is with the
- * authority, so each is resolved as a refund received (with its receipt) or an offset against a
- * later remittance to the same authority. Which one an authority allows is the person's call,
- * confirmed with the adviser; the app records it and keeps every record as written.
+ * authority, so each is resolved as an offset against a later remittance to the same authority
+ * or a refund received (with its receipt). Offset is the default (slice 5.9b; tax adviser, 24 Nov
+ * 2026: authorities rarely refund cash), and the refund stays for when one comes back. The app
+ * records it and keeps every record as written.
  */
 export function VoidedPayments({
   payments,
@@ -34,9 +35,9 @@ export function VoidedPayments({
         </h2>
         <p className="m-0 max-w-3xl text-sm text-fg-muted">
           A run was reversed after these remittances were paid, so they are voided and the money is
-          with the authority. Record a refund when it comes back, or offset it against a later
-          remittance to the same authority if the authority accepts that. Check which with your tax
-          adviser; the app doesn&apos;t decide it.
+          with the authority. Authorities rarely refund cash, so offset it against your next
+          remittance to the same authority. If the authority does send a refund, record it with its
+          receipt instead.
         </p>
       </div>
       <ul className="m-0 flex list-none flex-col gap-3 p-0">
@@ -83,22 +84,9 @@ export function VoidedPayments({
             ) : null}
             {canRecord && p.resolution.unresolvedKobo > 0n ? (
               <div className="flex flex-col gap-2">
-                <details className="rounded-lg border border-line px-3 py-2.5">
+                <details open className="rounded-lg border border-line px-3 py-2.5">
                   <summary className="cursor-pointer text-sm font-semibold">
-                    Record a refund
-                  </summary>
-                  <div className="pt-3">
-                    <RecordRefundForm
-                      paymentId={p.paymentId}
-                      unresolved={koboToMajorString(p.resolution.unresolvedKobo)}
-                      today={today}
-                      minDate={p.paidOn}
-                    />
-                  </div>
-                </details>
-                <details className="rounded-lg border border-line px-3 py-2.5">
-                  <summary className="cursor-pointer text-sm font-semibold">
-                    Offset against a later remittance
+                    Offset against a later remittance (usual)
                   </summary>
                   <div className="pt-3">
                     {p.targets.length > 0 ? (
@@ -116,6 +104,19 @@ export function VoidedPayments({
                         the next run is approved.
                       </p>
                     )}
+                  </div>
+                </details>
+                <details className="rounded-lg border border-line px-3 py-2.5">
+                  <summary className="cursor-pointer text-sm font-semibold">
+                    Record a refund instead
+                  </summary>
+                  <div className="pt-3">
+                    <RecordRefundForm
+                      paymentId={p.paymentId}
+                      unresolved={koboToMajorString(p.resolution.unresolvedKobo)}
+                      today={today}
+                      minDate={p.paidOn}
+                    />
                   </div>
                 </details>
               </div>

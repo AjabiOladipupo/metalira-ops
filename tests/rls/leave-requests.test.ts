@@ -162,7 +162,10 @@ beforeAll(async () => {
     p_preset: "B",
   });
   expect(preset.error).toBeNull();
-  const types = await admin.from("leave_types").select("id, code").eq("organisation_id", owner.orgId);
+  const types = await admin
+    .from("leave_types")
+    .select("id, code")
+    .eq("organisation_id", owner.orgId);
   annual = types.data!.find((t) => t.code === "annual")!.id;
   sick = types.data!.find((t) => t.code === "sick")!.id;
 
@@ -380,7 +383,9 @@ describe("asking, deciding and the balance", () => {
     });
     expect(error).toBeNull();
     const id = (data as { id: string }).id;
-    const list = await staff.ops.client.rpc("leave_request_list", { p_organisation_id: owner.orgId });
+    const list = await staff.ops.client.rpc("leave_request_list", {
+      p_organisation_id: owner.orgId,
+    });
     expect(list.error).toBeNull();
     const mine = list.data!.find((r) => r.id === id)!;
     expect(mine.can_decide_step1).toBe(true);
@@ -474,7 +479,10 @@ describe("insert-only rows", () => {
   });
 
   it("the secret key can't change ledger rows", async () => {
-    const { error } = await admin.from("leave_ledger").update({ days: 99 }).eq("organisation_id", owner.orgId);
+    const { error } = await admin
+      .from("leave_ledger")
+      .update({ days: 99 })
+      .eq("organisation_id", owner.orgId);
     expect(error).not.toBeNull();
   });
 });
@@ -487,9 +495,15 @@ describe("the leave year", () => {
   });
 
   it("is idempotent and leaves the secret key's call in the open", async () => {
-    const first = await admin.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    const first = await admin.rpc("ensure_leave_year", {
+      p_organisation_id: owner.orgId,
+      p_year: year,
+    });
     expect(first.error).toBeNull();
-    const second = await admin.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    const second = await admin.rpc("ensure_leave_year", {
+      p_organisation_id: owner.orgId,
+      p_year: year,
+    });
     expect(second.data).toBe(0);
   });
 
@@ -546,7 +560,10 @@ describe("security review fixes (L1 to L4)", () => {
 
   it("L1: workers and line managers never ensure a past year through a balance read", async () => {
     const past = year - 1;
-    const worker = await meClient.rpc("leave_balances", { p_organisation_id: owner.orgId, p_year: past });
+    const worker = await meClient.rpc("leave_balances", {
+      p_organisation_id: owner.orgId,
+      p_year: past,
+    });
     expect(worker.error).toBeNull();
     const lm = await staff.lineManager.client.rpc("leave_balances", {
       p_organisation_id: owner.orgId,
@@ -611,14 +628,20 @@ describe("security review fixes (L1 to L4)", () => {
   });
 
   it("L4: only the service role skips the role check when ensuring a year", async () => {
-    const worker = await meClient.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    const worker = await meClient.rpc("ensure_leave_year", {
+      p_organisation_id: owner.orgId,
+      p_year: year,
+    });
     expect(worker.error?.code).toBe("42501");
     const anon = await anonClient().rpc("ensure_leave_year", {
       p_organisation_id: owner.orgId,
       p_year: year,
     });
     expect(anon.error).not.toBeNull();
-    const hr = await staff.hr.client.rpc("ensure_leave_year", { p_organisation_id: owner.orgId, p_year: year });
+    const hr = await staff.hr.client.rpc("ensure_leave_year", {
+      p_organisation_id: owner.orgId,
+      p_year: year,
+    });
     expect(hr.error).toBeNull();
   });
 });
@@ -639,10 +662,14 @@ describe("reads", () => {
   });
 
   it("another company's line manager sees nothing", async () => {
-    const list = await staff.otherLm.client.rpc("leave_request_list", { p_organisation_id: other.orgId });
+    const list = await staff.otherLm.client.rpc("leave_request_list", {
+      p_organisation_id: other.orgId,
+    });
     expect(list.error).toBeNull();
     expect(list.data).toEqual([]);
-    const cross = await staff.otherLm.client.rpc("leave_request_list", { p_organisation_id: owner.orgId });
+    const cross = await staff.otherLm.client.rpc("leave_request_list", {
+      p_organisation_id: owner.orgId,
+    });
     expect(cross.error?.code).toBe("42501");
   });
 

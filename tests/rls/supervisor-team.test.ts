@@ -133,7 +133,12 @@ async function workedDay(
 ): Promise<string> {
   dayBack += 1;
   const DAY = addDays(lagosToday(), -dayBack);
-  const [contract, post, shift, assignment] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  const [contract, post, shift, assignment] = [
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
+    randomUUID(),
+  ];
   const startsAt = new Date(at(DAY, "07:00"));
   const endsAt = new Date(at(DAY, "19:00"));
   await db.query("begin");
@@ -294,7 +299,10 @@ beforeAll(async () => {
     p_preset: "B",
   });
   expect(preset.error).toBeNull();
-  const types = await admin.from("leave_types").select("id, code").eq("organisation_id", owner.orgId);
+  const types = await admin
+    .from("leave_types")
+    .select("id, code")
+    .eq("organisation_id", owner.orgId);
   annual = types.data!.find((t) => t.code === "annual")!.id;
 
   sup = await addWorker();

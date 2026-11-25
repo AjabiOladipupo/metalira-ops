@@ -28,6 +28,7 @@ import { MutationError, runMutation } from "@/server/identity/mutate";
 import { approveRunSpec, createRunSpec, INPUTS_CHANGED_MESSAGE } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
+import { verifyGoldenRents } from "./helpers/reliefs";
 import {
   adminClient,
   createTenantUser,
@@ -148,6 +149,18 @@ beforeAll(async () => {
     if (rate.error) throw new Error(rate.error.message);
     workers[w.name] = data.id;
   }
+
+  // Slice 5.9a: the rent the golden workers declared counts only once its proof is verified (the
+  // tax adviser, NTA 2025 v2, the company's starting rule set). October is their first payroll in
+  // the app, with no opening balance, so cumulative PAYE is the month annualised: the fixture
+  // holds exactly.
+  await verifyGoldenRents(
+    admin,
+    { client: hr.client, userId: hr.id },
+    owner.orgId,
+    workers,
+    golden,
+  );
 
   // A full cycle of approved days: every Monday to Friday, 8 hours, no overtime, on a shift.
   const ids = Object.values(workers);
@@ -308,19 +321,23 @@ describe("October 2026 through run and approval", () => {
     expect(owed("itf")).toBe(kobo(st.itf));
     expect(owed("paye")).toBe(kobo(golden.totals.paye));
     expect(owed("nhf")).toBe(0n);
-    // Everyone is in Lagos, with no PFA on file here; pension is due by the 7th working day
-    // counting Sunday 25 Oct 2026 rolled back to Friday 23 Oct (Monday 2 Nov, money review M3);
-    // the levies have no due date until the company sets one.
+    // Everyone is in Lagos, with no PFA on file here. Slice 5.9b (the tax adviser, 24 Nov 2026;
+    // the owner approved the change from Monday 2 Nov): pension is due within 7 working days of
+    // the day salary is paid, counting Sunday 25 Oct's next working day, Monday 26 Oct, as day 1,
+    // so Tuesday 3 Nov (provisional until the bank file is uploaded). PAYE is due the 10th of
+    // the following month; NSITF the 15th (a Sunday, so Friday 13 Nov); ITF 1 April 2027.
     expect(rems!.find((r) => r.kind === "paye")).toMatchObject({
       authority_key: "lagos",
       worker_count: 5,
-      due_date: null,
+      due_date: "2026-11-10",
     });
     expect(rems!.find((r) => r.kind === "pension")).toMatchObject({
       authority_key: null,
       worker_count: 6,
-      due_date: "2026-11-02",
+      due_date: "2026-11-03",
     });
+    expect(rems!.find((r) => r.kind === "nsitf")).toMatchObject({ due_date: "2026-11-13" });
+    expect(rems!.find((r) => r.kind === "itf")).toMatchObject({ due_date: "2027-04-01" });
     expect(rems).toHaveLength(4);
   });
 

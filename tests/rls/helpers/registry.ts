@@ -54,6 +54,54 @@ export interface TableSpec {
   patch: Record<string, unknown>;
 }
 
+/**
+ * A deliberate tenancy exception (slice 5.9b): platform reference data with no organisation_id,
+ * the same for every company (the official holiday calendar). Declared in a module file as
+ * `platformTables`, with why. isolation.test.ts proves every signed-in user reads the same rows,
+ * nobody signed in can insert, update or delete them, and anon reads nothing.
+ */
+export interface PlatformTableSpec {
+  table: string;
+  key: string;
+  /** Why the table has no organisation_id. Required. */
+  noOrganisationIdReason: string;
+  /** Optional: create a row with the admin (secret-key) client. */
+  seed?: (admin: Client) => Promise<void>;
+  /** The `key` value of one row every signed-in user should read. */
+  rowOf: (admin: Client) => Promise<string>;
+  /** A plausible insert by a signed-in user. Must be rejected. */
+  attackInsert: () => Record<string, unknown>;
+  /** A harmless update patch. Must change nothing. */
+  patch: Record<string, unknown>;
+}
+
+type RegistryModule = { tables?: unknown; platformTables?: unknown };
+
+async function registryModules(): Promise<[string, RegistryModule][]> {
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "tables");
+  const files = readdirSync(dir)
+    .filter((file) => file.endsWith(".ts"))
+    .sort();
+  const mods: [string, RegistryModule][] = [];
+  for (const file of files) {
+    mods.push([file, (await import(pathToFileURL(path.join(dir, file)).href)) as RegistryModule]);
+  }
+  return mods;
+}
+
+/** The platform tables (no organisation_id, on purpose) declared in tests/rls/tables/. */
+export async function loadPlatformRegistry(): Promise<PlatformTableSpec[]> {
+  const specs: PlatformTableSpec[] = [];
+  for (const [file, mod] of await registryModules()) {
+    if (mod.platformTables === undefined) continue;
+    if (!Array.isArray(mod.platformTables)) {
+      throw new Error(`tests/rls/tables/${file}: \`platformTables\` must be an array.`);
+    }
+    specs.push(...(mod.platformTables as PlatformTableSpec[]));
+  }
+  return specs;
+}
+
 export async function loadRegistry(): Promise<TableSpec[]> {
   const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "tables");
   const files = readdirSync(dir)

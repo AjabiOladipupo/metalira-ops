@@ -1,6 +1,7 @@
 import { runContractDocumentSweep } from "@/server/business/contract-document-sweep";
 import { runPayrollFileSweep } from "@/server/payroll/payout-sweep";
 import { runReceiptSweep } from "@/server/payroll/receipt-sweep";
+import { runReliefProofSweep } from "@/server/payroll/relief-proof-sweep";
 import { isCronRequest } from "@/server/people/imports/sweep";
 
 // Daily Vercel Cron job (vercel.json): deletes contract-document files that are no longer kept
@@ -30,5 +31,20 @@ export async function GET(request: Request) {
       error instanceof Error ? error.name : "unknown error",
     );
   }
-  return Response.json({ ...result, receiptUploadsDeleted: receipts.deleted, bankFilesDeleted });
+  // Slice 5.9a (security review M1): relief-proof uploads that never became a proof.
+  let proofUploadsDeleted: number | null = null;
+  try {
+    proofUploadsDeleted = (await runReliefProofSweep()).deleted;
+  } catch (error) {
+    console.error(
+      "payroll.relief_proof_sweep_failed:",
+      error instanceof Error ? error.name : "unknown error",
+    );
+  }
+  return Response.json({
+    ...result,
+    receiptUploadsDeleted: receipts.deleted,
+    bankFilesDeleted,
+    proofUploadsDeleted,
+  });
 }

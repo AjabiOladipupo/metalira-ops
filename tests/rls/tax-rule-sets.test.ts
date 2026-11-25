@@ -3,8 +3,9 @@
  * the SQL functions; only an owner records the tax adviser's confirmation; admins, ops managers,
  * line managers, workers and other companies see and do nothing. A version in force never
  * changes, for the secret key and the database owner too (rule 3); versions never overlap; the
- * database's template equals src/lib/payroll/rule-set.ts NTA_2025_V1 (which a unit test compares
- * with docs/RULES_NIGERIA.md).
+ * database's template equals src/lib/payroll/rule-set.ts NTA_2025_V2 (slice 5.9a: v1 with the tax
+ * adviser's answers of 24 Nov 2026; the starting version changed from v1, so this suite now expects
+ * v2 where it expected v1, and v1's shape still passes the database's check).
  */
 import { randomUUID } from "node:crypto";
 
@@ -14,7 +15,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, lagosToday } from "@/lib/dates";
 import {
   NTA_2025_V1,
-  NTA_2025_V1_SOURCE,
+  NTA_2025_V2,
+  NTA_2025_V2_SOURCE,
   ruleSetPolicyJson,
   ruleSetRulesJson,
 } from "@/lib/payroll/rule-set";
@@ -36,8 +38,8 @@ const PERMISSION_DENIED = "42501";
 const today = lagosToday();
 const tomorrow = addDays(today, 1);
 const year = Number(today.slice(0, 4));
-const rules = ruleSetRulesJson(NTA_2025_V1.rules);
-const policy = ruleSetPolicyJson(NTA_2025_V1.policy);
+const rules = ruleSetRulesJson(NTA_2025_V2.rules);
+const policy = ruleSetPolicyJson(NTA_2025_V2.policy);
 
 let admin: Client;
 let db: pg.Client;
@@ -77,7 +79,7 @@ function withNsitf(bps: number) {
 function addArgs(over: Record<string, unknown> = {}) {
   return {
     p_organisation_id: owner.orgId,
-    p_name: "NTA 2025 v2",
+    p_name: "NTA 2025 v2.1",
     p_rules: withNsitf(150),
     p_policy: policy,
     p_effective_from: tomorrow,
@@ -110,23 +112,40 @@ afterAll(async () => {
 });
 
 describe("the template", () => {
-  it("equals src/lib/payroll/rule-set.ts NTA_2025_V1", async () => {
+  it("equals src/lib/payroll/rule-set.ts NTA_2025_V2", async () => {
     const { rows } = await db.query(
       "select name, effective_from::text as effective_from, rules, policy, source_label from private.tax_rule_set_template()",
     );
     expect(rows).toEqual([
       {
-        name: NTA_2025_V1.name,
+        name: NTA_2025_V2.name,
         effective_from: "2026-01-01",
         rules,
         policy,
-        source_label: NTA_2025_V1_SOURCE,
+        source_label: NTA_2025_V2_SOURCE,
       },
     ]);
     const valid = await db.query(
       "select private.tax_rules_valid(t.rules) as r, private.tax_policy_valid(t.policy) as p from private.tax_rule_set_template() t",
     );
     expect(valid.rows[0]).toEqual({ r: true, p: true });
+  });
+
+  it("still accepts NTA 2025 v1's shape, and checks the adviser's part (slice 5.9a)", async () => {
+    const v1 = ruleSetRulesJson(NTA_2025_V1.rules);
+    const bad = { ...rules, adviser: { ...(rules.adviser as Record<string, unknown>), extra: 1 } };
+    const badCap = {
+      ...rules,
+      adviser: {
+        ...(rules.adviser as Record<string, unknown>),
+        deduction_cap: { numerator: 4, denominator: 3 },
+      },
+    };
+    const { rows } = await db.query(
+      "select private.tax_rules_valid($1::jsonb) as v1, private.tax_rules_valid($2::jsonb) as bad, private.tax_rules_valid($3::jsonb) as cap",
+      [JSON.stringify(v1), JSON.stringify(bad), JSON.stringify(badCap)],
+    );
+    expect(rows[0]).toEqual({ v1: true, bad: false, cap: false });
   });
 
   it("is copied once on first use, by hr, from 1 Jan 2026", async () => {
@@ -139,7 +158,7 @@ describe("the template", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       id: first.data,
-      name: "NTA 2025 v1",
+      name: "NTA 2025 v2",
       effective_from: "2026-01-01",
       effective_to: null,
       rules,
@@ -196,7 +215,7 @@ describe("who reads", () => {
       });
       expect(ins.error).not.toBeNull();
     }
-    expect((await versions())[0]!.name).toBe("NTA 2025 v1");
+    expect((await versions())[0]!.name).toBe("NTA 2025 v2");
   });
 });
 
@@ -243,15 +262,15 @@ describe("adding a version", () => {
       effective_from: tomorrow,
       replaces: [],
     });
-    expect((dry.data as { before: { name: string } }).before.name).toBe("NTA 2025 v1");
+    expect((dry.data as { before: { name: string } }).before.name).toBe("NTA 2025 v2");
     expect(await versions()).toHaveLength(1);
 
     const { error } = await hr.client.rpc("add_tax_rule_set_version", addArgs());
     expect(error).toBeNull();
     const rows = await versions();
     expect(rows.map((r) => [r.name, r.effective_from, r.effective_to])).toEqual([
-      ["NTA 2025 v1", "2026-01-01", today],
-      ["NTA 2025 v2", tomorrow, null],
+      ["NTA 2025 v2", "2026-01-01", today],
+      ["NTA 2025 v2.1", tomorrow, null],
     ]);
     const { data: audit } = await admin
       .from("audit_log")
@@ -289,8 +308,8 @@ describe("adding a version", () => {
     ]);
     const rows = await versions();
     expect(rows.map((r) => [r.name, r.effective_from, r.effective_to])).toEqual([
-      ["NTA 2025 v1", "2026-01-01", today],
-      ["NTA 2025 v2", tomorrow, `${year + 1}-01-31`],
+      ["NTA 2025 v2", "2026-01-01", today],
+      ["NTA 2025 v2.1", tomorrow, `${year + 1}-01-31`],
       ["NTA 2025 v4", `${year + 1}-02-01`, null],
     ]);
   });
@@ -424,7 +443,7 @@ describe("the adviser's confirmation", () => {
 
 describe("closing a version", () => {
   it("is refused outside add_tax_rule_set_version, even for the database owner and the secret key", async () => {
-    // The other company's only version, NTA 2025 v1, is open and in force.
+    // The other company's only version, NTA 2025 v2, is open and in force.
     const [open] = await versions(other.orgId);
     expect(open!.effective_to).toBeNull();
     for (const to of [today, addDays(today, 5)]) {
@@ -444,14 +463,14 @@ describe("closing a version", () => {
 describe("the version on a date", () => {
   it("gives the version in force on a run's pay date to owner, hr, finance and the secret key", async () => {
     const rows = await versions();
-    const v2 = rows.find((r) => r.name === "NTA 2025 v2")!;
+    const v2 = rows.find((r) => r.name === "NTA 2025 v2.1")!;
     for (const reader of [owner, hr, finance]) {
       const { data, error } = await reader.client.rpc("tax_rule_set_on", {
         p_organisation_id: owner.orgId,
         p_on: "2026-10-25",
       });
       expect(error).toBeNull();
-      expect(data!.map((d) => d.name)).toEqual(["NTA 2025 v1"]);
+      expect(data!.map((d) => d.name)).toEqual(["NTA 2025 v2"]);
     }
     const later = await admin.rpc("tax_rule_set_on", {
       p_organisation_id: owner.orgId,

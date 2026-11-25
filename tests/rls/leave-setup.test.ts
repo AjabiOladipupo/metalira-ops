@@ -83,10 +83,7 @@ afterAll(async () => {
 describe("presets", () => {
   it("match src/lib/leave/presets.ts in the database", async () => {
     for (const preset of PRESETS) {
-      const { rows } = await db.query(
-        "select * from private.leave_preset_rows($1)",
-        [preset.id],
-      );
+      const { rows } = await db.query("select * from private.leave_preset_rows($1)", [preset.id]);
       expect(rows).toEqual(
         preset.types.map((t) => ({
           code: t.code,
@@ -102,7 +99,9 @@ describe("presets", () => {
         })),
       );
     }
-    const { rows } = await db.query("select count(*)::int as n from private.leave_preset_rows('C')");
+    const { rows } = await db.query(
+      "select count(*)::int as n from private.leave_preset_rows('C')",
+    );
     expect(rows[0].n).toBe(0);
   });
 
@@ -151,7 +150,11 @@ describe("presets", () => {
     expect(applied.error).toBeNull();
     const annual = await versions(await typeId("annual"));
     expect(annual).toEqual([
-      expect.objectContaining({ effective_from: `${year}-01-01`, effective_to: null, days_per_year: 15 }),
+      expect.objectContaining({
+        effective_from: `${year}-01-01`,
+        effective_to: null,
+        days_per_year: 15,
+      }),
     ]);
 
     const log = await admin
@@ -178,7 +181,11 @@ describe("presets", () => {
     const annual = await versions(await typeId("annual"));
     expect(annual).toEqual([
       expect.objectContaining({ days_per_year: 15, effective_to: `${year}-12-31` }),
-      expect.objectContaining({ days_per_year: 6, effective_from: nextJanuary, effective_to: null }),
+      expect.objectContaining({
+        days_per_year: 6,
+        effective_from: nextJanuary,
+        effective_to: null,
+      }),
     ]);
     const maternity = await versions(await typeId("maternity"));
     expect(maternity.at(-1)).toMatchObject({ pay_percent: 50 });
@@ -235,7 +242,10 @@ describe("entitlement versions", () => {
 
   it("lets line managers and workers read types and versions but write nothing", async () => {
     for (const reader of [lineManager, worker]) {
-      const types = await reader.client.from("leave_types").select("id").eq("organisation_id", owner.orgId);
+      const types = await reader.client
+        .from("leave_types")
+        .select("id")
+        .eq("organisation_id", owner.orgId);
       expect(types.error).toBeNull();
       expect(types.data!.length).toBeGreaterThanOrEqual(5);
       const ents = await reader.client
@@ -268,7 +278,9 @@ describe("entitlement versions", () => {
   it("never changes a version in force, even for the database owner", async () => {
     const [inForce] = await versions(await typeId("sick"));
     await expect(
-      db.query("update public.leave_entitlements set days_per_year = 30 where id = $1", [inForce!.id]),
+      db.query("update public.leave_entitlements set days_per_year = 30 where id = $1", [
+        inForce!.id,
+      ]),
     ).rejects.toMatchObject({ code: "MLLV2" });
     await expect(
       db.query("delete from public.leave_entitlements where id = $1", [inForce!.id]),
@@ -353,9 +365,9 @@ describe("entitlement versions", () => {
       p_status: "retired",
     });
     expect(retire.error).toBeNull();
-    await expect(db.query("delete from public.leave_types where id = $1", [id])).rejects.toMatchObject(
-      { code: "MLLV3" },
-    );
+    await expect(
+      db.query("delete from public.leave_types where id = $1", [id]),
+    ).rejects.toMatchObject({ code: "MLLV3" });
   });
 });
 
@@ -380,7 +392,8 @@ describe("paid and pay percent", () => {
     const type = await admin.from("leave_types").select("paid").eq("id", id).single();
     const rows = await versions(id);
     const fromTomorrow = rows.find(
-      (r) => r.effective_from <= tomorrow && (r.effective_to === null || r.effective_to >= tomorrow),
+      (r) =>
+        r.effective_from <= tomorrow && (r.effective_to === null || r.effective_to >= tomorrow),
     );
     return { paid: type.data!.paid, pay: fromTomorrow!.pay_percent, latest: rows.at(-1)! };
   }
@@ -389,7 +402,11 @@ describe("paid and pay percent", () => {
     await saveCompassionate(false);
     let now = await flagAndPay();
     expect(now).toMatchObject({ paid: false, pay: 0 });
-    expect(now.latest).toMatchObject({ effective_from: tomorrow, effective_to: null, days_per_year: 3 });
+    expect(now.latest).toMatchObject({
+      effective_from: tomorrow,
+      effective_to: null,
+      days_per_year: 3,
+    });
 
     await saveCompassionate(true);
     now = await flagAndPay();
@@ -404,7 +421,8 @@ describe("paid and pay percent", () => {
     for (const t of types.data!) {
       const rows = await versions(t.id);
       const v = rows.find(
-        (r) => r.effective_from <= tomorrow && (r.effective_to === null || r.effective_to >= tomorrow),
+        (r) =>
+          r.effective_from <= tomorrow && (r.effective_to === null || r.effective_to >= tomorrow),
       );
       expect(v!.pay_percent > 0, t.id).toBe(t.paid);
     }
@@ -445,12 +463,16 @@ describe("holidays and the working week", () => {
       p_holiday_id: id!,
     });
     expect(removed.error).toBeNull();
-    const row = await admin.from("public_holidays").select("removed_at, removed_by").eq("id", id!).single();
+    const row = await admin
+      .from("public_holidays")
+      .select("removed_at, removed_by")
+      .eq("id", id!)
+      .single();
     expect(row.data?.removed_at).not.toBeNull();
     expect(row.data?.removed_by).toBe(hr.id);
-    await expect(db.query("delete from public.public_holidays where id = $1", [id])).rejects.toMatchObject(
-      { code: "MLHD2" },
-    );
+    await expect(
+      db.query("delete from public.public_holidays where id = $1", [id]),
+    ).rejects.toMatchObject({ code: "MLHD2" });
 
     const readded = await hr.client.rpc("add_public_holiday", {
       p_organisation_id: owner.orgId,
@@ -519,7 +541,10 @@ describe("holidays and the working week", () => {
     });
     expect(error).toBeNull();
     expect(data).toEqual([1, 2, 3, 4, 5, 6]);
-    const empty = await hr.client.rpc("set_work_week", { p_organisation_id: owner.orgId, p_days: [] });
+    const empty = await hr.client.rpc("set_work_week", {
+      p_organisation_id: owner.orgId,
+      p_days: [],
+    });
     expect(empty.error?.code).toBe("22023");
     const lm = await lineManager.client.rpc("set_work_week", {
       p_organisation_id: owner.orgId,

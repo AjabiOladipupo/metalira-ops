@@ -12,16 +12,16 @@ const row = (over: Partial<Row>): Row => ({
   status: "due",
   overdue: false,
   outstandingKobo: 0n,
-  dueDate: null,
+  dueDate: "2026-12-31",
   ...over,
 });
 
 describe("summariseRemittances", () => {
-  it("leaves voided remittances out of due, paid, no due date and the total", () => {
+  it("leaves voided remittances out of due, paid and the total", () => {
     const summary = summariseRemittances([
       row({ status: "due", outstandingKobo: 15_660_000n, dueDate: "2026-11-02" }),
       row({ status: "paid" }),
-      row({ status: "no_due_date", outstandingKobo: 870_000n }),
+      row({ status: "due", outstandingKobo: 870_000n, dueDate: "2026-11-13" }),
       // A reversed run's: one unpaid, one paid before the reversal (refund or offset needed).
       row({ status: "voided", outstandingKobo: 0n, dueDate: "2026-10-01" }),
       row({ status: "voided", outstandingKobo: 0n }),
@@ -31,13 +31,37 @@ describe("summariseRemittances", () => {
       paid: 1,
       partPaid: 0,
       overpaid: 0,
-      due: 1,
+      due: 2,
       overdue: 0,
-      noDueDate: 1,
+      pastPenalty: 0,
+      provisional: 0,
       voided: 2,
       outstandingKobo: "16530000",
       nextDueDate: "2026-11-02",
     });
+  });
+
+  it("counts PAYE past its penalty date and provisional due dates, voided ones left out (slice 5.9b)", () => {
+    const summary = summariseRemittances([
+      row({
+        status: "overdue",
+        overdue: true,
+        pastPenalty: true,
+        outstandingKobo: 100_000n,
+        dueDate: "2026-11-10",
+        deadline: { provisional: true },
+      }),
+      row({
+        status: "due",
+        outstandingKobo: 200_000n,
+        dueDate: "2026-12-03",
+        deadline: { provisional: false },
+      }),
+      // Paid: nothing owed, so not counted as provisional.
+      row({ status: "paid", deadline: { provisional: true } }),
+      row({ status: "voided", pastPenalty: false, deadline: { provisional: true } }),
+    ]);
+    expect(summary).toMatchObject({ overdue: 1, pastPenalty: 1, provisional: 1, voided: 1 });
   });
 
   it("gives zeros when every remittance is voided", () => {
