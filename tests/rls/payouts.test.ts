@@ -21,6 +21,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { addDays, lagosToday } from "@/lib/dates";
 import type { Database } from "@/types/db";
 
 import { makeLookup } from "./helpers/bank-lookup";
@@ -695,6 +696,74 @@ describe("release", () => {
       true,
     );
     expect(sneaky.error?.code).toBe("MLPRD");
+  });
+});
+
+describe("the upload date given at release (slice 5.9b, money review M4)", () => {
+  it("is not before the approval day or after today, and is kept on the release decision", async () => {
+    const c = await approvedCompany("upload-date");
+    const made = await makeBatch(admin, c.owner.client, c.owner.orgId, c.run.runId);
+    expect(made.error).toBeNull();
+    expect((await download(c.owner.client, c.owner.orgId, made.batchId)).error).toBeNull();
+    const today = lagosToday();
+    const go = (uploadedOn?: string) =>
+      c.finance.client.rpc("release_payroll_run", {
+        p_organisation_id: c.owner.orgId,
+        p_run_id: c.run.runId,
+        p_batch_id: made.batchId,
+        p_file_sha256: "c".repeat(64),
+        ...(uploadedOn ? { p_uploaded_on: uploadedOn } : {}),
+      });
+    expect((await go(addDays(today, 1))).error?.code).toBe("MLDD5");
+    expect((await go("2020-01-01")).error?.code).toBe("MLDD5");
+    const done = await go(today);
+    expect(done.error).toBeNull();
+    const { data: decision } = await admin
+      .from("payroll_run_decisions")
+      .select("uploaded_on")
+      .eq("id", done.data!)
+      .single();
+    expect(decision).toEqual({ uploaded_on: today });
+    // Audited with the release; the decision is insert-only like every other.
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("after")
+      .eq("organisation_id", c.owner.orgId)
+      .eq("action", "payroll.run_released")
+      .eq("entity_id", c.run.runId)
+      .single();
+    expect((audit?.after as { uploaded_on?: string } | null)?.uploaded_on).toBe(today);
+    const changed = await asDbOwner(
+      "update public.payroll_run_decisions set uploaded_on = '2020-01-01' where id = $1",
+      [done.data!],
+    );
+    expect(changed.error).not.toBeNull();
+    // Only a release decision carries one.
+    const { count } = await admin
+      .from("payroll_run_decisions")
+      .select("id", { count: "exact", head: true })
+      .eq("run_id", c.run.runId)
+      .neq("decision", "released")
+      .not("uploaded_on", "is", null);
+    expect(count).toBe(0);
+  });
+
+  it("stamps who and when itself, whatever the caller wrote (security review L5)", async () => {
+    const c = await approvedCompany("release-stamp");
+    expect((await makeBatch(admin, c.finance.client, c.owner.orgId, c.run.runId)).error).toBeNull();
+    // The database owner has no signed-in user, so released_by is stamped empty and refused,
+    // even when a real finance user and an old time are written in.
+    const forged = await asDbOwner(
+      `update public.payroll_runs set status = 'released', released_at = '2000-01-01', released_by = $2
+       where id = $1`,
+      [c.run.runId, c.finance.id],
+    );
+    expect(forged.error?.code).toBe("23514");
+    const { rows } = await db.query<{ tgenabled: string }>(
+      `select tgenabled from pg_trigger
+       where tgrelid = 'public.payroll_runs'::regclass and tgname = 'payroll_runs_release_stamp'`,
+    );
+    expect(rows).toEqual([{ tgenabled: "A" }]);
   });
 });
 

@@ -274,7 +274,7 @@ import {
   makeSupplementSpec,
   supplementIdSchema,
 } from "@/server/payroll/supplements";
-import { loadOfficialHolidays } from "@/server/payroll/official-holidays";
+import { loadOfficialHolidayYear } from "@/server/payroll/official-holidays";
 import { loadRemittanceSummary } from "@/server/payroll/remittance-data";
 import {
   REMITTANCE_RECORDERS,
@@ -2569,7 +2569,7 @@ export const CAPABILITIES: readonly Capability[] = [
     // Slice 5.9b: platform-wide reference data, read-only for every company.
     read: async ({ supabase }, input) => {
       const { year } = holidayYearSchema.parse(input);
-      return loadOfficialHolidays(supabase, { year });
+      return loadOfficialHolidayYear(supabase, year);
     },
     agent: true,
   },

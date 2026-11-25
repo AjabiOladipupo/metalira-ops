@@ -147,7 +147,7 @@ Coastline Security's October 2026 run is released. Its bank file left Ada Obi ou
 
 ## Slice 5.9b: statutory deadlines per the tax adviser
 
-Coastline Security's October 2026 run (pay date Sunday 25 Oct) was released on Tuesday 27 Oct ("I uploaded it to the bank"). The company set its own PAYE day as the 5th and its NSITF day as the 20th. Today is 25 Nov 2026 and nothing is paid. Rows 1 to 3 of slice 5.6 above are replaced by these.
+Coastline Security's October 2026 run (pay date Sunday 25 Oct) was released with the upload date Tuesday 27 Oct given on "I uploaded it to the bank". The company set its own PAYE day as the 5th and its NSITF day as the 20th. Today is 25 Nov 2026 and nothing is paid. Rows 1 to 3 of slice 5.6 above are replaced by these.
 
 | # | Who asks | Request | Expected outcome |
 | --- | --- | --- | --- |

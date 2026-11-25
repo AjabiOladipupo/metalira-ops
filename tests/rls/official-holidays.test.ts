@@ -22,6 +22,8 @@ import {
   type RemittanceKind,
 } from "@/lib/payroll/statutory";
 
+import { loadOfficialHolidays } from "@/server/payroll/official-holidays";
+
 import {
   adminClient,
   anonClient,
@@ -30,6 +32,9 @@ import {
   type Client,
   type TenantUser,
 } from "./helpers/supabase";
+
+/** How a Metalira admin's secret-key insert names itself (security review L1). */
+const ADMIN = "admin:00000000-0000-4000-8000-000000000001";
 
 let admin: Client;
 let db: pg.Client;
@@ -107,7 +112,7 @@ describe("kept as written", () => {
         scope: "state",
         state_key: "kano",
         source: "Test",
-        recorded_by: "rls test",
+        recorded_by: ADMIN,
       })
       .select("id")
       .single();
@@ -121,9 +126,19 @@ describe("kept as written", () => {
       scope: "state",
       state_key: "kano",
       source: "Test",
-      recorded_by: "rls test",
+      recorded_by: ADMIN,
     });
     expect(twice.error?.code).toBe("MLDD4");
+    // recorded_by is a migration's name or an admin's id, nothing free-form.
+    const freeForm = await admin.from("official_holidays").insert({
+      entry: "holiday",
+      holiday_date: "2030-05-14",
+      name: "Free form",
+      scope: "federal",
+      source: "Test",
+      recorded_by: "Ada from ops",
+    });
+    expect(freeForm.error?.code).toBe("23514");
     // A state that isn't one of the 36 or FCT, or isn't a normalised key, is refused.
     for (const state_key of ["atlantis", "Kano", "kano state"]) {
       const bad = await admin.from("official_holidays").insert({
@@ -133,7 +148,7 @@ describe("kept as written", () => {
         scope: "state",
         state_key,
         source: "Test",
-        recorded_by: "rls test",
+        recorded_by: ADMIN,
       });
       expect(bad.error?.code, state_key).toBe("MLDD2");
     }
@@ -179,23 +194,59 @@ describe("kept as written", () => {
     // Withdrawn with a reason, once; then it stops counting.
     const noReason = await admin
       .from("official_holidays")
-      .insert({ entry: "withdrawal", withdraws_id: id, recorded_by: "rls test" });
+      .insert({ entry: "withdrawal", withdraws_id: id, recorded_by: ADMIN });
     expect(noReason.error).not.toBeNull();
     const withdrawn = await admin.from("official_holidays").insert({
       entry: "withdrawal",
       withdraws_id: id,
       reason: "Entered for the test",
-      recorded_by: "rls test",
+      recorded_by: ADMIN,
     });
     expect(withdrawn.error).toBeNull();
     const again = await admin.from("official_holidays").insert({
       entry: "withdrawal",
       withdraws_id: id,
       reason: "Entered for the test",
-      recorded_by: "rls test",
+      recorded_by: ADMIN,
     });
     expect(again.error?.code).toBe("MLDD3");
     expect(await sqlDeadline("paye", "2030-04-25", "kano")).toBe("2030-05-10");
+  });
+});
+
+describe("reading more than the API's row cap (security review M1)", () => {
+  it("reads every standing holiday in a range, in pages, withdrawn ones left out", async () => {
+    // 1,100 daily federal holidays in 2090 to 2093, far from any date the other tests use.
+    await db.query(
+      `insert into public.official_holidays (entry, holiday_date, name, scope, source, recorded_by)
+       select 'holiday', d::date, 'Load test day', 'federal', 'Test', $1
+       from generate_series('2090-01-01'::date, '2090-01-01'::date + 1099, interval '1 day') d`,
+      [ADMIN],
+    );
+    const { rows } = await db.query<{ id: string }>(
+      "select id from public.official_holidays where entry = 'holiday' and holiday_date = '2091-06-01'",
+    );
+    const withdrawn = await admin.from("official_holidays").insert({
+      entry: "withdrawal",
+      withdraws_id: rows[0]!.id,
+      reason: "Load test withdrawal",
+      recorded_by: ADMIN,
+    });
+    expect(withdrawn.error).toBeNull();
+    const range = { from: "2090-01-01", to: "2093-12-31" };
+    // One API call is capped below the total ...
+    const capped = await owner.client.rpc("official_holidays_between", {
+      p_from: range.from,
+      p_to: range.to,
+    });
+    expect(capped.error).toBeNull();
+    expect(capped.data!.length).toBeLessThan(1099);
+    // ... the server's paged read gets them all, as any signed-in member.
+    const all = await loadOfficialHolidays(other.client, range);
+    expect(all).toHaveLength(1099);
+    expect(all.some((h) => h.date === "2091-06-01")).toBe(false);
+    expect(new Set(all.map((h) => h.id)).size).toBe(1099);
+    expect(all[0]).toMatchObject({ date: "2090-01-01", scope: "federal", stateKey: null });
   });
 });
 
@@ -240,7 +291,7 @@ describe("the database's due dates agree with statutory.ts", () => {
         kind,
         authorityKey,
         payDate: "2026-10-25",
-        releasedOn: null,
+        uploadedOn: null,
         dueDays,
         calendar,
       });
@@ -253,6 +304,49 @@ describe("the database's due dates agree with statutory.ts", () => {
       [owner.orgId],
     );
     expect(rows[0]).toEqual({ paye: "2026-11-05", nsitf: "2026-11-13" });
+    // A company day on a weekend is brought back to a working day first (money review L1):
+    // the 7th of Nov 2026 is a Saturday, so Friday 6 Nov.
+    const weekend = await owner.client.rpc("set_remittance_due_days", {
+      p_organisation_id: owner.orgId,
+      p_paye: 7,
+    });
+    expect(weekend.error).toBeNull();
+    const rolled = await db.query<{ d: string }>(
+      "select private.statutory_due_date($1, 'paye', '2026-10-25', 'lagos')::text as d",
+      [owner.orgId],
+    );
+    expect(rolled.rows[0]!.d).toBe("2026-11-06");
+  });
+
+  it("gives up on a working-day search past a year (security review L4)", async () => {
+    await expect(
+      db.query("select private.deadline_add_working_days(null, '2026-01-01', 61)"),
+    ).rejects.toMatchObject({ code: "22023" });
+    await expect(
+      db.query("select private.deadline_on_or_before(null, null)"),
+    ).rejects.toMatchObject({ code: "22023" });
+    // Every day of 2095 to early 2097 a holiday, inside a transaction rolled back: no working day
+    // within a year, so each search stops with 22023 instead of running on.
+    await db.query("begin");
+    try {
+      await db.query(
+        `insert into public.official_holidays (entry, holiday_date, name, scope, source, recorded_by)
+         select 'holiday', d::date, 'Bound test day', 'federal', 'Test', $1
+         from generate_series('2095-01-01'::date, '2095-01-01'::date + 799, interval '1 day') d`,
+        [ADMIN],
+      );
+      for (const sql of [
+        "select private.deadline_on_or_before(null, '2096-06-30')",
+        "select private.deadline_on_or_after(null, '2095-06-30')",
+        "select private.deadline_add_working_days(null, '2095-06-30', 1)",
+      ]) {
+        await db.query("savepoint s");
+        await expect(db.query(sql), sql).rejects.toMatchObject({ code: "22023" });
+        await db.query("rollback to savepoint s");
+      }
+    } finally {
+      await db.query("rollback");
+    }
   });
 
   it("keeps the due-date functions away from signed-in users", async () => {
@@ -262,10 +356,11 @@ describe("the database's due dates agree with statutory.ts", () => {
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'private' and p.proname in (
          'official_holiday', 'deadline_working_day', 'deadline_add_working_days',
-         'deadline_on_or_before', 'deadline_on_or_after', 'statutory_deadline', 'statutory_due_date'
+         'deadline_on_or_before', 'deadline_on_or_after', 'statutory_deadline', 'statutory_due_date',
+         'payroll_runs_release_stamp'
        )`,
     );
-    expect(rows.length).toBe(7);
+    expect(rows.length).toBe(8);
     expect(rows.filter((r) => r.can)).toEqual([]);
   });
 });

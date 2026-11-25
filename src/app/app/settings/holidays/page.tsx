@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/dates";
 import { formatWorkDays } from "@/lib/leave/entitlements";
 import { cn } from "@/lib/utils";
 import { nigerianStateName } from "@/lib/payroll/statutory";
-import { loadOfficialHolidays } from "@/server/payroll/official-holidays";
+import { loadOfficialHolidayYear } from "@/server/payroll/official-holidays";
 import { canEditLeaveSetup } from "@/server/people/leave-setup";
 import { loadCalendar, loadHolidays } from "@/server/people/leave-setup-data";
 import { peoplePageContext } from "@/server/people/page-context";
@@ -47,7 +47,7 @@ async function Holidays({
   const [holidays, previous, official] = await Promise.all([
     loadHolidays(ctx.supabase, ctx.organisationId, year),
     loadHolidays(ctx.supabase, ctx.organisationId, year - 1),
-    loadOfficialHolidays(ctx.supabase, { year }),
+    loadOfficialHolidayYear(ctx.supabase, year),
   ]);
   const canEdit = canEditLeaveSetup(ctx.role);
   const count = holidays.live.length;

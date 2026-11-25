@@ -236,6 +236,10 @@ test("Finance makes the bank file with control totals, downloads it and releases
   await expect(release.getByTestId("run-preview")).toContainText("Releases October 2026 payroll", {
     timeout: 30_000,
   });
+  // Slice 5.9b: the release asks for the upload date (today by default), which pension's
+  // deadline counts from.
+  await expect(release.getByLabel("Date you uploaded it to the bank")).toBeVisible();
+  await expect(release.getByTestId("run-preview")).toContainText("Uploaded to the bank on");
   await release.getByRole("button", { name: "Confirm and release" }).click();
   await expect(fin.getByTestId("released-note")).toContainText("Released", { timeout: 30_000 });
   await fin.reload();

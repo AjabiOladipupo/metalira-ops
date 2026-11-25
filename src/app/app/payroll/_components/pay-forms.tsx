@@ -91,10 +91,16 @@ export function ReleaseRunForm({
   runId,
   batchId,
   fileSha256,
+  today,
+  minDate,
 }: {
   runId: string;
   batchId: string;
   fileSha256: string;
+  /** Today in Lagos: the default and latest upload date (slice 5.9b). */
+  today: string;
+  /** The run's approval day: the earliest upload date. */
+  minDate: string;
 }) {
   return (
     <TwoStepForm
@@ -104,7 +110,23 @@ export function ReleaseRunForm({
       previewLabel="I uploaded it to the bank"
       confirmLabel="Confirm and release"
       pendingLabel="Releasing…"
-    />
+    >
+      {(state) => (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))] items-start gap-4">
+          <Field
+            label="Date you uploaded it to the bank"
+            name="uploadedOn"
+            type="date"
+            required
+            min={minDate}
+            max={today}
+            defaultValue={valueOf(state, "uploadedOn", today)}
+            hint="Pension is due 7 working days from this date."
+            error={state && !state.ok ? state.fieldErrors?.uploadedOn : undefined}
+          />
+        </div>
+      )}
+    </TwoStepForm>
   );
 }
 

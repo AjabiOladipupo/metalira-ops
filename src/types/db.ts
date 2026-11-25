@@ -1021,14 +1021,14 @@ isOneToOne: false
                   ]
                 },"payroll_run_decisions": {
                   Row: {
-                    "actor_id": string,"created_at": string,"decision": string,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"net_kobo": number,"organisation_id": string,"reason": string | null,"run_id": string,"worker_count": number
+                    "actor_id": string,"created_at": string,"decision": string,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"net_kobo": number,"organisation_id": string,"reason": string | null,"run_id": string,"uploaded_on": string | null,"worker_count": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "actor_id": string,"created_at"?: string,"decision": string,"gross_kobo": number,"id"?: string,"inputs_sha256"?: string | null,"net_kobo": number,"organisation_id": string,"reason"?: string | null,"run_id": string,"worker_count": number
+                    "actor_id": string,"created_at"?: string,"decision": string,"gross_kobo": number,"id"?: string,"inputs_sha256"?: string | null,"net_kobo": number,"organisation_id": string,"reason"?: string | null,"run_id": string,"uploaded_on"?: string | null,"worker_count": number
                   }
                   Update: {
-                    "actor_id"?: string,"created_at"?: string,"decision"?: string,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"net_kobo"?: number,"organisation_id"?: string,"reason"?: string | null,"run_id"?: string,"worker_count"?: number
+                    "actor_id"?: string,"created_at"?: string,"decision"?: string,"gross_kobo"?: number,"id"?: string,"inputs_sha256"?: string | null,"net_kobo"?: number,"organisation_id"?: string,"reason"?: string | null,"run_id"?: string,"uploaded_on"?: string | null,"worker_count"?: number
                   }
                   Relationships: [
                     {
@@ -2689,6 +2689,11 @@ isOneToOne: false
               "can_dispute": boolean,"early_minutes": number,"ends_at": string,"exceptions": (string)[],"in_recorded_at": string,"last_correction_reason": string,"last_decision": string,"last_decision_reason": string,"late_minutes": number,"line_id": string,"ot_minutes": number,"out_recorded_at": string,"post_name": string,"scheduled_minutes": number,"site_name": string,"starts_at": string,"status": string,"work_date": string,"worked_minutes": number
             }[]
                            },
+"official_holidays_between":
+{ Args: { "p_from": string,"p_to": string }; Returns: {
+              "holiday_date": string,"id": string,"name": string,"scope": string,"source": string,"state_key": string
+            }[]
+                           },
 "open_payslip_document":
 { Args: { "p_organisation_id": string,"p_payslip_id": string }; Returns: Json
                            },
@@ -2832,7 +2837,7 @@ isOneToOne: false
 { Args: { "p_line_id": string,"p_organisation_id": string,"p_reason": string }; Returns: Json
                            },
 "release_payroll_run":
-{ Args: { "p_batch_id": string,"p_file_sha256": string,"p_organisation_id": string,"p_run_id": string }; Returns: string
+{ Args: { "p_batch_id": string,"p_file_sha256": string,"p_organisation_id": string,"p_run_id": string,"p_uploaded_on"?: string }; Returns: string
                            },
 "remove_assignment":
 { Args: { "p_assignment_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json

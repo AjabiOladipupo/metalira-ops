@@ -29,27 +29,38 @@
 --    the federal holidays and, for PAYE, the tax state's holidays.
 --    - Pension (PRA 2014 s.11(3)(b)): the 7th working day counting the day salary is actually
 --      paid as day 1, or the next working day when that day isn't one (paid Sunday 25 Oct 2026:
---      day 1 Monday 26 Oct, due Tuesday 3 Nov). The actual day is the release ("I uploaded it
---      to the bank", slice 5.4); before release the scheduled pay date, provisionally.
---    - PAYE: the 10th of the following month (statutory penalty after the 21st, NTAA 2025 s.107).
---    - NHF (NHF Act s.9(2)): within 1 month of the deduction: the same day of the next month,
---      or that month's last day when it has no such day.
---    - NSITF (ECA 2010 s.33(1)): on or before the 15th of the following month.
---    - ITF (ITF Act s.6(2)): by 1 April of the following year.
---    - A fixed date that isn't a working day is brought back to the working day before (paying
---      early is never late; whether the law moves it to the next working day is for the adviser).
---    - The company's own day (organisations.*_remit_day, slice 5.6) applies only when it is
---      earlier than the statutory date; a later one is ignored (the screen says so).
+--      day 1 Monday 26 Oct, due Tuesday 3 Nov). The actual day is the date the bank file was
+--      uploaded, given at release (payroll_run_decisions.uploaded_on, section 4); until one is
+--      given, the scheduled pay date, provisionally.
+--    - PAYE: the 10th of the month after the pay-date month (statutory penalty after the 21st,
+--      NTAA 2025 s.107).
+--    - NHF (NHF Act s.9(2)): within 1 month of the deduction: the same day of the month after the
+--      pay date, or that month's last day when it has no such day.
+--    - NSITF (ECA 2010 s.33(1)): on or before the 15th of the month after the pay-date month.
+--    - ITF (ITF Act s.6(2)): by 1 April of the year after the pay-date (payroll) year.
+--    - PAYE, NHF, NSITF and ITF key on the pay date, never the upload date (money review M1).
+--    - A fixed date that isn't a working day is brought back to the working day before: our
+--      conservative choice, not an adviser answer ("earlier working day used until confirmed").
+--    - The company's own day (organisations.*_remit_day, slice 5.6), itself brought back to a
+--      working day, applies only when it is earlier than the statutory date; a later one is
+--      ignored (the screen says so).
 --    statutory_remittances.due_date is stamped at approval from the scheduled pay date, so it
---    is provisional; the screens work the due date out on read from the actual paid day, the
---    calendar and the company's days as they are now.
+--    is provisional (a rename can wait); the screens work the due date out on read from the
+--    upload date, the calendar and the company's days as they are now. Every kind has one.
+--
+-- 3. The release (slice 5.4's release_payroll_run, replaced): the person gives the date the file
+--    was uploaded to the bank (default today; not before the approval day or after today, in
+--    Lagos), kept on the release decision (insert-only) and in its audit row. A new trigger stamps
+--    payroll_runs.released_at := now() and released_by := the session's user on every release
+--    (security review L5), whatever the caller wrote.
 --
 -- Refusals (SQLSTATE):
 --   MLDD1 the official calendar is kept as written (no update, delete or truncate)
 --   MLDD2 not a well-formed holiday or withdrawal (scope, state, date, name, source or reason)
 --   MLDD3 a withdrawal must name a holiday that stands
 --   MLDD4 that day is already an official holiday for that scope and state
---   22023 bad input to a due-date function
+--   MLDD5 the upload date is before the run's approval day or after today
+--   22023 bad input to a due-date function, or a working-day search past 366 days
 
 -- ---------------------------------------------------------------------------
 -- 1. The official holiday calendar
@@ -82,10 +93,11 @@ create table public.official_holidays (
     constraint official_holidays_reason_text check (
       char_length(reason) between 3 and 500 and reason !~ '[\x01-\x1f\x7f-\x9f<>]'
     ),
-  -- Who added it: the migration's name, or the Metalira admin who used the secret key.
+  -- Who added it: 'migration <14 digits>', or 'admin:<user id>' for the Metalira admin who used
+  -- the secret key (security review L1: nothing free-form for every signed-in user to read).
   recorded_by text not null
-    constraint official_holidays_recorded_by_text check (
-      char_length(recorded_by) between 1 and 120 and recorded_by !~ '[\x01-\x1f\x7f-\x9f<>]'
+    constraint official_holidays_recorded_by_format check (
+      recorded_by ~ '^(migration \d{14}|admin:[0-9a-f-]{36})$'
     ),
   created_at timestamptz not null default now(),
   -- A holiday is withdrawn at most once.
@@ -142,6 +154,14 @@ begin
     raise exception 'The official holiday calendar is kept as written; withdraw a wrong date.'
       using errcode = 'MLDD1';
   end if;
+  -- Security review L3: two inserts for one day, scope and state (or one holiday's withdrawal)
+  -- queue here, so the duplicate checks below see each other.
+  perform pg_advisory_xact_lock(hashtextextended(
+    'official_holidays:' || coalesce(new.withdraws_id::text,
+      coalesce(new.holiday_date::text, '') || ':' || coalesce(new.scope, '') || ':'
+        || coalesce(new.state_key, '')),
+    0
+  ));
   if new.entry = 'holiday' then
     if new.scope = 'state' and (
       new.state_key is null
@@ -201,16 +221,46 @@ alter table public.official_holidays enable always trigger official_holidays_no_
 
 alter table public.official_holidays enable row level security;
 
--- Every signed-in user reads the calendar (public law, the same for every company); anon gets
--- nothing (no grant). Not `using (true)`: the isolation suite refuses always-true policies.
+-- Every signed-in user in a trusted session reads the calendar (public law, the same for every
+-- company); anon gets nothing (no grant). Security review M2: the session check every other
+-- policy uses, run once per statement.
 create policy official_holidays_select on public.official_holidays
   for select to authenticated
-  using ((select auth.uid()) is not null);
+  using ((select private.session_uid()) is not null);
 
 revoke all on table public.official_holidays from anon, authenticated;
 grant select on table public.official_holidays to authenticated;
--- The secret key (a Metalira admin path) may insert; nothing may change or remove a row.
-revoke update, delete, truncate on table public.official_holidays from service_role;
+-- The secret key (a Metalira admin path) may read and insert; nothing may change or remove a
+-- row (security review L2).
+revoke all on table public.official_holidays from service_role;
+grant select, insert on table public.official_holidays to service_role;
+
+-- The standing official holidays between two dates (withdrawn ones left out), for the server's
+-- deadline maths and Settings > Holidays (security review M1: filtered in SQL, read in pages).
+-- Security invoker: it reads the table under the caller's RLS.
+create function public.official_holidays_between(p_from date, p_to date)
+returns table (
+  id uuid,
+  holiday_date date,
+  name text,
+  scope text,
+  state_key text,
+  source text
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select h.id, h.holiday_date, h.name, h.scope, h.state_key, h.source
+  from public.official_holidays h
+  where h.entry = 'holiday' and h.holiday_date between p_from and p_to
+    and not exists (select 1 from public.official_holidays w where w.withdraws_id = h.id)
+  order by h.holiday_date, h.id
+$$;
+
+revoke all on function public.official_holidays_between(date, date) from public, anon;
+grant execute on function public.official_holidays_between(date, date) to authenticated;
 
 -- Seed: 2026 and 2027 federal holidays we could verify (see the header for what's left out).
 insert into public.official_holidays (entry, holiday_date, name, scope, source, recorded_by)
@@ -271,6 +321,9 @@ begin
   end if;
   while v_left > 0 loop
     v_date := v_date + 1;
+    if v_date - p_from > 366 then
+      raise exception 'No working day found within a year.' using errcode = '22023';
+    end if;
     if private.deadline_working_day(v_date, p_state_key) then
       v_left := v_left - 1;
     end if;
@@ -293,8 +346,14 @@ as $$
 declare
   v_date date := p_date;
 begin
+  if p_date is null then
+    raise exception 'A working day needs a date.' using errcode = '22023';
+  end if;
   while not private.deadline_working_day(v_date, p_state_key) loop
     v_date := v_date - 1;
+    if p_date - v_date > 366 then
+      raise exception 'No working day found within a year.' using errcode = '22023';
+    end if;
   end loop;
   return v_date;
 end;
@@ -313,8 +372,14 @@ as $$
 declare
   v_date date := p_date;
 begin
+  if p_date is null then
+    raise exception 'A working day needs a date.' using errcode = '22023';
+  end if;
   while not private.deadline_working_day(v_date, p_state_key) loop
     v_date := v_date + 1;
+    if v_date - p_date > 366 then
+      raise exception 'No working day found within a year.' using errcode = '22023';
+    end if;
   end loop;
   return v_date;
 end;
@@ -322,9 +387,10 @@ $$;
 
 revoke all on function private.deadline_on_or_after(text, date) from public, anon, authenticated;
 
--- The statutory deadline of a kind for salary paid on p_paid_on (adviser, 24 Nov 2026), before
--- any company day. p_state_key is the PAYE authority's key (its state's holidays count); null
--- for the other kinds. Mirrors statutoryDeadline.
+-- The statutory deadline of a kind (adviser, 24 Nov 2026), before any company day. p_paid_on is
+-- the day salary was paid for pension (the upload date, or the pay date provisionally) and the
+-- pay date for the other kinds. p_state_key is the PAYE authority's key (its state's holidays
+-- count); null for the other kinds. Mirrors statutoryDeadline.
 create function private.statutory_deadline(p_kind text, p_paid_on date, p_state_key text)
 returns date
 language plpgsql
@@ -357,8 +423,9 @@ $$;
 
 revoke all on function private.statutory_deadline(text, date, text) from public, anon, authenticated;
 
--- A remittance's due date: the statutory deadline, or the company's own day of the month after
--- the pay date when that is earlier (a later one never applies). Mirrors remittanceDeadline.
+-- A remittance's provisional due date, stamped at approval from the pay date: the statutory
+-- deadline, or the company's own day of the month after the pay date (brought back to a working
+-- day) when that is earlier (a later one never applies). Mirrors remittanceDeadline.
 create function private.statutory_due_date(
   p_organisation_id uuid,
   p_kind text,
@@ -390,7 +457,12 @@ begin
   if v_day is null then
     return v_statutory;
   end if;
-  v_custom := (date_trunc('month', p_paid_on) + interval '1 month')::date + (v_day - 1);
+  -- Money review L1: the company's day, brought back to a working day like the statutory one,
+  -- then compared.
+  v_custom := private.deadline_on_or_before(
+    case when p_kind = 'paye' then p_authority_key end,
+    (date_trunc('month', p_paid_on) + interval '1 month')::date + (v_day - 1)
+  );
   return least(v_custom, v_statutory);
 end;
 $$;
@@ -474,6 +546,177 @@ begin
   return null;
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. The release records the date the file was uploaded to the bank (money review M4)
+-- ---------------------------------------------------------------------------
+
+alter table public.payroll_run_decisions
+  add column uploaded_on date,
+  add constraint payroll_run_decisions_uploaded_on_release check (
+    uploaded_on is null or decision = 'released'
+  );
+
+comment on column public.payroll_run_decisions.uploaded_on is
+  'Slice 5.9b: on a release, the date the person says the bank file was uploaded to the bank (Lagos; not before the approval day, not after the release day). Pension''s deadline counts from it. Insert-only like the decision.';
+
+-- Security review L5: every release stamps who and when itself, whatever the caller wrote. The
+-- run guard (which fires first) still refuses a release that changes anything else; a session
+-- with no trusted user leaves released_by null, which payroll_runs_released_pair refuses.
+create function private.payroll_runs_release_stamp()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.status = 'approved' and new.status = 'released' then
+    new.released_at := now();
+    new.released_by := private.session_uid();
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payroll_runs_release_stamp() from public, anon, authenticated;
+
+create trigger payroll_runs_release_stamp
+  before update on public.payroll_runs
+  for each row execute function private.payroll_runs_release_stamp();
+alter table public.payroll_runs enable always trigger payroll_runs_release_stamp;
+
+-- 5.4's release, with the upload date: p_uploaded_on (default today in Lagos) must be on or after
+-- the run's approval day and not after today (MLDD5). Kept on the decision and in the audit row.
+-- Everything else is 5.4's function as written.
+drop function public.release_payroll_run(uuid, uuid, uuid, text);
+drop function private.release_payroll_run(uuid, uuid, uuid, text);
+
+create function private.release_payroll_run(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_batch_id uuid,
+  p_file_sha256 text,
+  p_uploaded_on date default null
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_payout_maker(p_organisation_id);
+  v_run public.payroll_runs%rowtype;
+  v_batch public.payout_batches%rowtype;
+  v_id uuid;
+  v_today date := (now() at time zone 'Africa/Lagos')::date;
+  v_uploaded date := coalesce(p_uploaded_on, (now() at time zone 'Africa/Lagos')::date);
+begin
+  if p_batch_id is null or p_file_sha256 is null or p_file_sha256 !~ '^[0-9a-f]{64}$' then
+    raise exception 'Name the bank file you uploaded (its id and SHA-256).' using errcode = '22023';
+  end if;
+  v_run := private.payroll_lock_run(p_organisation_id, p_run_id);
+  select b.* into v_batch
+  from public.payout_batches b
+  where b.organisation_id = p_organisation_id and b.run_id = p_run_id and b.status = 'active'
+  for share;
+  if v_run.status = 'released' then
+    if v_batch.id = p_batch_id and v_batch.file_sha256 = p_file_sha256 then
+      select d.id into v_id
+      from public.payroll_run_decisions d
+      where d.organisation_id = p_organisation_id and d.run_id = p_run_id
+        and d.decision = 'released'
+      order by d.created_at desc
+      limit 1;
+      if v_id is not null then
+        return v_id;
+      end if;
+    end if;
+    raise exception 'This run is already released.' using errcode = 'MLBF5';
+  end if;
+  if v_run.status <> 'approved' then
+    raise exception 'Only an approved run is released.' using errcode = 'MLBF5';
+  end if;
+  if v_uploaded > v_today
+    or v_uploaded < (v_run.approved_at at time zone 'Africa/Lagos')::date then
+    raise exception 'The upload date is on or after the day the run was approved, and not after today.'
+      using errcode = 'MLDD5';
+  end if;
+  if v_uid = any (private.payroll_run_touchers(p_organisation_id, p_run_id)) then
+    raise exception 'You prepared or changed this run, so a different person must release it.'
+      using errcode = 'MLBF8';
+  end if;
+  if v_batch.id is null then
+    raise exception 'Make the bank file and upload it to the bank before releasing.'
+      using errcode = 'MLBF7';
+  end if;
+  if v_batch.id <> p_batch_id or v_batch.file_sha256 <> p_file_sha256 then
+    raise exception 'The bank file changed since you looked. Reload the page, check the control totals and confirm again.'
+      using errcode = 'MLBFC';
+  end if;
+  -- Security review M1 (5.4): whoever made the file doesn't confirm it went to the bank.
+  if v_uid = v_batch.made_by then
+    raise exception 'You made this bank file, so a different person must confirm it went to the bank.'
+      using errcode = 'MLBFA';
+  end if;
+  if not exists (
+    select 1 from public.audit_log l
+    where l.organisation_id = p_organisation_id and l.action = 'payroll.bank_file_downloaded'
+      and l.entity = 'payout_batches' and l.entity_id = v_batch.id
+  ) then
+    raise exception 'Nobody has downloaded this bank file yet. Download it and upload it to the bank first.'
+      using errcode = 'MLBFD';
+  end if;
+
+  update public.payroll_runs r
+  set status = 'released', released_at = now(), released_by = v_uid
+  where r.id = p_run_id;
+  insert into public.payroll_run_decisions (
+    organisation_id, run_id, decision, actor_id, inputs_sha256, gross_kobo, net_kobo, worker_count,
+    uploaded_on
+  )
+  values (
+    p_organisation_id, p_run_id, 'released', v_uid, v_run.inputs_sha256, v_run.gross_kobo,
+    v_run.net_kobo, v_run.worker_count, v_uploaded
+  )
+  returning id into v_id;
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.run_released', 'payroll_runs', p_run_id, null,
+    jsonb_build_object(
+      'decision_id', v_id, 'batch_id', v_batch.id, 'item_count', v_batch.item_count,
+      'total_kobo', v_batch.total_kobo::text, 'left_out_count', v_batch.left_out_count,
+      'left_out_kobo', v_batch.left_out_kobo::text, 'net_kobo', v_run.net_kobo::text,
+      'file_sha256', v_batch.file_sha256, 'uploaded_on', v_uploaded
+    ),
+    null
+  );
+  return v_id;
+end;
+$$;
+
+revoke all on function private.release_payroll_run(uuid, uuid, uuid, text, date) from public, anon;
+grant execute on function private.release_payroll_run(uuid, uuid, uuid, text, date) to authenticated;
+
+create function public.release_payroll_run(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_batch_id uuid,
+  p_file_sha256 text,
+  p_uploaded_on date default null
+)
+returns uuid
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.release_payroll_run(
+    p_organisation_id, p_run_id, p_batch_id, p_file_sha256, p_uploaded_on
+  )
+$$;
+
+revoke all on function public.release_payroll_run(uuid, uuid, uuid, text, date) from public, anon;
+grant execute on function public.release_payroll_run(uuid, uuid, uuid, text, date) to authenticated;
 
 -- 5.6's due-date helpers counted the company's own holidays; nothing calls them now.
 drop function private.statutory_due_date(uuid, text, date);

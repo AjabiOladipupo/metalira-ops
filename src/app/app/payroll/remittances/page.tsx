@@ -39,21 +39,37 @@ function first(value: string | string[] | undefined): string | undefined {
 }
 
 function dueText(r: RemittanceRow): string {
-  return r.dueDate ? `Due ${formatDate(r.dueDate)}` : "No due date set";
+  return `Due ${formatDate(r.dueDate)}`;
 }
 
 /**
- * How the due date was worked out (slice 5.9b): from the day salary was paid (provisional before
- * the bank file is uploaded), the company's own day when it is earlier, and PAYE's penalty date.
+ * How the due date was worked out (slice 5.9b): pension from the upload date given at release
+ * (provisional from the pay date until then, with both dates shown when they differ); the other
+ * kinds from the pay date, an earlier working day used when the fixed date isn't one (until the
+ * adviser confirms); the company's own day when it is earlier; PAYE's penalty date.
  */
 function DeadlineNotes({ r }: { r: RemittanceRow }) {
   const d = r.deadline;
   const notes: string[] = [];
-  notes.push(
-    d.provisional
-      ? `Provisional: counted from the scheduled pay date, ${formatDate(d.paidOn)}. It is worked out again from the day you upload the bank file.`
-      : `Counted from ${formatDate(d.paidOn)}, the day the bank file was uploaded.`,
-  );
+  if (r.kind === "pension") {
+    notes.push(
+      d.provisional
+        ? `Provisional: counted from the scheduled pay date, ${formatDate(d.paidOn)}, until the upload date is given at release.`
+        : `Counted from ${formatDate(d.paidOn)}, the day the bank file was uploaded.`,
+    );
+    if (d.provisionalDueDate) {
+      notes.push(
+        `Provisional date was ${formatDate(d.provisionalDueDate)} (from the pay date); actual ${formatDate(d.dueDate)}.`,
+      );
+    }
+  } else {
+    notes.push(`Counted from the pay date, ${formatDate(d.paidOn)}.`);
+  }
+  if (d.rolledBackFrom) {
+    notes.push(
+      `${formatDate(d.rolledBackFrom)} isn't a working day: earlier working day used until confirmed.`,
+    );
+  }
   if (d.customDay?.applied) {
     notes.push(
       `Your own day (the ${d.customDay.day}${ordinal(d.customDay.day)}) is earlier than the statutory ${formatDate(d.statutoryDate)}, so it applies.`,
@@ -302,9 +318,9 @@ async function RemittancesPage({
           <Link href="/app/settings/holidays#official" className="text-signal">
             official public holidays
           </Link>{" "}
-          (federal, and the tax state&apos;s for PAYE), not your company&apos;s own days off. A date
-          that falls on a non-working day is brought back to the working day before. Your own days
-          in{" "}
+          (federal, and the tax state&apos;s for PAYE), not your company&apos;s own days off. When a
+          fixed date falls on a non-working day, the earlier working day is used until the tax
+          adviser confirms which way it moves. Your own days in{" "}
           <Link href="/app/settings/payroll#due-days" className="text-signal">
             Payroll rules
           </Link>{" "}
@@ -351,12 +367,15 @@ async function RemittancesPage({
                   {run.kind === "off_cycle" ? " · off-cycle" : ""}
                 </h2>
                 <p className="m-0 text-sm text-fg-muted">
-                  {formatLeaveRange(run.periodStart, run.periodEnd)} ·{" "}
-                  {run.releasedOn
-                    ? `bank file uploaded ${formatDate(run.releasedOn)}`
+                  {formatLeaveRange(run.periodStart, run.periodEnd)} · pay date{" "}
+                  {formatDate(run.payDate)}
+                  {run.uploadedOn
+                    ? `, bank file uploaded ${formatDate(run.uploadedOn)}`
                     : run.status === "reversed"
-                      ? `pay date ${formatDate(run.payDate)}, reversed`
-                      : `pay date ${formatDate(run.payDate)}, not uploaded to the bank yet`}{" "}
+                      ? ", reversed"
+                      : run.status === "released"
+                        ? ", released (no upload date given)"
+                        : ", not uploaded to the bank yet"}{" "}
                   ·{" "}
                   <Link href={`/app/payroll/${run.id}?step=submit`} className="text-signal">
                     Open the run

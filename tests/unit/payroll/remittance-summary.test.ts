@@ -12,16 +12,16 @@ const row = (over: Partial<Row>): Row => ({
   status: "due",
   overdue: false,
   outstandingKobo: 0n,
-  dueDate: null,
+  dueDate: "2026-12-31",
   ...over,
 });
 
 describe("summariseRemittances", () => {
-  it("leaves voided remittances out of due, paid, no due date and the total", () => {
+  it("leaves voided remittances out of due, paid and the total", () => {
     const summary = summariseRemittances([
       row({ status: "due", outstandingKobo: 15_660_000n, dueDate: "2026-11-02" }),
       row({ status: "paid" }),
-      row({ status: "no_due_date", outstandingKobo: 870_000n }),
+      row({ status: "due", outstandingKobo: 870_000n, dueDate: "2026-11-13" }),
       // A reversed run's: one unpaid, one paid before the reversal (refund or offset needed).
       row({ status: "voided", outstandingKobo: 0n, dueDate: "2026-10-01" }),
       row({ status: "voided", outstandingKobo: 0n }),
@@ -31,11 +31,10 @@ describe("summariseRemittances", () => {
       paid: 1,
       partPaid: 0,
       overpaid: 0,
-      due: 1,
+      due: 2,
       overdue: 0,
       pastPenalty: 0,
       provisional: 0,
-      noDueDate: 1,
       voided: 2,
       outstandingKobo: "16530000",
       nextDueDate: "2026-11-02",
