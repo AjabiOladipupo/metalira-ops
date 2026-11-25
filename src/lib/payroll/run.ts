@@ -20,10 +20,10 @@ import type {
   DeductionLine,
   EarningLine,
   EmploymentType,
-  MonthToDate,
   PaySourceRef,
   PayslipResult,
 } from "./contract";
+import type { YearToDate } from "./contract";
 import type { EarningsFlag, EarningsResult } from "./earnings";
 import { grossToNet, PayrollInputError } from "./gross-to-net";
 import type { RuleSet } from "./rule-set";
@@ -44,6 +44,17 @@ export interface RunAdjustment {
   taxable: boolean;
   instalmentNumber: number;
   instalmentCount: number;
+  /**
+   * Slice 5.9a (tax adviser): a deduction correcting an overpaid earning on a payslip of the same
+   * tax year is recovered before tax, as a negative `clawback` earning line that reduces taxable
+   * pay and (when `pensionable`) the pension base. Set by the server from the corrected payslip's
+   * pay date and the rule set.
+   */
+  preTax?: boolean;
+  /** Slice 5.9a: a correction of a payslip of an earlier tax year, recovered after tax. */
+  priorTaxYear?: number | null;
+  /** Slice 5.7a: the released payslip a correction names (null for other adjustments). */
+  correctsPayslipId?: string | null;
 }
 
 /** "Supervisor allowance", or "Salary advance repayment, 2 of 3" for a recurring item. */
@@ -67,7 +78,17 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
   const deductions: DeductionLine[] = [];
   for (const a of adjustments) {
     const sources: PaySourceRef[] = [{ kind: "adjustment", id: a.id }];
-    if (a.kind === "earning") {
+    if (a.kind === "deduction" && a.preTax) {
+      earnings.push({
+        code: "clawback",
+        label: `${adjustmentLabel(a)}, recovered before tax`,
+        amountKobo: -a.amountKobo,
+        pensionable: a.pensionable,
+        nhfBase: false,
+        taxable: true,
+        sources,
+      });
+    } else if (a.kind === "earning") {
       earnings.push({
         code: "adjustment_earning",
         label: adjustmentLabel(a),
@@ -78,7 +99,14 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
         sources,
       });
     } else {
-      deductions.push({ label: adjustmentLabel(a), amountKobo: a.amountKobo, sources });
+      deductions.push({
+        label:
+          a.priorTaxYear != null
+            ? `${adjustmentLabel(a)}, recovered after tax (overpaid in ${a.priorTaxYear})`
+            : adjustmentLabel(a),
+        amountKobo: a.amountKobo,
+        sources,
+      });
     }
   }
   return { earnings, deductions };
@@ -92,13 +120,19 @@ export interface WorkerPayslipInput {
   annualRentKobo: Kobo;
   /** Outstanding from the worker's latest posted payslip (open question 6). */
   carriedDeductionKobo: Kobo;
-  /** The month's other standing payslips, for month-aggregate PAYE (slice 5.7b). */
-  monthToDate?: MonthToDate;
+  /** The tax year so far, for cumulative PAYE (slice 5.9a). */
+  yearToDate?: YearToDate;
+  /** Slice 5.9a: an NHF number is on file. */
+  nhfNumberOnFile?: boolean;
+  /** Slice 5.9a: verified annual NHIS and life assurance reliefs. */
+  reliefs?: { nhisAnnualKobo: Kobo; lifeAssuranceAnnualKobo: Kobo };
 }
 
 export interface WorkerPayslipOptions {
   itfApplies: boolean;
   ruleSetId: string;
+  /** Slice 5.9a: the company has enough employees for pension (left out: true). */
+  pensionApplies?: boolean;
 }
 
 /** One worker's payslip: the earnings stage's lines and trace, the adjustments, gross to net. */
@@ -113,13 +147,21 @@ export function workerPayslip(
   const priorTrace = [...input.earnings.trace];
   for (const e of adj.earnings) {
     priorTrace.push(
-      traceStep(
-        "adjustment_earning",
-        e.label,
-        `Added by HR: taxable ${e.taxable ? "yes" : "no"}, pensionable ${e.pensionable ? "yes" : "no"}`,
-        e.amountKobo,
-        "PHASE_5 open question 12",
-      ),
+      e.code === "clawback"
+        ? traceStep(
+            "clawback",
+            e.label,
+            `A correction of an overpaid earning this tax year: less taxable pay${e.pensionable ? " and pension base" : ""}`,
+            e.amountKobo,
+            "Tax adviser 24 Nov 2026: clawbacks before tax in the same tax year",
+          )
+        : traceStep(
+            "adjustment_earning",
+            e.label,
+            `Added by HR: taxable ${e.taxable ? "yes" : "no"}, pensionable ${e.pensionable ? "yes" : "no"}`,
+            e.amountKobo,
+            "PHASE_5 open question 12",
+          ),
     );
   }
   return grossToNet(
@@ -130,20 +172,38 @@ export function workerPayslip(
       annualRentKobo: input.annualRentKobo,
       deductions: adj.deductions,
       carriedDeductionKobo: input.carriedDeductionKobo,
+      ...(input.nhfNumberOnFile !== undefined ? { nhfNumberOnFile: input.nhfNumberOnFile } : {}),
+      ...(input.reliefs ? { reliefs: input.reliefs } : {}),
     },
     rules,
     {
       itfApplies: options.itfApplies,
       ruleSetId: options.ruleSetId,
       priorTrace,
-      ...(input.monthToDate ? { monthToDate: input.monthToDate } : {}),
+      ...(input.yearToDate ? { yearToDate: input.yearToDate } : {}),
+      ...(options.pensionApplies !== undefined ? { pensionApplies: options.pensionApplies } : {}),
     },
   );
 }
 
 /**
+ * Slice 5.9a (tax adviser, ITF Act): the company is liable for ITF when it has `minStaff` (5) or
+ * more employees on the pay date, or when it has flagged a turnover of N50 million or more (the
+ * company's switch, Settings > Payroll rules). Daily workers count.
+ */
+export function itfLiable(headcount: number, turnoverOver50m: boolean, rules: RuleSet): boolean {
+  return turnoverOver50m || headcount >= rules.rules.itf.minStaff;
+}
+
+/** Slice 5.9a (tax adviser, PRA 2014): pension applies from the rule set's minimum employees. */
+export function pensionAppliesFor(headcount: number, rules: RuleSet): boolean {
+  return rules.rules.adviser === null || headcount >= rules.rules.adviser.pensionMinEmployees;
+}
+
+/**
  * ITF applies when the run has `minStaff` (5) or more workers in the levy base (open question
- * 14's default): workers with pay this run who aren't exempt daily workers.
+ * 14's default before slice 5.9a): workers with pay this run who aren't exempt daily workers.
+ * Runs use `itfLiable` from slice 5.9a.
  */
 export function itfAppliesTo(
   workers: readonly { employmentType: EmploymentType; grossKobo: Kobo }[],
@@ -189,7 +249,15 @@ export type AnomalyCode =
   /** Slice 5.8: a later posted run already settled this worker's carried deduction. */
   | "carry_settled_later"
   /** Slice 5.8 (owner decision): a leave refund pays back arrears still in the carried balance. */
-  | "refund_uncollected_carry";
+  | "refund_uncollected_carry"
+  /** Slice 5.9a: other deductions capped at a third of gross (Labour Act s.5(7)); rest carried. */
+  | "deduction_capped"
+  /** Slice 5.9a: PAYE already withheld this year is more than the tax due to date. */
+  | "paye_overwithheld"
+  /** Slice 5.9a: opted in to NHF, but no NHF number on file or pay below the minimum wage. */
+  | "nhf_not_deducted"
+  /** Slice 5.9a: rent declared, but its proof isn't verified, so no rent relief. */
+  | "rent_relief_unverified";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -218,6 +286,10 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   leave_correction_pending: "warning",
   carry_settled_later: "warning",
   refund_uncollected_carry: "warning",
+  deduction_capped: "warning",
+  paye_overwithheld: "warning",
+  nhf_not_deducted: "warning",
+  rent_relief_unverified: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;
@@ -270,6 +342,8 @@ export interface WorkerAnomalyInput {
   /** True when the worker has a posted payslip already. */
   paidBefore: boolean;
   rules: RuleSet;
+  /** Slice 5.9a: rent is declared on the worker but no verified rent proof backs it. */
+  rentUnverified?: boolean;
 }
 
 /** Percent change, rounded half away from zero to a whole percent (display only). */
@@ -346,6 +420,20 @@ export function workerAnomalies(w: WorkerAnomalyInput): RunAnomaly[] {
     );
   }
   if (slip && slip.flags.includes("deduction_cut")) out.push(anomaly("deduction_cut", w.workerId));
+  if (slip && slip.flags.includes("deduction_capped"))
+    out.push(anomaly("deduction_capped", w.workerId));
+  if (slip && slip.flags.includes("paye_overwithheld"))
+    out.push(anomaly("paye_overwithheld", w.workerId));
+  if (slip && slip.flags.includes("nhf_not_deducted")) {
+    const step = slip.trace.find((t) => t.step === "nhf_not_deducted");
+    out.push(
+      anomaly("nhf_not_deducted", w.workerId, {
+        no_number: step?.inputs.no_number === "true",
+        below_minimum_wage: step?.inputs.below_minimum_wage === "true",
+      }),
+    );
+  }
+  if (slip && !exempt && w.rentUnverified) out.push(anomaly("rent_relief_unverified", w.workerId));
   if (slip && slip.pensionEmployeeKobo > 0n && (!w.pfaName || !w.hasRsaPin)) {
     out.push(
       anomaly("no_pension_details", w.workerId, { no_pfa: !w.pfaName, no_rsa_pin: !w.hasRsaPin }),

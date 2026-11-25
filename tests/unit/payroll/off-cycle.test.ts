@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 import golden from "../../../fixtures/october-2026-golden.json";
 import { allocateKobo, parseNairaToKobo, sumKobo, type Kobo } from "@/lib/money";
 import { computeEarnings, POLICY_DEFAULTS, type EarningsWorker } from "@/lib/payroll/earnings";
-import type { MonthToDate } from "@/lib/payroll/contract";
+import type { YearToDate } from "@/lib/payroll/contract";
 import { adjustmentsOnlyEarnings, correctionEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
 import { hasPersonalNumber } from "@/lib/personal-number";
 import { salaryNarration } from "@/server/payroll/bank-formats";
@@ -249,12 +249,15 @@ describe("the worker's notice", () => {
   });
 });
 
-describe("month-aggregate PAYE (owner decision, 24 Nov 2026)", () => {
+// Slice 5.9a: cumulative year-to-date PAYE subsumes 5.7b's month aggregate. Two payslips in one
+// month, the company's first (one month elapsed), give the month's PAYE exactly as before: these
+// tests keep 5.7b's figures, with the earlier payslip passed as the year so far.
+describe("two payslips in a month (cumulative PAYE, slice 5.9a)", () => {
   // ₦300,000 a month (₦150,000 / ₦90,000 / ₦60,000), no rent declared: pension ₦24,000; annual
   // taxable ₦3,312,000; tax ₦330,000 + 18% of ₦312,000 = ₦386,160; PAYE ₦32,180 a month.
   const regularGross = 30_000_000n;
 
-  function regularSlip(monthToDate?: MonthToDate) {
+  function regularSlip(yearToDate?: YearToDate) {
     const w = worker({
       payRates: [
         {
@@ -272,22 +275,22 @@ describe("month-aggregate PAYE (owner decision, 24 Nov 2026)", () => {
         },
       ],
     });
-    return slipWith(earnings(w), [], monthToDate);
+    return slipWith(earnings(w), [], yearToDate);
   }
 
-  function oneOffSlip(amountKobo: Kobo, monthToDate?: MonthToDate) {
+  function oneOffSlip(amountKobo: Kobo, yearToDate?: YearToDate) {
     const w = worker();
     return slipWith(
       adjustmentsOnlyEarnings(earnings(w)),
       [oneOff(w.workerId, amountKobo)],
-      monthToDate,
+      yearToDate,
     );
   }
 
   function slipWith(
     e: ReturnType<typeof earnings>,
     adj: RunAdjustment[],
-    monthToDate?: MonthToDate,
+    yearToDate?: YearToDate,
   ) {
     return workerPayslip(
       {
@@ -297,22 +300,26 @@ describe("month-aggregate PAYE (owner decision, 24 Nov 2026)", () => {
         nhfOptIn: false,
         annualRentKobo: 0n,
         carriedDeductionKobo: 0n,
-        ...(monthToDate ? { monthToDate } : {}),
+        ...(yearToDate ? { yearToDate } : {}),
       },
       NTA_2025_V1,
       { itfApplies: false, ruleSetId: "rule-set" },
     );
   }
 
-  const asEarlier = (slip: ReturnType<typeof regularSlip>): MonthToDate => ({
+  const asEarlier = (slip: ReturnType<typeof regularSlip>): YearToDate => ({
+    monthsElapsed: 1,
+    fromMonth: "2026-10",
     payslips: 1,
-    taxableKobo:
+    grossKobo: slip.grossKobo,
+    chargeableKobo:
       sumKobo(
         slip.lines.filter((l) => l.kind === "earning" && l.taxable).map((l) => l.amountKobo),
       ) -
       slip.pensionEmployeeKobo -
       slip.nhfKobo,
     payeKobo: slip.payeKobo,
+    opening: null,
   });
 
   it("withholds the marginal band on a ₦60,000 one-off paid after ₦300,000 of salary", () => {
@@ -325,9 +332,9 @@ describe("month-aggregate PAYE (owner decision, 24 Nov 2026)", () => {
     const bonus = oneOffSlip(6_000_000n, asEarlier(regular));
     expect(bonus.payeKobo).toBe(1_080_000n);
     const steps = bonus.trace.map((t) => t.step);
-    expect(steps).toEqual(expect.arrayContaining(["month_to_date", "paye_month", "paye_earlier"]));
-    expect(bonus.trace.find((t) => t.step === "paye_month")?.valueKobo).toBe(4_298_000n);
-    expect(bonus.trace.find((t) => t.step === "paye_earlier")?.valueKobo).toBe(3_218_000n);
+    expect(steps).toEqual(expect.arrayContaining(["year_to_date", "tax_to_date", "paye_withheld"]));
+    expect(bonus.trace.find((t) => t.step === "tax_to_date")?.valueKobo).toBe(4_298_000n);
+    expect(bonus.trace.find((t) => t.step === "paye_withheld")?.valueKobo).toBe(3_218_000n);
   });
 
   it("taxes a ₦2,000,000 gratuity on the month's total", () => {
@@ -347,8 +354,17 @@ describe("month-aggregate PAYE (owner decision, 24 Nov 2026)", () => {
   });
 
   it("never withholds below ₦0", () => {
-    const slip = oneOffSlip(100_000n, { payslips: 1, taxableKobo: 0n, payeKobo: 5_000_000n });
+    const slip = oneOffSlip(100_000n, {
+      monthsElapsed: 1,
+      fromMonth: "2026-10",
+      payslips: 1,
+      grossKobo: 0n,
+      chargeableKobo: 0n,
+      payeKobo: 5_000_000n,
+      opening: null,
+    });
     expect(slip.payeKobo).toBe(0n);
+    expect(slip.flags).toContain("paye_overwithheld");
   });
 });
 

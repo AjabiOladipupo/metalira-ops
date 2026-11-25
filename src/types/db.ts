@@ -699,14 +699,14 @@ isOneToOne: false
                   ]
                 },"organisations": {
                   Row: {
-                    "address": string | null,"auto_email_receipts": boolean,"business_type": string,"company_code": string,"created_at": string,"created_by": string | null,"default_work_days": (number)[],"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"itf_remit_day": number | null,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"nhf_remit_day": number | null,"no_show_after_minutes": number,"nsitf_remit_day": number | null,"pay_cycle_start_day": number,"pay_day": number,"paye_remit_day": number | null,"payment_terms_days": number,"payroll_enabled": boolean,"people_enabled": boolean,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"shifts_enabled": boolean,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
+                    "address": string | null,"auto_email_receipts": boolean,"business_type": string,"company_code": string,"created_at": string,"created_by": string | null,"default_work_days": (number)[],"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"itf_remit_day": number | null,"itf_turnover_over_50m": boolean,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"nhf_remit_day": number | null,"no_show_after_minutes": number,"nsitf_remit_day": number | null,"pay_cycle_start_day": number,"pay_day": number,"paye_remit_day": number | null,"payment_terms_days": number,"payroll_enabled": boolean,"people_enabled": boolean,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"shifts_enabled": boolean,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code": string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code": string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"itf_turnover_over_50m"?: boolean,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Update: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"itf_turnover_over_50m"?: boolean,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Relationships: [
                     
@@ -999,6 +999,160 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"payroll_nhf_numbers": {
+                  Row: {
+                    "created_at": string,"created_by": string,"id": string,"nhf_number": string | null,"organisation_id": string,"reason": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"created_by": string,"id"?: string,"nhf_number"?: string | null,"organisation_id": string,"reason": string,"worker_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string,"id"?: string,"nhf_number"?: string | null,"organisation_id"?: string,"reason"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_nhf_numbers_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_nhf_numbers_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_opening_balances": {
+                  Row: {
+                    "as_of_month": string,"created_at": string,"created_by": string,"currency": string,"id": string,"organisation_id": string,"reason": string,"supersedes_id": string | null,"tax_year": number,"worker_id": string,"ytd_chargeable_kobo": number,"ytd_gross_kobo": number,"ytd_paye_kobo": number,"ytd_pension_kobo": number
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "as_of_month": string,"created_at"?: string,"created_by": string,"currency"?: string,"id"?: string,"organisation_id": string,"reason": string,"supersedes_id"?: string | null,"tax_year": number,"worker_id": string,"ytd_chargeable_kobo": number,"ytd_gross_kobo": number,"ytd_paye_kobo": number,"ytd_pension_kobo": number
+                  }
+                  Update: {
+                    "as_of_month"?: string,"created_at"?: string,"created_by"?: string,"currency"?: string,"id"?: string,"organisation_id"?: string,"reason"?: string,"supersedes_id"?: string | null,"tax_year"?: number,"worker_id"?: string,"ytd_chargeable_kobo"?: number,"ytd_gross_kobo"?: number,"ytd_paye_kobo"?: number,"ytd_pension_kobo"?: number
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_opening_balances_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_opening_balances_supersedes_fkey"
+      columns: ["organisation_id","supersedes_id"]
+isOneToOne: false
+      referencedRelation: "payroll_opening_balances"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_opening_balances_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_relief_declarations": {
+                  Row: {
+                    "annual_amount_kobo": number,"created_at": string,"created_by": string,"currency": string,"id": string,"kind": string,"organisation_id": string,"reason": string,"supersedes_id": string | null,"tax_year": number,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "annual_amount_kobo": number,"created_at"?: string,"created_by": string,"currency"?: string,"id"?: string,"kind": string,"organisation_id": string,"reason": string,"supersedes_id"?: string | null,"tax_year": number,"worker_id": string
+                  }
+                  Update: {
+                    "annual_amount_kobo"?: number,"created_at"?: string,"created_by"?: string,"currency"?: string,"id"?: string,"kind"?: string,"organisation_id"?: string,"reason"?: string,"supersedes_id"?: string | null,"tax_year"?: number,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_relief_declarations_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_relief_declarations_supersedes_fkey"
+      columns: ["organisation_id","supersedes_id"]
+isOneToOne: false
+      referencedRelation: "payroll_relief_declarations"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_relief_declarations_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_relief_proofs": {
+                  Row: {
+                    "checked_by": string,"created_at": string,"declaration_id": string,"document_kind": string,"file_ext": string,"id": string,"mime_type": string,"organisation_id": string,"sha256": string,"size_bytes": number,"storage_path": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "checked_by": string,"created_at"?: string,"declaration_id": string,"document_kind": string,"file_ext": string,"id": string,"mime_type": string,"organisation_id": string,"sha256": string,"size_bytes": number,"storage_path": string,"worker_id": string
+                  }
+                  Update: {
+                    "checked_by"?: string,"created_at"?: string,"declaration_id"?: string,"document_kind"?: string,"file_ext"?: string,"id"?: string,"mime_type"?: string,"organisation_id"?: string,"sha256"?: string,"size_bytes"?: number,"storage_path"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_relief_proofs_declaration_fkey"
+      columns: ["organisation_id","declaration_id"]
+isOneToOne: false
+      referencedRelation: "payroll_relief_declarations"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_relief_proofs_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_relief_proofs_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
+                },"payroll_relief_verifications": {
+                  Row: {
+                    "created_at": string,"created_by": string,"decision": string,"declaration_id": string,"id": string,"note": string | null,"organisation_id": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"created_by": string,"decision": string,"declaration_id": string,"id"?: string,"note"?: string | null,"organisation_id": string,"worker_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string,"decision"?: string,"declaration_id"?: string,"id"?: string,"note"?: string | null,"organisation_id"?: string,"worker_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_relief_verifications_declaration_fkey"
+      columns: ["organisation_id","declaration_id"]
+isOneToOne: false
+      referencedRelation: "payroll_relief_declarations"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "payroll_relief_verifications_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "payroll_relief_verifications_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"payroll_run_decisions": {
                   Row: {
                     "actor_id": string,"created_at": string,"decision": string,"gross_kobo": number,"id": string,"inputs_sha256": string | null,"net_kobo": number,"organisation_id": string,"reason": string | null,"run_id": string,"worker_count": number
@@ -1123,14 +1277,14 @@ isOneToOne: false
                   ]
                 },"payslip_lines": {
                   Row: {
-                    "amount_kobo": number,"code": string,"copies_line_id": string | null,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign": number,"taxable": boolean
+                    "amount_kobo": number,"code": string,"copies_line_id": string | null,"currency": string,"id": string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"regular": boolean | null,"run_id": string,"sign": number,"taxable": boolean
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"code": string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"run_id": string,"sign"?: number,"taxable": boolean
+                    "amount_kobo": number,"code": string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"regular"?: never,"run_id": string,"sign"?: number,"taxable": boolean
                   }
                   Update: {
-                    "amount_kobo"?: number,"code"?: string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"run_id"?: string,"sign"?: number,"taxable"?: boolean
+                    "amount_kobo"?: number,"code"?: string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"regular"?: never,"run_id"?: string,"sign"?: number,"taxable"?: boolean
                   }
                   Relationships: [
                     {
@@ -2553,6 +2707,9 @@ isOneToOne: false
               "applies_after": string,"bank_account_last4": string,"id": string,"status": Database["public"]['Enums']["org_bank_account_status"]
             }[]
                            },
+"declare_payroll_relief":
+{ Args: { "p_annual_kobo": string,"p_kind": string,"p_organisation_id": string,"p_reason": string,"p_supersedes_id"?: string,"p_tax_year": number,"p_worker_id": string }; Returns: string
+                           },
 "decide_owner_change":
 { Args: { "p_change_id": string,"p_decision": string,"p_organisation_id": string }; Returns: {
               "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
@@ -2584,6 +2741,9 @@ isOneToOne: false
                            },
 "finish_bank_account_lookup":
 { Args: { "p_account_name"?: string,"p_id": string,"p_source"?: string,"p_status": Database["public"]['Enums']["bank_lookup_status"] }; Returns: boolean
+                           },
+"import_payroll_opening_balances":
+{ Args: { "p_as_of_month": string,"p_organisation_id": string,"p_reason": string,"p_rows": Json,"p_tax_year": number }; Returns: number
                            },
 "leave_balances":
 { Args: { "p_organisation_id": string,"p_worker_ids"?: (string)[],"p_year": number }; Returns: {
@@ -2732,6 +2892,9 @@ isOneToOne: false
 "payroll_run_inputs":
 { Args: { "p_organisation_id": string,"p_period_start": string,"p_run_id": string,"p_worker_ids"?: (string)[] }; Returns: Json
                            },
+"payroll_tax_context":
+{ Args: { "p_organisation_id": string,"p_pay_date": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
 "payslip_pdf_views":
 { Args: { "p_organisation_id": string,"p_payslip_ids"?: (string)[],"p_run_id": string }; Returns: Json
                            },
@@ -2768,6 +2931,12 @@ isOneToOne: false
                            },
 "record_payroll_file_sweep":
 { Args: { "p_organisation_id": string,"p_paths": (string)[] }; Returns: string
+                           },
+"record_payroll_opening_balance":
+{ Args: { "p_as_of_month": string,"p_chargeable_kobo": string,"p_gross_kobo": string,"p_organisation_id": string,"p_paye_kobo": string,"p_pension_kobo": string,"p_reason": string,"p_supersedes_id"?: string,"p_tax_year": number,"p_worker_id": string }; Returns: string
+                           },
+"record_payroll_relief_proof":
+{ Args: { "p_actor": string,"p_declaration_id": string,"p_document_kind": string,"p_file_ext": string,"p_organisation_id": string,"p_proof_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string
                            },
 "record_payslip_document":
 { Args: { "p_actor": string,"p_organisation_id": string,"p_payslip_id": string,"p_sha256": string,"p_size_bytes": number }; Returns: string
@@ -2905,6 +3074,12 @@ isOneToOne: false
 "set_company_modules":
 { Args: { "p_organisation_id": string,"p_payroll_enabled": boolean,"p_people_enabled": boolean,"p_shifts_enabled": boolean }; Returns: Json
                            },
+"set_itf_turnover_flag":
+{ Args: { "p_organisation_id": string,"p_reason": string,"p_value": boolean }; Returns: undefined
+                           },
+"set_payroll_nhf_number":
+{ Args: { "p_nhf_number": string | null,"p_organisation_id": string,"p_reason": string,"p_worker_id": string }; Returns: string
+                           },
 "set_remittance_due_days":
 { Args: { "p_itf"?: number,"p_nhf"?: number,"p_nsitf"?: number,"p_organisation_id": string,"p_paye"?: number }; Returns: undefined
                            },
@@ -2965,6 +3140,9 @@ isOneToOne: false
                            },
 "update_draft_contract":
 { Args: { "p_contract": Json,"p_contract_id": string,"p_organisation_id": string,"p_site_ids"?: (string)[] }; Returns: string
+                           },
+"verify_payroll_relief":
+{ Args: { "p_decision": string,"p_note"?: string,"p_organisation_id": string,"p_declaration_id": string }; Returns: string
                            },
 "void_statutory_payment":
 { Args: { "p_organisation_id": string,"p_payment_id": string,"p_reason": string }; Returns: string
