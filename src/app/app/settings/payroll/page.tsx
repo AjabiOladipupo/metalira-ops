@@ -267,13 +267,13 @@ async function PayrollRulesPage({
             Remittance due days
           </h2>
           <p className="m-0 text-sm text-fg-muted">
-            Pension is due by the 7th working day counting the pay date (or the working day before
-            it, when it falls on a weekend or holiday), leaving out weekends and your public
-            holidays. Metalira&apos;s starting rules give no due date for PAYE, NHF, NSITF or ITF,
-            so they have none until you set your own: a day of the month after the pay date. A
-            change applies to runs approved after it; due dates already worked out stay as they are.
-            These are your company&apos;s choices, not tax rules: confirm them with your tax
-            adviser.
+            Every remittance has a statutory deadline: pension within 7 working days of the day
+            salary is paid; PAYE by the 10th of the following month (penalty after the 21st); NHF
+            the same day of the next month; NSITF by the 15th of the following month; ITF by 1 April
+            of the following year. You may set your own earlier day of the month after the pay date.
+            A day later than the statutory deadline is ignored: your own day can only bring a
+            deadline forward. Due dates are worked out each time you open remittances, so a change
+            applies to every remittance still owed.
           </p>
         </div>
         {canSetRemittanceDueDays(ctx.role) ? (
@@ -290,7 +290,9 @@ async function PayrollRulesPage({
             ).map(([label, day]) => (
               <div key={label} className="contents">
                 <dt>{label}</dt>
-                <dd className="m-0 text-right">{day ? `Day ${day} of the next month` : "None"}</dd>
+                <dd className="m-0 text-right">
+                  {day ? `Day ${day} of the next month, if earlier` : "Statutory"}
+                </dd>
               </div>
             ))}
           </dl>

@@ -2,6 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 
+import { formatDate, LAGOS_TIME_ZONE, lagosToday, todayIn } from "@/lib/dates";
 import { formatNaira, type Kobo } from "@/lib/money";
 import { runMonth } from "@/lib/payroll/run-format";
 import type { CapabilityPreview } from "@/server/capabilities/types";
@@ -39,7 +40,21 @@ export const releaseRunSchema = z.object({
   runId: z.uuid("Reload the page and try again"),
   batchId: z.uuid("Reload the page and try again"),
   fileSha256: z.string().regex(/^[0-9a-f]{64}$/, "Reload the page and try again"),
+  /**
+   * Slice 5.9b (money review M4): the date the file was uploaded to the bank, which pension's
+   * deadline counts from. Not before the run's approval day, not after today (the database
+   * refuses with MLDD5).
+   */
+  uploadedOn: z.iso.date("Choose the date you uploaded the file to the bank"),
 });
+
+export const UPLOAD_DATE_MESSAGE =
+  "The upload date can't be before the day the run was approved or after today.";
+
+/** The run's approval day in Lagos, the earliest upload date. */
+export function approvalDay(approvedAt: string): string {
+  return todayIn(LAGOS_TIME_ZONE, new Date(approvedAt));
+}
 
 /** Security review M1, as the person reads it. */
 export const RELEASE_MAKER_MESSAGE =
@@ -54,6 +69,12 @@ export async function previewRelease(
   data: z.output<typeof releaseRunSchema>,
 ): Promise<CapabilityPreview> {
   const run = await approvedRun(ctx.supabase, ctx.organisationId, data.runId);
+  if (
+    data.uploadedOn > lagosToday() ||
+    (run.approvedAt !== null && data.uploadedOn < approvalDay(run.approvedAt))
+  ) {
+    throw new MutationError("invalid", UPLOAD_DATE_MESSAGE, { uploadedOn: UPLOAD_DATE_MESSAGE });
+  }
   // The database checks the full list (every recalculation, adjustment and acknowledgement too).
   if ([run.preparedBy, run.submittedBy, run.calculatedBy].includes(ctx.userId)) {
     throw new MutationError("invalid", RELEASE_TWO_PERSON_MESSAGE);
@@ -88,6 +109,7 @@ export async function previewRelease(
     summary: `Releases ${runMonth(run.periodEnd)} payroll: you confirm the bank file (${batch.itemCount} ${batch.itemCount === 1 ? "worker" : "workers"}, ${money(batch.totalKobo)}, SHA-256 ${batch.fileSha256.slice(0, 12)}…) was uploaded to the company's bank.${leftOut} Workers can then see their payslips. This can't be undone.`,
     changes: [
       { label: "Status", before: "Approved", after: "Released" },
+      { label: "Uploaded to the bank on", after: formatDate(data.uploadedOn) },
       { label: "Workers in the file", after: String(batch.itemCount) },
       { label: "Total", after: money(batch.totalKobo) },
       {
@@ -116,9 +138,15 @@ export const releaseRunSpec: MutationSpec<
       p_run_id: data.runId,
       p_batch_id: data.batchId,
       p_file_sha256: data.fileSha256,
+      p_uploaded_on: data.uploadedOn,
     });
     if (error) {
       if (error.code === "MLBFA") throw new MutationError("invalid", RELEASE_MAKER_MESSAGE);
+      if (error.code === "MLDD5") {
+        throw new MutationError("invalid", UPLOAD_DATE_MESSAGE, {
+          uploadedOn: UPLOAD_DATE_MESSAGE,
+        });
+      }
       fromPayoutDbError(error);
     }
     return { runId: data.runId, decisionId: decisionId! };

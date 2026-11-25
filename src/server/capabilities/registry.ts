@@ -274,6 +274,7 @@ import {
   makeSupplementSpec,
   supplementIdSchema,
 } from "@/server/payroll/supplements";
+import { loadOfficialHolidayYear } from "@/server/payroll/official-holidays";
 import { loadRemittanceSummary } from "@/server/payroll/remittance-data";
 import {
   REMITTANCE_RECORDERS,
@@ -2575,6 +2576,23 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: true,
   },
   {
+    name: "calendar.official_holidays",
+    description:
+      "Lists a year's official federal and state holidays, kept by Metalira, that statutory deadlines skip.",
+    kind: "read",
+    audience: "manager",
+    roles: CALENDAR_READERS,
+    input: holidayYearSchema,
+    changes: "none",
+    action: null,
+    // Slice 5.9b: platform-wide reference data, read-only for every company.
+    read: async ({ supabase }, input) => {
+      const { year } = holidayYearSchema.parse(input);
+      return loadOfficialHolidayYear(supabase, year);
+    },
+    agent: true,
+  },
+  {
     name: "calendar.add_holiday",
     description: "Adds a public holiday on a date; refused when that date is already a holiday.",
     kind: "write",
@@ -3369,7 +3387,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "payroll.remittances_summary",
     description:
-      "Counts statutory remittances paid, due, overdue and without a due date, with the total still owed.",
+      "Counts statutory remittances paid, due, overdue and past the PAYE penalty date, with the total still owed.",
     kind: "read",
     audience: "manager",
     roles: REMITTANCE_RECORDERS,
@@ -3437,7 +3455,7 @@ export const CAPABILITIES: readonly Capability[] = [
   {
     name: "payroll.set_remittance_due_days",
     description:
-      "Sets the company's own due day for PAYE, NHF, NSITF and ITF remittances, or none.",
+      "Sets the company's own PAYE, NHF, NSITF and ITF due days, used only when earlier than the statutory deadline.",
     kind: "write",
     audience: "manager",
     ...fromSpec(setDueDaysSpec),

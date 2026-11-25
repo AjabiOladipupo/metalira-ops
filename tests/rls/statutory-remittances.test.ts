@@ -2,8 +2,10 @@
  * Slice 5.6: statutory remittances (docs/PHASE_5.md 5.6, open question 13) against the real
  * database.
  * - Approval makes one remittance per kind and authority with an amount above 0, summed from the
- *   payslip lines; pension is due 7 working days after the pay date, skipping weekends and the
- *   company's public holidays; PAYE, NHF, NSITF and ITF only when the company set its own day.
+ *   payslip lines, stamped with the provisional due date (slice 5.9b): pension the 7th working
+ *   day counting the pay date (or the next working day) as day 1, skipping weekends and the
+ *   official holidays but not the company's own; PAYE the 10th of the next month, or the
+ *   company's day when earlier; NSITF the 15th, brought back to the working day before.
  * - Who reads (owner, hr, finance) and who records (the same, in a trusted session); line
  *   managers, admins, workers and other companies see and do nothing.
  * - Insert-only (rule 4): remittances, receipts and payments refuse updates, deletes and truncate
@@ -118,7 +120,8 @@ beforeAll(async () => {
   await addMember(adminRole, "admin", owner.orgId);
   await addMember(lineManager, "line_manager", owner.orgId);
 
-  // The company's own holiday falls in pension's 7 working days; HR sets PAYE's due day.
+  // The company's own holiday falls in pension's 7 working days but no longer moves a deadline
+  // (slice 5.9b); HR sets PAYE's due day earlier than the statutory 10th.
   const holiday = await admin.from("public_holidays").insert({
     organisation_id: owner.orgId,
     holiday_date: "2026-10-28",
@@ -127,7 +130,8 @@ beforeAll(async () => {
   expect(holiday.error).toBeNull();
   const days = await hr.client.rpc("set_remittance_due_days", {
     p_organisation_id: owner.orgId,
-    p_paye: 10,
+    p_paye: 5,
+    p_nsitf: 20,
   });
   expect(days.error).toBeNull();
 
@@ -168,8 +172,10 @@ describe("made at approval", () => {
       .order("kind");
     expect(error).toBeNull();
     expect(data).toEqual([
-      // Pension: Sunday 25 Oct rolls back to Friday 23 Oct, day 1 of 7; Wednesday 28 Oct is a
-      // company holiday, so the 7th working day is Tuesday 3 Nov (money review M3).
+      // Pension (slice 5.9b): paid Sunday 25 Oct, so Monday 26 Oct is day 1 and Tuesday 3 Nov
+      // day 7; the company's own holiday on Wednesday 28 Oct doesn't count (it would give 4 Nov).
+      // PAYE: the company's 5th is earlier than the statutory 10 Nov, so it applies. NSITF: the
+      // statutory 15 Nov is a Sunday, so Friday 13 Nov; the company's 20th is later, so ignored.
       {
         kind: "nsitf",
         authority_key: null,
@@ -178,7 +184,7 @@ describe("made at approval", () => {
         amount_kobo: "120000",
         worker_count: 1,
         currency: "NGN",
-        due_date: null,
+        due_date: "2026-11-13",
       },
       {
         kind: "paye",
@@ -188,7 +194,7 @@ describe("made at approval", () => {
         amount_kobo: "100000",
         worker_count: 1,
         currency: "NGN",
-        due_date: "2026-11-10",
+        due_date: "2026-11-05",
       },
       {
         kind: "pension",
