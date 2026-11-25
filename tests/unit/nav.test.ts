@@ -272,7 +272,7 @@ describe("nav by role", () => {
     expect(canAccessHref("finance", "/app/people")).toBe(false);
   });
 
-  it("opens no People sub-page to line managers but the list and a person's page (slice 4.0b)", () => {
+  it("opens no People sub-page to line managers but the list, a person's page and the export (slices 4.0b, U.1)", () => {
     // Every page.tsx and route.ts under src/app/app/people, as an href with a sample uuid for
     // each dynamic segment. A new sub-page that forgets its EXTRA_PAGES entry would inherit the
     // People item's roles (line managers included) and fails here.
@@ -291,7 +291,8 @@ describe("nav by role", () => {
     expect(hrefs).toContain("/app/people");
     expect(hrefs).toContain(`/app/people/${sample}`);
     expect(hrefs.length).toBeGreaterThan(2);
-    const open = new Set(["/app/people", `/app/people/${sample}`]);
+    // Slice U.1: "Export CSV" is open to line managers too, for their own reportees only.
+    const open = new Set(["/app/people", `/app/people/${sample}`, "/app/people/export"]);
     for (const href of hrefs) {
       expect(canAccessHref("line_manager", href), href).toBe(open.has(href));
     }

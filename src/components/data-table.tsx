@@ -9,10 +9,14 @@ import { cn } from "@/lib/utils";
  *   follow the page scroll from inside a sideways-scrolling box, and the app's top bar does not
  *   stick, so the frame is the scroller.) The frame is at most the viewport height less 6rem for
  *   the page's own controls; `maxHeight` overrides it.
+ * - Row select (slice U.1): pass `header` a `<SelectAllCheckbox />` and a cell with a
+ *   `<RowCheckbox />` (src/components/row-selection.tsx); a row whose box is ticked takes the
+ *   signal edge, like `selectedIds`.
  */
 export type Column<Row> = {
   key: string;
-  header: string;
+  /** Usually text; a node for a header control such as the select-all box. */
+  header: React.ReactNode;
   kind?: "text" | "money" | "number";
   align?: "left" | "right";
   cell: (row: Row) => React.ReactNode;
@@ -98,6 +102,7 @@ export function DataTable<Row>({
                   aria-selected={selectedIds.length > 0 ? selected : undefined}
                   className={cn(
                     "border-b border-line last:border-b-0",
+                    "has-[input[data-row-select]:checked]:bg-surface has-[input[data-row-select]:checked]:shadow-[inset_3px_0_0_var(--signal)]",
                     selected && "bg-surface shadow-[inset_3px_0_0_var(--signal)]",
                   )}
                 >
