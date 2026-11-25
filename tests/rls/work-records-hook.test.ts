@@ -36,6 +36,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "what looks wrong on a payroll run (slice 5.2); a flag about the worker, nothing worked or paid",
   payroll_run_workers:
     "the workers an off-cycle payroll run pays (slice 5.7b); each is paid through a payslip, which is the work record",
+  payroll_final_pay_items:
+    "a leaver's typed final-pay items (slice 5.9c); each is paid through a payslip, which is the work record",
   payout_items:
     "a payslip's line in a bank file (slice 5.4); each hangs off a payslip, which is the work record",
   payout_supplement_items:

@@ -108,9 +108,12 @@ test("an off-cycle final pay goes from the worker picker to Finance's approval",
     "October 2026 off-cycle: Final pay for a leaver",
   );
   await expect(page.getByTestId("off-cycle-label").first()).toBeVisible();
+  // Slice 5.9c: pay in lieu of leave or notice, gratuity and redundancy are typed final-pay items
+  // (tests/e2e/payroll-final-pay.spec.ts); a one-off earning still takes anything else.
   await expect(page.getByTestId("off-cycle-earnings-hint")).toContainText(
-    "Leave encashment and terminal benefits have no rule in the app yet",
+    "are final-pay items above",
   );
+  await expect(page.getByRole("form", { name: "Add a final-pay item" })).toBeVisible();
 
   // A manual one-off earning with a reason: leave encashment, ₦10,000.
   const add = page.getByRole("form", { name: "Add an earning or deduction" });

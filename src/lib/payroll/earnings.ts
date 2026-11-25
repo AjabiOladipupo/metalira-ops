@@ -84,6 +84,12 @@ export interface PayPolicy {
   overtimeMultiplierBps: number;
   /** The rule set policy's flat pay for off-day work, in minutes (480). */
   offDayPaidMinutes: number;
+  /**
+   * Slice 5.9c (adviser answer 24, owner decision): public-holiday work is paid at the overtime
+   * rate × this company multiplier, in basis points (`payroll_holiday_pay_rates`, dated). Left
+   * out: 10000 (1.0×), today's rule.
+   */
+  holidayMultiplierBps?: number;
 }
 
 /**
@@ -94,7 +100,31 @@ export interface PayPolicy {
 export const POLICY_DEFAULTS = { overtimeMultiplierBps: 10_000, offDayPaidMinutes: 480 } as const;
 
 /** The policy figures that can change by day (a dated rule set version). */
-export type DayPolicy = Partial<Pick<PayPolicy, "overtimeMultiplierBps" | "offDayPaidMinutes">>;
+export type DayPolicy = Partial<
+  Pick<PayPolicy, "overtimeMultiplierBps" | "offDayPaidMinutes" | "holidayMultiplierBps">
+>;
+
+/** The company's holiday multiplier when none is set (1.0×). */
+export const HOLIDAY_MULTIPLIER_DEFAULT_BPS = 10_000;
+
+/** A dated holiday pay multiplier version (`payroll_holiday_pay_rates`, insert-only). */
+export interface HolidayRateVersion {
+  effectiveFrom: string;
+  multiplierBps: number;
+}
+
+/**
+ * The multiplier in force on `date`: the latest version starting on or before it, else 1.0×.
+ * Versions are never changed, so a later one simply takes over from its start.
+ */
+export function holidayMultiplierOn(versions: readonly HolidayRateVersion[], date: string): number {
+  let best: HolidayRateVersion | null = null;
+  for (const v of versions) {
+    if (v.effectiveFrom <= date && (best === null || v.effectiveFrom > best.effectiveFrom))
+      best = v;
+  }
+  return best?.multiplierBps ?? HOLIDAY_MULTIPLIER_DEFAULT_BPS;
+}
 
 export interface EarningsWorker {
   workerId: string;
@@ -231,11 +261,34 @@ function overtimeValue(rate: PayRateInput, minutes: number, policy: PayPolicy): 
   );
 }
 
+const holidayBps = (policy: PayPolicy): bigint =>
+  BigInt(policy.holidayMultiplierBps ?? HOLIDAY_MULTIPLIER_DEFAULT_BPS);
+
+/**
+ * Value of `minutes` of public-holiday work: the overtime rate x the company's holiday multiplier
+ * (slice 5.9c). At the default 1.0x it is exactly `overtimeValue`.
+ */
+function holidayValue(rate: PayRateInput, minutes: number, policy: PayPolicy): Fraction {
+  const ot = overtimeValue(rate, minutes, policy);
+  return frac(ot.num * holidayBps(policy), ot.den * 10_000n);
+}
+
+/** a > b for exact fractions (positive denominators). */
+function greater(a: Fraction, b: Fraction): boolean {
+  return a.num * b.den > b.num * a.den;
+}
+
 /** "₦750.00 an hour" (display only: the line itself is worked from the exact fraction). */
-function hourlyLabel(rate: PayRateInput, policy: PayPolicy, overtime: boolean): string {
+function hourlyLabel(
+  rate: PayRateInput,
+  policy: PayPolicy,
+  overtime: boolean,
+  holiday = false,
+): string {
   const r = minuteRate(rate, policy);
   const mult = overtime ? BigInt(policy.overtimeMultiplierBps) : 10_000n;
-  return `${formatNaira(roundHalfUp(r.num * 60n * mult, r.den * 10_000n))} an hour`;
+  const hol = holiday ? holidayBps(policy) : 10_000n;
+  return `${formatNaira(roundHalfUp(r.num * 60n * mult * hol, r.den * 10_000n * 10_000n))} an hour`;
 }
 
 function versionOn(rates: readonly PayRateInput[], date: string): PayRateInput | null {
@@ -342,17 +395,20 @@ function dayContributions(
   const out: Contribution[] = [];
   const holidayMinutes = day.worked + day.ot;
   if (rate.payType === "monthly" && offDay) {
-    if (holiday && holidayMinutes > policy.offDayPaidMinutes) {
+    // The larger of the two rules, never both (at 1.0x: more minutes than the off-day shift).
+    const offDayPay = overtimeValue(rate, policy.offDayPaidMinutes, policy);
+    const holidayPay = holidayValue(rate, holidayMinutes, policy);
+    if (holiday && greater(holidayPay, offDayPay)) {
       out.push({
         code: "public_holiday",
-        value: overtimeValue(rate, holidayMinutes, policy),
+        value: holidayPay,
         minutes: holidayMinutes,
         days: 1,
       });
     } else {
       out.push({
         code: "off_day",
-        value: overtimeValue(rate, policy.offDayPaidMinutes, policy),
+        value: offDayPay,
         minutes: policy.offDayPaidMinutes,
         days: 1,
       });
@@ -383,7 +439,7 @@ function dayContributions(
   if (holiday && holidayMinutes > 0) {
     out.push({
       code: "public_holiday",
-      value: overtimeValue(rate, holidayMinutes, policy),
+      value: holidayValue(rate, holidayMinutes, policy),
       minutes: holidayMinutes,
       days: 1,
     });
@@ -616,6 +672,8 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       ...policy,
       overtimeMultiplierBps: on.overtimeMultiplierBps ?? policy.overtimeMultiplierBps,
       offDayPaidMinutes: on.offDayPaidMinutes ?? policy.offDayPaidMinutes,
+      holidayMultiplierBps:
+        on.holidayMultiplierBps ?? policy.holidayMultiplierBps ?? HOLIDAY_MULTIPLIER_DEFAULT_BPS,
     };
   };
 
@@ -751,7 +809,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     const p = dayPolicy(day.date);
     for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), p)) {
       addTo(
-        `${c.code}|${rate.id}|${p.overtimeMultiplierBps}|${p.offDayPaidMinutes}`,
+        `${c.code}|${rate.id}|${p.overtimeMultiplierBps}|${p.offDayPaidMinutes}|${c.code === "public_holiday" ? p.holidayMultiplierBps : ""}`,
         { code: c.code, rate, policy: p },
         c,
         day,
@@ -838,7 +896,7 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         ? `Daily pay, ${plural(bucket.days, "day")} at ${formatNaira(rate.dailyRate)}`
         : code === "off_day"
           ? `Off-day work, ${plural(bucket.days, "day")} of ${formatMinutes(policy.offDayPaidMinutes)} at ${hourlyLabel(rate, policy, true)}`
-          : `${BUCKET_LABEL[code]}, ${formatMinutes(bucket.minutes)} at ${hourlyLabel(rate, policy, code !== "hourly_pay")}`;
+          : `${BUCKET_LABEL[code]}, ${formatMinutes(bucket.minutes)} at ${hourlyLabel(rate, policy, code !== "hourly_pay", code === "public_holiday")}`;
     lines.push({
       code,
       label,
@@ -856,11 +914,18 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
           ? "daily rate x days worked"
           : code === "hourly_pay"
             ? "worked minutes x hourly rate ÷ 60"
-            : "minutes x normal hourly rate x multiplier ÷ 60, rounded once",
+            : code === "public_holiday" && holidayBps(policy) !== 10_000n
+              ? "minutes x normal hourly rate x multiplier x holiday multiplier ÷ 60, rounded once"
+              : "minutes x normal hourly rate x multiplier ÷ 60, rounded once",
       inputs: {
         minutes: bucket.minutes,
         days: bucket.days,
         multiplier_bps: policy.overtimeMultiplierBps,
+        // Slice 5.9c: shown only when the company pays holidays at other than 1.0x, so traces
+        // worked out at the default stay as they were.
+        ...(code === "public_holiday" && holidayBps(policy) !== 10_000n
+          ? { holiday_multiplier_bps: Number(holidayBps(policy)) }
+          : {}),
         exact_kobo: koboText(bucket.value),
         pay_rate_from: rate.effectiveFrom,
       },

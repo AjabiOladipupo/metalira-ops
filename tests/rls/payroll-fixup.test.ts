@@ -196,6 +196,8 @@ const PAY_ENTITIES = [
   "payroll_approval_checks",
   "payroll_run_decisions",
   "payroll_run_workers",
+  "payroll_final_pay_items",
+  "payroll_holiday_pay_rates",
   "payslips",
   "payslip_lines",
   "payslip_sources",

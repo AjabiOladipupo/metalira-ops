@@ -42,6 +42,8 @@ import {
   SubmitRunForm,
 } from "../_components/run-forms";
 import { PayStep } from "../_components/pay-step";
+import { AddFinalPayItemForm, type FinalPayWorker } from "../_components/final-pay-form";
+import { loadFinalPayPrefill } from "@/server/payroll/final-pay";
 import {
   AddCorrectionForm,
   ApproveReversalForm,
@@ -247,9 +249,14 @@ function TimesheetsStep({ d }: StepProps) {
   );
 }
 
-function EarningsStep({ d, canPrepare }: StepProps) {
+function EarningsStep({
+  d,
+  canPrepare,
+  finalPayWorkers,
+}: StepProps & { finalPayWorkers: FinalPayWorker[] | null }) {
   const draft = d.run.status === "draft" && !d.run.discardedAt;
   const offCycle = d.run.kind === "off_cycle";
+  const finalPay = offCycle && d.run.offCycleReason === "final_pay";
   return (
     <section aria-labelledby="earnings" className="flex flex-col gap-3">
       <h2 id="earnings" className="m-0 type-h2">
@@ -287,6 +294,14 @@ function EarningsStep({ d, canPrepare }: StepProps) {
                   <td className={cn(TD, "font-semibold")}>{a.workerName}</td>
                   <td className="px-3 py-3">
                     {a.label}
+                    {a.finalPayItemId ? (
+                      <span className="block text-xs font-medium">
+                        Final pay ·{" "}
+                        {a.taxable
+                          ? "taxable, not pensionable"
+                          : "exempt from PAYE, not pensionable"}
+                      </span>
+                    ) : null}
                     <span className="block text-xs text-fg-muted">{a.reason}</span>
                   </td>
                   <td className={TDN}>
@@ -317,6 +332,21 @@ function EarningsStep({ d, canPrepare }: StepProps) {
         Gross pay on the Gross to net step already includes these items. Earnings are taxed and
         count toward pension only when marked; deductions come off after tax.
       </p>
+      {draft && canPrepare && finalPay && finalPayWorkers ? (
+        <div
+          className="flex flex-col gap-3 rounded-xl border border-line p-5"
+          data-testid="final-pay-items"
+        >
+          <h3 className="m-0 type-h3">Add a final-pay item</h3>
+          <p className="m-0 text-sm text-fg-muted">
+            Pay in lieu of untaken leave or notice is pre-filled from the leave balance and the
+            basic pay on the last day; change it with a reason. None of these items counts toward
+            pension. Redundancy pay is exempt from PAYE up to ₦50,000,000 a worker; only the excess
+            is taxed.
+          </p>
+          <AddFinalPayItemForm runId={d.run.id} workers={finalPayWorkers} />
+        </div>
+      ) : null}
       {draft && canPrepare ? (
         <div className="flex flex-col gap-3 rounded-xl border border-line p-5">
           <h3 className="m-0 type-h3">
@@ -324,9 +354,9 @@ function EarningsStep({ d, canPrepare }: StepProps) {
           </h3>
           {offCycle ? (
             <p className="m-0 text-sm text-fg-muted" data-testid="off-cycle-earnings-hint">
-              Off-cycle items are one-off, for the workers on this run. Leave encashment and
-              terminal benefits have no rule in the app yet: add each as an earning with a reason,
-              and confirm the amount and its tax with your tax adviser.
+              {finalPay
+                ? "Off-cycle items are one-off, for the workers on this run. Pay in lieu of leave or notice, gratuity and redundancy pay are final-pay items above, each with its own tax and pension rule; use this for anything else, such as a bonus."
+                : "Off-cycle items are one-off, for the workers on this run."}
             </p>
           ) : null}
           <AddAdjustmentForm runId={d.run.id} workers={d.workers} oneOffOnly={offCycle} />
@@ -1028,6 +1058,37 @@ async function RunPage({
     : (reversal ? REVERSAL_STATUS : RUN_STATUS)[d.run.status];
   const shownNet = reversal ? -d.run.totals.netKobo : d.run.totals.netKobo;
   const offCycle = d.run.kind === "off_cycle";
+  // Slice 5.9c: a final-pay draft's pre-fill figures, for the final-pay items form.
+  const finalPayWorkers: FinalPayWorker[] | null =
+    step === "earnings" &&
+    props.canPrepare &&
+    offCycle &&
+    d.run.offCycleReason === "final_pay" &&
+    d.run.status === "draft" &&
+    !d.run.discardedAt
+      ? await loadFinalPayPrefill(ctx.supabase, ctx.organisationId, d.run.id).then((m) =>
+          d.offCycleWorkers.flatMap((w) => {
+            const p = m.get(w.id);
+            return p
+              ? [
+                  {
+                    id: w.id,
+                    name: w.name,
+                    staffId: w.staffId,
+                    startDate: p.startDate,
+                    endDate: p.endDate,
+                    basicMonthlyKobo:
+                      p.basicMonthlyKobo === null ? null : p.basicMonthlyKobo.toString(),
+                    divisorDays: p.divisorDays,
+                    annualBalanceDays: p.annualBalanceDays,
+                    exemptCapKobo: p.exemptCapKobo.toString(),
+                    exemptUsedKobo: p.exemptUsedKobo.toString(),
+                  },
+                ]
+              : [];
+          }),
+        )
+      : null;
 
   return (
     <>
@@ -1060,7 +1121,7 @@ async function RunPage({
       <StepNav runId={d.run.id} step={step} />
       {step === "period" ? <PeriodStep {...props} /> : null}
       {step === "timesheets" ? <TimesheetsStep {...props} /> : null}
-      {step === "earnings" ? <EarningsStep {...props} /> : null}
+      {step === "earnings" ? <EarningsStep {...props} finalPayWorkers={finalPayWorkers} /> : null}
       {step === "anomalies" ? <AnomaliesStep {...props} /> : null}
       {step === "gross-to-net" ? (
         <GrossToNetStep {...props} explain={first(query.explain)} />

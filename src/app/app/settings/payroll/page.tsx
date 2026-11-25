@@ -14,6 +14,12 @@ import {
   type RuleSet,
 } from "@/lib/payroll/rule-set";
 import { loadRemitDueDays } from "@/server/payroll/remittance-data";
+import { addDays, lagosToday } from "@/lib/dates";
+import {
+  canSetHolidayPay,
+  loadHolidayPay,
+  loadLossOfOfficeCap,
+} from "@/server/payroll/holiday-pay";
 import { canSetRemittanceDueDays } from "@/server/payroll/remittances";
 import { canConfirmPayrollRules, canEditPayrollRules } from "@/server/payroll/rule-sets";
 import { loadPayrollRules, type RuleSetVersion } from "@/server/payroll/rule-sets-data";
@@ -22,6 +28,7 @@ import { peoplePageContext } from "@/server/people/page-context";
 import { RouteGate } from "../../_shell/slots";
 import { RemitDueDaysForm } from "../../payroll/remittances/_components/remittance-forms";
 import { ConfirmAdviserForm } from "./_components/payroll-rules-forms";
+import { HolidayPaySection } from "./_components/holiday-pay-section";
 
 export const metadata: Metadata = { title: "Payroll rules" };
 
@@ -68,9 +75,11 @@ async function PayrollRulesPage({
   searchParams: PageProps<"/app/settings/payroll">["searchParams"];
 }) {
   const [ctx, query] = await Promise.all([peoplePageContext(), searchParams]);
-  const [rules, dueDays] = await Promise.all([
+  const [rules, dueDays, holidayPay, exemptCap] = await Promise.all([
     loadPayrollRules(ctx.supabase, ctx.organisationId),
     loadRemitDueDays(ctx.supabase, ctx.organisationId),
+    loadHolidayPay(ctx.supabase, ctx.organisationId),
+    loadLossOfOfficeCap(ctx.supabase, ctx.organisationId),
   ]);
   const canEdit = canEditPayrollRules(ctx.role);
   const canConfirm = canConfirmPayrollRules(ctx.role);
@@ -176,6 +185,13 @@ async function PayrollRulesPage({
           .
         </p>
       </section>
+
+      <HolidayPaySection
+        settings={holidayPay}
+        exemptCapKobo={exemptCap}
+        canEdit={canSetHolidayPay(ctx.role)}
+        minDate={addDays(lagosToday(), 1)}
+      />
 
       {canConfirm && !confirmed ? (
         <section
