@@ -273,7 +273,7 @@ const leaveRefundSchema = z
       code: l.code,
       label: l.label,
       wantedKobo: l.wanted_kobo ?? null,
-      carriedKobo: l.carried_kobo ?? null,
+      ...(l.carried_kobo != null ? { carriedKobo: l.carried_kobo } : {}),
       amountKobo: l.amount_kobo,
       pensionable: l.pensionable,
       taxable: l.taxable,
