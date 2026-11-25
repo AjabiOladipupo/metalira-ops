@@ -765,22 +765,31 @@ describe("leave in a posted period: corrected in the next run (slice 5.7c lifts 
     });
     expect(ack.error).toBeNull();
     expect(
-      (await hr.client.rpc("submit_payroll_run", {
-        p_organisation_id: owner.orgId,
-        p_run_id: nov.runId,
-      })).error,
+      (
+        await hr.client.rpc("submit_payroll_run", {
+          p_organisation_id: owner.orgId,
+          p_run_id: nov.runId,
+        })
+      ).error,
     ).toBeNull();
     await runMutation(
-      { supabase: finance.client, userId: finance.id, organisationId: owner.orgId, role: "finance" },
+      {
+        supabase: finance.client,
+        userId: finance.id,
+        organisationId: owner.orgId,
+        role: "finance",
+      },
       approveRunSpec,
       { runId: nov.runId },
     );
     expect(
-      (await hr.client.rpc("cancel_leave_request", {
-        p_organisation_id: owner.orgId,
-        p_request_id: id,
-        p_reason: "Came to work after all",
-      })).error,
+      (
+        await hr.client.rpc("cancel_leave_request", {
+          p_organisation_id: owner.orgId,
+          p_request_id: id,
+          p_reason: "Came to work after all",
+        })
+      ).error,
     ).toBeNull();
     const dec = await runMutation(
       { supabase: hr.client, userId: hr.id, organisationId: owner.orgId, role: "hr" },

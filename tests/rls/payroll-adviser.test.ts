@@ -976,7 +976,12 @@ describe("the server engine under NTA 2025 v2 (coverage)", () => {
     process.env.SUPABASE_SECRET_KEY = env.secretKey;
     const c = await company("cap");
     const worker = await addPayrollWorker(admin, c.owner.orgId);
-    const ctx = { supabase: c.hr.client, userId: c.hr.id, organisationId: c.owner.orgId, role: "hr" as const };
+    const ctx = {
+      supabase: c.hr.client,
+      userId: c.hr.id,
+      organisationId: c.owner.orgId,
+      role: "hr" as const,
+    };
     const created = await runMutation(ctx, createRunSpec, { periodStart: OCT_START });
     const loan = await c.hr.client.rpc("add_payroll_adjustment", {
       p_organisation_id: c.owner.orgId,
