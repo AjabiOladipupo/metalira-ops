@@ -338,6 +338,13 @@ export const EXTRA_PAGES: readonly {
   // "Export CSV" from the People list (slice U.1, a route handler): every role that reads the
   // list, in its own scope (a line manager exports only their reportees; the route checks again).
   { href: "/app/people/export", roles: ["owner", "admin", "hr", "ops_manager", "line_manager"] },
+  // "Export selected to CSV" on the other lists (slice U.2, one route handler for clients, sites,
+  // attendance, timesheets, leave and the payroll lists): every role that reads one of them. The
+  // route checks each list's own readers and builds the file in the caller's scope.
+  {
+    href: "/app/export",
+    roles: ["owner", "admin", "hr", "finance", "ops_manager", "line_manager"],
+  },
   // A worker's page (slice 1.11): line managers open their own reportees to unlock phone
   // sign-in; RLS shows them no one else. Last, so the named People pages above win the tie.
   { href: "/app/people/[id]", roles: ["owner", "admin", "hr", "ops_manager", "line_manager"] },

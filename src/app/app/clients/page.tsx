@@ -5,7 +5,9 @@ import Link from "next/link";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { Illustration } from "@/components/illustration";
+import { ListSelectionBar } from "@/components/list-export";
 import { PageHeader } from "@/components/page-header";
+import { RowCheckbox, RowSelection, SelectAllCheckbox } from "@/components/row-selection";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +37,13 @@ function ClientStatus({ row }: { row: ClientRow }) {
 }
 
 const COLUMNS: Column<ClientRow>[] = [
+  // Slice U.2: tick clients to export them.
+  {
+    key: "select",
+    header: <SelectAllCheckbox label="Select all clients shown" />,
+    className: "w-10",
+    cell: (row) => <RowCheckbox rowId={row.id} label={`Select ${row.name}`} />,
+  },
   {
     key: "client",
     header: "Client",
@@ -162,17 +171,29 @@ async function ClientsList({
         <p role="status" className="m-0 text-sm text-fg-muted empty:sr-only">
           {query ? `${plural(rows.length, "client", "clients")} found` : ""}
         </p>
-        <DataTable
-          caption="Clients"
-          columns={COLUMNS}
-          rows={rows}
-          getRowId={(row) => row.id}
-          empty={
-            <p className="m-0 px-4 py-8 text-center text-sm text-fg-muted">
-              No clients match. <Link href="/app/clients">Show every client</Link>
-            </p>
-          }
-        />
+        {/* Keyed by the search, so another search starts with nothing ticked. */}
+        <RowSelection
+          key={query}
+          rowIds={rows.map((row) => row.id)}
+          matchingCount={rows.length}
+          noun={{ one: "client", many: "clients" }}
+        >
+          <ListSelectionBar
+            params={{ list: "clients" }}
+            noun={{ one: "client", many: "clients" }}
+          />
+          <DataTable
+            caption="Clients"
+            columns={COLUMNS}
+            rows={rows}
+            getRowId={(row) => row.id}
+            empty={
+              <p className="m-0 px-4 py-8 text-center text-sm text-fg-muted">
+                No clients match. <Link href="/app/clients">Show every client</Link>
+              </p>
+            }
+          />
+        </RowSelection>
       </section>
     </>
   );

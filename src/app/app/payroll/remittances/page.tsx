@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
+import { ListSelectionBar } from "@/components/list-export";
 import { PageHeader } from "@/components/page-header";
+import { RowCheckbox, RowSelection, SelectAllCheckbox } from "@/components/row-selection";
 import { Status } from "@/components/status";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
@@ -61,11 +63,18 @@ function RemittanceCard({
   const gap = paid ? paid.paidAmountKobo - due : 0n;
   return (
     <li
-      className="flex min-w-0 flex-col gap-4 rounded-xl border border-line p-4 sm:p-5"
+      className="relative flex min-w-0 flex-col gap-4 rounded-xl border border-line p-4 sm:p-5"
       data-testid="remittance"
       aria-label={title}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      {/* Slice U.2: tick remittances to export them. */}
+      <span className="absolute top-3.5 left-3.5 sm:top-4.5 sm:left-4.5">
+        <RowCheckbox
+          rowId={r.id}
+          label={`Select ${title}, period from ${formatDate(periodStart)}`}
+        />
+      </span>
+      <div className="flex flex-wrap items-start justify-between gap-2 pl-8">
         <div className="flex min-w-0 flex-col gap-1">
           <h3 className="m-0 text-base font-semibold break-words">{title}</h3>
           <p className="m-0 text-sm text-fg-muted">
@@ -227,7 +236,12 @@ async function RemittancesPage({
   const outstanding = sumKobo(all.map((r) => r.outstandingKobo));
 
   return (
-    <>
+    // Slice U.2: the whole page shares one row selection (the remittances are ticked per card).
+    <RowSelection
+      rowIds={all.map((r) => r.id)}
+      matchingCount={all.length}
+      noun={{ one: "remittance", many: "remittances" }}
+    >
       <PageHeader
         back={{ href: "/app/payroll", label: "Payroll run" }}
         eyebrow="Payroll"
@@ -259,6 +273,21 @@ async function RemittancesPage({
             Show every posted run
           </Link>
         </p>
+      ) : null}
+
+      {all.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 px-1">
+            <SelectAllCheckbox label="Select every remittance shown" />
+            <span aria-hidden className="text-sm text-fg-muted">
+              Select all
+            </span>
+          </div>
+          <ListSelectionBar
+            params={{ list: "remittances" }}
+            noun={{ one: "remittance", many: "remittances" }}
+          />
+        </div>
       ) : null}
 
       {runs.length === 0 ? (
@@ -301,7 +330,7 @@ async function RemittancesPage({
           );
         })
       )}
-    </>
+    </RowSelection>
   );
 }
 

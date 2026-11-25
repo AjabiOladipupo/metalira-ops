@@ -3,10 +3,19 @@
 import { useActionState, useMemo, useState } from "react";
 import { useFormStatus } from "react-dom";
 
+import { useRouter } from "next/navigation";
+
+import { BulkPreviewSheet } from "@/components/bulk-preview-sheet";
 import { DataTable, type Column } from "@/components/data-table";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { bulkSummary } from "@/lib/bulk-approve";
 import { inviteStatus, lagosDate, plural, type RosterWorker } from "@/lib/worker-invites";
+import type { InviteBulkAction, InviteBulkPreview } from "@/server/identity/worker-invite-bulk";
+import {
+  inviteBulkAction,
+  previewInviteBulkAction,
+} from "@/server/identity/worker-invite-bulk-actions";
 import { createInviteSheet, emailWorkerInvites } from "@/server/identity/worker-invite-actions";
 import type { InviteActionState } from "@/server/identity/worker-invite-state";
 
@@ -121,6 +130,63 @@ function InviteSheet({
   );
 }
 
+function invitePlan(value: InviteBulkPreview) {
+  const verb = value.action === "resend" ? "emailed" : "cancelled";
+  return {
+    passing: value.done.map((w) => ({
+      id: w.workerId,
+      title: w.name ?? "Unnamed",
+      detail: w.staffId ? `Staff ID ${w.staffId}` : undefined,
+    })),
+    skipped: value.skipped.map((w) => ({
+      id: w.workerId,
+      title: w.name ?? "Unnamed",
+      detail: w.staffId ? `Staff ID ${w.staffId}` : undefined,
+      reason: w.reason,
+    })),
+    summary: bulkSummary(
+      value.done.length,
+      value.skipped.map((w) => w.reason),
+      { verb },
+    ),
+    digest: value.selection.digest,
+  };
+}
+
+/**
+ * "Resend" and "Cancel invite" for the chosen workers (slice U.2): a preview of who is emailed
+ * or cancelled and who is skipped and why, then the confirm. Resends follow the shared email
+ * caps; anyone past them is skipped and listed.
+ */
+function InviteBulkButtons({ ids, onDone }: { ids: string[]; onDone: (message: string) => void }) {
+  const sheet = (action: InviteBulkAction) => (
+    <BulkPreviewSheet
+      key={action}
+      trigger={action === "resend" ? "Resend invites" : "Cancel invites"}
+      title={action === "resend" ? "Resend invites" : "Cancel invites"}
+      description={
+        action === "resend"
+          ? "Emails a fresh invite link to each chosen worker whose invite wasn't used; the old link stops working. Up to 500 at a time, within today's email limits."
+          : "Cancels each chosen worker's open invite, so its link stops working. Up to 500 at a time."
+      }
+      confirmLabel={(n) =>
+        `${action === "resend" ? "Resend" : "Cancel"} ${n} ${n === 1 ? "invite" : "invites"}`
+      }
+      pendingLabel={action === "resend" ? "Sending…" : "Cancelling…"}
+      preview={() => previewInviteBulkAction({ action, workerIds: ids })}
+      confirm={(expectedDigest) => inviteBulkAction({ action, workerIds: ids, expectedDigest })}
+      plan={invitePlan}
+      onDone={onDone}
+    />
+  );
+  return (
+    <>
+      {sheet("resend")}
+      {sheet("cancel")}
+    </>
+  );
+}
+
 /**
  * Pick workers (by site, or everyone not signed up), then email their invites or print a QR
  * sheet. The sheet shows only after the server has created the invites; the links are never
@@ -132,6 +198,8 @@ export function InvitesPanel({ workers }: { workers: RosterWorker[] }) {
   const [site, setSite] = useState(ALL);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [closedSheet, setClosedSheet] = useState<InviteActionState>(null);
+  const [bulkNotice, setBulkNotice] = useState<string | null>(null);
+  const router = useRouter();
 
   const now = useMemo(() => new Date(), []);
   const sites = useMemo(() => {
@@ -294,7 +362,20 @@ export function InvitesPanel({ workers }: { workers: RosterWorker[] }) {
             >
               Print invite sheet{noneChosen ? "" : ` (${chosen.length.toLocaleString("en-NG")})`}
             </SubmitWith>
+            {noneChosen ? null : (
+              <InviteBulkButtons
+                ids={chosen.map((w) => w.id)}
+                onDone={(message) => {
+                  setBulkNotice(message);
+                  setSelected(new Set());
+                  router.refresh();
+                }}
+              />
+            )}
           </div>
+          <p role="status" className="m-0 text-sm font-medium empty:hidden">
+            {bulkNotice ?? ""}
+          </p>
           <Message state={emailState} />
           {printState && !printState.ok ? <Message state={printState} /> : null}
         </div>

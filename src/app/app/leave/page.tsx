@@ -6,15 +6,21 @@ import { EmptyState } from "@/components/empty-state";
 import { Illustration } from "@/components/illustration";
 import { KpiTile } from "@/components/kpi-tile";
 import { PageHeader } from "@/components/page-header";
+import { RowCheckbox, RowSelection, SelectAllCheckbox } from "@/components/row-selection";
 import { Status, type StatusTone } from "@/components/status";
 import { addDays } from "@/lib/dates";
 import { formatLeaveRange, STATUS_LABELS } from "@/lib/leave/requests";
 import { cn } from "@/lib/utils";
-import { loadLeaveBoard, type LeaveRequestRow, type StepDecision } from "@/server/people/leave-data";
+import {
+  loadLeaveBoard,
+  type LeaveRequestRow,
+  type StepDecision,
+} from "@/server/people/leave-data";
 import { canEditLeaveSetup } from "@/server/people/leave-setup";
 import { peoplePageContext } from "@/server/people/page-context";
 
 import { RouteGate } from "../_shell/slots";
+import { LeaveBulkBar } from "./_components/leave-bulk";
 
 export const metadata: Metadata = { title: "Leave" };
 
@@ -43,7 +49,9 @@ function stepCell(
     if (row.canDecideStep1) return { tone: "action", label: "Yours to decide" };
     return {
       tone: "pending",
-      label: row.hasLineManager ? `Waiting · ${row.lineManagerName ?? "line manager"}` : "Waiting · ops",
+      label: row.hasLineManager
+        ? `Waiting · ${row.lineManagerName ?? "line manager"}`
+        : "Waiting · ops",
     };
   }
   if (row.status === "pending_hr") {
@@ -51,7 +59,8 @@ function stepCell(
       ? { tone: "action", label: "Yours to decide" }
       : { tone: "pending", label: "Waiting" };
   }
-  if (row.status === "pending_line_manager") return { tone: "pending", label: "After line manager" };
+  if (row.status === "pending_line_manager")
+    return { tone: "pending", label: "After line manager" };
   return { tone: "pending", label: "—" };
 }
 
@@ -74,8 +83,20 @@ function TabLink({ tab, current, label }: { tab: Tab; current: Tab; label: strin
   );
 }
 
-function RequestsTable({ rows }: { rows: LeaveRequestRow[] }) {
+function RequestsTable({ rows, canDecide }: { rows: LeaveRequestRow[]; canDecide: boolean }) {
   const columns: Column<LeaveRequestRow>[] = [
+    // Slice U.2: tick requests to approve them together or export them.
+    {
+      key: "select",
+      header: <SelectAllCheckbox label="Select all requests" />,
+      className: "w-10",
+      cell: (r) => (
+        <RowCheckbox
+          rowId={r.id}
+          label={`Select ${r.workerName}'s ${r.leaveTypeName.toLowerCase()} leave`}
+        />
+      ),
+    },
     {
       key: "worker",
       header: "Employee",
@@ -90,7 +111,9 @@ function RequestsTable({ rows }: { rows: LeaveRequestRow[] }) {
     {
       key: "dates",
       header: "Dates",
-      cell: (r) => <span className="whitespace-nowrap">{formatLeaveRange(r.startDate, r.endDate)}</span>,
+      cell: (r) => (
+        <span className="whitespace-nowrap">{formatLeaveRange(r.startDate, r.endDate)}</span>
+      ),
     },
     { key: "days", header: "Days", kind: "number", cell: (r) => r.days },
     {
@@ -123,7 +146,16 @@ function RequestsTable({ rows }: { rows: LeaveRequestRow[] }) {
       ),
     },
   ];
-  return <DataTable caption="Leave requests" columns={columns} rows={rows} getRowId={(r) => r.id} />;
+  return (
+    <RowSelection
+      rowIds={rows.map((r) => r.id)}
+      matchingCount={rows.length}
+      noun={{ one: "request", many: "requests" }}
+    >
+      <LeaveBulkBar canDecide={canDecide} />
+      <DataTable caption="Leave requests" columns={columns} rows={rows} getRowId={(r) => r.id} />
+    </RowSelection>
+  );
 }
 
 const DAY_LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -149,13 +181,20 @@ function CalendarGrid({ rows, today }: { rows: LeaveRequestRow[]; today: string 
       <table className="w-full min-w-[720px] border-collapse text-sm">
         <thead>
           <tr>
-            <th scope="col" className="sticky left-0 bg-background px-3 py-2 text-left font-semibold">
+            <th
+              scope="col"
+              className="sticky left-0 bg-background px-3 py-2 text-left font-semibold"
+            >
               Employee
             </th>
             {days.map((d) => {
               const weekday = (new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7;
               return (
-                <th key={d} scope="col" className="px-1 py-2 text-center text-xs font-medium text-fg-muted">
+                <th
+                  key={d}
+                  scope="col"
+                  className="px-1 py-2 text-center text-xs font-medium text-fg-muted"
+                >
                   <span className="block">{DAY_LETTERS[weekday]}</span>
                   <span className="block text-foreground tabular-nums">{Number(d.slice(8))}</span>
                 </th>
@@ -166,7 +205,10 @@ function CalendarGrid({ rows, today }: { rows: LeaveRequestRow[]; today: string 
         <tbody>
           {[...byWorker.values()].map((list) => (
             <tr key={list[0]!.workerId} className="border-t border-line">
-              <th scope="row" className="sticky left-0 bg-background px-3 py-2 text-left font-normal">
+              <th
+                scope="row"
+                className="sticky left-0 bg-background px-3 py-2 text-left font-normal"
+              >
                 <span className="flex flex-col">
                   <span className="font-semibold">{list[0]!.workerName}</span>
                   <span className="text-xs text-fg-muted">
@@ -237,7 +279,11 @@ async function LeaveBoardPage({
         <KpiTile label="Starting in 14 days" value={String(board.startingIn14Days)} />
       </section>
 
-      <div role="tablist" aria-label="Leave" className="flex gap-1 overflow-x-auto border-b border-line">
+      <div
+        role="tablist"
+        aria-label="Leave"
+        className="flex gap-1 overflow-x-auto border-b border-line"
+      >
         <TabLink tab="requests" current={tab} label="Requests" />
         <TabLink tab="calendar" current={tab} label="Calendar" />
         <TabLink tab="policies" current={tab} label="Policies" />
@@ -251,7 +297,7 @@ async function LeaveBoardPage({
           />
         ) : (
           <div className="flex flex-col gap-3">
-            <RequestsTable rows={board.requests} />
+            <RequestsTable rows={board.requests} canDecide={board.yours > 0} />
             <p className="m-0 text-[13px] text-fg-muted">
               Requests go to the line manager first, then HR. The balance drops when HR approves.
               {ctx.role === "ops_manager" ? " You see dates and type only, for the roster." : ""}
@@ -264,7 +310,8 @@ async function LeaveBoardPage({
         <div className="flex flex-col gap-3">
           <CalendarGrid rows={board.calendar} today={board.today} />
           <p className="m-0 text-[13px] text-fg-muted">
-            The next 14 days. Solid bars are approved leave; outlined bars are waiting for a decision.
+            The next 14 days. Solid bars are approved leave; outlined bars are waiting for a
+            decision.
           </p>
         </div>
       ) : null}

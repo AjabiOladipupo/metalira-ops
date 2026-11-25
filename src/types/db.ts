@@ -2414,11 +2414,20 @@ isOneToOne: false
 "begin_punch_selfie_upload":
 { Args: { "p_actor": string,"p_punch_id": string }; Returns: undefined
                            },
+"bulk_approve_leave":
+{ Args: { "p_dry_run"?: boolean,"p_organisation_id": string,"p_request_ids": (string)[] }; Returns: Json
+                           },
+"bulk_cancel_worker_invites":
+{ Args: { "p_dry_run"?: boolean,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
 "bulk_end_employment":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_reason": string,"p_worker_ids": (string)[] }; Returns: Json
                            },
 "bulk_end_employment_preview":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
+"bulk_resend_worker_invites":
+{ Args: { "p_dry_run"?: boolean,"p_global_cap"?: number,"p_org_cap"?: number,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
                            },
 "bulk_set_department":
 { Args: { "p_department_id": string,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json

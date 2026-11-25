@@ -1,7 +1,14 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
+import { ListSelectionBar } from "@/components/list-export";
 import { PageHeader } from "@/components/page-header";
+import {
+  RowCheckbox,
+  RowSelection,
+  SelectAllCheckbox,
+  selectableRowClass,
+} from "@/components/row-selection";
 import { Status } from "@/components/status";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatLeaveRange } from "@/lib/leave/requests";
@@ -72,62 +79,83 @@ async function PayslipsPage({
       (made < payslips.length || (canSeeNotices && notified < payslips.length)) ? (
         <PublishPayslipsForm runId={d.run.id} />
       ) : null}
-      <div className="relative overflow-x-auto rounded-xl border border-line">
-        <table className="w-full border-collapse text-sm" aria-label="Payslips">
-          <thead className="bg-surface">
-            <tr>
-              <th className={TH}>Worker</th>
-              <th className={THN}>Gross</th>
-              <th className={THN}>Net pay</th>
-              <th className={TH}>PDF</th>
-              {canSeeNotices ? <th className={TH}>Notice</th> : null}
-              <th className={TH}>
-                <span className="sr-only">Download</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {payslips.map((p) => {
-              const doc = docs.get(p.id);
-              return (
-                <tr key={p.id} className="border-t border-line" data-testid="payslip-row">
-                  <td className={TD}>
-                    <span className="flex flex-col">
-                      <span className="font-semibold">{p.workerName}</span>
-                      <span className="text-xs text-fg-muted">
-                        {[p.staffId, p.jobTitle].filter(Boolean).join(" · ")}
-                      </span>
-                    </span>
-                  </td>
-                  <td className={TDN}>{naira(p.grossKobo)}</td>
-                  <td className={cn(TDN, "font-semibold")}>{naira(p.netKobo)}</td>
-                  <td className={TD}>
-                    {doc?.madeAt ? (
-                      <Status tone="done">Made {formatDateTime(doc.madeAt)}</Status>
-                    ) : (
-                      <Status tone="pending">{released ? "Not made yet" : "At release"}</Status>
-                    )}
-                  </td>
-                  {canSeeNotices ? (
+      {/* Slice U.2: tick payslips to export them (amounts only; never bank or RSA details). */}
+      <RowSelection
+        rowIds={payslips.map((p) => p.id)}
+        matchingCount={payslips.length}
+        noun={{ one: "payslip", many: "payslips" }}
+      >
+        <ListSelectionBar
+          params={{ list: "payslips", runId: d.run.id }}
+          noun={{ one: "payslip", many: "payslips" }}
+        />
+        <div className="relative overflow-x-auto rounded-xl border border-line">
+          <table className="w-full border-collapse text-sm" aria-label="Payslips">
+            <thead className="bg-surface">
+              <tr>
+                <th className="w-10 px-3 py-2.5">
+                  <SelectAllCheckbox label="Select all payslips" />
+                </th>
+                <th className={TH}>Worker</th>
+                <th className={THN}>Gross</th>
+                <th className={THN}>Net pay</th>
+                <th className={TH}>PDF</th>
+                {canSeeNotices ? <th className={TH}>Notice</th> : null}
+                <th className={TH}>
+                  <span className="sr-only">Download</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {payslips.map((p) => {
+                const doc = docs.get(p.id);
+                return (
+                  <tr
+                    key={p.id}
+                    className={cn("border-t border-line", selectableRowClass)}
+                    data-testid="payslip-row"
+                  >
+                    <td className="px-3 py-3">
+                      <RowCheckbox rowId={p.id} label={`Select ${p.workerName}`} />
+                    </td>
                     <td className={TD}>
-                      {doc?.notified ? (
-                        <Status tone="done">Told</Status>
+                      <span className="flex flex-col">
+                        <span className="font-semibold">{p.workerName}</span>
+                        <span className="text-xs text-fg-muted">
+                          {[p.staffId, p.jobTitle].filter(Boolean).join(" · ")}
+                        </span>
+                      </span>
+                    </td>
+                    <td className={TDN}>{naira(p.grossKobo)}</td>
+                    <td className={cn(TDN, "font-semibold")}>{naira(p.netKobo)}</td>
+                    <td className={TD}>
+                      {doc?.madeAt ? (
+                        <Status tone="done">Made {formatDateTime(doc.madeAt)}</Status>
                       ) : (
-                        <Status tone="pending">Not yet</Status>
+                        <Status tone="pending">{released ? "Not made yet" : "At release"}</Status>
                       )}
                     </td>
-                  ) : null}
-                  <td className={cn(TD, "text-right")}>
-                    {doc?.documentId ? (
-                      <PayslipPdfButton payslipId={p.id} workerName={p.workerName} />
+                    {canSeeNotices ? (
+                      <td className={TD}>
+                        {doc?.notified ? (
+                          <Status tone="done">Told</Status>
+                        ) : (
+                          <Status tone="pending">Not yet</Status>
+                        )}
+                      </td>
                     ) : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    <td className={cn(TD, "text-right")}>
+                      {doc?.documentId ? (
+                        <PayslipPdfButton payslipId={p.id} workerName={p.workerName} />
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </RowSelection>
       <p className="m-0 text-[13px] text-fg-muted">
         Each PDF opens through a link that lasts 60 seconds, and every download is recorded. Bank
         accounts and RSA PINs show the last 4 digits only.
