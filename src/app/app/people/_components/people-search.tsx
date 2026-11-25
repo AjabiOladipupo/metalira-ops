@@ -6,21 +6,18 @@ import { Input } from "@/components/ui/input";
 
 /**
  * Search by name or staff ID. A plain GET form, so the result is a shareable URL. It keeps the
- * department filter and page size and leaves out the page, so a new search starts on page 1.
+ * filters and page size (`keep`) and leaves out the page, so a new search starts on page 1.
  */
 export function PeopleSearch({
   query,
-  departmentId,
-  size,
+  keep = {},
 }: {
   query: string;
-  departmentId: string;
-  /** A non-default page size to keep. */
-  size?: number;
+  /** Other search params to keep: the filters and a non-default page size. */
+  keep?: Readonly<Record<string, string>>;
 }) {
-  const clear = new URLSearchParams();
-  if (departmentId) clear.set("dept", departmentId);
-  if (size) clear.set("size", String(size));
+  const kept = Object.entries(keep).filter(([name, value]) => name !== "q" && value);
+  const clear = new URLSearchParams(kept);
   const clearHref = clear.size ? `/app/people?${clear.toString()}` : "/app/people";
   return (
     <form
@@ -29,8 +26,9 @@ export function PeopleSearch({
       method="get"
       className="flex flex-wrap items-center gap-2"
     >
-      {departmentId ? <input type="hidden" name="dept" value={departmentId} /> : null}
-      {size ? <input type="hidden" name="size" value={size} /> : null}
+      {kept.map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
       <label htmlFor="people-search" className="sr-only">
         Search by name or staff ID
       </label>

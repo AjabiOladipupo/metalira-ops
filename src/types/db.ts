@@ -2414,6 +2414,18 @@ isOneToOne: false
 "begin_punch_selfie_upload":
 { Args: { "p_actor": string,"p_punch_id": string }; Returns: undefined
                            },
+"bulk_end_employment":
+{ Args: { "p_end_date": string,"p_organisation_id": string,"p_reason": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
+"bulk_end_employment_preview":
+{ Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
+"bulk_set_department":
+{ Args: { "p_department_id": string,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
+"bulk_set_line_manager":
+{ Args: { "p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
 "cancel_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string }; Returns: undefined
                            },

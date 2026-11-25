@@ -86,10 +86,13 @@ const FORMULA_START = /^[=+\-@\t\r]/;
 /**
  * One CSV cell for a file people will open in Excel. A value starting with `=`, `+`, `-`, `@`,
  * tab or carriage return is prefixed with `'` so it shows as text and never runs as a formula
- * (CSV formula injection); then the cell is quoted if it holds a quote, comma or line break.
+ * (CSV formula injection); so is one that starts that way after leading spaces (" =1+1"), since
+ * some spreadsheet apps trim before reading a formula. Then the cell is quoted if it holds a
+ * quote, comma or line break.
  */
 export function csvCell(value: string): string {
-  const safe = FORMULA_START.test(value) ? `'${value}` : value;
+  const risky = FORMULA_START.test(value) || FORMULA_START.test(value.trimStart());
+  const safe = risky ? `'${value}` : value;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 

@@ -2,14 +2,23 @@ import "server-only";
 
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
-import { MANAGER_ROLES, ROLE_LABELS, isRole, type Role } from "@/lib/roles";
+import { canReadPay } from "@/lib/pay-access";
+import {
+  EMPTY_FILTERS,
+  appRoleOf,
+  matchesPeopleFilters,
+  normaliseTitle,
+  type AppRole,
+  type PeopleFilters,
+} from "@/lib/people-filters";
+import { MANAGER_ROLES, ROLE_LABELS, isRole, type ManagerRole, type Role } from "@/lib/roles";
 import {
   encodeLineManager,
   fullName,
   isMapped,
-  matchesPeopleSearch,
   type EmploymentType,
   type LineManagerRef,
+  type PayType,
 } from "@/lib/people";
 import type { Kobo } from "@/lib/money";
 import type { Database } from "@/types/db";
@@ -181,6 +190,33 @@ export interface PeopleRow {
   /** The first day of site or project changes saved for later (the next shift), if any. */
   changesFrom: string | null;
   mapped: boolean;
+  status: Database["public"]["Enums"]["worker_status"];
+  employmentType: EmploymentType;
+  startDate: string;
+  endDate: string | null;
+  /** App access: the role of the login linked to this record, or null without one. */
+  appRole: AppRole | null;
+  /** The pay version in force today: read only for the roles that see pay, null otherwise. */
+  payType: PayType | null;
+  /** Active, invited to the worker app and not signed up yet (owner, admin and hr only). */
+  invited: boolean;
+}
+
+/** A filter choice: a value and its label, with how many active employees have it. */
+export interface FilterOption {
+  value: string;
+  label: string;
+}
+
+/** The choices the filters offer, from the employees the caller can see. */
+export interface PeopleFilterOptions {
+  sites: FilterOption[];
+  lineManagers: FilterOption[];
+  jobTitles: FilterOption[];
+  /** Whether the employment type (as paid) filter applies: the roles that see pay. */
+  payTypes: boolean;
+  /** Whether "Invited" applies: the roles that read worker invites. */
+  invited: boolean;
 }
 
 export interface DepartmentSummary {
@@ -193,7 +229,7 @@ export interface DepartmentSummary {
 }
 
 export interface PeopleDirectory {
-  /** Active employees matching the search and department filter, by name. */
+  /** Employees matching the search and filters (active ones unless the status says otherwise), by name. */
   rows: PeopleRow[];
   /** Active employees in the company, before filters. */
   activeCount: number;
@@ -204,6 +240,9 @@ export interface PeopleDirectory {
   departments: DepartmentSummary[];
   /** The active employee asked for by `selectedId`, whatever the filters, or null. */
   selected: PeopleRow | null;
+  filterOptions: PeopleFilterOptions;
+  /** Every employee the caller can read, active and ended, before filters (server use only). */
+  everyone: PeopleRow[];
 }
 
 interface WorkerListRow {
@@ -216,47 +255,140 @@ interface WorkerListRow {
   line_manager_worker_id: string | null;
   line_manager_membership_id: string | null;
   status: Database["public"]["Enums"]["worker_status"];
+  employment_type: EmploymentType;
+  start_date: string;
+  end_date: string | null;
+}
+
+/** Who reads invites (owner, admin, hr: worker_invites and worker_credentials RLS). */
+const INVITE_READERS: readonly ManagerRole[] = ["owner", "admin", "hr"];
+
+/**
+ * App access by worker id: the role of the login linked to each worker record (memberships are
+ * read by every manager role). A worker login with reportees is a supervisor.
+ */
+async function loadAppRoles(
+  supabase: Client,
+  organisationId: string,
+  hasReportees: (workerId: string) => boolean,
+): Promise<Map<string, AppRole>> {
+  const rows = await readAll<{ worker_id: string | null; role: string }>("logins", (from, to) =>
+    supabase
+      .from("memberships")
+      .select("worker_id, role")
+      .eq("organisation_id", organisationId)
+      .not("worker_id", "is", null)
+      .order("id")
+      .range(from, to),
+  );
+  const roles = new Map<string, AppRole>();
+  for (const row of rows) {
+    if (!row.worker_id) continue;
+    const role = appRoleOf(row.role, hasReportees(row.worker_id));
+    if (role) roles.set(row.worker_id, role);
+  }
+  return roles;
+}
+
+/** Pay type in force today, by worker: no amounts are read. Only for the roles that see pay. */
+async function loadPayTypes(
+  supabase: Client,
+  organisationId: string,
+  today: string,
+): Promise<Map<string, PayType>> {
+  const rows = await readAll<{ worker_id: string; pay_type: PayType }>("pay types", (from, to) =>
+    supabase
+      .from("pay_rates")
+      .select("worker_id, pay_type")
+      .eq("organisation_id", organisationId)
+      .lte("effective_from", today)
+      .or(`effective_to.is.null,effective_to.gte.${today}`)
+      .order("id")
+      .range(from, to),
+  );
+  return new Map(rows.map((r) => [r.worker_id, r.pay_type]));
+}
+
+/** Active workers invited to the worker app who have not signed up yet (open, unexpired invite). */
+async function loadInvitedIds(supabase: Client, organisationId: string): Promise<Set<string>> {
+  const now = new Date().toISOString();
+  const [invites, credentials] = await Promise.all([
+    readAll<{ worker_id: string }>("invites", (from, to) =>
+      supabase
+        .from("worker_invites")
+        .select("worker_id")
+        .eq("organisation_id", organisationId)
+        .is("used_at", null)
+        .is("revoked_at", null)
+        .gt("expires_at", now)
+        .order("id")
+        .range(from, to),
+    ),
+    readAll<{ worker_id: string }>("logins", (from, to) =>
+      supabase
+        .from("worker_credentials")
+        .select("worker_id")
+        .eq("organisation_id", organisationId)
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+  const signedUp = new Set(credentials.map((c) => c.worker_id));
+  return new Set(invites.map((i) => i.worker_id).filter((id) => !signedUp.has(id)));
 }
 
 /** A department filter value: a department id, or "none" for employees without one. */
 export const NO_DEPARTMENT = "none";
 
+/** What the directory is asked for: the list filters, the employee picked for the panel. */
+export type DirectoryFilters = Partial<PeopleFilters> & { selectedId?: string };
+
 /**
- * The active employees, their department, line manager, current site and projects, and the
- * department tiles. Filters apply to `rows` only; the counts are company-wide.
+ * The employees, their department, line manager, current site and projects, and the department
+ * tiles. Filters apply to `rows` only; the counts are company-wide and count active employees.
+ * `role` decides the optional reads: pay type for the roles that see pay, invites for the roles
+ * that send them (RLS returns nothing to anyone else anyway).
  */
 export async function loadPeopleDirectory(
   supabase: Client,
   organisationId: string,
   today: string,
-  filters: { query?: string; departmentId?: string; selectedId?: string } = {},
+  filters: DirectoryFilters = {},
+  role?: ManagerRole,
 ): Promise<PeopleDirectory> {
-  const [workers, departments, sites, projects, assignments, managers] = await Promise.all([
-    readAll<WorkerListRow>("employees", (from, to) =>
-      supabase
-        .from("workers")
-        .select(
-          "id, staff_id, first_name, last_name, job_title, department_id, line_manager_worker_id, line_manager_membership_id, status",
-        )
-        .eq("organisation_id", organisationId)
-        .order("id")
-        .range(from, to),
-    ),
-    readAll<{ id: string; name: string; head_worker_id: string | null }>(
-      "departments",
-      (from, to) =>
+  const seePay = role ? canReadPay(role) : false;
+  const seeInvites = role ? INVITE_READERS.includes(role) : false;
+  const [workers, departments, sites, projects, assignments, managers, payTypes, invited] =
+    await Promise.all([
+      readAll<WorkerListRow>("employees", (from, to) =>
         supabase
-          .from("departments")
-          .select("id, name, head_worker_id")
+          .from("workers")
+          .select(
+            "id, staff_id, first_name, last_name, job_title, department_id, line_manager_worker_id, line_manager_membership_id, status, employment_type, start_date, end_date",
+          )
           .eq("organisation_id", organisationId)
           .order("id")
           .range(from, to),
-    ),
-    loadNames(supabase, "sites", organisationId),
-    loadNames(supabase, "projects", organisationId),
-    loadCurrentAssignments(supabase, organisationId, today),
-    loadManagerUsers(supabase, organisationId),
-  ]);
+      ),
+      readAll<{ id: string; name: string; head_worker_id: string | null }>(
+        "departments",
+        (from, to) =>
+          supabase
+            .from("departments")
+            .select("id, name, head_worker_id")
+            .eq("organisation_id", organisationId)
+            .order("id")
+            .range(from, to),
+      ),
+      loadNames(supabase, "sites", organisationId),
+      loadNames(supabase, "projects", organisationId),
+      loadCurrentAssignments(supabase, organisationId, today),
+      loadManagerUsers(supabase, organisationId),
+      seePay
+        ? loadPayTypes(supabase, organisationId, today)
+        : Promise.resolve(new Map<string, PayType>()),
+      seeInvites ? loadInvitedIds(supabase, organisationId) : Promise.resolve(new Set<string>()),
+    ]);
 
   const workerName = new Map(
     workers.map((w) => [w.id, fullName({ firstName: w.first_name, lastName: w.last_name })]),
@@ -269,9 +401,14 @@ export async function loadPeopleDirectory(
     list.push(a);
     byWorker.set(a.worker_id, list);
   }
+  const supervisors = new Set(
+    workers.flatMap((w) =>
+      w.status === "active" && w.line_manager_worker_id ? [w.line_manager_worker_id] : [],
+    ),
+  );
+  const appRoles = await loadAppRoles(supabase, organisationId, (id) => supervisors.has(id));
 
-  const active = workers.filter((w) => w.status === "active");
-  const all: PeopleRow[] = active.map((w) => {
+  const everyone: PeopleRow[] = workers.map((w) => {
     const current = byWorker.get(w.id) ?? [];
     const siteIds = unique(current.map((a) => a.site_id));
     const projectIds = unique(current.map((a) => a.project_id));
@@ -308,21 +445,25 @@ export async function loadPeopleDirectory(
         hasLineManager: Boolean(w.line_manager_worker_id || w.line_manager_membership_id),
         siteIds,
       }),
+      status: w.status,
+      employmentType: w.employment_type,
+      startDate: w.start_date,
+      endDate: w.end_date,
+      appRole: appRoles.get(w.id) ?? null,
+      payType: payTypes.get(w.id) ?? null,
+      invited: w.status === "active" && invited.has(w.id),
     };
   });
+  const all = everyone.filter((r) => r.status === "active");
 
   const counts = new Map<string, number>();
   for (const row of all) {
     if (row.departmentId) counts.set(row.departmentId, (counts.get(row.departmentId) ?? 0) + 1);
   }
 
-  const query = filters.query ?? "";
-  const dept = filters.departmentId;
-  const rows = all
-    .filter((r) => matchesPeopleSearch(r, query))
-    .filter((r) =>
-      !dept ? true : dept === NO_DEPARTMENT ? r.departmentId === null : r.departmentId === dept,
-    )
+  const wanted = withDefaults(filters);
+  const rows = everyone
+    .filter((r) => matchesPeopleFilters(r, wanted))
     .sort(
       (a, b) =>
         a.name.localeCompare(b.name, "en", { sensitivity: "base" }) ||
@@ -344,6 +485,58 @@ export async function loadPeopleDirectory(
       }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     selected: filters.selectedId ? (all.find((r) => r.id === filters.selectedId) ?? null) : null,
+    filterOptions: {
+      ...filterOptionsFor(everyone, sites),
+      payTypes: seePay,
+      invited: seeInvites,
+    },
+    everyone,
+  };
+}
+
+/** Filters with every key set: the ones given, the defaults for the rest. */
+export function withDefaults(filters: Partial<PeopleFilters>): PeopleFilters {
+  return {
+    q: filters.q ?? EMPTY_FILTERS.q,
+    dept: filters.dept ?? EMPTY_FILTERS.dept,
+    site: filters.site ?? EMPTY_FILTERS.site,
+    manager: filters.manager ?? EMPTY_FILTERS.manager,
+    title: filters.title ?? EMPTY_FILTERS.title,
+    role: filters.role ?? EMPTY_FILTERS.role,
+    type: filters.type ?? EMPTY_FILTERS.type,
+    status: filters.status ?? EMPTY_FILTERS.status,
+  };
+}
+
+const byLabel = (a: FilterOption, b: FilterOption) =>
+  a.label.localeCompare(b.label, "en", { sensitivity: "base" });
+
+/**
+ * The site, line-manager and job-title choices: the ones in use by the people the caller can
+ * see (a select of every worker in the company would be unusable), by name.
+ */
+export function filterOptionsFor(
+  people: readonly {
+    siteIds: readonly string[];
+    lineManager: string;
+    lineManagerName: string | null;
+    jobTitle: string | null;
+  }[],
+  siteNames: ReadonlyMap<string, string>,
+): Pick<PeopleFilterOptions, "sites" | "lineManagers" | "jobTitles"> {
+  const sites = new Map<string, string>();
+  const managers = new Map<string, string>();
+  const titles = new Map<string, string>();
+  for (const p of people) {
+    for (const id of p.siteIds) sites.set(id, siteNames.get(id) ?? "Site");
+    if (p.lineManager) managers.set(p.lineManager, p.lineManagerName ?? "Manager");
+    const key = normaliseTitle(p.jobTitle);
+    if (key && !titles.has(key)) titles.set(key, (p.jobTitle ?? "").trim().replace(/\s+/g, " "));
+  }
+  return {
+    sites: [...sites].map(([value, label]) => ({ value, label })).sort(byLabel),
+    lineManagers: [...managers].map(([value, label]) => ({ value, label })).sort(byLabel),
+    jobTitles: [...titles.values()].map((t) => ({ value: t, label: t })).sort(byLabel),
   };
 }
 
