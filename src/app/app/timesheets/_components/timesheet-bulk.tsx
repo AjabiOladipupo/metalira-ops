@@ -39,6 +39,7 @@ function plan(value: BulkTimesheetResult) {
       { verb: "approved" },
     ),
     digest: value.selection.digest,
+    act: value.selection.act,
   };
 }
 
@@ -60,9 +61,7 @@ export function TimesheetBulkBar({ period, canDecide }: { period: string; canDec
             confirmLabel={(n) => `Approve ${n} ${n === 1 ? "day" : "days"}`}
             pendingLabel="Approving…"
             preview={() => previewBulkTimesheetAction({ period, lineIds: ids })}
-            confirm={(expectedDigest) =>
-              bulkApproveTimesheetAction({ period, lineIds: ids, expectedDigest })
-            }
+            confirm={(signed) => bulkApproveTimesheetAction({ period, lineIds: ids, ...signed })}
             plan={plan}
             onDone={(message) => {
               done(message);

@@ -3,7 +3,7 @@
  * is not failing: the preview says "N will be approved, M skipped" with each reason, the codes map
  * to plain words (unknown codes fall back safely), and a confirm only acts on the preview's set.
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   INVITE_SKIP_TEXT,
@@ -18,7 +18,7 @@ import {
   LIST_CHANGED,
   ListChanged,
   NotInList,
-  confirmSelection,
+  confirmPlan,
   idSet,
   previewedSet,
   resolveSelection,
@@ -148,26 +148,67 @@ describe("timesheet and invite skip reasons", () => {
   });
 });
 
-describe("the selection guard", () => {
-  const visible = idSet([A, B]);
+describe("the selection guard (security review M1)", () => {
+  const visible = idSet([A, B, C]);
+  const scope = {
+    action: "leave.bulk_approve",
+    userId: "d0000000-0000-4000-8000-000000000004",
+    organisationId: "e0000000-0000-4000-8000-000000000005",
+  };
+
+  beforeAll(() => {
+    // A throwaway 32-byte key: the digest is keyed with a subkey of the personal data key.
+    process.env.PII_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
+  });
 
   it("resolves ticked ids the caller can read, distinct", () => {
     expect(resolveSelection([A, B, A.toUpperCase()], visible)).toEqual([A, B]);
   });
 
   it("refuses an id the caller can't read (another company's or out of scope)", () => {
-    expect(() => resolveSelection([A, C], visible)).toThrow(NotInList);
+    expect(() => resolveSelection([A, "f0000000-0000-4000-8000-000000000006"], visible)).toThrow(
+      NotInList,
+    );
   });
 
-  it("confirms only the preview's set, whatever the order", () => {
-    const preview = previewedSet([A, B]);
-    expect(preview.count).toBe(2);
-    expect(confirmSelection([B, A], visible, preview.digest).sort()).toEqual([A, B]);
+  it("confirms the preview's act set, and leaves the rest of the ticked ids alone", () => {
+    const preview = previewedSet(scope, [A, B, C], [A]);
+    expect(preview.count).toBe(3);
+    expect(preview.act).toEqual([A]);
+    const plan = confirmPlan(scope, [C, B, A], visible, [A], preview.digest);
+    expect(plan.act).toEqual([A]);
+    expect(plan.rest.sort()).toEqual([B, C]);
   });
 
-  it("refuses with 'the list changed' when the set differs or a row is gone", () => {
-    const preview = previewedSet([A, B]);
-    expect(() => confirmSelection([A], visible, preview.digest)).toThrow(ListChanged);
-    expect(() => confirmSelection([A, B], idSet([A]), preview.digest)).toThrow(LIST_CHANGED);
+  it("refuses an act set the preview didn't sign, even within the ticked ids", () => {
+    const preview = previewedSet(scope, [A, B, C], [A]);
+    // B and C were skipped in the preview; a confirm can't add them back.
+    expect(() => confirmPlan(scope, [A, B, C], visible, [A, B, C], preview.digest)).toThrow(
+      ListChanged,
+    );
+  });
+
+  it("binds the digest to the user, the company and the action", () => {
+    const preview = previewedSet(scope, [A, B], [A, B]);
+    for (const other of [
+      { ...scope, userId: "d0000000-0000-4000-8000-000000000009" },
+      { ...scope, organisationId: "e0000000-0000-4000-8000-000000000009" },
+      { ...scope, action: "timesheets.bulk_approve" },
+    ]) {
+      expect(() => confirmPlan(other, [A, B], visible, [A, B], preview.digest)).toThrow(
+        ListChanged,
+      );
+    }
+  });
+
+  it("refuses with 'the list changed' when the ticked set differs or a row is gone", () => {
+    const preview = previewedSet(scope, [A, B], [A, B]);
+    expect(() => confirmPlan(scope, [A], visible, [A], preview.digest)).toThrow(ListChanged);
+    expect(() => confirmPlan(scope, [A, B], idSet([A]), [A, B], preview.digest)).toThrow(
+      LIST_CHANGED,
+    );
+    expect(() => confirmPlan(scope, [A, B, C], visible, [A, C], preview.digest)).toThrow(
+      ListChanged,
+    );
   });
 });

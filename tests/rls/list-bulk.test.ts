@@ -299,6 +299,8 @@ async function lineStatus(id: string): Promise<string> {
 }
 
 beforeAll(async () => {
+  // The preview digest is keyed with a subkey of the personal data key (any throwaway key here).
+  process.env.PII_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
   admin = adminClient();
   db = await pgClient();
   owner = await createTenantUser("lb-owner", "List Bulk Org");
@@ -369,8 +371,8 @@ describe("bulk approve leave", () => {
     expect(preview.approved.every((x) => x.step === "line_manager")).toBe(true);
     const skipped = Object.fromEntries(preview.skipped.map((s) => [s.id, s]));
     expect(skipped[ownReq]).toMatchObject({ code: "own" });
-    // Out of the line manager's scope: skipped, and without the worker's name.
-    expect(skipped[outsiderReq]).toMatchObject({ code: "not_yours", worker_name: null });
+    // Out of the line manager's scope: skipped as not found, with no details.
+    expect(skipped[outsiderReq]).toEqual({ id: outsiderReq, code: "not_found" });
     for (const id of ids) expect(await leaveStatus(id)).toBe("pending_line_manager");
     expect(await auditCount("leave.bulk_approved")).toBe(batchesBefore);
 
@@ -484,7 +486,7 @@ describe("bulk approve leave", () => {
     ).rejects.toBeInstanceOf(NotInList);
   });
 
-  it("refuses a confirm whose selection isn't the preview's (the digest guard)", async () => {
+  it("refuses a confirm whose selection or act set isn't the preview's (the digest guard)", async () => {
     if (!roomInYear) return;
     const ctx = {
       supabase: owner.client,
@@ -498,10 +500,25 @@ describe("bulk approve leave", () => {
     const yReq = await requestLeave(await workerSession(y), annual, start, start);
     const preview = await previewBulkLeaveSpec.run({ ...ctx, data: { requestIds: [xReq] } });
     expect(preview.selection.count).toBe(1);
+    expect(preview.selection.act).toEqual([xReq]);
     await expect(
       bulkApproveLeaveSpec.run({
         ...ctx,
-        data: { requestIds: [xReq, yReq], expectedDigest: preview.selection.digest },
+        data: {
+          requestIds: [xReq, yReq],
+          actIds: [xReq],
+          expectedDigest: preview.selection.digest,
+        },
+      }),
+    ).rejects.toMatchObject({ refusal: "MLLB3" });
+    // The digest is bound to the user: HR can't replay the owner's preview.
+    await expect(
+      bulkApproveLeaveSpec.run({
+        ...ctx,
+        supabase: staff.hr.client,
+        userId: staff.hr.id,
+        role: "hr",
+        data: { requestIds: [xReq], actIds: [xReq], expectedDigest: preview.selection.digest },
       }),
     ).rejects.toMatchObject({ refusal: "MLLB3" });
     expect(await leaveStatus(xReq)).toBe("pending_line_manager");
@@ -509,10 +526,71 @@ describe("bulk approve leave", () => {
 
     const done = await bulkApproveLeaveSpec.run({
       ...ctx,
-      data: { requestIds: [xReq], expectedDigest: preview.selection.digest },
+      data: { requestIds: [xReq], actIds: [xReq], expectedDigest: preview.selection.digest },
     });
     expect(done.approved.map((a) => a.id)).toEqual([xReq]);
     expect(await leaveStatus(xReq)).toBe("pending_hr");
+  });
+
+  it("never approves requests the preview skipped, even once they pass (security review M1)", async () => {
+    if (!roomInYear) return;
+    const ctx = {
+      supabase: staff.hr.client,
+      organisationId: owner.orgId,
+      userId: staff.hr.id,
+      role: "hr" as const,
+    };
+    const [p, q, r] = [await addWorker(), await addWorker(), await addWorker()];
+    const okReq = await requestLeave(await workerSession(p), annual, start, start);
+    const sickA = await requestLeave(await workerSession(q), sick, start, start);
+    const sickB = await requestLeave(await workerSession(r), sick, start, start);
+    const ids = [okReq, sickA, sickB];
+    // No line managers: ops decides step 1, so all three wait for HR.
+    await bulkLeave(staff.ops.client, ids);
+    for (const id of ids) expect(await leaveStatus(id)).toBe("pending_hr");
+
+    const preview = await previewBulkLeaveSpec.run({ ...ctx, data: { requestIds: ids } });
+    expect(preview.selection.act).toEqual([okReq]);
+    expect(preview.skipped.map((s) => s.code).sort()).toEqual(["certificate", "certificate"]);
+
+    // Both become clean before the confirm.
+    await db.query(
+      "update public.leave_requests set certificate_seen = true where id = any($1::uuid[])",
+      [[sickA, sickB]],
+    );
+
+    // A confirm can't add them to the signed set...
+    await expect(
+      bulkApproveLeaveSpec.run({
+        ...ctx,
+        data: { requestIds: ids, actIds: ids, expectedDigest: preview.selection.digest },
+      }),
+    ).rejects.toMatchObject({ refusal: "MLLB3" });
+    // ...and the honest confirm leaves them alone.
+    const done = await bulkApproveLeaveSpec.run({
+      ...ctx,
+      data: {
+        requestIds: ids,
+        actIds: preview.selection.act,
+        expectedDigest: preview.selection.digest,
+      },
+    });
+    expect(done.approved.map((a) => a.id)).toEqual([okReq]);
+    expect(done.notInPreview.sort()).toEqual([sickA, sickB].sort());
+    expect(await leaveStatus(okReq)).toBe("approved");
+    expect(await leaveStatus(sickA)).toBe("pending_hr");
+    expect(await leaveStatus(sickB)).toBe("pending_hr");
+  });
+
+  it("skips a request the caller can't read as not found, with no details (security review L1)", async () => {
+    if (!roomInYear) return;
+    const stranger = await addWorker();
+    const req = await requestLeave(await workerSession(stranger), annual, start, start);
+    const res = await bulkLeave(staff.lineManager.client, [req], true);
+    expect(res.error).toBeNull();
+    const out = res.data as unknown as BulkLeave;
+    expect(out.approved).toEqual([]);
+    expect(out.skipped).toEqual([{ id: req, code: "not_found" }]);
   });
 
   it("refuses an empty batch and more than 500", async () => {
@@ -551,7 +629,7 @@ describe("bulk approve timesheets", () => {
     for (const id of [flagged, own, strangers]) expect(await lineStatus(id)).toBe("pending");
   });
 
-  it("previews, then confirms only the preview's days; another set is refused", async () => {
+  it("previews, then confirms only the days the preview would approve; another set is refused", async () => {
     const ctx = {
       supabase: owner.client,
       organisationId: owner.orgId,
@@ -570,24 +648,37 @@ describe("bulk approve timesheets", () => {
     });
     expect(preview.dryRun).toBe(true);
     expect(preview.approved.map((a) => a.lineId).sort()).toEqual([...days].sort());
+    expect([...preview.selection.act].sort()).toEqual([...days].sort());
     expect(preview.refused).toEqual([
       expect.objectContaining({ lineId: flagged, code: "flagged" }),
     ]);
     for (const id of days) expect(await lineStatus(id)).toBe("pending");
 
-    await expect(
-      bulkApproveTimesheetSpec.run({
-        ...ctx,
-        data: { period: DAY, lineIds: days, expectedDigest: preview.selection.digest },
-      }),
-    ).rejects.toBeInstanceOf(ListChanged);
-    for (const id of days) expect(await lineStatus(id)).toBe("pending");
+    // Another ticked set, or the flagged day added to the signed set: refused, nothing changes.
+    for (const data of [
+      { period: DAY, lineIds: days, actIds: days },
+      { period: DAY, lineIds: [...days, flagged], actIds: [...days, flagged] },
+    ]) {
+      await expect(
+        bulkApproveTimesheetSpec.run({
+          ...ctx,
+          data: { ...data, expectedDigest: preview.selection.digest },
+        }),
+      ).rejects.toBeInstanceOf(ListChanged);
+    }
+    for (const id of [...days, flagged]) expect(await lineStatus(id)).toBe("pending");
 
     const done = await bulkApproveTimesheetSpec.run({
       ...ctx,
-      data: { period: DAY, lineIds: [...days, flagged], expectedDigest: preview.selection.digest },
+      data: {
+        period: DAY,
+        lineIds: [...days, flagged],
+        actIds: preview.selection.act,
+        expectedDigest: preview.selection.digest,
+      },
     });
     expect(done.approved).toHaveLength(3);
+    expect(done.notInPreview).toEqual([flagged]);
     for (const id of days) expect(await lineStatus(id)).toBe("approved");
     expect(await lineStatus(flagged)).toBe("pending");
   });
@@ -608,7 +699,7 @@ describe("bulk approve timesheets", () => {
 
 describe("bulk resend and cancel worker invites", () => {
   interface InviteOut {
-    sent?: { worker_id: string; token: string | null }[];
+    sent?: { worker_id: string }[];
     cancelled?: { worker_id: string }[];
     skipped: { worker_id: string; code: string }[];
   }
@@ -630,7 +721,14 @@ describe("bulk resend and cancel worker invites", () => {
     expect(res.error).toBeNull();
   }
 
-  it("resends only to workers whose last invite wasn't used, and lists the rest", async () => {
+  function commit(workerId: string, client: Client = staff.hr.client) {
+    return client.rpc("commit_worker_invite_resends", {
+      p_organisation_id: owner.orgId,
+      p_invites: [{ worker_id: workerId, invite_id: randomUUID(), token_hash: "ab".repeat(32) }],
+    });
+  }
+
+  it("claims a resend only for workers whose invite can be resent, and lists the rest", async () => {
     const invited = await addWorker({ email: `inv-${randomUUID()}@example.test` });
     const noEmail = await addWorker();
     const never = await addWorker({ email: `never-${randomUUID()}@example.test` });
@@ -638,8 +736,12 @@ describe("bulk resend and cancel worker invites", () => {
     await printInvite(invited);
     await printInvite(noEmail);
     await workerSession(signedUp);
+    // A PIN set with an unused invite still counts as signed up (security review L2).
+    const pinOnly = await addWorker({ email: `pin-${randomUUID()}@example.test` });
+    await workerSession(pinOnly);
+    await printInvite(pinOnly);
     const before = await openInvites(invited);
-    const ids = [invited, noEmail, never, signedUp];
+    const ids = [invited, noEmail, never, signedUp, pinOnly];
 
     const dry = await staff.hr.client.rpc("bulk_resend_worker_invites", {
       p_organisation_id: owner.orgId,
@@ -649,25 +751,39 @@ describe("bulk resend and cancel worker invites", () => {
     expect(dry.error).toBeNull();
     const preview = dry.data as unknown as InviteOut;
     expect(preview.sent!.map((s) => s.worker_id)).toEqual([invited]);
-    // The preview never carries a token.
-    expect(preview.sent![0]!.token).toBeNull();
     const codes = Object.fromEntries(preview.skipped.map((s) => [s.worker_id, s.code]));
     expect(codes).toEqual({
       [noEmail]: "no_email",
       [never]: "not_invited",
       [signedUp]: "signed_up",
+      [pinOnly]: "signed_up",
     });
+
+    // Step 1 claims the email but changes no invite: the old link still works.
+    const claim = await staff.hr.client.rpc("bulk_resend_worker_invites", {
+      p_organisation_id: owner.orgId,
+      p_worker_ids: [invited],
+    });
+    expect(claim.error).toBeNull();
+    expect((claim.data as unknown as InviteOut).sent!.map((s) => s.worker_id)).toEqual([invited]);
     expect(await openInvites(invited)).toEqual(before);
 
+    // Once a day per worker.
+    const again = await staff.hr.client.rpc("bulk_resend_worker_invites", {
+      p_organisation_id: owner.orgId,
+      p_worker_ids: [invited],
+      p_dry_run: true,
+    });
+    expect((again.data as unknown as InviteOut).skipped).toEqual([
+      expect.objectContaining({ worker_id: invited, code: "resent_today" }),
+    ]);
+
+    // Step 2, after the email went out: the new invite replaces the old one.
     const resentBefore = await auditCount("worker_invite.resent");
     const batchBefore = await auditCount("worker_invites.bulk_resent");
-    const real = await staff.hr.client.rpc("bulk_resend_worker_invites", {
-      p_organisation_id: owner.orgId,
-      p_worker_ids: ids,
-    });
-    expect(real.error).toBeNull();
-    const out = real.data as unknown as InviteOut;
-    expect(out.sent![0]!.token).toMatch(/^[0-9a-f]{64}$/);
+    const committed = await commit(invited);
+    expect(committed.error).toBeNull();
+    expect((committed.data as { resent: unknown[] }).resent).toHaveLength(1);
     const after = await openInvites(invited);
     expect(after).toHaveLength(1);
     expect(after[0]!.id).not.toBe(before[0]!.id);
@@ -676,7 +792,20 @@ describe("bulk resend and cancel worker invites", () => {
     expect(await auditCount("worker_invites.bulk_resent")).toBe(batchBefore + 1);
   });
 
-  it("skips and lists a worker past the email cap, who keeps their open invite", async () => {
+  it("records a resend only for a worker claimed today, so nobody else loses their link", async () => {
+    const w = await addWorker({ email: `nc-${randomUUID()}@example.test` });
+    await printInvite(w);
+    const before = await openInvites(w);
+    const res = await commit(w);
+    expect(res.error).toBeNull();
+    expect(res.data).toMatchObject({
+      resent: [],
+      skipped: [{ worker_id: w, code: "not_claimed" }],
+    });
+    expect(await openInvites(w)).toEqual(before);
+  });
+
+  it("skips and lists a worker past a cap, who keeps their open invite", async () => {
     const w = await addWorker({ email: `cap-${randomUUID()}@example.test` });
     await printInvite(w);
     const before = await openInvites(w);
@@ -697,6 +826,49 @@ describe("bulk resend and cancel worker invites", () => {
       p_org_cap: 1000,
     });
     expect(raised.error?.code).toBe("22023");
+  });
+
+  it("stops invite resends at their own sub-cap of 20 a company a day (security review M3)", async () => {
+    const w = await addWorker({ email: `sub-${randomUUID()}@example.test` });
+    await printInvite(w);
+    const { rows: existing } = await db.query<{ n: number }>(
+      `select count(*)::int as n from public.manager_emails
+        where organisation_id = $1 and kind = 'worker_invite_resend'
+          and created_at > now() - interval '24 hours'`,
+      [owner.orgId],
+    );
+    const seeded: string[] = [];
+    try {
+      for (let i = existing[0]!.n; i < 20; i += 1) {
+        const id = randomUUID();
+        await db.query(
+          `insert into public.manager_emails (organisation_id, kind, ref_id, recipients)
+           values ($1, 'worker_invite_resend', $2, 1)`,
+          [owner.orgId, id],
+        );
+        seeded.push(id);
+      }
+      const res = await staff.hr.client.rpc("bulk_resend_worker_invites", {
+        p_organisation_id: owner.orgId,
+        p_worker_ids: [w],
+        p_dry_run: true,
+      });
+      expect(res.error).toBeNull();
+      expect((res.data as unknown as InviteOut).skipped).toEqual([
+        expect.objectContaining({ worker_id: w, code: "cap" }),
+      ]);
+    } finally {
+      if (seeded.length > 0) {
+        // Insert-only for everyone: lifted for this clean-up only, so other suites keep the pool.
+        await db.query("begin");
+        await db.query("set local session_replication_role = replica");
+        await db.query(
+          "delete from public.manager_emails where kind = 'worker_invite_resend' and ref_id = any($1::uuid[])",
+          [seeded],
+        );
+        await db.query("commit");
+      }
+    }
   });
 
   it("cancels open invites and skips workers with none", async () => {
@@ -740,6 +912,7 @@ describe("bulk resend and cancel worker invites", () => {
       });
       expect(notMine.error?.code, fn).toBe(DENIED);
     }
+    expect((await commit(w, staff.ops.client)).error?.code).toBe(DENIED);
     expect(await openInvites(w)).toHaveLength(1);
   });
 });
@@ -776,6 +949,10 @@ describe("untrusted sessions", () => {
       client.rpc("approve_clean_timesheet_lines", {
         p_organisation_id: other.orgId,
         p_line_ids: [randomUUID()],
+      }),
+      client.rpc("commit_worker_invite_resends", {
+        p_organisation_id: owner.orgId,
+        p_invites: [{ worker_id: w, invite_id: randomUUID(), token_hash: "ab".repeat(32) }],
       }),
     ]);
     for (const { error } of results) expect(error?.code).toBe(DENIED);

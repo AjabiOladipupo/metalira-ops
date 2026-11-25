@@ -21,7 +21,10 @@ function plan(value: BulkLeaveResult) {
     skipped: value.skipped.map((s) => ({
       id: s.id,
       title: s.workerName ?? "A request you can't decide",
-      detail: `${s.leaveType} · ${formatLeaveRange(s.startDate, s.endDate)}`,
+      detail:
+        s.leaveType && s.startDate && s.endDate
+          ? `${s.leaveType} · ${formatLeaveRange(s.startDate, s.endDate)}`
+          : undefined,
       reason: s.reason,
     })),
     summary: bulkSummary(
@@ -30,6 +33,7 @@ function plan(value: BulkLeaveResult) {
       { verb: "approved" },
     ),
     digest: value.selection.digest,
+    act: value.selection.act,
   };
 }
 
@@ -51,9 +55,7 @@ export function LeaveBulkBar({ canDecide }: { canDecide: boolean }) {
             confirmLabel={(n) => `Approve ${n} ${n === 1 ? "request" : "requests"}`}
             pendingLabel="Approving…"
             preview={() => previewBulkLeaveAction({ requestIds: ids })}
-            confirm={(expectedDigest) =>
-              bulkApproveLeaveAction({ requestIds: ids, expectedDigest })
-            }
+            confirm={(signed) => bulkApproveLeaveAction({ requestIds: ids, ...signed })}
             plan={plan}
             onDone={(message) => {
               done(message);

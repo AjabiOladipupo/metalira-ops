@@ -7,6 +7,7 @@
 --    does: never your own, the line manager and supervisor scope, the balance, the certificate
 --    and the working-day count. Not all or nothing: a request that would fail, or that needs a
 --    look first, is SKIPPED with a code and a reason, and the rest are approved:
+--      not_found          a request the caller can't read (no details)
 --      own                you can't decide your own leave
 --      not_yours          not a step the caller decides (scope), no name unless the caller reads it
 --      decided            not waiting for a decision
@@ -17,16 +18,23 @@
 --    Each approval writes the single decision's own rows and audit row; the batch adds one
 --    `leave.bulk_approved` row with the counts. p_dry_run works everything out, then rolls it all
 --    back (the preview), so the preview and the confirm agree.
--- 2. public.bulk_resend_worker_invites(org, worker_ids, dry_run): emails a fresh invite to each
---    selected worker whose last invite wasn't used, through the single invite
---    (private.create_worker_invites_impl: the open invite is revoked, a new one made; owner,
---    admin or hr). Each email is claimed first under the shared email caps
---    (private.claim_manager_email, kind worker_invite_resend: 30 a company and 80 overall a
---    day); past a cap the worker is skipped, keeps their open invite and is listed. Skipped too:
---    left, no email address, never invited, already signed up. The raw tokens are returned once
---    for the server to email (they exist nowhere else). One `worker_invite.resent` audit row per
---    invite and one `worker_invites.bulk_resent` for the batch (the row triggers also log each
---    invite row).
+-- 2. Bulk resend, in two steps so no worker is left without a working link (security review M2):
+--    a. public.bulk_resend_worker_invites(org, worker_ids, dry_run): who may be emailed a fresh
+--       invite, with one email claimed for each (nothing about the invites changes). Skipped:
+--       left, no email address, never invited, signed up (a PIN set, or the last invite used),
+--       already resent today, or past a cap. The caps (security review M3): invite resends have
+--       their own sub-cap of 20 a company a day, so they can never take more than that share of
+--       the shared pool; one resend per worker a day (the claim's ref_id is the worker and the
+--       company's day); then the shared caps (private.claim_manager_email, 30 a company and 80
+--       overall a day, kind worker_invite_resend).
+--    b. public.commit_worker_invite_resends(org, invites): after the server has emailed the new
+--       links, records only the ones that went out ({worker_id, invite_id, token_hash}; the raw
+--       token never reaches the database): the open invite is revoked and the new one stored, as
+--       the single invite does, for workers claimed today and still eligible. A worker whose
+--       email failed keeps their open invite. One `worker_invite.resent` audit row per invite and
+--       one `worker_invites.bulk_resent` for the batch (the row triggers also log each row).
+--    The single "Email invites" path (create_worker_invites) claims no cap; this slice leaves it
+--    as it is (security review L3).
 -- 3. public.bulk_cancel_worker_invites(org, worker_ids, dry_run): revokes each selected worker's
 --    open invite, so its link stops working (owner, admin or hr, as the invite itself). Skipped:
 --    no open invite, or it already expired. One `worker_invite.cancelled` row per invite and one
@@ -42,6 +50,10 @@
 -- MLLB2 an id selected isn't in this company (the whole batch is refused and nothing changes).
 -- MLLB3 is the server's "the list changed since the preview" (no SQL raises it). MLLBP is the
 -- dry run's internal rollback and never leaves a function.
+--
+-- The confirm acts only on what the preview said (security review M1): the server signs the
+-- preview's act set (HMAC, bound to user, company and action) and passes only that set to these
+-- functions, so a row the preview skipped is never acted on, even if it passes now.
 
 -- ---------------------------------------------------------------------------
 -- Shared checks
@@ -189,6 +201,17 @@ begin
       v_reason := null;
       v_step := null;
 
+      -- A request the caller can't read (not a reader role, not their reportee's, not their own)
+      -- is "not found", with no details (as approve_clean_timesheet_lines; security review L1).
+      if not (
+        v_reader
+        or v_row.worker_id in (select private.my_reportee_ids())
+        or v_row.worker_id in (select private.my_worker_ids())
+      ) then
+        v_skipped := v_skipped || jsonb_build_object('id', v_row.id, 'code', 'not_found');
+        continue;
+      end if;
+
       if v_row.worker_id in (select private.my_worker_ids()) then
         v_code := 'own';
       elsif v_row.status = 'pending_line_manager' then
@@ -328,9 +351,55 @@ revoke all on function public.bulk_approve_leave(uuid, uuid[], boolean) from pub
 grant execute on function public.bulk_approve_leave(uuid, uuid[], boolean) to authenticated;
 
 -- ---------------------------------------------------------------------------
--- 2. Bulk resend worker invites
+-- 2. Bulk resend worker invites: claim, then commit after the email is sent
 -- ---------------------------------------------------------------------------
 
+-- Signed up: a PIN is set, or the latest invite was used.
+create function private.list_bulk_worker_signed_up(p_organisation_id uuid, p_worker_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.worker_credentials c
+    where c.organisation_id = p_organisation_id
+      and c.worker_id = p_worker_id
+      and c.pin_set_at is not null
+  ) or coalesce((
+    select i.used_at is not null
+    from public.worker_invites i
+    where i.organisation_id = p_organisation_id and i.worker_id = p_worker_id
+    order by i.created_at desc, i.id desc
+    limit 1
+  ), false)
+$$;
+
+revoke all on function private.list_bulk_worker_signed_up(uuid, uuid) from public, anon, authenticated;
+
+-- The claim's record id for a worker's resend today (the company's day): one resend email per
+-- worker a day (manager_emails_once on kind and ref_id).
+create function private.list_bulk_resend_ref(p_organisation_id uuid, p_worker_id uuid)
+returns uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select md5(
+    'worker_invite_resend:' || p_worker_id::text || ':' || private.org_today(p_organisation_id)::text
+  )::uuid
+$$;
+
+revoke all on function private.list_bulk_resend_ref(uuid, uuid) from public, anon, authenticated;
+
+-- Step 1 (and the preview): who may be emailed a fresh invite, and the email claimed for each
+-- under the caps, in this order: the invite resends' own sub-cap (20 a company a day, so resends
+-- can never take more than that share of the shared pool), one resend per worker a day, then the
+-- shared caps (private.claim_manager_email, at most 30 a company and 80 overall a day). Nothing
+-- about the invites changes here: the server emails the new links, then commits only the ones
+-- that went out (step 2), so a worker whose email fails keeps their open invite.
 create function private.bulk_resend_worker_invites(
   p_organisation_id uuid,
   p_worker_ids uuid[],
@@ -348,7 +417,8 @@ declare
   v_ids uuid[];
   v_row record;
   v_code text;
-  v_invite record;
+  v_ref uuid;
+  v_resends integer;
   v_sent jsonb := '[]'::jsonb;
   v_skipped jsonb := '[]'::jsonb;
   v_out jsonb;
@@ -363,34 +433,46 @@ begin
   perform private.list_bulk_assert_workers(p_organisation_id, v_ids);
 
   begin
+    -- The caps' own lock (as claim_manager_email takes it), so the sub-cap count can't race.
+    perform pg_advisory_xact_lock(hashtextextended('inbox_email_cap', 0));
+    select count(*)::integer into v_resends
+    from public.manager_emails e
+    where e.organisation_id = p_organisation_id
+      and e.kind = 'worker_invite_resend'
+      and e.created_at > now() - interval '24 hours';
+
     for v_row in
       select w.id, w.status, w.email, w.staff_id,
         nullif(btrim(concat_ws(' ', w.first_name, w.last_name)), '') as worker_name,
-        (
-          select i.used_at is not null
-          from public.worker_invites i
+        exists (
+          select 1 from public.worker_invites i
           where i.organisation_id = p_organisation_id and i.worker_id = w.id
-          order by i.created_at desc, i.id desc
-          limit 1
-        ) as last_used
+        ) as invited
       from public.workers w
       where w.organisation_id = p_organisation_id and w.id = any (v_ids)
       order by w.last_name, w.first_name, w.staff_id, w.id
       for update of w
     loop
+      v_ref := private.list_bulk_resend_ref(p_organisation_id, v_row.id);
       v_code := case
         when v_row.status <> 'active' then 'left'
         when v_row.email is null then 'no_email'
-        when v_row.last_used is null then 'not_invited'
-        when v_row.last_used then 'signed_up'
+        when private.list_bulk_worker_signed_up(p_organisation_id, v_row.id) then 'signed_up'
+        when not v_row.invited then 'not_invited'
+        when exists (
+          select 1 from public.manager_emails e
+          where e.kind = 'worker_invite_resend' and e.ref_id = v_ref
+        ) then 'resent_today'
+        when v_resends >= 20 then 'cap'
       end;
-      -- One email under the shared caps, claimed before the invite is made (and only for a
-      -- worker who passed the checks above): past a cap the worker keeps their open invite and is
-      -- listed. Nested, since SQL doesn't promise to skip the claim after a false AND.
+      -- Only for a worker who passed every check above (nested: SQL doesn't promise to skip the
+      -- claim after a false AND).
       if v_code is null then
-        if not private.claim_manager_email(
-          p_organisation_id, 'worker_invite_resend', gen_random_uuid(), 1, p_org_cap, p_global_cap
+        if private.claim_manager_email(
+          p_organisation_id, 'worker_invite_resend', v_ref, 1, p_org_cap, p_global_cap
         ) then
+          v_resends := v_resends + 1;
+        else
           v_code := 'cap';
         end if;
       end if;
@@ -401,28 +483,16 @@ begin
         );
         continue;
       end if;
-
-      -- The single invite, unchanged: revokes the open one and makes a new one by email.
-      select c.* into v_invite
-      from private.create_worker_invites_impl(p_organisation_id, array[v_row.id], 'email') c;
-      perform private.log_audit_impl(
-        p_organisation_id, 'worker_invite.resent', 'worker_invites', v_invite.invite_id, null,
-        jsonb_build_object('worker_id', v_row.id, 'sent_via', 'email', 'bulk', true),
-        null
-      );
       v_sent := v_sent || jsonb_build_object(
-        'worker_id', v_row.id, 'name', v_row.worker_name, 'staff_id', v_row.staff_id,
-        'invite_id', v_invite.invite_id, 'expires_at', v_invite.invite_expires_at,
-        -- The raw token, once, for the server to email; never stored or logged.
-        'token', case when coalesce(p_dry_run, false) then null else v_invite.token end
+        'worker_id', v_row.id, 'name', v_row.worker_name, 'staff_id', v_row.staff_id
       );
     end loop;
 
     if not coalesce(p_dry_run, false) then
       perform private.log_audit_impl(
-        p_organisation_id, 'worker_invites.bulk_resent', 'worker_invites', null, null,
+        p_organisation_id, 'worker_invites.resend_claimed', 'worker_invites', null, null,
         jsonb_build_object(
-          'resent', jsonb_array_length(v_sent), 'skipped', jsonb_array_length(v_skipped)
+          'claimed', jsonb_array_length(v_sent), 'skipped', jsonb_array_length(v_skipped)
         ),
         null
       );
@@ -467,6 +537,118 @@ revoke all on function public.bulk_resend_worker_invites(uuid, uuid[], boolean, 
   from public, anon;
 grant execute on function public.bulk_resend_worker_invites(uuid, uuid[], boolean, integer, integer)
   to authenticated;
+
+-- Step 2: after the server has emailed the new links, records them: for each worker
+-- (p_invites: [{worker_id, invite_id, token_hash}], the id and SHA-256 of the link the email
+-- carried), the open invite is revoked and the new one stored, as the single invite does. Only
+-- for a worker claimed today in step 1 and still eligible; anyone else is skipped. A worker whose
+-- email didn't go out is never sent here, so their open invite keeps working. One
+-- `worker_invite.resent` audit row per invite and one `worker_invites.bulk_resent` for the batch.
+create function private.commit_worker_invite_resends(p_organisation_id uuid, p_invites jsonb)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_ids uuid[];
+  v_item record;
+  v_worker record;
+  v_code text;
+  v_expires timestamptz;
+  v_resent jsonb := '[]'::jsonb;
+  v_skipped jsonb := '[]'::jsonb;
+begin
+  perform private.list_bulk_assert_inviter(p_organisation_id);
+  if p_invites is null or jsonb_typeof(p_invites) <> 'array' then
+    raise exception 'Give the invites to record.' using errcode = '22023';
+  end if;
+  select coalesce(array_agg((e ->> 'worker_id')::uuid), '{}') into v_ids
+  from jsonb_array_elements(p_invites) e;
+  v_ids := private.list_bulk_ids(v_ids);
+  if cardinality(v_ids) <> jsonb_array_length(p_invites) then
+    raise exception 'One invite per worker.' using errcode = '22023';
+  end if;
+  perform private.list_bulk_assert_workers(p_organisation_id, v_ids);
+
+  for v_item in
+    select (e ->> 'worker_id')::uuid as worker_id,
+      (e ->> 'invite_id')::uuid as invite_id,
+      e ->> 'token_hash' as token_hash
+    from jsonb_array_elements(p_invites) e
+    order by 1
+  loop
+    if v_item.invite_id is null or v_item.token_hash is null
+      or v_item.token_hash !~ '^[0-9a-f]{64}$' then
+      raise exception 'Each invite needs an id and a SHA-256 token hash.' using errcode = '22023';
+    end if;
+    select w.id, w.status, w.email into v_worker
+    from public.workers w
+    where w.organisation_id = p_organisation_id and w.id = v_item.worker_id
+    for update;
+    v_code := case
+      when not exists (
+        select 1 from public.manager_emails e
+        where e.kind = 'worker_invite_resend'
+          and e.organisation_id = p_organisation_id
+          and e.ref_id = private.list_bulk_resend_ref(p_organisation_id, v_item.worker_id)
+      ) then 'not_claimed'
+      when v_worker.status <> 'active' then 'left'
+      when v_worker.email is null then 'no_email'
+      when private.list_bulk_worker_signed_up(p_organisation_id, v_item.worker_id) then 'signed_up'
+    end;
+    if v_code is not null then
+      v_skipped := v_skipped || jsonb_build_object('worker_id', v_item.worker_id, 'code', v_code);
+      continue;
+    end if;
+
+    update public.worker_invites i
+    set revoked_at = now()
+    where i.organisation_id = p_organisation_id
+      and i.worker_id = v_item.worker_id
+      and i.used_at is null
+      and i.revoked_at is null;
+    insert into public.worker_invites (id, organisation_id, worker_id, token_hash, sent_via, created_by)
+    values (
+      v_item.invite_id, p_organisation_id, v_item.worker_id, v_item.token_hash, 'email',
+      private.session_uid()
+    )
+    returning expires_at into v_expires;
+    perform private.log_audit_impl(
+      p_organisation_id, 'worker_invite.resent', 'worker_invites', v_item.invite_id, null,
+      jsonb_build_object('worker_id', v_item.worker_id, 'sent_via', 'email', 'bulk', true),
+      null
+    );
+    v_resent := v_resent || jsonb_build_object(
+      'worker_id', v_item.worker_id, 'invite_id', v_item.invite_id, 'expires_at', v_expires
+    );
+  end loop;
+
+  perform private.log_audit_impl(
+    p_organisation_id, 'worker_invites.bulk_resent', 'worker_invites', null, null,
+    jsonb_build_object(
+      'resent', jsonb_array_length(v_resent), 'skipped', jsonb_array_length(v_skipped)
+    ),
+    null
+  );
+  return jsonb_build_object('resent', v_resent, 'skipped', v_skipped);
+end;
+$$;
+
+revoke all on function private.commit_worker_invite_resends(uuid, jsonb) from public, anon;
+grant execute on function private.commit_worker_invite_resends(uuid, jsonb) to authenticated;
+
+create function public.commit_worker_invite_resends(p_organisation_id uuid, p_invites jsonb)
+returns jsonb
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$ select private.commit_worker_invite_resends(p_organisation_id, p_invites) $$;
+
+revoke all on function public.commit_worker_invite_resends(uuid, jsonb) from public, anon;
+grant execute on function public.commit_worker_invite_resends(uuid, jsonb) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 3. Bulk cancel worker invites

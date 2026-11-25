@@ -2495,6 +2495,9 @@ isOneToOne: false
 "commit_import_batch":
 { Args: { "p_batch_id": string,"p_organisation_id": string,"p_rows": Json }; Returns: Json
                            },
+"commit_worker_invite_resends":
+{ Args: { "p_invites": Json,"p_organisation_id": string }; Returns: Json
+                           },
 "complete_company_setup":
 { Args: { "p_organisation_id": string }; Returns: string
                            },

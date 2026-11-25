@@ -150,6 +150,7 @@ function invitePlan(value: InviteBulkPreview) {
       { verb },
     ),
     digest: value.selection.digest,
+    act: value.selection.act,
   };
 }
 
@@ -174,7 +175,7 @@ function InviteBulkButtons({ ids, onDone }: { ids: string[]; onDone: (message: s
       }
       pendingLabel={action === "resend" ? "Sending…" : "Cancelling…"}
       preview={() => previewInviteBulkAction({ action, workerIds: ids })}
-      confirm={(expectedDigest) => inviteBulkAction({ action, workerIds: ids, expectedDigest })}
+      confirm={(signed) => inviteBulkAction({ action, workerIds: ids, ...signed })}
       plan={invitePlan}
       onDone={onDone}
     />

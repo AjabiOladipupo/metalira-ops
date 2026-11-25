@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { bulkSummary, TIMESHEET_SKIP_TEXT } from "@/lib/bulk-approve";
+import { bulkSummary, NOT_IN_PREVIEW, TIMESHEET_SKIP_TEXT } from "@/lib/bulk-approve";
 import { listBulkRefusal, type ListBulkResult } from "@/server/identity/bulk-action-result";
 import { mutate } from "@/server/identity/mutate";
 
@@ -38,7 +38,10 @@ export async function bulkApproveTimesheetAction(
       value: result,
       message: bulkSummary(
         result.approved.length,
-        result.refused.map((r) => TIMESHEET_SKIP_TEXT[r.code]),
+        [
+          ...result.refused.map((r) => TIMESHEET_SKIP_TEXT[r.code]),
+          ...result.notInPreview.map(() => NOT_IN_PREVIEW),
+        ],
         { verb: "approved", done: true },
       ),
     };

@@ -9,9 +9,17 @@ import { CLEAN_REFUSAL_TEXT, type CleanRefusal } from "@/lib/timesheets/approval
 
 /** Why public.bulk_approve_leave skipped a request (migration 20261122270000_list_bulk). */
 export type LeaveSkipCode =
-  "own" | "not_yours" | "decided" | "certificate" | "recount" | "pay_below_service" | "refused";
+  | "not_found"
+  | "own"
+  | "not_yours"
+  | "decided"
+  | "certificate"
+  | "recount"
+  | "pay_below_service"
+  | "refused";
 
 export const LEAVE_SKIP_TEXT: Record<LeaveSkipCode, string> = {
+  not_found: "Not in your list",
   own: "Your own leave",
   not_yours: "Not yours to decide",
   decided: "Not waiting for a decision",
@@ -48,14 +56,26 @@ export const TIMESHEET_SKIP_TEXT: Record<CleanRefusal, string> = {
 
 /** Why a bulk invite resend or cancel skipped a worker (bulk_*_worker_invites' codes). */
 export type InviteSkipCode =
-  "left" | "no_email" | "not_invited" | "signed_up" | "cap" | "no_open_invite" | "expired";
+  | "left"
+  | "no_email"
+  | "not_invited"
+  | "signed_up"
+  | "resent_today"
+  | "cap"
+  | "not_claimed"
+  | "not_sent"
+  | "no_open_invite"
+  | "expired";
 
 export const INVITE_SKIP_TEXT: Record<InviteSkipCode, string> = {
   left: "Has left the company",
   no_email: "No email address: print a sheet instead",
   not_invited: "Not invited yet: use Email invites",
   signed_up: "Already signed up",
-  cap: "Today's email limit is reached: try again tomorrow or print a sheet",
+  resent_today: "Already resent today: print a sheet or try tomorrow",
+  cap: "Today's email limit is reached: print a sheet or try tomorrow",
+  not_claimed: "Not resent: preview again",
+  not_sent: "Link not sent: print a sheet or try tomorrow. Their earlier link still works",
   no_open_invite: "No open invite to cancel",
   expired: "The invite already expired",
 };
@@ -65,6 +85,12 @@ const INVITE_CODES = Object.keys(INVITE_SKIP_TEXT) as InviteSkipCode[];
 export function inviteSkipCode(value: unknown): InviteSkipCode | null {
   return INVITE_CODES.find((c) => c === value) ?? null;
 }
+
+/**
+ * A ticked row the confirm left alone because its preview skipped it (security review M1): the
+ * confirm acts only on what the preview said it would.
+ */
+export const NOT_IN_PREVIEW = "Skipped in the preview: preview again to include it";
 
 const count = (n: number) => n.toLocaleString("en-NG");
 

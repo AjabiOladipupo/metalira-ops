@@ -16,6 +16,7 @@ import {
   TIMESHEET_EXPORT_COLUMNS,
   attendanceCsv,
   clientsCsv,
+  exportCell,
   exportFileName,
   leaveCsv,
   payslipExportColumns,
@@ -343,5 +344,21 @@ describe("payroll files", () => {
     expect(first).toBe(
       "2026-10-20,2026-11-19,PAYE,Lagos State IRS,12,2026-12-10,Paid,2026-12-01,10000.00,0.00,0.00,10000.00",
     );
+  });
+});
+
+describe("cells (security review L6)", () => {
+  it("writes plain numbers as numbers, negatives included", () => {
+    for (const n of ["0", "12", "-12", "642312.50", "-1250.50"]) expect(exportCell(n)).toBe(n);
+  });
+
+  it("escapes anything else that starts like a formula", () => {
+    expect(exportCell("-1+1")).toBe("'-1+1");
+    expect(exportCell("=SUM(A1)")).toBe("'=SUM(A1)");
+    expect(exportCell(" -12")).toBe("' -12");
+    expect(exportCell("+234")).toBe("'+234");
+    expect(exportCell("@guard")).toBe("'@guard");
+    expect(exportCell("1e5")).toBe("1e5");
+    expect(exportCell("12.")).toBe("12.");
   });
 });

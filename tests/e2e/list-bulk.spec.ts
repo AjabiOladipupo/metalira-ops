@@ -4,6 +4,9 @@
  *   approved, 1 skipped" with the reason, confirm, and the three are approved.
  * - Leave at 390px: tick two requests, preview, approve; they move on to HR.
  * - Clients: tick one client and export it; the file holds that client and no contact details.
+ * - /app/export (security review L5): a line manager's export holds only their reportees; a role
+ *   without payroll gets 403 on a payroll export; a cross-origin post gets 403; the audit row
+ *   holds the count only.
  * Timesheet contracts, posts, shifts and assignments are seeded as the database owner with
  * triggers off for the transaction, three days ago so the shifts are over (as timesheets.spec.ts);
  * leave requests are seeded as the database owner with the day count the app works out.
@@ -17,6 +20,8 @@ import { addDays, lagosToday } from "../../src/lib/dates";
 import { adminClient, anonClient, pgClient } from "../rls/helpers/supabase";
 import {
   NEEDS_SUPABASE,
+  addMembership,
+  createAccount,
   createOwner,
   signInViaUi,
   supabaseReady,
@@ -338,4 +343,122 @@ test("export the selected clients to CSV", async ({ page }, testInfo) => {
     .eq("organisation_id", owner.orgId)
     .eq("action", "clients.exported");
   expect(audit).toEqual([{ after: { count: 1 } }]);
+});
+
+test("the export route is scoped to the caller and refuses other roles and origins", async ({
+  browser,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440", "One run covers the route.");
+  test.setTimeout(120_000);
+  const baseURL = String(testInfo.project.use.baseURL);
+  const admin = adminClient();
+  const suffix = uniqueSuffix();
+  const owner = await createOwner("lb-route", `Route Co ${suffix}`);
+  const ownerClient = anonClient();
+  await ownerClient.auth.signInWithPassword({ email: owner.email, password: owner.password });
+  const preset = await ownerClient.rpc("apply_leave_preset", {
+    p_organisation_id: owner.orgId,
+    p_preset: "B",
+  });
+  expect(preset.error).toBeNull();
+  const annual = (
+    await admin.from("leave_types").select("id, code").eq("organisation_id", owner.orgId)
+  ).data!.find((t) => t.code === "annual")!.id;
+
+  const lm = await createAccount("lb-route-lm", "Kola Adebayo");
+  const lmMember = await admin
+    .from("memberships")
+    .insert({ organisation_id: owner.orgId, user_id: lm.userId, role: "line_manager" })
+    .select("id")
+    .single();
+  expect(lmMember.error).toBeNull();
+  const ops = await createAccount("lb-route-ops", "Ngozi Eze");
+  await addMembership(owner.orgId, ops.userId, "ops_manager");
+
+  const start = nextMonday(lagosToday());
+  const requests: Record<string, string> = {};
+  const db = await pgClient();
+  try {
+    for (const [i, p] of [
+      { name: "Ada Reportee", lm: true },
+      { name: "Bayo Elsewhere", lm: false },
+    ].entries()) {
+      const [first, last] = p.name.split(" ");
+      const w = await admin
+        .from("workers")
+        .insert({
+          organisation_id: owner.orgId,
+          staff_id: `RT-${i}-${suffix.slice(0, 4)}`,
+          first_name: first!,
+          last_name: last!,
+          employment_type: "permanent",
+          start_date: "2025-01-06",
+          line_manager_membership_id: p.lm ? lmMember.data!.id : null,
+        })
+        .select("id")
+        .single();
+      expect(w.error).toBeNull();
+      const { rows } = await db.query<{ id: string }>(
+        `insert into public.leave_requests (organisation_id, worker_id, leave_type_id, leave_year,
+           start_date, end_date, days)
+         values ($1, $2, $3, $4, $5, $5, 1) returning id`,
+        [owner.orgId, w.data!.id, annual, Number(start.slice(0, 4)), start],
+      );
+      requests[p.name] = rows[0]!.id;
+    }
+  } finally {
+    await db.end();
+  }
+
+  const post = (page: Page, data: unknown, origin = baseURL) =>
+    page.request.post("/app/export", {
+      headers: { origin, "content-type": "application/json" },
+      data,
+    });
+
+  // The line manager: their reportee only.
+  const lmContext = await browser.newContext({ baseURL });
+  const lmPage = await lmContext.newPage();
+  await signInViaUi(lmPage, lm.email, lm.password);
+  await expect(lmPage).toHaveURL(/\/app/, NAV);
+  const mine = await post(lmPage, { list: "leave", ids: [requests["Ada Reportee"]] });
+  expect(mine.status()).toBe(200);
+  expect(mine.headers()["cache-control"]).toContain("no-store");
+  expect(mine.headers()["content-disposition"]).toMatch(/^attachment; filename="leave-/);
+  const rows = (await mine.text()).replace(/^﻿/, "").split("\r\n").filter(Boolean);
+  expect(rows).toHaveLength(2);
+  expect(rows[1]).toMatch(/^Ada Reportee,/);
+  const notMine = await post(lmPage, { list: "leave", ids: [requests["Bayo Elsewhere"]] });
+  expect(notMine.status()).toBe(400);
+  expect(await notMine.text()).not.toContain("Bayo");
+  // A cross-origin post is refused before anything is read.
+  const crossSite = await post(
+    lmPage,
+    { list: "leave", ids: [requests["Ada Reportee"]] },
+    "https://evil.example",
+  );
+  expect(crossSite.status()).toBe(403);
+  await lmContext.close();
+
+  // A role without payroll: 403 on every payroll export.
+  const opsContext = await browser.newContext({ baseURL });
+  const opsPage = await opsContext.newPage();
+  await signInViaUi(opsPage, ops.email, ops.password);
+  await expect(opsPage).toHaveURL(/\/app/, NAV);
+  for (const data of [
+    { list: "payroll_runs", ids: [randomUUID()] },
+    { list: "payslips", runId: randomUUID(), ids: [randomUUID()] },
+    { list: "remittances", ids: [randomUUID()] },
+  ]) {
+    expect((await post(opsPage, data)).status(), data.list).toBe(403);
+  }
+  await opsContext.close();
+
+  // The audit row holds the count only.
+  const { data: audit } = await admin
+    .from("audit_log")
+    .select("after, entity_id")
+    .eq("organisation_id", owner.orgId)
+    .eq("action", "leave.exported");
+  expect(audit).toEqual([{ after: { count: 1 }, entity_id: null }]);
 });

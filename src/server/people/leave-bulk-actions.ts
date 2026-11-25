@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 
-import { bulkSummary } from "@/lib/bulk-approve";
+import { bulkSummary, NOT_IN_PREVIEW } from "@/lib/bulk-approve";
 import { listBulkRefusal, type ListBulkResult } from "@/server/identity/bulk-action-result";
 import { mutate } from "@/server/identity/mutate";
 import { getSession } from "@/server/identity/session";
@@ -67,9 +67,13 @@ export async function bulkApproveLeaveAction(
   return {
     ok: true,
     value: result,
-    message: bulkSummary(result.approved.length, result.skipped.map(leaveSkipGroup), {
-      verb: "approved",
-      done: true,
-    }),
+    message: bulkSummary(
+      result.approved.length,
+      [...result.skipped.map(leaveSkipGroup), ...result.notInPreview.map(() => NOT_IN_PREVIEW)],
+      {
+        verb: "approved",
+        done: true,
+      },
+    ),
   };
 }

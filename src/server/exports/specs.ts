@@ -188,7 +188,8 @@ export const exportTimesheetsSpec = spec({
     ids,
   }),
   roles: TIMESHEET_READERS,
-  module: "people",
+  // The timesheet functions' own switch (security review L4).
+  module: "shifts",
   audit: { action: "timesheets.exported", entity: "timesheet_lines" },
   build: async ({ supabase, organisationId, data }) => {
     const { timeZone, days } = await loadPeriodDays(supabase, organisationId, data.period);

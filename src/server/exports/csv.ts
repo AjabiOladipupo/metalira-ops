@@ -11,13 +11,13 @@ import {
 import { RUN_STATUS, type RunStatusName } from "@/lib/payroll/run-format";
 import { timeIn } from "@/lib/roster";
 import { LINE_STATUS_TEXT, exceptionLabels, type LineStatus } from "@/lib/timesheets/approval";
-import { formatCsv } from "@/server/people/import/csv";
+import { csvCell } from "@/server/people/import/csv";
 
 /**
  * "Export selected to CSV" on the lists (slice U.2): the fixed columns of each list's file. Pure,
- * so tests/unit/exports checks them. Every cell goes through the shared `csvCell` (via
- * `formatCsv`), so a value starting with `=`, `+`, `-`, `@`, tab or carriage return, even after
- * leading spaces, opens as text.
+ * so tests/unit/exports checks them. Every cell but a plain number goes through the shared
+ * `csvCell`, so a value starting with `=`, `+`, `-`, `@`, tab or carriage return, even after
+ * leading spaces, opens as text; plain numbers stay numbers.
  *
  * Never in any file: NIN, BVN, bank or account numbers, RSA PIN, phone numbers, locations,
  * selfies, reasons and notes, or anything decrypted. The rows these take never carry them.
@@ -30,8 +30,25 @@ function naira(kobo: Kobo): string {
   return koboToMajorString(kobo);
 }
 
+/** A plain number ("12", "-1250.50"): written as is, so a spreadsheet reads it as a number. */
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
+/**
+ * One cell (security review L6): a plain number as is; anything else through the shared
+ * `csvCell`, which opens a value starting with =, +, -, @, tab or carriage return (even after
+ * leading spaces) as text.
+ */
+export function exportCell(value: string): string {
+  return PLAIN_NUMBER.test(value) ? value : csvCell(value);
+}
+
+const BOM = "﻿";
+const CRLF = "\r\n";
+
+/** The file: a byte order mark, the header, one line per row, CRLF line ends. */
 function file(header: readonly string[], rows: readonly (readonly string[])[]): string {
-  return formatCsv([[...header], ...rows]);
+  const lines = [[...header], ...rows].map((row) => row.map(exportCell).join(","));
+  return `${BOM}${lines.join(CRLF)}${CRLF}`;
 }
 
 /** `clients-2026-11-25.csv`. */

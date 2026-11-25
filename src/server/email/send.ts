@@ -73,6 +73,14 @@ function resendClient(key: string): Resend {
 }
 
 /**
+ * True when this deployment can send email (RESEND_API_KEY is set). For a change that should not
+ * happen unless its email goes out (slice U.2's bulk invite resend).
+ */
+export function emailIsConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim());
+}
+
+/**
  * Sends one email through Resend. Every outbound message goes through here.
  *
  * Without RESEND_API_KEY it throws EmailConfigError in production and, everywhere else

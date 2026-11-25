@@ -16,7 +16,8 @@ import {
  * The preview-then-confirm sheet for a list's bulk action (slice U.2): "Approve selected" on
  * timesheets and leave, "Resend" and "Cancel invite" on worker invites. The preview lists what
  * will happen and every item that will be skipped with its reason ("3 will be approved, 2
- * skipped"); the confirm sends the preview's digest, and when the server says the list changed
+ * skipped"); the confirm sends the ids the preview would act on with its signed digest (so it
+ * never acts on anything the preview skipped), and when the server says the list changed
  * the sheet goes back to a fresh preview. Not all or nothing: the confirm acts on what passes.
  */
 
@@ -33,6 +34,8 @@ export interface BulkPlan {
   skipped: BulkItem[];
   summary: string;
   digest: string;
+  /** The ids the preview said it would act on; the confirm sends them with the digest. */
+  act: string[];
 }
 
 type Result<T> =
@@ -57,7 +60,7 @@ export function BulkPreviewSheet<T>({
   confirmLabel: (passing: number) => string;
   pendingLabel: string;
   preview: () => Promise<Result<T>>;
-  confirm: (expectedDigest: string) => Promise<Result<T>>;
+  confirm: (signed: { expectedDigest: string; actIds: string[] }) => Promise<Result<T>>;
   plan: (value: T) => BulkPlan;
   onDone: (message: string) => void;
 }) {
@@ -152,7 +155,10 @@ export function BulkPreviewSheet<T>({
                     onClick={() =>
                       start(async () => {
                         setError(null);
-                        const result = await confirm(current.digest);
+                        const result = await confirm({
+                          expectedDigest: current.digest,
+                          actIds: current.act,
+                        });
                         if (!result.ok) {
                           setError(result.message);
                           // The list changed since the preview: show a fresh one.

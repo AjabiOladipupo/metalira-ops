@@ -13,7 +13,8 @@ import { lagosToday } from "@/lib/dates";
 import type { ManagerRole } from "@/lib/roles";
 import {
   LIST_BULK_LIMIT,
-  confirmSelection,
+  actIdsSchema,
+  confirmPlan,
   expectedDigestSchema,
   idSet,
   idsSchema,
@@ -35,8 +36,10 @@ import { loadLeaveBoard } from "./leave-data";
  * Not all or nothing: a request that would fail a check, or that needs a look first (a
  * certificate nobody has seen, a changed day count, paid leave the service doesn't pay), is
  * SKIPPED and listed with its reason; the rest are approved. The preview is the same function's
- * dry run. The confirm sends the preview's digest and is refused (MLLB3) when the ticked requests
- * now resolve differently; a request the caller can't read refuses the request (MLLB2). At most
+ * dry run, and its digest signs the requests it would approve; the confirm passes only those to
+ * the database, so a request the preview skipped is never approved, even if it passes now. A
+ * confirm whose ticked requests now resolve differently, or whose digest isn't this user's
+ * preview, is refused (MLLB3); a request the caller can't read refuses the request (MLLB2). At most
  * 500. Each approval writes the single decision's rows and audit row; the run adds
  * `leave.bulk_approved`. The worker (and HR, after step 1; ops, for shifts the leave opened) are
  * told afterwards, as for a single decision.
@@ -56,8 +59,12 @@ export const previewBulkLeaveSchema = z.object({
 });
 
 export const bulkApproveLeaveSchema = previewBulkLeaveSchema.extend({
+  /** The requests the preview said it would approve (signed by the digest). */
+  actIds: actIdsSchema(LIST_BULK_LIMIT),
   expectedDigest: expectedDigestSchema,
 });
+
+const ACTION = "leave.bulk_approve";
 
 export interface BulkLeaveApproved {
   id: string;
@@ -80,20 +87,22 @@ export interface BulkLeaveSkipped {
   code: LeaveSkipCode;
   /** In words, with the single decision's own reason when it refused. */
   reason: string;
-  /** Null for a request outside the caller's scope. */
+  /** Null for a request the caller can't read (and its other details too) or doesn't decide. */
   workerName: string | null;
   staffId: string | null;
-  leaveType: string;
-  startDate: string;
-  endDate: string;
+  leaveType: string | null;
+  startDate: string | null;
+  endDate: string | null;
 }
 
 export interface BulkLeaveResult {
   dryRun: boolean;
   approved: BulkLeaveApproved[];
   skipped: BulkLeaveSkipped[];
-  /** Send `selection.digest` back with the confirm. */
+  /** Send `selection.act` and `selection.digest` back with the confirm. */
   selection: PreviewedSet;
+  /** On a confirm: ticked requests the preview skipped, left alone. */
+  notInPreview: string[];
 }
 
 const approvedRow = z.object({
@@ -111,15 +120,16 @@ const approvedRow = z.object({
   opened_shifts: z.number(),
 });
 
+// A request the caller can't read comes back as {id, code: "not_found"} only.
 const skippedRow = z.object({
   id: z.string(),
   code: z.string(),
-  reason: z.string().nullable(),
-  worker_name: z.string().nullable(),
-  staff_id: z.string().nullable(),
-  leave_type: z.string(),
-  start_date: z.string(),
-  end_date: z.string(),
+  reason: z.string().nullish(),
+  worker_name: z.string().nullish(),
+  staff_id: z.string().nullish(),
+  leave_type: z.string().nullish(),
+  start_date: z.string().nullish(),
+  end_date: z.string().nullish(),
 });
 
 const resultSchema = z.object({
@@ -128,7 +138,9 @@ const resultSchema = z.object({
   skipped: z.array(skippedRow),
 });
 
-export function parseBulkLeave(value: unknown): Omit<BulkLeaveResult, "selection"> {
+export function parseBulkLeave(
+  value: unknown,
+): Omit<BulkLeaveResult, "selection" | "notInPreview"> {
   const r = resultSchema.parse(value);
   return {
     dryRun: r.dry_run,
@@ -151,12 +163,12 @@ export function parseBulkLeave(value: unknown): Omit<BulkLeaveResult, "selection
       return {
         id: s.id,
         code,
-        reason: leaveSkipReason(code, s.reason),
-        workerName: s.worker_name,
-        staffId: s.staff_id,
-        leaveType: s.leave_type,
-        startDate: s.start_date,
-        endDate: s.end_date,
+        reason: leaveSkipReason(code, s.reason ?? null),
+        workerName: s.worker_name ?? null,
+        staffId: s.staff_id ?? null,
+        leaveType: s.leave_type ?? null,
+        startDate: s.start_date ?? null,
+        endDate: s.end_date ?? null,
       };
     }),
   };
@@ -187,14 +199,14 @@ async function run(
   ctx: Pick<MutationContext, "supabase" | "organisationId">,
   ids: string[],
   dryRun: boolean,
-): Promise<BulkLeaveResult> {
+) {
   const { data, error } = await ctx.supabase.rpc("bulk_approve_leave", {
     p_organisation_id: ctx.organisationId,
     p_request_ids: ids,
     p_dry_run: dryRun,
   });
   if (error) fromDbError(error);
-  return { ...parseBulkLeave(data), selection: previewedSet(ids) };
+  return parseBulkLeave(data);
 }
 
 export const previewBulkLeaveSpec: MutationSpec<typeof previewBulkLeaveSchema, BulkLeaveResult> = {
@@ -203,7 +215,17 @@ export const previewBulkLeaveSpec: MutationSpec<typeof previewBulkLeaveSchema, B
   roles: LEAVE_BULK_DECIDERS,
   run: async (ctx) => {
     const ids = resolveSelection(ctx.data.requestIds, await visibleRequests(ctx));
-    return run(ctx, ids, true);
+    const result = await run(ctx, ids, true);
+    const scope = { action: ACTION, userId: ctx.userId, organisationId: ctx.organisationId };
+    return {
+      ...result,
+      selection: previewedSet(
+        scope,
+        ids,
+        result.approved.map((a) => a.id),
+      ),
+      notInPreview: [],
+    };
   },
 };
 
@@ -212,12 +234,21 @@ export const bulkApproveLeaveSpec: MutationSpec<typeof bulkApproveLeaveSchema, B
   schema: bulkApproveLeaveSchema,
   roles: LEAVE_BULK_DECIDERS,
   run: async (ctx) => {
-    const ids = confirmSelection(
+    const scope = { action: ACTION, userId: ctx.userId, organisationId: ctx.organisationId };
+    const plan = confirmPlan(
+      scope,
       ctx.data.requestIds,
       await visibleRequests(ctx),
+      ctx.data.actIds,
       ctx.data.expectedDigest,
     );
-    return run(ctx, ids, false);
+    // Only the requests the preview said it would approve reach the database.
+    const result = await run(ctx, plan.act, false);
+    return {
+      ...result,
+      selection: previewedSet(scope, plan.ids, plan.act),
+      notInPreview: plan.rest,
+    };
   },
   // Each single decision writes its audit row; the function adds the batch's row.
 };
