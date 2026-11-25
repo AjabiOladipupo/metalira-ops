@@ -100,6 +100,7 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
         sources,
         recovery: true,
         ...(a.preTaxCapKobo !== undefined ? { recoveryCapKobo: a.preTaxCapKobo } : {}),
+        ...(a.correctsPayslipId ? { recoveryCapGroup: a.correctsPayslipId } : {}),
       });
     } else if (a.kind === "earning") {
       earnings.push({
@@ -560,6 +561,24 @@ export function runAnomalies(
     );
   }
   return out;
+}
+
+/**
+ * Slice 5.10 (money review round 2, L6): why a correction or one-off run's payslip would carry,
+ * for the blocking anomaly's message: the one-third cap (with no cap base at all), the corrected
+ * payslip's taxable pay, or what the run's pay can bear.
+ */
+export function carryBlockDetail(slip: PayslipResult): AnomalyDetail {
+  const steps = slip.trace.filter((t) => t.step === "recovery_carried");
+  const limits = new Set(steps.map((t) => String(t.inputs.limit ?? "pay")));
+  const capStep = slip.trace.find((t) => t.step === "deduction_cap");
+  return {
+    deduction_cut: true,
+    ...(slip.flags.includes("deduction_capped") ? { capped: true } : {}),
+    ...(slip.flags.includes("recovery_carried") ? { clawback: true } : {}),
+    ...(limits.has("corrected_taxable") ? { taxable_limit: true } : {}),
+    ...(capStep && capStep.valueKobo === 0n ? { no_cap_base: true } : {}),
+  };
 }
 
 /** A shared-account anomaly names at most this many workers (and gives the full count). */

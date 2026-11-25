@@ -31,6 +31,7 @@ import {
 import {
   canonicalJson,
   carrySettledLater,
+  carryBlockDetail,
   carrySettledLaterAnomalies,
   itfAppliesTo,
   itfLiable,
@@ -1019,9 +1020,9 @@ export async function calculateRun(
   );
   // Slice 5.10 (money review round 2, L3): the cap is cumulative across every correction of
   // the same payslip: what earlier clawbacks of it took before tax on other standing runs comes
-  // off what its taxable earnings paid, and this run's corrections of it share what is left in
-  // the order added (each is allotted at most its own amount).
-  const allotted = new Map<string, bigint>();
+  // off what its taxable earnings paid. This run's corrections of it share what is left, in the
+  // order added, counting what each actually took (the engine's cap group, as SQL's running
+  // total does).
   const adjustments: RunAdjustment[] = gathered.map((a) => {
     const paid =
       a.kind === "deduction" && a.correctsPayslipId
@@ -1030,11 +1031,8 @@ export async function calculateRun(
     if (!paid || !adviser?.clawback.preTaxSameTaxYear) return a;
     const year = Number(paid.payDate.slice(0, 4));
     if (year !== taxYear) return { ...a, priorTaxYear: year };
-    const used = allotted.get(a.correctsPayslipId!) ?? 0n;
-    const room = paid.taxableKobo - paid.clawedBackKobo - used;
-    const cap = room > 0n ? (room < a.amountKobo ? room : a.amountKobo) : 0n;
-    allotted.set(a.correctsPayslipId!, used + cap);
-    return { ...a, preTax: true, preTaxCapKobo: cap };
+    const room = paid.taxableKobo - paid.clawedBackKobo;
+    return { ...a, preTax: true, preTaxCapKobo: room > 0n ? room : 0n };
   });
 
   // A correction or one-off run pays only workers with an item on it (or, for a correction, an
@@ -1264,11 +1262,7 @@ export async function calculateRun(
         workerId: w.workerId,
         code: "calculation_failed",
         severity: "blocking",
-        detail: {
-          deduction_cut: true,
-          ...(slip.flags.includes("deduction_capped") ? { capped: true } : {}),
-          ...(slip.flags.includes("recovery_carried") ? { clawback: true } : {}),
-        },
+        detail: carryBlockDetail(slip),
       });
     }
     // Slice 5.8: a later posted run already settled this worker's carry, so none is taken here

@@ -37,9 +37,21 @@
 -- 1. Declared rent, and clock stamps on the engine's other inputs
 -- ---------------------------------------------------------------------------
 
+-- Who set the declared rent now on file, and when (security review round 2, M-1): stamped on the
+-- row by the guard below from the session, never taken from the writer, so the touchers list
+-- reads it from here rather than from audit rows a manager could write by hand. Null for rents set
+-- before slice 5.10 (no setter was recorded) and for writes by the secret key.
+alter table public.workers
+  add column rent_declared_by uuid,
+  add column rent_declared_at timestamptz;
+
+comment on column public.workers.rent_declared_by is
+  'Slice 5.10: the signed-in user who set annual_rent_declared_kobo to its current value (null: the secret key, or set before 5.10). Stamped by workers_rent_declared_guard; read by private.payroll_run_touchers.';
+
 -- Refuses a change to the declared rent by anyone but an owner or hr, whatever the path (the
 -- Data API, a definer function acting for the signed-in user). With no signed-in user (the secret
--- key, migrations, the database owner) it is server code and allowed.
+-- key, migrations, the database owner) it is server code and allowed. Stamps who set it and when;
+-- the stamp columns can't be written any other way.
 create function private.workers_rent_declared_guard()
 returns trigger
 language plpgsql
@@ -56,6 +68,14 @@ begin
     ) then
       raise exception 'Only an owner or HR can change the declared rent.' using errcode = 'MLFZ2';
     end if;
+    new.rent_declared_by := private.session_uid();
+    new.rent_declared_at := clock_timestamp();
+  elsif tg_op = 'UPDATE' then
+    new.rent_declared_by := old.rent_declared_by;
+    new.rent_declared_at := old.rent_declared_at;
+  else
+    new.rent_declared_by := null;
+    new.rent_declared_at := null;
   end if;
   return new;
 end;
@@ -120,6 +140,33 @@ create trigger workers_stamp_clock before insert or update on public.workers
   for each row execute function private.stamp_updated_at_clock();
 alter table public.workers enable always trigger workers_stamp_clock;
 
+-- The same for the other writes approval compares with its read (money review round 2): pay
+-- rates (created_at on insert, updated_at on every write), timesheet and leave decisions and run
+-- adjustments (created_at). The triggers are named to fire after every other BEFORE trigger.
+create function private.stamp_created_at_clock()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.created_at := clock_timestamp();
+  return new;
+end;
+$$;
+
+revoke all on function private.stamp_created_at_clock() from public, anon, authenticated;
+
+create trigger zz_stamp_clock before insert on public.timesheet_decisions
+  for each row execute function private.stamp_created_at_clock();
+create trigger zz_stamp_clock before insert on public.leave_decisions
+  for each row execute function private.stamp_created_at_clock();
+create trigger zz_stamp_clock before insert on public.payroll_adjustments
+  for each row execute function private.stamp_created_at_clock();
+create trigger zz_stamp_clock before insert on public.pay_rates
+  for each row execute function private.stamp_created_at_clock();
+create trigger zz_stamp_updated_clock before insert or update on public.pay_rates
+  for each row execute function private.stamp_updated_at_clock();
+
 -- 5.9a's private.payroll_tax_records_guard (its only version), with one change marked "Slice
 -- 5.10": NHF numbers and the ITF switch are stamped clock_timestamp() (money review round 2, L1).
 -- Their writers take the company's payroll tax lock exclusively before the insert, so the stamp
@@ -172,6 +219,117 @@ begin
 end;
 $$;
 
+-- 5.7c's public.log_audit (migration 20261122200000, its latest version), with
+-- payroll.rent_declared_set added to the reserved list (marked "Slice 5.10"; security review round
+-- 2, M-1): only workers_rent_declared_audit writes it. payroll.% as a whole isn't reserved
+-- (payroll.relief_proof_opened is written through mutate()). The grants stand.
+create or replace function public.log_audit(
+  p_organisation_id uuid,
+  p_action text,
+  p_entity text,
+  p_entity_id uuid default null,
+  p_before jsonb default null,
+  p_after jsonb default null,
+  p_reason text default null
+)
+returns uuid
+language plpgsql
+volatile
+security invoker
+set search_path = ''
+as $$
+begin
+  if p_action in (
+    'payroll.bank_file_downloaded', 'payroll.supplementary_file_downloaded',
+    'payroll.instalment_not_carried', 'payroll.results_saved', 'payroll.run_created',
+    'payroll.run_submitted', 'payroll.adjustment_added', 'payroll.adjustment_removed',
+    'payroll.anomalies_acknowledged', 'payroll.instalment_carried', 'worker_auth.locked',
+    'people.bank_details_single_approver',
+    -- Slice 5.10.
+    'payroll.rent_declared_set'
+  ) then
+    raise exception 'That audit event is written only by the change it records.'
+      using errcode = '42501';
+  end if;
+  return private.log_audit_impl(
+    p_organisation_id, p_action, p_entity, p_entity_id, p_before, p_after, p_reason
+  );
+end;
+$$;
+
+-- 5.9a's private.set_payroll_nhf_number (its only version), with one check added (marked "Slice
+-- 5.10"; security review round 2, L-3): the reason mustn't hold the last 4 of the number being
+-- saved, nor of the one on file (the server compares the whole numbers; the database sees only
+-- ciphertext and the last 4). Letters and digits only, case ignored. The grants stand.
+create or replace function private.set_payroll_nhf_number(
+  p_organisation_id uuid,
+  p_worker_id uuid,
+  p_id uuid,
+  p_nhf_number_enc bytea,
+  p_last4 text,
+  p_reason text
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_payroll_tax_writer(p_organisation_id);
+  v_reason text := private.payroll_tax_text(p_reason, 500);
+  v_on_file text;
+begin
+  if p_id is null or (p_nhf_number_enc is null) <> (p_last4 is null)
+    or (p_last4 is not null and p_last4 !~ '^[A-Za-z0-9/-]{1,4}$')
+    or (p_nhf_number_enc is not null and octet_length(p_nhf_number_enc) not between 30 and 200) then
+    raise exception 'An NHF number is 4 to 20 letters, digits, / or -.' using errcode = '22023';
+  end if;
+  if v_reason is null then
+    raise exception 'Give a reason of up to 500 characters, with no web addresses or personal numbers.'
+      using errcode = '22023';
+  end if;
+  if not exists (
+    select 1 from public.workers w
+    where w.organisation_id = p_organisation_id and w.id = p_worker_id
+  ) then
+    raise exception 'That worker wasn''t found.' using errcode = 'P0002';
+  end if;
+  -- Slice 5.10: no part of the number in the reason the audit log keeps.
+  select n.nhf_number_last4 into v_on_file
+  from public.payroll_nhf_numbers n
+  where n.organisation_id = p_organisation_id and n.worker_id = p_worker_id
+  order by n.created_at desc, n.id desc
+  limit 1;
+  if exists (
+    select 1
+    from unnest(array[p_last4, v_on_file]) x(last4)
+    where x.last4 is not null
+      and regexp_replace(x.last4, '[^[:alnum:]]', '', 'g') <> ''
+      and position(
+        lower(regexp_replace(x.last4, '[^[:alnum:]]', '', 'g'))
+        in lower(regexp_replace(v_reason, '[^[:alnum:]]', '', 'g'))
+      ) > 0
+  ) then
+    raise exception 'Leave the NHF number out of the reason: the reason is kept in the audit log.'
+      using errcode = '22023';
+  end if;
+  perform private.payroll_tax_org_lock(p_organisation_id, false);
+  insert into public.payroll_nhf_numbers (
+    id, organisation_id, worker_id, nhf_number_enc, nhf_number_last4, reason, created_by
+  )
+  values (p_id, p_organisation_id, p_worker_id, p_nhf_number_enc, p_last4, v_reason, v_uid);
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.nhf_number_set', 'payroll_nhf_numbers', p_id, null,
+    jsonb_build_object(
+      'worker_id', p_worker_id, 'on_file', p_last4 is not null, 'last4', p_last4
+    ),
+    v_reason
+  );
+  return p_id;
+end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- 2. Everyone who touched a run (rule 10)
 -- ---------------------------------------------------------------------------
@@ -179,8 +337,8 @@ $$;
 -- 5.2's private.payroll_run_touchers (its only version), with the tax records of the run's
 -- workers added (marked "Slice 5.10"): whoever recorded an opening balance, declared a relief,
 -- uploaded a proof (checked_by: the user the server named after checking the signed-in user) or
--- verified a relief for one of them in the run's tax year, and whoever set the declared rent or
--- the NHF number now on file.
+-- verified a relief for one of them in the run's tax year, whoever set the declared rent now on
+-- file in that year (the row's stamp), and whoever set the NHF number now on file.
 -- Each changed what the run pays, so none may approve, release, approve the reversal of or
 -- confirm a supplementary file for it. No role check: definers call it.
 create or replace function private.payroll_run_touchers(p_organisation_id uuid, p_run_id uuid)
@@ -257,18 +415,13 @@ as $$
     cross join run
     where v.organisation_id = p_organisation_id and d.tax_year = run.yr
       and v.worker_id in (select worker_id from ws)
-    -- The declared rent isn't tied to a year: whoever set the value in force (security review
-    -- round 2, M-1), whenever they set it.
+    -- Whoever set the declared rent now on file in the run's tax year (Lagos dates), read from
+    -- the row's own stamp (security review round 2, M-1), never from the audit log.
     union all
-    select x.actor_id
-    from (
-      select distinct on (l.entity_id) l.actor_id
-      from public.audit_log l
-      where l.organisation_id = p_organisation_id and l.entity = 'workers'
-        and l.action = 'payroll.rent_declared_set'
-        and l.entity_id in (select worker_id from ws)
-      order by l.entity_id, l.at desc, l.id desc
-    ) x
+    select w.rent_declared_by
+    from public.workers w, run
+    where w.organisation_id = p_organisation_id and w.id in (select worker_id from ws)
+      and extract(year from (w.rent_declared_at at time zone 'Africa/Lagos'))::integer = run.yr
     -- And whoever saved or removed the NHF number on file (NHF is taken only with one).
     union all
     select n.created_by
@@ -794,6 +947,22 @@ $$;
 -- 7. Approval
 -- ---------------------------------------------------------------------------
 
+-- The moment this migration ran (money review round 2, L2): the engine's cap base, months elapsed
+-- and NSITF base change output without changing a run's inputs hash, so a run worked out before
+-- it is sent back to HR at approval (MLPRD) instead of being approved on the old rules. Written
+-- as a constant at migration time.
+do $do$
+begin
+  execute format(
+    'create function private.payroll_fixup2_at() returns timestamptz language sql immutable '
+    'set search_path = '''' as %L',
+    'select ' || quote_literal(clock_timestamp()::text) || '::timestamptz'
+  );
+end;
+$do$;
+
+revoke all on function private.payroll_fixup2_at() from public, anon, authenticated;
+
 -- 5.9a's approve_payroll_run (migration 20261122230000, its latest version), with two additions
 -- marked "Slice 5.10": the months each payslip's year_to_date step counted are checked, and the
 -- 3-month overpayment window is checked again. Everything else is as it was. The grants stand.
@@ -854,6 +1023,11 @@ begin
   end if;
   if v_run.needs_recalculation or v_run.calculated_at is null or v_run.inputs_sha256 is null then
     raise exception 'The run needs recalculating. Return it to HR.' using errcode = 'MLPRD';
+  end if;
+  -- Slice 5.10 (money review round 2, L2): worked out before the engine changed.
+  if v_run.calculated_at < private.payroll_fixup2_at() then
+    raise exception 'The run was worked out before the payroll engine changed on 25 Nov 2026. Return it to HR to recalculate.'
+      using errcode = 'MLPRD';
   end if;
 
   -- Decision 7: the approver's own server check, after the latest submission, read in the last

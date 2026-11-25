@@ -224,12 +224,23 @@ export function grossToNet(
             r.nhf.rateBps,
           )
         : 0n;
+    // Slice 5.10 (money review round 2, L3 and L1): clawbacks of the same corrected payslip share
+    // its cap, counting what each actually took, as save_payroll_results does.
+    const usedInGroup = new Map<string, Kobo>();
     for (let i = 0; i < earnings.length; i += 1) {
       const e = earnings[i]!;
       if (!e.recovery) continue;
       const wanted = -e.amountKobo;
       let taken = wanted;
-      if (e.recoveryCapKobo !== undefined && taken > e.recoveryCapKobo) taken = e.recoveryCapKobo;
+      let limit: "cap" | "pay" | "corrected_taxable" = "pay";
+      if (e.recoveryCapKobo !== undefined) {
+        const used = e.recoveryCapGroup ? (usedInGroup.get(e.recoveryCapGroup) ?? 0n) : 0n;
+        const left = e.recoveryCapKobo - used > 0n ? e.recoveryCapKobo - used : 0n;
+        if (taken > left) {
+          taken = left;
+          limit = "corrected_taxable";
+        }
+      }
       // Leave room for the employee pension and NHF on what stays (they always come off in full),
       // so the payslip can still pay them.
       const reserve =
@@ -237,8 +248,14 @@ export function grossToNet(
           ? applyBps(roomPension > 0n ? roomPension : 0n, r.pension.employeeBps)
           : 0n) + nhfReserve;
       const fits = roomGross - reserve;
-      if (taken > fits) taken = fits > 0n ? fits : 0n;
-      if (e.pensionable && taken > roomPension) taken = roomPension > 0n ? roomPension : 0n;
+      if (taken > fits) {
+        taken = fits > 0n ? fits : 0n;
+        limit = "pay";
+      }
+      if (e.pensionable && taken > roomPension) {
+        taken = roomPension > 0n ? roomPension : 0n;
+        limit = "pay";
+      }
       // Slice 5.10 (money review round 2, H1): a clawback counts inside the one-third cap.
       let overCap = false;
       if (e.code === "clawback" && capRoom !== null) {
@@ -246,8 +263,12 @@ export function grossToNet(
           taken = capRoom;
           overCap = true;
           wasCapped = true;
+          limit = "cap";
         }
         capRoom -= taken;
+      }
+      if (e.recoveryCapGroup) {
+        usedInGroup.set(e.recoveryCapGroup, (usedInGroup.get(e.recoveryCapGroup) ?? 0n) + taken);
       }
       roomGross -= taken;
       if (e.pensionable) roomPension -= taken;
@@ -260,11 +281,19 @@ export function grossToNet(
             `${e.label}: ${traceNaira(taken)} before tax, ${traceNaira(wanted - taken)} carried`,
             overCap
               ? "Over the one-third cap on deductions (Labour Act s.5(7)): the rest comes off after tax in later runs"
-              : "More than this month's pay can bear: the rest comes off after tax in later runs",
+              : limit === "corrected_taxable"
+                ? "More than the corrected payslip's taxable pay (less earlier clawbacks of it): the rest comes off after tax in later runs"
+                : "More than this month's pay can bear: the rest comes off after tax in later runs",
             wanted - taken,
             REF.recovery,
             // The line's label: a later refund of the leave reads the carried rest by it.
-            { wanted_kobo: wanted.toString(), taken_kobo: taken.toString(), label: e.label },
+            {
+              wanted_kobo: wanted.toString(),
+              taken_kobo: taken.toString(),
+              label: e.label,
+              limit,
+              cap_base_kobo: capBase.toString(),
+            },
           ),
         );
       }
@@ -806,15 +835,18 @@ export function grossToNet(
   // Recoveries that didn't fit before tax are carried after tax (money review M2).
   let carriedForward = recoveryCarried;
   let wasCut = false;
-  const take = (wanted: Kobo): Kobo => {
+  // Leave arrears (late-approved unpaid leave of an earlier tax year, recovered after tax) stay
+  // outside the one-third cap whatever the year (owner decision, 25 Nov 2026): only net pay
+  // limits them.
+  const take = (wanted: Kobo, outsideCap = false): Kobo => {
     let taken = wanted < room ? wanted : room;
     if (taken < wanted) wasCut = true;
-    if (capRoom !== null && taken > capRoom) {
+    if (!outsideCap && capRoom !== null && taken > capRoom) {
       taken = capRoom;
       wasCapped = true;
     }
     room -= taken;
-    if (capRoom !== null) capRoom -= taken;
+    if (!outsideCap && capRoom !== null) capRoom -= taken;
     other += taken;
     carriedForward += wanted - taken;
     return taken;
@@ -845,7 +877,7 @@ export function grossToNet(
     );
   }
   for (const d of input.deductions) {
-    const taken = take(d.amountKobo);
+    const taken = take(d.amountKobo, d.code === "leave_arrears");
     lines.push({
       code: d.code ?? "deduction",
       kind: "deduction",

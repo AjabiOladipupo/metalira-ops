@@ -62,13 +62,21 @@ export function describeAnomaly(
       if (detail.deduction_cut === true && (detail.capped === true || detail.clawback === true)) {
         // Slice 5.10 (money review round 2, L6): the one exception to "never block": a correction
         // or one-off run has no later run of its own to carry to.
+        if (detail.no_cap_base === true) {
+          return {
+            title: `Deduction can't carry from this run · ${name}`,
+            body: "This run pays nothing a deduction can come from (the one-third cap is ₦0), and a correction or one-off run can't carry anything to a later run. Remove the deduction here and move it to the next regular run, which carries what doesn't fit. This blocks the run.",
+          };
+        }
         const why =
-          detail.capped === true
-            ? "Clawbacks and deductions together are over a third of gross pay (Labour Act s.5(7)), so part of them would carry forward"
-            : "The clawback is more than this run's pay can bear before tax, so part of it would carry forward";
+          detail.taxable_limit === true
+            ? "The clawback is more than the corrected payslip's taxable pay (less earlier clawbacks of it), so part of it would carry forward"
+            : detail.capped === true
+              ? "Clawbacks and deductions together are over a third of gross pay (Labour Act s.5(7)), so part of them would carry forward"
+              : "The clawback is more than this run's pay can bear before tax, so part of it would carry forward";
         return {
           title: `Deduction can't carry from this run · ${name}`,
-          body: `${why}, and a correction or one-off run can't carry anything to a later run. Lower the deduction to what fits (Explain shows the cap), or remove it here and add it to the next regular run, which carries the rest. This blocks the run.`,
+          body: `${why}, and a correction or one-off run can't carry anything to a later run. Lower the deduction to what fits (Explain shows the limit), or remove it here and add it to the next regular run, which carries the rest. This blocks the run.`,
         };
       }
       if (detail.deduction_cut === true) {

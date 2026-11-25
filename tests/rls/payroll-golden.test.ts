@@ -202,6 +202,9 @@ describe("October 2026 through run and approval", () => {
     expect(anomalies!.filter((a) => a.severity === "blocking")).toEqual([]);
     // The pending Saturday is flagged ("pay next run").
     expect(anomalies!.map((a) => a.code)).toContain("open_timesheet_days");
+    // Slice 5.10 (M2): October is the golden workers' first payslip in Metalira and they have no
+    // opening balance, so their year to date starts there (m = 1), and the run says so.
+    expect(anomalies!.map((a) => a.code)).toContain("no_opening_balance");
     const ack = await hr.client.rpc("acknowledge_payroll_anomalies", {
       p_organisation_id: owner.orgId,
       p_run_id: runId,

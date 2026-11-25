@@ -19,7 +19,7 @@ import {
 import type { ManagerRole } from "@/lib/roles";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
-import { encryptPiiForDb } from "@/server/crypto/pii";
+import { decryptPii, encryptPiiForDb } from "@/server/crypto/pii";
 import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database } from "@/types/db";
 
@@ -232,6 +232,8 @@ export const verifyReliefSchema = z
 
 export const proofLinkSchema = z.object({ proofId: z.uuid(reload) });
 
+const NHF_IN_REASON = "Leave the NHF number out of the reason: the reason is kept in the audit log";
+
 /** Letters and digits only, lower case: how a number is compared with free text. */
 const alnum = (v: string) => v.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
 
@@ -262,7 +264,7 @@ export const nhfNumberSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["reason"],
-        message: "Leave the NHF number out of the reason: the reason is kept in the audit log",
+        message: NHF_IN_REASON,
       });
     }
   });
@@ -1129,6 +1131,34 @@ export const nhfNumberSpec: MutationSpec<typeof nhfNumberSchema, { id: string }>
   schema: nhfNumberSchema,
   roles: TAX_RECORD_WRITERS,
   run: async ({ supabase, organisationId, data }) => {
+    // Slice 5.10 (security review round 2, L-3): on a removal or a change, the reason mustn't
+    // quote the number on file either. It is decrypted here, compared, and never kept or logged.
+    const { data: onFile, error: readError } = await supabase
+      .from("payroll_nhf_numbers")
+      .select("id, nhf_number_enc")
+      .eq("organisation_id", organisationId)
+      .eq("worker_id", data.workerId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1);
+    if (readError) throw new Error(`Could not read the NHF number on file (${readError.code})`);
+    const current = onFile?.[0];
+    if (current?.nhf_number_enc) {
+      let plain: string | null = null;
+      try {
+        plain = decryptPii(current.nhf_number_enc, {
+          organisationId,
+          table: "payroll_nhf_numbers",
+          column: "nhf_number_enc",
+          rowId: current.id,
+        });
+      } catch {
+        plain = null;
+      }
+      if (plain !== null && reasonHoldsNumber(data.reason, plain)) {
+        throw new MutationError("invalid", NHF_IN_REASON, { reason: NHF_IN_REASON });
+      }
+    }
     // Encrypted for this row (security review M2), like the RSA PIN: the number never reaches
     // the database in the clear; the last 4 characters are kept for display.
     const rowId = randomUUID();

@@ -19,7 +19,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "@/types/db";
 
 import { addPayrollWorker, OCT_START, resultsFor, saveResults, SHA } from "./helpers/payroll";
-import { approveRun, submitRunFor } from "./helpers/payslips";
+import { download, giveBankDetails, makeBatch, release } from "./helpers/payout";
+import { approveRun, periodEnd, releaseRun, submitRunFor } from "./helpers/payslips";
 import { verifyRelief } from "./helpers/reliefs";
 import {
   adminClient,
@@ -144,6 +145,39 @@ describe("declared rent: owner and hr only, audited (security review round 2, M1
       .select("id")
       .eq("action", "payroll.rent_declared_set");
     expect(hidden.data).toEqual([]);
+    // The setter is stamped on the row from the session (security review round 2, M-1).
+    const { data: row } = await admin
+      .from("workers")
+      .select("rent_declared_by")
+      .eq("id", workerId)
+      .single();
+    expect(row).toEqual({ rent_declared_by: c.hr.id });
+  });
+
+  it("keeps the setter stamp out of anyone's hands", async () => {
+    const forged = await c.owner.client
+      .from("workers")
+      .update({ rent_declared_by: c.finance.id, job_title: "Supervisor" })
+      .eq("id", workerId);
+    expect(forged.error).toBeNull();
+    const { data: row } = await admin
+      .from("workers")
+      .select("rent_declared_by")
+      .eq("id", workerId)
+      .single();
+    expect(row).toEqual({ rent_declared_by: c.hr.id });
+  });
+
+  it("refuses payroll.rent_declared_set through public.log_audit, for every manager", async () => {
+    for (const user of [c.owner, c.hr, c.adminUser]) {
+      const { error } = await user.client.rpc("log_audit", {
+        p_organisation_id: c.owner.orgId,
+        p_action: "payroll.rent_declared_set",
+        p_entity: "workers",
+        p_entity_id: workerId,
+      });
+      expect(error?.code).toBe("42501");
+    }
   });
 
   it("never saves a worker an admin inserts with a declared rent", async () => {
@@ -156,13 +190,26 @@ describe("declared rent: owner and hr only, audited (security review round 2, M1
       start_date: "2026-01-05",
       annual_rent_declared_kobo: 10_000_000,
     });
-    // Either the guard (MLFZ2) or the table's own insert rules refuse it; never saved.
-    expect(error).not.toBeNull();
+    expect(error?.code).toBe("MLFZ2");
+    // Through create_worker (a definer acting for the signed-in admin) too.
+    const viaRpc = await c.adminUser.client.rpc("create_worker", {
+      p_worker: {
+        id: "00000000-0000-4000-8000-00000000f210",
+        organisation_id: c.owner.orgId,
+        staff_id: "PFZ-RENT-2",
+        first_name: "Ada",
+        last_name: "Obi",
+        employment_type: "permanent",
+        start_date: "2026-01-05",
+        annual_rent_declared_kobo: 10_000_000,
+      },
+    });
+    expect(viaRpc.error?.code).toBe("MLFZ2");
     const { data } = await admin
       .from("workers")
       .select("id")
       .eq("organisation_id", c.owner.orgId)
-      .eq("staff_id", "PFZ-RENT-1");
+      .in("staff_id", ["PFZ-RENT-1", "PFZ-RENT-2"]);
     expect(data).toEqual([]);
   });
 });
@@ -226,6 +273,30 @@ describe("everyone who touched a run (security review round 2, L1)", () => {
     });
     expect(refused.error?.code).toBe("MLPRE");
     await approveRun(admin, c.owner.orgId, runId, c.finance);
+  });
+
+  it("refuses the relief verifier's release too (the same list)", async () => {
+    await giveBankDetails(admin, c.owner.orgId, worker.workerId);
+    const made = await makeBatch(admin, c.finance.client, c.owner.orgId, runId);
+    expect(made.error).toBeNull();
+    expect((await download(c.finance.client, c.owner.orgId, made.batchId)).error).toBeNull();
+    const refused = await release(c.owner.client, c.owner.orgId, runId, made.batchId);
+    expect(refused.error?.code).toBe("MLBF8");
+  });
+
+  it("ignores a hand-written rent audit row: the setter comes from the worker's row", async () => {
+    const forged = await asDbOwner(
+      `insert into public.audit_log (organisation_id, actor_id, action, entity, entity_id, after)
+       values ($1, $2, 'payroll.rent_declared_set', 'workers', $3, '{}')`,
+      [c.owner.orgId, c.finance.id, worker.workerId],
+    );
+    expect(forged.error).toBeNull();
+    const { rows } = await db.query<{ t: string[] }>(
+      "select private.payroll_run_touchers($1, $2) as t",
+      [c.owner.orgId, runId],
+    );
+    expect(rows[0]!.t).not.toContain(c.finance.id);
+    expect(rows[0]!.t).toContain(c.hr4.id);
   });
 
   it("counts only the run's tax year", async () => {
@@ -540,5 +611,164 @@ describe("final pay paid once (money review round 2, M1)", () => {
     )[0]!;
     expect(freed.leave).toMatchObject({ paid_elsewhere_days: 0, days: 12 });
     expect(freed.other_run_item_types).toEqual([]);
+  });
+});
+
+describe("clawbacks of one payslip across runs, and the window at approval (money review round 2)", () => {
+  let c: Company;
+  let worker: { workerId: string; payRateId: string };
+
+  const NOV_START = "2026-10-20";
+  const DEC_START = "2026-11-20";
+
+  /** A draft regular run for the period, with a correction of `payslipId` added. */
+  async function runWithCorrection(periodStart: string, payslipId: string, repeat = false) {
+    const run = await c.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: periodStart,
+    });
+    expect(run.error).toBeNull();
+    const adj = await c.owner.client.rpc("add_payroll_correction", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: run.data!,
+      p_payslip_id: payslipId,
+      p_kind: "deduction",
+      p_label: "Overpaid allowance",
+      p_amount_kobo: "8000000",
+      p_pensionable: false,
+      p_reason: "Paid twice",
+      ...(repeat ? { p_repeat: true } : {}),
+    });
+    expect(adj.error).toBeNull();
+    return { runId: run.data!, adjustmentId: adj.data! };
+  }
+
+  /** Saves the run with one clawback line of `amount` kobo paying the correction. */
+  function saveWithClawback(
+    periodStart: string,
+    runId: string,
+    adjustmentId: string,
+    amount: number,
+  ) {
+    const period = { start: periodStart, end: periodEnd(periodStart) };
+    return saveResults(
+      admin,
+      c.owner,
+      runId,
+      resultsFor(
+        { ...worker, adjustmentId: null },
+        {
+          anomalies: [],
+          period,
+          extra: [
+            {
+              code: "clawback",
+              label: "Overpaid allowance, recovered before tax",
+              amount: -amount,
+              sources: [
+                { kind: "adjustment", id: adjustmentId, from: period.start, to: period.end },
+              ],
+            },
+          ],
+        },
+      ),
+    );
+  }
+
+  beforeAll(async () => {
+    c = await company("claw");
+    worker = await addPayrollWorker(admin, c.owner.orgId);
+  });
+
+  it("refuses a second run's clawback past what the payslip's taxable pay has left (L3)", async () => {
+    // October pays ₦120,000 taxable and is released.
+    const oct = await submitRunFor(admin, c.owner, worker, OCT_START);
+    await approveRun(admin, c.owner.orgId, oct, c.finance);
+    await releaseRun(admin, c.owner, oct, c.finance);
+    const { data: slip } = await admin.from("payslips").select("id").eq("run_id", oct).single();
+
+    // November claws back ₦80,000 of it and is approved.
+    const nov = await runWithCorrection(NOV_START, slip!.id);
+    expect(
+      (await saveWithClawback(NOV_START, nov.runId, nov.adjustmentId, 8_000_000)).error,
+    ).toBeNull();
+    expect(
+      (
+        await c.owner.client.rpc("submit_payroll_run", {
+          p_organisation_id: c.owner.orgId,
+          p_run_id: nov.runId,
+        })
+      ).error,
+    ).toBeNull();
+    await approveRun(admin, c.owner.orgId, nov.runId, c.finance);
+
+    // December corrects the same payslip again: only ₦40,000 is left before tax.
+    const dec = await runWithCorrection(DEC_START, slip!.id, true);
+    const over = await saveWithClawback(DEC_START, dec.runId, dec.adjustmentId, 8_000_000);
+    expect(over.error?.code).toBe("MLPR6");
+    const fits = await saveWithClawback(DEC_START, dec.runId, dec.adjustmentId, 4_000_000);
+    expect(fits.error).toBeNull();
+  });
+
+  it("refuses at approval a correction of an overpayment now older than the window (L5)", async () => {
+    // June is released; a correction of it can't be added through add_payroll_correction
+    // (MLYA1), so it is written as if it had been added while recent.
+    const d = await company("aged");
+    const w = await addPayrollWorker(admin, d.owner.orgId);
+    const june = await submitRunFor(admin, d.owner, w, "2026-05-20");
+    await approveRun(admin, d.owner.orgId, june, d.finance);
+    await releaseRun(admin, d.owner, june, d.finance);
+    const { data: slip } = await admin.from("payslips").select("id").eq("run_id", june).single();
+    const run = await d.owner.client.rpc("create_payroll_run", {
+      p_organisation_id: d.owner.orgId,
+      p_period_start: OCT_START,
+    });
+    expect(run.error).toBeNull();
+    const adjustmentId = "00000000-0000-4000-8000-00000000a6ed";
+    const inserted = await asDbOwner(
+      `insert into public.payroll_adjustments
+         (id, organisation_id, run_id, worker_id, kind, label, amount_kobo, pensionable, taxable,
+          series_id, instalment_number, instalment_count, reason, created_by, corrects_payslip_id)
+       values ($1, $2, $3, $4, 'deduction', 'Overpaid allowance', 100, false, false, $1, 1, 1,
+         'Paid twice', $5, $6)`,
+      [adjustmentId, d.owner.orgId, run.data!, w.workerId, d.owner.id, slip!.id],
+    );
+    expect(inserted.error).toBeNull();
+    const saved = await saveResults(
+      admin,
+      d.owner,
+      run.data!,
+      resultsFor(
+        { ...w, adjustmentId: null },
+        {
+          anomalies: [],
+          extra: [
+            {
+              code: "clawback",
+              label: "Overpaid allowance, recovered before tax",
+              amount: -100,
+              sources: [
+                { kind: "adjustment", id: adjustmentId, from: OCT_START, to: periodEnd(OCT_START) },
+              ],
+            },
+          ],
+        },
+      ),
+    );
+    expect(saved.error).toBeNull();
+    expect(
+      (
+        await d.owner.client.rpc("submit_payroll_run", {
+          p_organisation_id: d.owner.orgId,
+          p_run_id: run.data!,
+        })
+      ).error,
+    ).toBeNull();
+    await recordCheck(d.owner.orgId, run.data!, d.finance);
+    const refused = await d.finance.client.rpc("approve_payroll_run", {
+      p_organisation_id: d.owner.orgId,
+      p_run_id: run.data!,
+    });
+    expect(refused.error?.code).toBe("MLYA1");
   });
 });

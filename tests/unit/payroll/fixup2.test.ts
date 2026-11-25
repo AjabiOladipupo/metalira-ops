@@ -24,7 +24,12 @@ import type { EarningLine, PayslipResult } from "@/lib/payroll/contract";
 import { leavePrefillText } from "@/lib/payroll/final-pay";
 import { grossToNet } from "@/lib/payroll/gross-to-net";
 import { NTA_2025_V1, NTA_2025_V2 } from "@/lib/payroll/rule-set";
-import { adjustmentLines, workerAnomalies, type RunAdjustment } from "@/lib/payroll/run";
+import {
+  adjustmentLines,
+  carryBlockDetail,
+  workerAnomalies,
+  type RunAdjustment,
+} from "@/lib/payroll/run";
 import { yearToDateFor } from "@/lib/payroll/ytd";
 import { nhfNumberSchema, reasonHoldsNumber } from "@/server/payroll/tax-records";
 
@@ -158,6 +163,48 @@ describe("H1: a clawback counts inside the one-third cap (owner decision, 25 Nov
     const s = slip(salary(REGULAR, earnings));
     expect(clawbackOf(s)).toBe(0n);
     expect(s.carriedForwardKobo).toBe(naira(20_000));
+  });
+});
+
+describe("leave arrears and shared clawback caps (money review round 2)", () => {
+  it("keeps prior-year leave arrears outside the cap: ₦90,000 arrears and a ₦50,000 loan both come off", () => {
+    const s = grossToNet(
+      {
+        employmentType: "permanent",
+        earnings: salary(REGULAR),
+        nhfOptIn: false,
+        annualRentKobo: 0n,
+        deductions: [
+          {
+            code: "leave_arrears",
+            label: "Unpaid leave, December 2025, recovered after tax",
+            amountKobo: naira(90_000),
+            sources: [],
+          },
+          { label: "Loan", amountKobo: naira(50_000), sources: [] },
+        ],
+        carriedDeductionKobo: 0n,
+      },
+      V2,
+      { itfApplies: true },
+    );
+    expect(s.otherDeductionsKobo).toBe(naira(140_000));
+    expect(s.carriedForwardKobo).toBe(0n);
+    expect(s.flags).not.toContain("deduction_capped");
+  });
+
+  it("shares the corrected payslip's taxable pay between two clawbacks of it, by what each took (L3)", () => {
+    const payslipId = "00000000-0000-4000-8000-0000000000aa";
+    const { earnings } = adjustmentLines([
+      correction(naira(30_000), { correctsPayslipId: payslipId, preTaxCapKobo: naira(40_000) }),
+      correction(naira(30_000), { correctsPayslipId: payslipId, preTaxCapKobo: naira(40_000) }),
+    ]);
+    const s = slip(salary(REGULAR, earnings));
+    const claws = s.lines.filter((l) => l.code === "clawback").map((l) => l.amountKobo);
+    expect(claws).toEqual([-naira(30_000), -naira(10_000)]);
+    expect(s.carriedForwardKobo).toBe(naira(20_000));
+    const step = s.trace.find((t) => t.step === "recovery_carried")!;
+    expect(step.inputs.limit).toBe("corrected_taxable");
   });
 });
 
@@ -338,6 +385,24 @@ describe("L6: a correction or one-off run's carry blocks with why and what to do
     expect(t.title).toBe("Deduction can't carry from this run · Ada");
     expect(t.body).toContain("Labour Act s.5(7)");
     expect(t.body).toContain("next regular run");
+  });
+
+  it("says why from the payslip: the corrected payslip's taxable pay", () => {
+    const { earnings } = adjustmentLines([correction(naira(20_000), { preTaxCapKobo: 0n })]);
+    const detail = carryBlockDetail(slip(salary(REGULAR, earnings)));
+    expect(detail).toMatchObject({ deduction_cut: true, clawback: true, taxable_limit: true });
+    expect(describeAnomaly("calculation_failed", detail, "Ada").body).toContain(
+      "corrected payslip's taxable pay",
+    );
+  });
+
+  it("says to move it to the next regular run when the cap base is ₦0", () => {
+    const t = describeAnomaly(
+      "calculation_failed",
+      { deduction_cut: true, capped: true, no_cap_base: true },
+      "Ada",
+    );
+    expect(t.body).toContain("move it to the next regular run");
   });
 
   it("names the clawback", () => {
