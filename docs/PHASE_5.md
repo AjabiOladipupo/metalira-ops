@@ -46,6 +46,8 @@ Builds on (names as they are on `main`):
 
 These are the plan's defaults. Every statutory figure below is **confirm with a tax adviser before the first live payroll**; the app shows that line on Settings > Payroll rules and on the run's Gross to net step.
 
+**Superseded in part (25 Nov 2026).** The tax adviser's 27 answers (docs/RULES_NIGERIA.md) replaced several defaults here, as built in 5.9a, 5.9b and 5.9c: PAYE is cumulative year to date, not the month annualised (decision 2, open question 9); daily workers pay PAYE (above the minimum wage), pension, NSITF and ITF under NTA 2025 v2 (decisions 1 and 3); the minimum wage (₦70,000 a month) is PAYE-exempt; pension applies from 3 employees and ITF from 5 employees or the turnover switch (open question 14); NSITF is on regular pay only; remittance due dates are statutory (open question 13, 5.9b). The "As built" sections below are the current behaviour.
+
 1. **Statutory figures** come from RULES_NIGERIA.md, stored as the first dated `tax_rule_sets` version (from 1 Jan 2026): PAYE bands 0% / 15% / 18% / 21% / 23% / 25% on ₦800,000 / ₦2,200,000 / ₦9,000,000 / ₦13,000,000 / ₦25,000,000 / above ₦50,000,000; rent relief 20% of declared annual rent capped at ₦500,000; employee pension 8% and employer pension 10% of basic + housing + transport; NHF 2.5% of basic where `nhf_opt_in`; NSITF 1% of monthly payroll; ITF 1% of payroll accrued monthly for employers with 5 or more staff (or ₦50m turnover). **Confirm with a tax adviser.**
 2. **PAYE method** (RULES_NIGERIA): taxable income = annual gross − employee pension − NHF − rent relief; monthly PAYE = annual tax ÷ 12, rounded half up to the kobo. "Annual" is this month's figures × 12 (the month annualised), which is what the golden fixture does. **Confirm with a tax adviser** (open question 9 asks about a cumulative year-to-date method).
 3. **Pay policy** (owner, 15 Nov 2026), stored per organisation and in the rule set's `policy` part: cycle 20th to 19th, paid on the 25th; normal hourly rate = monthly gross ÷ (20 × standard shift hours); overtime only past the assigned shift's end, at 1.0×; off-day work paid as one 8-hour overtime shift; public-holiday work recorded as overtime; daily workers paid daily rate × days worked, with no PAYE, pension, NSITF or ITF and left out of the levy base (**confirm with a tax adviser**).
@@ -175,6 +177,8 @@ Gathered by one definer read, `private.payroll_inputs(org, period_start, worker_
 - **Arrears**: earlier-period days approved after posting, priced at the rate in force on each day, one line per earlier period.
 
 ### Gross to net (5.0)
+
+As planned for NTA 2025 v1. Steps 2, 5 and 6 are superseded under v2 by 5.9a (daily workers taxed, cumulative year-to-date PAYE, the minimum-wage exemption, the pension and NHF conditions) and 5.10 (the one-third cap); see their "As built" sections.
 
 Per worker, in this order, each line rounded once:
 1. Gross = Σ earning lines.
@@ -589,11 +593,13 @@ At most three agents at once:
 - **Wave 4:** 5.4, 5.5 and 5.6, each from 5.3's branch (5.5 wires its publication to `release_payroll_run` once 5.4 lands).
 - **Wave 5:** 5.7, with 5.4, 5.5 and 5.6 merged.
 
-Migrations in order: `20261122100000` (5.0), `20261122110000` (5.1), `20261122120000` (5.2), `20261122130000` (5.3), `20261122150000` (5.5), `20261122160000` (5.6), `20261122170000` (5.4, planned as `20261122140000`; 5.5 and 5.6 merged first), `20261122180000` (5.7a reversal), `20261122190000` (5.7b off-cycle runs), `20261122200000` (5.7c arrears and refunds), `20261122210000` (5.8 review fix-up), `20261122230000` (5.9a tax engine per the adviser; 5.9b takes `20261122240000`, 5.9c `20261122250000`). A fix-up migration takes the next free minute in its own hour (for example `20261122120500`).
+As built, after wave 5: **Wave 6** 5.8 (the phase review fix-up); **Wave 7** 5.9a, 5.9b and 5.9c (the tax adviser's answers), merged in migration order; **Wave 8** 5.10 (the round-2 fix-up). U.1 and U.2 (owner-requested list work) were built beside waves 6 and 7.
 
-Reviews: **money-reviewer** on every slice (5.0 to 5.7). **security-reviewer** on 5.1 to 5.7 (definer reads of pay and work records, two-person checks, private buckets, decrypted account numbers and RSA PINs, worker access to payslips).
+Migrations in order, as built: `20261122100000` (5.0), `20261122110000` (5.1), `20261122120000` (5.2), `20261122130000` (5.3), `20261122150000` (5.5), `20261122160000` (5.6), `20261122170000` (5.4, planned as `20261122140000`; 5.5 and 5.6 merged first), `20261122180000` (5.7a reversal), `20261122190000` (5.7b off-cycle runs), `20261122200000` (5.7c arrears and refunds), `20261122210000` (5.8 review fix-up), `20261122220000` (U.1 People bulk actions), `20261122230000` (5.9a tax engine per the adviser), `20261122240000` (5.9b deadlines), `20261122250000` (5.9c leavers and holiday pay), `20261122270000` (U.2 list bulk actions and exports), `20261122280000` (5.10 round-2 fix-up). `20261122140000` and `20261122260000` are unused.
 
-No new crons. New buckets: `payroll-files`, `payslips`, `payroll-evidence`.
+Reviews: **money-reviewer** on every slice (5.0 to 5.10). **security-reviewer** on 5.1 to 5.10 (definer reads of pay and work records, two-person checks, private buckets, decrypted account numbers and RSA PINs, worker access to payslips), and twice on the whole phase (24 and 25 Nov 2026).
+
+No new crons (sweeps run from the existing daily `contract-documents` job). New buckets: `payroll-files`, `payslips`, `payroll-evidence`, and `payroll-relief-proofs` (5.9a).
 
 ### Estimated time (at the Phase 3 and 4 pace)
 
@@ -627,7 +633,7 @@ Starting each wave from the previous slice's open branch (the build-speed rule) 
 - `/app/payroll`, its run pages, Settings > Payroll rules, `/app/payroll/remittances` and `/m/payslips` work at 390px and 1440px.
 
 ## Needed from the owner
-- **The tax adviser's confirmation** of the 2026 PAYE bands and method, rent relief, pension, NHF (and whether it is optional), NSITF, ITF, the daily-worker exemption, the minimum-wage question, the pension and tax treatment of overtime and one-off pay, and the remittance due dates (open questions 1, 3, 6, 9 to 14), before Phase 5 ends (BUILD_PLAN "Open decisions"). Recorded on the rule set with `confirm_tax_rule_set`.
+- **The tax adviser's confirmation** of the 2026 PAYE bands and method, rent relief, pension, NHF (and whether it is optional), NSITF, ITF, the daily-worker exemption, the minimum-wage question, the pension and tax treatment of overtime and one-off pay, and the remittance due dates (open questions 1, 3, 6, 9 to 14), before Phase 5 ends (BUILD_PLAN "Open decisions"). Recorded on the rule set with `confirm_tax_rule_set`. The adviser answered all 27 points on 24 Nov 2026 and they are built (5.9a to 5.9c); recording the confirmation on NTA 2025 v2 is still the owner's step (see the sign-off).
 - **Each pilot's bank bulk-payment template** (a blank file and a filled sample with fake numbers), to add as formats in 5.4 or after. Until then the generic CSV is the only format.
 - A sample bank statement export from each pilot (needed for Phase 6, and to match payout debits).
 - Answers to open questions 1 to 8 and 15 (the defaults are built meanwhile).
@@ -659,3 +665,146 @@ Still open for later phases (from the Phase 4 sign-off and earlier):
 - A manager inbox, so payroll notices to Finance and HR don't spend email.
 - Leave attachments (medical certificates) with a private bucket and signed URLs.
 - The Phase 2 and 3 low hardening follow-ups.
+
+## Sign-off (25 Nov 2026)
+
+All Phase 5 pull requests are merged. Each "done when" item was checked against the code on `main` at `a16f911` (PR #90, slice 5.10, the last Phase 5 slice). That commit passed CI: `check`, `rls` and `e2e` all green (run 45629122109).
+
+| # | Done when | Verdict | Evidence |
+| --- | --- | --- | --- |
+| 1 | The app reproduces `fixtures/october-2026-golden.json` exactly: the engine's unit test, the end-to-end database test through run and approval, and the statutory totals, every figure in kobo | Met | Engine: `tests/unit/payroll/golden.test.ts` "%s matches to the kobo" (each of the six workers), "matches the totals", "matches the statutory figures", "explains Musa Ibrahim's PAYE as the plan's worked check" (NTA 2025 v1); `tests/unit/payroll/adviser-engine.test.ts`, under "the golden fixture under NTA 2025 v2 (October is the first payroll)": "%s" (each worker), "reproduces the totals and the statutory figures", "is the month annualised: the same as with no year-to-date at all"; `tests/unit/payroll/fixup2.test.ts` keeps it exact under 5.10's months rule. End to end: `tests/rls/payroll-golden.test.ts` "a second person in Finance approves, and every stored payslip equals the golden fixture" (under v2, with the four rents verified). Statutory: `tests/unit/payroll/statutory.test.ts` "gives the golden statutory totals to the kobo", "sums the golden run's NSITF schedule to ₦8,700"; `tests/rls/payroll-golden.test.ts` "owes the golden statutory figures as remittances (slice 5.6)". Note: the golden pension due date moved from Monday 2 Nov to Tuesday 3 Nov with the adviser's answer 20 (`statutory.test.ts` "counts pension from a weekend payday's next working day as day 1 (Sun 25 Oct 2026 gives Tue 3 Nov)"). |
+| 2 | Gross to net has a trace for every worker, shown by Explain on the run and summarised on the payslip | Met with notes | Every payslip row carries a trace: `payslips.trace` is `not null` with the `payslips_trace_shape` check (migration `20261122120000`), and `save_payroll_results` stores the engine's trace for each worker. `tests/unit/payroll/earnings.test.ts` "writes a trace with kobo as strings and no names", "never rounds a line twice: each line equals its trace value"; `tests/unit/payroll/golden.test.ts` "keeps names out of the trace (the engine is never given one)"; `tests/unit/payroll/run.test.ts` "explains Musa Ibrahim's PAYE of ₦5,660 in the trace"; `tests/e2e/payroll-run.spec.ts` "HR prepares the October run, sees the golden figures and Explain, and submits after acknowledging" (opens "Explain Musa Ibrahim" at 1440px, then at 390px). Payslip: `tests/unit/payroll/payslip-view.test.ts` "states the rent the tax used, or nothing without one", "refuses lines that don't add up to the totals"; `tests/unit/payroll/payslip-pdf.test.ts` "is the same figures the view gives". Notes: the payslip summarises the trace as its grouped lines (What you earned, Taken out, Your employer also paid) and the rent line read from the trace's `rent_relief` step, not as the steps themselves; Explain is checked end to end for one worker (Musa Ibrahim). |
+| 3 | A run can't be approved by the person who prepared it, and can't be approved after its inputs changed | Met with notes | Two people: `tests/rls/payroll-approval.test.ts` "refuses the owner who prepared it, and hr whatever they did", "refuses an owner who acknowledged an anomaly, and anyone who recalculated", "holds the rule in the table too: approved_by is never the preparer"; `tests/rls/payroll-adviser.test.ts` "refuses an approver who verified a relief or recorded an opening balance of the run's workers"; `tests/rls/payroll-off-cycle.test.ts` "needs a second person, as a regular run does"; `tests/rls/payroll-reversal.test.ts` "needs a second person, and 5.3's approval can't approve a reversal"; `tests/e2e/payroll-approval.spec.ts` "the preparer can't approve their own run; Finance approves it after seeing the totals and anomalies". Changed inputs: `tests/rls/payroll-golden.test.ts` "refuses HR approving, and Finance approving after the inputs changed"; `tests/rls/payroll-approval.test.ts` "is refused without the approver's own check, and when the check found a change", "is refused when a paid day is reopened after the check", "is refused when a pay rate in its scope is written after the check", "catches a pay-rate edit committed while the server was reading the inputs"; `tests/rls/payroll-adviser.test.ts` "refuses when a relief was verified after the PAYE was worked out, and approves a current one", "refuses after an NHF number, the ITF switch or a worker changed". Note: a write whose transaction began before the server's read and committed after it can still slip past the "written after the read began" timestamp checks (5.10 "Clock stamps"); the inputs hash and the year-to-date content checks cover what the engine read. Carried forward below. |
+| 4 | Approved payslips, lines and sources can't be edited or deleted by anyone; corrections are reversals (before release) or adjustments and off-cycle runs | Met | `tests/rls/payroll-approval.test.ts` "refuses every change to posted rows for the database owner, even with triggers off", "refuses the secret key and signed-in roles too (no write grants)"; `tests/rls/payroll-runs.test.ts` "never changes a payslip, and keeps a submitted run's payslips"; `tests/rls/payroll-reversal.test.ts` "never changes the reversed run or its reversal, for the database owner in replica mode too", "refuses every other way to reverse, free or void, for the database owner too", "refuses a released run: the money has gone", "adds a correction to a later draft naming the released payslip", "corrects a payslip once per run, and again elsewhere only when confirmed"; `tests/rls/payroll-off-cycle.test.ts` "lets a correction or one-off run pay adjustments only, for its own workers"; `tests/e2e/payroll-reversal.spec.ts` "Finance reverses an approved run before release; a second person approves; the period reopens"; `tests/e2e/payroll-off-cycle.spec.ts` "an off-cycle final pay goes from the worker picker to Finance's approval". |
+| 5 | Posting locks the pay period: reopening or disputing a timesheet day in it is refused | Met | `tests/rls/payroll-approval.test.ts` "is true for days in the posted period only", "makes 4.3's reopen and dispute refuse with MLTA5, and holds for the database owner"; `tests/rls/payroll-golden.test.ts` "locks 20 Sep to 19 Oct: reopening a day there is refused"; `tests/rls/payroll-off-cycle.test.ts` "holds the timesheet day it paid, for the database owner too"; `tests/rls/payroll-reversal.test.ts` "reopens the period: no posted days, and 4.3's reopen isn't MLTA5" (a reversed run unlocks it). |
+| 6 | The bank file has control totals, refuses a last-4 mismatch, sits in a private bucket behind 60-second links, and no account number appears in a log | Met with notes | `tests/rls/payouts.test.ts` "refuses hr and line managers; finance makes it with control totals and masked items", "refuses items that don't match the run and the details in force", "refuses direct reads, lists, signed links and writes by every signed-in role", "gives owner and finance the path, audited with the batch id only; refuses hr"; `tests/unit/payroll/bank-file.test.ts` "totals: the amounts in the file sum to the items' kobo", "renders the fixture's bytes exactly (CRLF, no byte-order mark)"; `tests/unit/payroll/bank-file-log.test.ts` "makes the file: numbers in its bytes only, never in the log or the database call", "refuses a last-4 mismatch by name, without the number", "deletes the stored file when the database refuses, and logs no number"; `tests/e2e/payroll-pay.spec.ts` "Finance makes the bank file with control totals, downloads it and releases the run". Note: the 60 seconds is the constant `BANK_FILE_URL_SECONDS` in `src/server/payroll/payouts.ts` (supplementary files use the same); no test asserts the link's lifetime. |
+| 7 | Workers read their released payslips and download the PDF on the phone; nobody else's | Met | `tests/rls/payslips.test.ts` "lists Musa's released payslips, newest first, with the figures in kobo", "never shows a draft, a run in review or an approved run not released", "gives another worker, managers and other companies nothing of Musa's", "opens the worker's own released PDF and audits it with ids only", "opens any PDF for owner, hr and finance; never for a line manager, another worker or company", "refuses direct reads, lists, signs and writes by every signed-in role"; `tests/rls/payroll-runs.test.ts` "never shows a worker their own draft or submitted payslip"; `tests/e2e/payslips.spec.ts` "after release Musa Ibrahim reads his October payslip on the phone and downloads the PDF". |
+| 8 | Every statutory figure shows "confirm with a tax adviser before the first live payroll" until the adviser's confirmation is recorded | Met with notes | Settings > Payroll rules: `tests/e2e/payroll-rules.spec.ts` "HR sees the bands with the adviser line, previews and saves a version from tomorrow" and "Finance reads the rules without editing; an admin can't open them" (1440px and 390px). Remittances: `tests/e2e/payroll-remittances.spec.ts` "HR downloads the pension schedule and records the payment with its receipt" (checks the adviser line). Recording it: `tests/rls/tax-rule-sets.test.ts` "is recorded by an owner only, once, and then kept". Off the worker's payslip (owner decision): `tests/unit/payroll/fixup.test.ts` "is in no worker-app screen, nor the payslip PDF or its view"; `tests/unit/payroll/payslip-pdf.test.ts` "never carries the tax adviser line (owner decision, slice 5.8: managers only)". Notes: on the run's Gross to net and Submit steps and a reversal's totals the line is proven by reading the code only (`src/app/app/payroll/[id]/page.tsx`, shown until the run's rule set is confirmed). docs/RULES_NIGERIA.md now records the tax adviser's 27 answers (24 Nov 2026), but `confirm_tax_rule_set` has **not** been recorded by a person on NTA 2025 v2 yet, so the adviser line still shows everywhere above. Recording it is the owner's step (the last item of the live-site list). |
+| 9 | Every Phase 5 table is in the isolation test; every Server Action is in the capability registry, all payroll writes `agent: false`, and every money write has a preview | Met with notes | The 30 public tables created by migrations `20261122100000` to `20261122280000` each have a registry entry: `tax_rule_sets` (`tests/rls/tables/payroll_rules.ts`); `payroll_runs`, `payslips`, `payslip_lines`, `payslip_sources`, `payroll_adjustments`, `payroll_anomalies`, `payroll_run_decisions`, `payroll_approval_checks` (`zz_payroll_runs.ts`); `payslip_documents`, `payslip_snapshots` (`zz_payslip_documents.ts`); `statutory_remittances`, `statutory_payments`, `statutory_receipts` (`zz_statutory.ts`); `payout_batches`, `payout_items` (`zzz_payouts.ts`); `statutory_remittance_voids` (`zzzz_reversal.ts`); `payroll_run_workers` (`zzzz_off_cycle.ts`); `payout_supplements`, `payout_supplement_items` (`zzzz_supplements.ts`); `statutory_payment_resolutions` (`zzzzz_resolutions.ts`); `payroll_opening_balances`, `payroll_relief_declarations`, `payroll_relief_proofs`, `payroll_relief_verifications`, `payroll_nhf_numbers`, `payroll_itf_turnover` (`zzzzzz_tax_records.ts`); `payroll_final_pay_items`, `payroll_holiday_pay_rates` (`zzzzzz_leavers.ts`); and `official_holidays`, declared as a platform table (`official_holidays.ts`). U.1 and U.2 create no tables. `tests/rls/isolation.test.ts` "declares exactly the tables in schema public" fails on any table without an entry. Phase 5 added 47 Server Actions across 8 `"use server"` modules in `src/server/payroll/` (`rule-sets-actions.ts`, `run-actions.ts`, `reversal-actions.ts`, `payout-actions.ts`, `payslip-actions.ts`, `remittance-actions.ts`, `tax-records-actions.ts`, `leavers-actions.ts`), and each is in `src/server/capabilities/registry.ts`; `tests/unit/capabilities/registry.test.ts` "registers every exported Server Action" holds the line. Every payroll capability that writes is `agent: false` (so are the worker's `me.payslip_pdf` and `me.ask_hr_about_payslip`), and all 31 `kind: "money"` writes have a preview. Note: 8 non-money writes have none, all `agent: false`: `payroll.confirm_rule_set`, `payroll.publish_payslips` (many rows, but idempotent and only what release already decided), `payroll.set_remittance_due_days`, the upload steps `payroll.start_relief_proof`, `payroll.record_relief_proof`, `payroll.start_remittance_receipt` and `payroll.start_refund_receipt`, and `payroll.open_relief_proof`. The registry test requires a preview only when the agent may offer the write. |
+| 10 | `/app/payroll`, its run pages, Settings > Payroll rules, `/app/payroll/remittances` and `/m/payslips` work at 390px and 1440px | Met with notes | Each spec runs at 1440px, then 390px, and checks for no sideways scroll: `/app/payroll` and its run pages, `tests/e2e/payroll-run.spec.ts`, `payroll-approval.spec.ts`, `payroll-pay.spec.ts`, `payroll-reversal.spec.ts`, `payroll-off-cycle.spec.ts`, `payroll-final-pay.spec.ts` and `payroll-supplementary.spec.ts`; Settings > Payroll rules, `payroll-rules.spec.ts` and `payroll-final-pay.spec.ts` "HR sets the public holiday pay rate from tomorrow; Finance only reads it"; `/app/payroll/remittances`, `payroll-remittances.spec.ts`; the run's Payslips page at 1440px in `payslips.spec.ts`. Note: `/m/payslips` is proven at 390px only (`tests/e2e/payslips.spec.ts`), as the other worker screens were; 1440px for it is step 10 of the live-site list. The worker page's Tax and reliefs section has no width check of its own. |
+
+### Merged pull requests
+- #72 Phase 5 plan
+- #73 slice 5.1 pay inputs and the earnings stage; pay visible to owner, hr and finance only
+- #74 slice 5.0 tax rule sets and the gross-to-net engine
+- #75 slice 5.2 the payroll run (draft, review, anomalies)
+- #76 slice 5.3 two-person approval, posting and the period lock
+- #77 slice 5.6 statutory schedules and remittances
+- #78 slice 5.5 payslip PDFs, the worker app and notices
+- #79 slice 5.4 bank file export and release
+- #80 cut Vercel function storage use (previews build only on `[preview]` commits; payslip fonts traced only for payroll pages)
+- #81 slice 5.7b off-cycle payroll runs
+- #82 slice 5.7a payroll reversal and corrections
+- #83 slice 5.7c arrears, leave refunds, supplementary payouts, remittance offsets
+- #84 slice 5.8 Phase 5 review fix-up
+- #86 slice 5.9b statutory deadlines per the tax adviser
+- #87 slice 5.9c leavers' final pay, holiday pay rate and adviser rules
+- #88 slice 5.9a payroll tax engine per the tax adviser
+- #90 slice 5.10 Phase 5 round-2 fix-up
+
+Related, owner-requested:
+- #85 slice U.1 list selection, People filters and bulk actions
+- #89 slice U.2 bulk actions and CSV export on lists
+
+### Owner decisions made during the phase
+- **Pay rates are for owner, hr and finance only** (23 Nov): admins and ops managers lost read access to pay and the pay actions; the people import is owner and hr only (5.1).
+- **Off-cycle PAYE taxed the calendar month as a whole** (24 Nov), across every payslip paid in it; the tax adviser's cumulative year-to-date method replaced it in 5.9a (answer 4).
+- **The tax adviser line is for managers only**: never on the worker's payslip screen or the PDF (5.8).
+- **A leave refund that pays back a deduction not yet recovered from carried deductions is flagged** on the run (`refund_uncollected_carry`, 5.8).
+- **HR keeps the pension schedules**: remittances and schedules stay with owner, hr and finance.
+- **Daily workers are taxed as the adviser says**: PAYE above the minimum wage, pension, NSITF and ITF; NHF stays opt-in (5.9a, reversing the plan's exemption).
+- **The one-third cap covers non-statutory deductions only**: PAYE, pension and NHF always come off in full. Same-year clawbacks count inside the cap; late-approved leave arrears stay outside it (5.9a, 5.10; pending an employment lawyer).
+- **Public holiday pay defaults to 1.0×** on top of normal pay, set per company by the owner or HR; Finance reads it (5.9c, 5.10).
+- **Pay in lieu of untaken leave is prorated**: the yearly entitlement × complete months worked in the leave year ÷ 12, less days taken, rounded down, from 6 months' service, editable with a reason (5.9c).
+- **The ₦50,000,000 redundancy exemption is per person and cumulative** across their final-pay items (5.9c).
+- **The official holiday calendar keeps its own trail** and writes no `audit_log` row (5.9b).
+- **Payroll rows in the audit log are for the owner only**: admins see no pay, payroll or statutory entries (5.8).
+- **Resend Pro**: the owner subscribes before the first real payroll release.
+
+### Coordinator defaults the owner may change
+- PAYE above what a payslip can pay after pension and NHF is capped there and caught up by the year-to-date maths next month (or flagged for year end); a run never blocks for it (5.9a).
+- Same-year clawbacks and leave arrears larger than the month can bear take what fits before tax; the rest is carried and recovered after tax (5.9a, 5.10).
+- Rent relief before NTA 2025 v2 is kept on the declared rent for the months before v2; from v2 only verified rent counts, and unverified months aren't caught up (5.9a).
+- A daily worker's payslips under v1 (exempt) are left out of the tax year, so v2 never taxes those months (5.9a).
+- Months elapsed count from the worker's first payslip in Metalira when there's no opening balance, with the warning "No opening balance" (5.10).
+- NHF numbers are encrypted at column level, last 4 kept, never in the audit log (5.9a).
+- The ITF turnover switch is dated: the value in force on the pay date counts (5.9a).
+- The headcount for the pension (3) and ITF (5) thresholds is the workers employed on the pay date, daily workers included (5.9a).
+- Whoever made the bank file can't release it; the approver may (5.4).
+- A fixed remittance deadline that falls on a weekend or holiday rolls back to the earlier working day, labelled until the adviser confirms (5.9b; 5.6's roll-back of the pay date itself was replaced by the adviser's answer 20).
+- State public holidays move only that state's PAYE deadline; the other kinds count federal holidays only (5.9b).
+- Offset is the default for a payment on a reversed run's remittance; a refund stays available (5.9b).
+- One rule set per run: the version in force on the pay date; pay-policy figures per day worked (5.0).
+- Pay defaults from 5.1: unpaid leave deductions leave out public holidays; holiday minutes are paid once at the holiday rate on top of normal pay; a worker with no rostered days is paid ₦0 and flagged; a no-shift clock-in on a working day isn't off-day pay.
+- A later run that depends on a run must be reversed first (5.8).
+- A leaver's carried deduction can't be recovered through payroll and is flagged (5.10).
+- A correction or one-off run blocks when a deduction would carry, as it has no later run of its own (5.10).
+- A recurring allowance counts as regular pay for NSITF only when HR ticks it (5.10).
+- Runs worked out before 5.10's migration must be returned and recalculated before approval (5.10).
+
+### Carried to Phase 6 and later
+- Phase 6: price Work Units from the rate card in force on their date; match payout debits from bank statements to `payout_items` and supplementary items (status matched); the rest as in PHASE_2.md. A sample bank statement export from each pilot is needed for it.
+- Phase 7: actual labour cost per Work Unit and site from posted payslips.
+- Phase 8: special project and task overtime multipliers; 1.0× until then.
+- "Mark paid outside the file" for a left-out payslip (money review L7), so a supplementary file can't pay it again; until then the Pay step lists it as outstanding.
+- A leaver's leave corrections (arrears or refunds after their final pay posted) go through a correction off-cycle run by hand; no regular run picks them up.
+- The residual window on approval re-checks: a write whose transaction started before the server's read and committed after it isn't caught by the timestamp checks (only by the inputs hash and the year-to-date content checks).
+- Each pilot's bank bulk-payment template, to add as a bank file format; the generic CSV is the only format until then.
+- Supabase Pro before the first pilot (selfies, photos, payslip PDFs, bank files and relief proofs in storage).
+- Resend Pro before the first live payroll release (Resend Free's 100 emails a day won't cover a release).
+- The 2027 Muslim holidays, weekend substitute days and every state's own holidays in the official calendar, added by a Metalira admin with the secret key; there is no admin screen yet.
+- An integration test of the run calculation reading a holiday pay rate other than 1.0× (5.9c).
+- Consider refusing payroll release while company setup is unfinished (Phase 1).
+- Unicode hardening of the inbox and query text rules: refuse `\p{Cf}` and count digits after NFKC (applies to "Ask HR" too).
+- Hide manager user ids from workers in what the worker app reads.
+- A crew group photo viewer for managers (from Phase 3).
+- Replacing a past-day night shift from the board (from Phase 3).
+- The HR file's "Timesheet exceptions by period" placeholder (`hr-file-timesheet-placeholder`); it can read `timesheet_review_days`.
+- Crons: `vercel.json` has 7 daily crons; Phase 5 adds none. Check Hobby's cron limit before adding more.
+- A manager inbox, so payroll notices to Finance and HR don't spend email.
+- Leave attachments (medical certificates) with a private bucket and signed URLs.
+- The Phase 2 and 3 low hardening follow-ups.
+
+### Open points for the tax adviser
+From docs/RULES_NIGERIA.md; each is built as a product reading until answered.
+1. A fixed deadline on a weekend or holiday: the working day before (built) or after?
+2. Do state holidays count only for that state's PAYE deadline?
+3. Pension on a daily worker's consolidated pay; and is that pay NHF's "basic"?
+4. The headcount for the pension and ITF thresholds, taken on the pay date.
+5. The minimum-wage test on the year-to-date basis, and whether a redundancy payment's exempt part and leave refunds count in it; NHF's minimum-wage test on regular monthly pay.
+6. PAYE capped at what a payslip can bear, and over-withholding kept on the trace rather than refunded.
+7. Months elapsed from the worker's first payslip in Metalira without an opening balance; rent relief not caught up for months before proof was required.
+8. Clawbacks and same-year leave arrears cut to fit and carried; earlier-year leave arrears after tax; pension and NHF room kept before a pre-tax recovery.
+9. The NSITF regular payroll as built, and whether redundancy and other final-pay items are in the ITF base.
+10. Caps on the NHIS and life assurance reliefs (none applied), and hourly pay in the pension base.
+
+### Open points for the employment lawyer
+1. Public holiday pay: the company multiplier, and the 1.0× floor.
+2. Maternity under Labour Act s.54, and pay below 6 months' service.
+3. The one-third cap (s.5(7)): statutory deductions outside it, clawbacks inside, leave arrears outside, and its base before same-year leave arrears.
+4. The cap on a leaver's final payslip, and future loan instalments there.
+5. The 3-month window (s.5(5)), measured from the corrected payslip's pay date to the day the correction is added and again at approval.
+6. Notice periods (s.11): the app takes the notice days from HR.
+7. The leave-in-lieu pre-fill, and reading s.18 and s.18(4) as two rules.
+
+### Check on the live site
+On ops.metaliratech.com: HR, Finance and the owner on a laptop as three different people, a worker on a phone at `/m`. Set up the six workers of the golden fixture (pay rates, Lagos tax state, PFAs, rents) with a full 20 Sep–19 Oct of approved days, and leave one of them without bank details.
+1. **5.0, 5.9a** As HR, open Settings > Payroll rules: NTA 2025 v2 is in force with the PAYE bands, the adviser's figures and "Confirm with a tax adviser before the first live payroll." "Add a version" previews the figures that change.
+2. **5.9a** On the same page, ITF and turnover shows the switch; under Opening balances, "Import opening balances" with a pasted line for a worker paid elsewhere earlier in 2026 previews before it saves.
+3. **5.9a** On a worker's page, Tax and reliefs: "Declare a relief" for rent and upload the tenancy proof. Verifying it yourself is refused; as the owner, "Verify the proof". Add the NHF number: only the last 4 show. (Whoever declares or verifies a relief, or sets the NHF number, can't later approve, release or approve a reversal of a run that pays that worker this year.)
+4. **5.2** As HR, Payroll run > "Prepare a payroll run" for October 2026: the Period step shows 20 Sep–19 Oct, pay date 25 Oct and the rule set; Timesheets lists any flagged days by site.
+5. **5.0, 5.2** Gross to net shows ₦870,000 gross, ₦55,150 PAYE, ₦69,600 pension, ₦745,250 net and ₦974,400 employer cost, with the adviser line. "Explain Musa Ibrahim" shows his PAYE of ₦5,660 step by step.
+6. **5.2** On Earnings, "Add an earning or deduction" shows the net before and after. On Anomalies, acknowledge the warnings (the missing bank details included). Submit is refused while one is open, then "Confirm and submit".
+7. **5.3** As HR, approving is refused with the two-person message. As Finance, "Check and approve" shows the control totals and acknowledged anomalies; "Confirm and approve". In Timesheets, reopening a day in 20 Sep–19 Oct is refused.
+8. **5.4** As the owner, on the Pay step, "Preview the file" then "Make the file": the control totals match the run's net and count, with 1 left out, and the SHA-256 shows. Download opens a 60-second link. "Release the run" is refused for the file's maker.
+9. **5.4, 5.9b** As Finance, download the file, then "Release the run" with "Date you uploaded it to the bank" (default today) and "Confirm and release": the run shows Paid and released, and the left-out worker is listed as outstanding.
+10. **5.5** On the phone, Musa Ibrahim opens Payslips: "You received ₦104,740", What you earned, Taken out, Your employer also paid, This year so far and the rent line, with no adviser line. "Download PDF" gives the same figures; "Ask HR" sends a question. Another worker sees only their own. Open `/m/payslips` at laptop width too: the layout holds.
+11. **5.6, 5.9b** Open Statutory remittances: PAYE to Lagos State IRS (due Tue 10 Nov, penalty after 21 Nov), pension by PFA (the 7th working day counting the upload day given at release as day 1, or the next working day when it isn't one; Tue 3 Nov had it been uploaded on 25 Oct), NSITF (15 Nov is a Sunday, so Fri 13 Nov, "earlier working day used until confirmed") and ITF (1 Apr 2027). Dates already past show as overdue in the banner. Download the pension schedule; "Record payment" with a receipt ("Upload receipt and record"): it shows paid with "View receipt".
+12. **5.7c** Once the left-out worker's bank details are in force, the Pay step lists them as ready. As the owner, "Make a supplementary file"; as Finance, download it and "Confirm the supplementary file" (its maker is refused).
+13. **5.7a** Prepare, submit and approve a November test run, then as Finance "Reverse this run" with a reason: "Preview the reversal" shows the negative totals and what it voids; "Ask for the reversal". As a second Finance member (not the one who asked, and nobody who prepared the run or verified a relief for its workers), "Approve the reversal": the run shows Reversed, its remittances Voided, and the period reopens.
+14. **5.7c, 5.9a** Approve unpaid leave whose days fall in 20 Sep–19 Oct. Prepare November again: Earnings shows "Unpaid leave in 20 Sep to 19 Oct, approved after posting (…)", taken before tax, once. "Correct a released payslip" previews the net before and after.
+15. **5.7b, 5.9c, 5.10** "New off-cycle run": Final pay for a leaver, for a worker whose last day is in the period. On Earnings, "Add a final-pay item": Pay in lieu of untaken leave shows its pre-filled days and the working; Redundancy or loss-of-office compensation splits at ₦50,000,000 into exempt and taxable. A second leave item asks "Why this is a further item". Submit, and approve as a second person.
+16. **5.9c, 5.10** In Settings > Payroll rules > Public holiday pay, HR sets 1.5× from tomorrow after its preview; Finance sees the rate but no form.
+17. **U.1** In People, filter by site, line manager, job title, app role and department; select several people and use Change line manager, Change department and End employment for the selected people, each with its preview.
+18. **U.2** "Export CSV" on People, Timesheets, Leave, Payroll run, the run's Payslips page and Statutory remittances; "Approve selected days" on Timesheets; "Resend invites" on the invites list.
+19. **5.0** Last, as the owner, once the tax adviser has signed off NTA 2025 v2: Settings > Payroll rules > Your tax adviser's confirmation, record it with a note. The page then says "Confirmed by your tax adviser." and the adviser line leaves the run and remittance pages.
