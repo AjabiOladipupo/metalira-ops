@@ -37,8 +37,9 @@
 --
 -- Refusals: 42501 role or untrusted session; MLBU1 nobody selected, or more than 200 (U.1's
 -- helper); MLBM1 the mode or a missing site; MLBM2 someone selected can't be mapped (DETAIL:
--- [{worker_id, name, staff_id, reason}]); MLBM3 the site or a project isn't this company's, or a
--- project isn't of the site's client. MLBMP is the dry run's internal rollback.
+-- [{worker_id, reason}], no names; the dry run returns names in its result instead); MLBM3 the
+-- site or a project isn't this company's, or a project isn't of the site's client. MLBMP is the
+-- dry run's internal rollback.
 --
 -- No table, trigger or policy is added.
 
@@ -234,9 +235,15 @@ begin
 
     if not coalesce(p_dry_run, false) then
       if jsonb_array_length(v_refusals) > 0 then
+        -- Ids and reasons only: no names or staff IDs in an error (security review L1). The
+        -- server names them from its own read, as the dry run's list already did.
         raise exception 'Nobody was mapped: % of the people selected can''t be.',
           jsonb_array_length(v_refusals)
-          using errcode = 'MLBM2', detail = v_refusals::text;
+          using errcode = 'MLBM2',
+                detail = (
+                  select jsonb_agg(jsonb_build_object('worker_id', r -> 'worker_id', 'reason', r -> 'reason'))
+                  from jsonb_array_elements(v_refusals) r
+                )::text;
       end if;
       perform private.log_audit_impl(
         p_organisation_id,

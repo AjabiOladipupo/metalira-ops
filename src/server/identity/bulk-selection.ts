@@ -18,6 +18,9 @@ import { MutationError } from "./mutate";
  *   `selection { ids, count, act, digest }`, where the digest is an HMAC-SHA256, keyed with a
  *   server-only secret (derived from the personal data key, purpose `bulk-selection-digest`),
  *   over the action, the signed-in user, the organisation, the ticked ids and the act set.
+ * - The digest also signs when the preview was made, and travels as `<issued-at ms>.<hmac hex>`.
+ *   A confirm more than 15 minutes after its preview is refused with "The preview has expired"
+ *   (security review of U.3, L2), so an old screen can't act on a stale picture.
  * - The confirm sends the ticked ids, the act set and the digest back. The server resolves the
  *   ticked ids again and checks the digest (constant time); anything else is refused with "The
  *   list changed since the preview" (MLLB3). Only the act set is passed to the database, so a
@@ -39,7 +42,10 @@ export function idsSchema(limit: number, noun = "rows") {
 
 export const expectedDigestSchema = z
   .string("Preview the change first")
-  .regex(/^[0-9a-f]{64}$/, "Preview the change first");
+  .regex(/^\d{1,15}\.[0-9a-f]{64}$/, "Preview the change first");
+
+/** How long a preview may be confirmed for. */
+export const PREVIEW_TTL_MS = 15 * 60 * 1000;
 
 /** The act set the preview signed: the ids it said it would act on. */
 export function actIdsSchema(limit: number) {
@@ -58,6 +64,7 @@ export interface PreviewedSet {
   ids: string[];
   count: number;
   act: string[];
+  /** `<issued-at ms>.<hmac hex>`: send it back unchanged with the confirm. */
   digest: string;
 }
 
@@ -65,14 +72,19 @@ function sortedDistinct(ids: readonly string[]): string[] {
   return [...new Set(ids.map((id) => id.toLowerCase()))].sort();
 }
 
-/** HMAC-SHA256 (hex) over the scope, the ticked ids and the act set, each sorted and distinct. */
+/**
+ * HMAC-SHA256 (hex) over the scope, the ticked ids, the act set (each sorted and distinct) and
+ * the time the preview was made.
+ */
 export function previewDigest(
   scope: PreviewScope,
   ids: readonly string[],
   act: readonly string[],
+  issuedAt: number,
 ): string {
   const payload = JSON.stringify([
-    "metalira-ops/bulk-preview/v1",
+    "metalira-ops/bulk-preview/v2",
+    issuedAt,
     scope.action,
     scope.userId.toLowerCase(),
     scope.organisationId.toLowerCase(),
@@ -88,6 +100,7 @@ export function previewedSet(
   scope: PreviewScope,
   ids: readonly string[],
   act: readonly string[],
+  now: number = Date.now(),
 ): PreviewedSet {
   const distinct = [...new Set(ids.map((id) => id.toLowerCase()))];
   const acting = [...new Set(act.map((id) => id.toLowerCase()))];
@@ -95,7 +108,7 @@ export function previewedSet(
     ids: distinct,
     count: distinct.length,
     act: acting,
-    digest: previewDigest(scope, distinct, acting),
+    digest: `${now}.${previewDigest(scope, distinct, acting, now)}`,
   };
 }
 
@@ -105,13 +118,23 @@ export const LIST_CHANGED = "The list changed since the preview. Review it again
 export class ListChanged extends MutationError {
   override name = "ListChanged";
   readonly refusal = "MLLB3";
-  constructor() {
-    super("invalid", LIST_CHANGED, { selection: LIST_CHANGED });
+  constructor(message: string = LIST_CHANGED) {
+    super("invalid", message, { selection: message });
   }
 }
 
 export const NOT_IN_LIST =
   "Some of the rows selected aren't in your list. Reload the page and select again.";
+
+export const PREVIEW_EXPIRED = "The preview has expired. Review it again.";
+
+/** The confirm came more than 15 minutes after its preview (MLLB3, preview again). */
+export class PreviewExpired extends ListChanged {
+  override name = "PreviewExpired";
+  constructor() {
+    super(PREVIEW_EXPIRED);
+  }
+}
 
 /** Some ids sent aren't rows the caller can read (MLLB2). */
 export class NotInList extends MutationError {
@@ -151,6 +174,7 @@ export function confirmPlan(
   visible: ReadonlySet<string>,
   sentAct: readonly string[],
   expectedDigest: string,
+  now: number = Date.now(),
 ): ConfirmedPlan {
   let ids: string[];
   try {
@@ -162,11 +186,17 @@ export function confirmPlan(
   const act = [...new Set(sentAct.map((id) => id.toLowerCase()))];
   const ticked = new Set(ids);
   if (act.some((id) => !ticked.has(id))) throw new ListChanged();
-  const expected = Buffer.from(previewDigest(scope, ids, act), "hex");
-  const given = Buffer.from(expectedDigest, "hex");
+  const [issued, mac] = expectedDigest.split(".");
+  const issuedAt = Number(issued);
+  if (!mac || !Number.isSafeInteger(issuedAt)) throw new ListChanged();
+  const expected = Buffer.from(previewDigest(scope, ids, act, issuedAt), "hex");
+  const given = Buffer.from(mac, "hex");
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
     throw new ListChanged();
   }
+  // Checked after the signature, so only a genuine preview's own time is trusted. A minute of
+  // clock skew is allowed for a time slightly ahead.
+  if (now - issuedAt > PREVIEW_TTL_MS || issuedAt - now > 60_000) throw new PreviewExpired();
   const acting = new Set(act);
   return { ids, act, rest: ids.filter((id) => !acting.has(id)) };
 }

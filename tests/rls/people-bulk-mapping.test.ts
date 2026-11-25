@@ -163,6 +163,8 @@ function problems(details: string | null | undefined): { worker_id: string; reas
 }
 
 beforeAll(async () => {
+  // The preview digest is keyed with a subkey of the personal data key (any throwaway key here).
+  process.env.PII_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
   admin = adminClient();
   db = await pgClient();
   owner = await createTenantUser("bm-owner", "Bulk Mapping Org");
@@ -361,6 +363,10 @@ describe("all or nothing", () => {
         reason: "This employee has left, so their mapping can't change.",
       }),
     ]);
+    // Ids and reasons only in the error: no names or staff IDs (security review L1).
+    for (const p of problems(error?.details)) {
+      expect(Object.keys(p).sort()).toEqual(["reason", "worker_id"]);
+    }
     expect(await rowsOf(fine)).toEqual([]);
 
     // The preview lists the same refusal without raising.
@@ -398,6 +404,34 @@ describe("all or nothing", () => {
       org: other.orgId,
     });
     expect(across.error?.code).toBe(DENIED);
+  });
+
+  it("refuses an archived site for everyone, through the single save's own check", async () => {
+    const { data: site, error } = await hr.client
+      .from("sites")
+      .insert({ organisation_id: owner.orgId, client_id: clientId, name: "Old Depot" })
+      .select("id")
+      .single();
+    expect(error).toBeNull();
+    const archived = await admin.from("sites").update({ status: "archived" }).eq("id", site!.id);
+    expect(archived.error).toBeNull();
+    const ids = [await newWorker(), await newWorker()];
+
+    const result = await bulkMap(hr.client, ids, site!.id);
+    expect(result.error?.code).toBe("MLBM2");
+    const refused = problems(result.error?.details);
+    expect(refused.map((p) => p.worker_id).sort()).toEqual([...ids].sort());
+    for (const p of refused) expect(p.reason).toMatch(/archived/);
+    for (const id of ids) expect(await rowsOf(id)).toEqual([]);
+  });
+
+  it("caps projects at 50 (MLBM3)", async () => {
+    const id = await newWorker();
+    const projects = Array.from({ length: 51 }, () => randomUUID());
+    const { error } = await bulkMap(hr.client, [id], apapa, projects);
+    expect(error?.code).toBe("MLBM3");
+    expect(error?.message).toBe("Choose 50 projects or fewer.");
+    expect(await rowsOf(id)).toEqual([]);
   });
 
   it("needs a mode, a site and at most 200 people", async () => {
@@ -540,6 +574,16 @@ describe("the selection guard", () => {
     // Another site than the preview's.
     await expect(
       bulkMapSpec.run({ ...ctx(), data: { ...signed, ...choice, siteId: lekki } }),
+    ).rejects.toMatchObject({ refusal: "MLLB3" });
+    // Another project set than the preview's.
+    await expect(
+      bulkMapSpec.run({ ...ctx(), data: { ...signed, ...choice, projectIds: [dayPatrol] } }),
+    ).rejects.toMatchObject({ refusal: "MLLB3" });
+    await expect(
+      bulkMapSpec.run({
+        ...ctx(),
+        data: { ...signed, ...choice, projectIds: [nightPatrol, dayPatrol] },
+      }),
     ).rejects.toMatchObject({ refusal: "MLLB3" });
     // Add instead of Replace.
     await expect(

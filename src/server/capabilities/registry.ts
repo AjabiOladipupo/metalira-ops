@@ -1075,6 +1075,9 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: BULK_PEOPLE,
   },
+  // The preview is a dry run of public.bulk_map_workers: it locks the selected workers' rows and
+  // writes assignment and audit rows before rolling them back (security review L4). It must stay
+  // `agent: false` and editor-only (owner, admin, hr), like the write it previews.
   {
     name: "people.preview_bulk_map",
     description:

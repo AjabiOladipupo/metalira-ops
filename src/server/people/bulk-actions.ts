@@ -153,7 +153,7 @@ export async function previewBulkMapAction(input: unknown): Promise<BulkResult<B
 export interface BulkMapOutcome {
   changed: number;
   /** People whose line manager wasn't emailed: the daily email limit was reached. */
-  notEmailed: { workerId: string; name: string }[];
+  notEmailed: { workerId: string }[];
 }
 
 export async function bulkMapAction(input: unknown): Promise<BulkResult<BulkMapOutcome>> {
@@ -164,7 +164,9 @@ export async function bulkMapAction(input: unknown): Promise<BulkResult<BulkMapO
     // and sent after the response.
     const supabase = await createServerSupabase();
     const plan = await planBulkMappingNotices(supabase, result);
-    if (plan.send.length > 0) after(() => sendPlannedNotices(plan));
+    if (plan.summaries.length > 0) {
+      after(() => sendPlannedNotices(supabase, result.organisationId, plan));
+    }
     const skipped =
       plan.skipped.length > 0
         ? ` The line managers of ${people(plan.skipped.length)} weren't emailed: the daily email limit was reached.`

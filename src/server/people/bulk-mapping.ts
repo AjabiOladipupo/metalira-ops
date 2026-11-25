@@ -85,6 +85,10 @@ export interface BulkMapPreview {
 export interface BulkMapped {
   organisationId: string;
   actorUserId: string;
+  /** The site everyone was mapped to (named in the line managers' summary). */
+  siteId: string;
+  /** The signed preview this confirm carried: keys the notices' claims to this batch. */
+  batchRef: string;
   selected: number;
   changed: number;
   /** Each person whose mapping changed, as the single save reports it (for the notices). */
@@ -99,16 +103,12 @@ function safeJson(text: string | null | undefined): unknown {
   }
 }
 
-const problemSchema = z.array(
-  z.object({
-    worker_id: z.string(),
-    name: z.string().nullable(),
-    staff_id: z.string().nullable(),
-    reason: z.string(),
-  }),
-);
+// MLBM2's DETAIL carries ids and reasons only (security review L1); names come from our own read.
+const problemSchema = z.array(z.object({ worker_id: z.string(), reason: z.string() }));
 
-function fromDbError(error: PostgrestError): never {
+type Names = ReadonlyMap<string, { name: string; staffId: string }>;
+
+function fromDbError(error: PostgrestError, names: Names = new Map()): never {
   switch (error.code) {
     case "42501":
       throw new MutationError("forbidden", "Your role can't make this change.");
@@ -119,8 +119,8 @@ function fromDbError(error: PostgrestError): never {
         parsed.success
           ? parsed.data.map((p) => ({
               workerId: p.worker_id,
-              name: p.name,
-              staffId: p.staff_id,
+              name: names.get(p.worker_id.toLowerCase())?.name ?? null,
+              staffId: names.get(p.worker_id.toLowerCase())?.staffId ?? null,
               reason: p.reason,
             }))
           : [],
@@ -160,6 +160,7 @@ async function run(
   ids: readonly string[],
   c: { siteId: string; projectIds: readonly string[]; mode: BulkMapMode },
   dryRun: boolean,
+  names?: Names,
 ): Promise<BulkMapResult> {
   const { data, error } = await ctx.supabase.rpc("bulk_map_workers", {
     p_organisation_id: ctx.organisationId,
@@ -169,7 +170,7 @@ async function run(
     p_mode: c.mode,
     p_dry_run: dryRun,
   });
-  if (error) fromDbError(error);
+  if (error) fromDbError(error, names);
   return bulkMapResultSchema.parse(data);
 }
 
@@ -224,7 +225,10 @@ export const bulkMapSpec: MutationSpec<typeof bulkMapSchema, BulkMapped> = {
       ctx.data.actIds,
       ctx.data.expectedDigest,
     );
-    const result = await run(ctx, plan.act, ctx.data, false);
+    const names: Names = new Map(
+      everyone.map((p) => [p.id.toLowerCase(), { name: p.name, staffId: p.staffId }]),
+    );
+    const result = await run(ctx, plan.act, ctx.data, false, names);
     if (result.refusals.length > 0) {
       // The function raises MLBM2 before this; never report a partial batch as done.
       throw new BulkRefusal("Nobody was mapped.", []);
@@ -232,6 +236,8 @@ export const bulkMapSpec: MutationSpec<typeof bulkMapSchema, BulkMapped> = {
     return {
       organisationId: ctx.organisationId,
       actorUserId: ctx.userId,
+      siteId: ctx.data.siteId,
+      batchRef: ctx.data.expectedDigest,
       selected: result.selected,
       changed: result.changed,
       saved: result.people
