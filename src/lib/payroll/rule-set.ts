@@ -53,6 +53,11 @@ export interface TaxRules {
 /** The figures and switches the tax adviser's answers added (slice 5.9a). */
 export interface AdviserRules {
   /**
+   * The PAYE method: cumulative year to date (slice 5.9a). A stored flag so other code (5.9c's
+   * final-pay guard) can require it of a run's rule set; the engine applies it to every run.
+   */
+  payeMethod: "cumulative_ytd";
+  /**
    * The national minimum wage a month (N70,000; N840,000 a year). A worker whose annualised
    * total income on the year-to-date basis is at or below 12 x this pays no PAYE; NHF is taken
    * only from pay at or above it.
@@ -144,6 +149,7 @@ export const NTA_2025_V2: RuleSet = {
     ...NTA_2025_V1.rules,
     dailyWorkersExempt: false,
     adviser: {
+      payeMethod: "cumulative_ytd",
       minimumWageMonthlyKobo: naira(70_000n),
       pensionMinEmployees: 3,
       dailyPayPensionable: true,
@@ -181,6 +187,7 @@ const components = z
 
 /** The adviser's part of `rules` (slice 5.9a); private.tax_rules_valid checks the same. */
 export const adviserJsonSchema = z.strictObject({
+  paye_method: z.literal("cumulative_ytd"),
   minimum_wage_monthly_kobo: koboString,
   pension_min_employees: z.number().int().min(1).max(100_000),
   daily_pay_pensionable: z.boolean(),
@@ -266,6 +273,7 @@ export function parseRuleSet(name: string, rules: unknown, policy: unknown): Rul
       dailyWorkersExempt: r.daily_workers_exempt,
       adviser: r.adviser
         ? {
+            payeMethod: r.adviser.paye_method,
             minimumWageMonthlyKobo: r.adviser.minimum_wage_monthly_kobo,
             pensionMinEmployees: r.adviser.pension_min_employees,
             dailyPayPensionable: r.adviser.daily_pay_pensionable,
@@ -319,6 +327,7 @@ export function ruleSetRulesJson(rules: TaxRules): TaxRulesJson {
 /** The jsonb `adviser` part of `rules` (slice 5.9a). */
 export function adviserJson(a: AdviserRules): z.input<typeof adviserJsonSchema> {
   return {
+    paye_method: a.payeMethod,
     minimum_wage_monthly_kobo: a.minimumWageMonthlyKobo.toString(),
     pension_min_employees: a.pensionMinEmployees,
     daily_pay_pensionable: a.dailyPayPensionable,
@@ -559,4 +568,20 @@ export function diffRuleSets(before: RuleSet, after: RuleSet): FigureChange[] {
 /** Whether a component counts toward a base (pension, NHF). */
 export function inBase(base: readonly SalaryComponent[], component: SalaryComponent): boolean {
   return base.includes(component);
+}
+
+/**
+ * The rule-set policy flags other slices check (slice 5.9a; 5.9c's final-pay guard requires
+ * both): the PAYE method and whether NSITF is on regular pay only. Stored in the adviser part of
+ * `rules` as `adviser.paye_method` ('cumulative_ytd') and `adviser.nsitf_regular_only`; a version
+ * without the adviser's part (NTA 2025 v1) has neither.
+ */
+export function ruleSetPolicyFlags(set: RuleSet): {
+  payeMethod: "cumulative_ytd" | null;
+  nsitfRegularOnly: boolean;
+} {
+  return {
+    payeMethod: set.rules.adviser?.payeMethod ?? null,
+    nsitfRegularOnly: set.rules.adviser?.nsitfRegularOnly === true,
+  };
 }

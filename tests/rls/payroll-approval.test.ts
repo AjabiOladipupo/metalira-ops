@@ -745,9 +745,10 @@ describe("leave in a posted period: corrected in the next run (slice 5.7c lifts 
       .select("code")
       .eq("payslip_id", novSlip!.id)
       .in("code", ["leave_arrears", "leave_deduction"]);
-    expect(new Set(codes!.map((c) => c.code))).toEqual(
-      new Set(["leave_arrears", "leave_deduction"]),
-    );
+    // Slice 5.9a (tax adviser, NTA 2025 v2): the posted October days are in the same tax year, so
+    // they are recovered before tax as leave deduction lines, like November's own leave; no
+    // after-tax leave_arrears line (5.7c's default, now for an earlier tax year only).
+    expect(new Set(codes!.map((c) => c.code))).toEqual(new Set(["leave_deduction"]));
   });
 });
 

@@ -16,7 +16,7 @@ import {
 import type { YearToDate } from "@/lib/payroll/contract";
 import { parseTaxContext, yearToDateFor, type TaxContext, type YearSlip } from "@/lib/payroll/ytd";
 import { adjustmentsOnlyEarnings, correctionEarnings, offCycleItf } from "@/lib/payroll/off-cycle";
-import { NTA_2025_V1, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set";
+import { NTA_2025_V2, parseRuleSet, type RuleSet } from "@/lib/payroll/rule-set";
 import {
   isOffCycleReason,
   offCyclePaysFullPeriod,
@@ -478,13 +478,15 @@ async function yearPayslips(
   payDate: string,
   workerIds: readonly string[],
   runId: string | null,
+  /** Rule set versions that exempt daily workers (NTA 2025 v1). */
+  exemptSets: ReadonlySet<string>,
 ): Promise<Map<string, YearSlip[]>> {
   const out = new Map<string, YearSlip[]>();
   if (workerIds.length === 0) return out;
   const year = payDate.slice(0, 4);
   let runQuery = supabase
     .from("payroll_runs")
-    .select("id, kind, pay_date")
+    .select("id, kind, pay_date, rule_set_id")
     .eq("organisation_id", organisationId)
     .in("status", ["approved", "released"])
     .neq("kind", "reversal")
@@ -495,6 +497,9 @@ async function yearPayslips(
   if (error) throw new Error(`Could not read the year's runs (${error.code})`);
   if (!runs || runs.length === 0) return out;
   const payDates = new Map(runs.map((r) => [r.id, r.pay_date] as const));
+  const exemptRuns = new Set(
+    runs.filter((r) => r.rule_set_id !== null && exemptSets.has(r.rule_set_id)).map((r) => r.id),
+  );
   const PAGE = 1000;
   for (let i = 0; i < workerIds.length; i += 200) {
     const slips: {
@@ -505,12 +510,13 @@ async function yearPayslips(
       paye_kobo: string;
       pension_employee_kobo: string;
       nhf_kobo: string;
+      employment_type: string;
     }[] = [];
     for (let from = 0; ; from += PAGE) {
       const { data, error: slipError } = await supabase
         .from("payslips")
         .select(
-          "id, run_id, worker_id, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, nhf_kobo::text",
+          "id, run_id, worker_id, gross_kobo::text, paye_kobo::text, pension_employee_kobo::text, nhf_kobo::text, employment_type",
         )
         .eq("organisation_id", organisationId)
         .in("run_id", [...payDates.keys()])
@@ -550,6 +556,8 @@ async function yearPayslips(
         chargeableKobo:
           (taxable.get(sl.id) ?? 0n) - toKobo(sl.pension_employee_kobo) - toKobo(sl.nhf_kobo),
         payeKobo: toKobo(sl.paye_kobo),
+        // A daily worker's payslip under a rule set that exempted them (money review H1).
+        exempt: sl.employment_type === "daily" && exemptRuns.has(sl.run_id),
       });
       out.set(sl.worker_id, list);
     }
@@ -784,7 +792,7 @@ export async function calculateRun(
     ? (versions.find((v) => v.id === target.ruleSetId) ?? null)
     : inForce(versions, target.payDate);
   if (target.ruleSetId && !runVersion) throw new Error("The run's rule set wasn't found");
-  const rules = runVersion?.set ?? NTA_2025_V1;
+  const rules = runVersion?.set ?? NTA_2025_V2;
   const ruleSetId = runVersion?.id ?? null;
   // The pay-policy figures of the version in force on each day worked (arrears included).
   const policyOn = (date: string): DayPolicy => {
@@ -851,7 +859,14 @@ export async function calculateRun(
         : openDaysBySite(supabase, organisationId, period, offCycle ? workerIds : null),
       carriedSeries(supabase, organisationId, target.runId),
       offCycle ? regularItf(supabase, organisationId, period.start) : Promise.resolve([]),
-      yearPayslips(supabase, organisationId, target.payDate, workerIds, target.runId),
+      yearPayslips(
+        supabase,
+        organisationId,
+        target.payDate,
+        workerIds,
+        target.runId,
+        new Set(versions.filter((v) => v.set.rules.dailyWorkersExempt).map((v) => v.id)),
+      ),
       // Slice 5.8: only a final-pay or missed-worker run takes a carry for an earlier period.
       fullPay
         ? laterCarrying(supabase, organisationId, period.start, workerIds)
@@ -1116,7 +1131,7 @@ export async function calculateRun(
       pay_date: target.payDate,
       rule_set: runVersion
         ? { id: runVersion.id, rules: runVersion.rules, policy: runVersion.policy }
-        : { id: null, name: NTA_2025_V1.name },
+        : { id: null, name: NTA_2025_V2.name },
       versions: versions.map((v) => ({
         id: v.id,
         from: v.effectiveFrom,
@@ -1145,6 +1160,7 @@ export async function calculateRun(
                 gross: x.grossKobo.toString(),
                 chargeable: x.chargeableKobo.toString(),
                 paye: x.payeKobo.toString(),
+                exempt: x.exempt === true,
               })),
             },
           ];

@@ -79,7 +79,7 @@ function withNsitf(bps: number) {
 function addArgs(over: Record<string, unknown> = {}) {
   return {
     p_organisation_id: owner.orgId,
-    p_name: "NTA 2025 v2",
+    p_name: "NTA 2025 v2.1",
     p_rules: withNsitf(150),
     p_policy: policy,
     p_effective_from: tomorrow,
@@ -270,7 +270,7 @@ describe("adding a version", () => {
     const rows = await versions();
     expect(rows.map((r) => [r.name, r.effective_from, r.effective_to])).toEqual([
       ["NTA 2025 v2", "2026-01-01", today],
-      ["NTA 2025 v2", tomorrow, null],
+      ["NTA 2025 v2.1", tomorrow, null],
     ]);
     const { data: audit } = await admin
       .from("audit_log")
@@ -309,7 +309,7 @@ describe("adding a version", () => {
     const rows = await versions();
     expect(rows.map((r) => [r.name, r.effective_from, r.effective_to])).toEqual([
       ["NTA 2025 v2", "2026-01-01", today],
-      ["NTA 2025 v2", tomorrow, `${year + 1}-01-31`],
+      ["NTA 2025 v2.1", tomorrow, `${year + 1}-01-31`],
       ["NTA 2025 v4", `${year + 1}-02-01`, null],
     ]);
   });
@@ -463,7 +463,7 @@ describe("closing a version", () => {
 describe("the version on a date", () => {
   it("gives the version in force on a run's pay date to owner, hr, finance and the secret key", async () => {
     const rows = await versions();
-    const v2 = rows.find((r) => r.name === "NTA 2025 v2")!;
+    const v2 = rows.find((r) => r.name === "NTA 2025 v2.1")!;
     for (const reader of [owner, hr, finance]) {
       const { data, error } = await reader.client.rpc("tax_rule_set_on", {
         p_organisation_id: owner.orgId,

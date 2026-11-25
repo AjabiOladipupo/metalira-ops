@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Kobo } from "@/lib/money";
 
 import type { OpeningBalance, YearToDate } from "./contract";
+import { PayrollInputError } from "./gross-to-net";
 
 /**
  * Cumulative year-to-date PAYE's inputs (slice 5.9a, the tax adviser's answers of 24 Nov 2026).
@@ -98,6 +99,12 @@ export interface YearSlip {
   /** Taxable pay less employee pension and NHF. */
   chargeableKobo: Kobo;
   payeKobo: Kobo;
+  /**
+   * Its own rule set exempted the worker (a daily worker under NTA 2025 v1: the trace's
+   * `daily_worker` step). Left out of the year, and the months up to it aren't counted, so a
+   * later rule set never taxes months a dated rule exempted (money review H1).
+   */
+  exempt?: boolean;
 }
 
 const ym = (date: string): { y: number; m: number } => ({
@@ -139,13 +146,34 @@ export function yearToDateFor(a: YearToDateArgs): YearToDate {
         : pay;
     if (live.y === pay.y) start = Math.max(start, live.m);
   }
+  // An opening balance covering this payslip's month would count the month twice (money review
+  // M3): the engine refuses the payslip (a blocking calculation_failed) until it is corrected.
+  if (opening && opening.asOfMonth >= monthText(pay.y, pay.m)) {
+    throw new PayrollInputError(
+      "The opening balance covers this payslip's month. Correct it to an earlier month.",
+    );
+  }
+  // Months a dated rule exempted (an exempt payslip) aren't counted: from the month after the
+  // latest one.
+  const exempt = a.slips.filter((s) => s.exempt);
+  for (const s of exempt) {
+    const e = ym(s.payDate);
+    if (e.y === pay.y) start = Math.max(start, e.m + 1);
+  }
   start = Math.min(start, pay.m);
-  const counted = opening
-    ? a.slips.filter((s) => s.payDate >= monthAfter(opening.asOfMonth))
-    : [...a.slips];
+  const counted = (
+    opening ? a.slips.filter((s) => s.payDate >= monthAfter(opening.asOfMonth)) : [...a.slips]
+  ).filter((s) => !s.exempt);
+  // A payslip paid in a later month than this one (an off-cycle run dated earlier than a posted
+  // run) is in the year so far, so the months run to it (money review H2).
+  let end = pay.m;
+  for (const s of counted) {
+    const c = ym(s.payDate);
+    if (c.y === pay.y && c.m > end) end = c.m;
+  }
   const sum = (pick: (s: YearSlip) => Kobo) => counted.reduce((n, s) => n + pick(s), 0n);
   return {
-    monthsElapsed: pay.m - start + 1,
+    monthsElapsed: end - start + 1,
     fromMonth: monthText(pay.y, start),
     payslips: counted.length,
     grossKobo: sum((s) => s.grossKobo),

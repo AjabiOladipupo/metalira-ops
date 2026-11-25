@@ -31,6 +31,7 @@ import {
   NTA_2025_V2,
   parseRuleSet,
   ruleSetFigures,
+  ruleSetPolicyFlags,
   ruleSetPolicyJson,
   ruleSetRulesJson,
   taxRulesJsonSchema,
@@ -169,6 +170,7 @@ describe("NTA 2025 v2: the adviser's rule set", () => {
     expect(V2.rules.rentRelief).toEqual(NTA_2025_V1.rules.rentRelief);
     expect(V2.rules.dailyWorkersExempt).toBe(false);
     expect(V2.rules.adviser).toEqual({
+      payeMethod: "cumulative_ytd",
       minimumWageMonthlyKobo: naira(70_000),
       pensionMinEmployees: 3,
       dailyPayPensionable: true,
@@ -758,6 +760,71 @@ describe("clawbacks before tax in the same tax year", () => {
     expect(before.payeKobo).toBeLessThan(after.payeKobo);
     expect(before.pensionEmployeeKobo).toBeLessThan(after.pensionEmployeeKobo);
     expect(run(2027).deductions?.[0]?.label).toContain("recovered after tax (2026)");
+  });
+});
+
+describe("the year so far: money review fixes", () => {
+  const slipAt = (payDate: string, over: Partial<YearSlip> = {}): YearSlip => ({
+    payslipId: randomUUID(),
+    payDate,
+    grossKobo: naira(150_000),
+    chargeableKobo: naira(150_000),
+    payeKobo: 0n,
+    ...over,
+  });
+
+  it("leaves out months a dated rule exempted (a daily worker under NTA 2025 v1)", () => {
+    const ytd = yearToDateFor({
+      payDate: "2026-12-25",
+      startDate: "2025-01-06",
+      goLiveMonth: "2026-01-01",
+      worker: null,
+      slips: [slipAt("2026-10-25", { exempt: true }), slipAt("2026-11-25", { exempt: true })],
+    });
+    expect(ytd).toMatchObject({ monthsElapsed: 1, fromMonth: "2026-12", payslips: 0 });
+  });
+
+  it("runs the months to a later payslip already in the year", () => {
+    const ytd = yearToDateFor({
+      payDate: "2026-09-30",
+      startDate: "2025-01-06",
+      goLiveMonth: "2026-09-01",
+      worker: null,
+      slips: [slipAt("2026-10-25")],
+    });
+    expect(ytd).toMatchObject({ monthsElapsed: 2, fromMonth: "2026-09", payslips: 1 });
+  });
+
+  it("refuses an opening balance that covers the payslip's month", () => {
+    expect(() =>
+      yearToDateFor({
+        payDate: "2026-10-25",
+        startDate: "2025-01-06",
+        goLiveMonth: null,
+        worker: {
+          hasNhfNumber: false,
+          rentDeclaredKobo: 0n,
+          opening: {
+            id: randomUUID(),
+            asOfMonth: "2026-10",
+            grossKobo: 0n,
+            chargeableKobo: 0n,
+            payeKobo: 0n,
+            pensionKobo: 0n,
+          },
+          reliefs: [],
+        },
+        slips: [],
+      }),
+    ).toThrow("covers this payslip's month");
+  });
+
+  it("names the policy flags 5.9c's final-pay guard reads", () => {
+    expect(ruleSetPolicyFlags(V2)).toEqual({
+      payeMethod: "cumulative_ytd",
+      nsitfRegularOnly: true,
+    });
+    expect(ruleSetPolicyFlags(NTA_2025_V1)).toEqual({ payeMethod: null, nsitfRegularOnly: false });
   });
 });
 

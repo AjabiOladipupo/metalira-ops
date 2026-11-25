@@ -138,10 +138,15 @@ set search_path = ''
 as $$
 begin
   if not private.tax_keys_are(p_adviser, array[
-    'minimum_wage_monthly_kobo', 'pension_min_employees', 'daily_pay_pensionable',
+    'paye_method', 'minimum_wage_monthly_kobo', 'pension_min_employees', 'daily_pay_pensionable',
     'nhf_needs_number_and_minimum_wage', 'nsitf_regular_only', 'deduction_cap', 'clawback',
     'reliefs'
   ]) then
+    return false;
+  end if;
+  -- The PAYE method (slice 5.9a): cumulative year to date, the flag 5.9c's guard reads.
+  if p_adviser ->> 'paye_method' is distinct from 'cumulative_ytd'
+    or jsonb_typeof(p_adviser -> 'paye_method') <> 'string' then
     return false;
   end if;
   if not private.tax_kobo_ok(p_adviser -> 'minimum_wage_monthly_kobo', false)
@@ -216,6 +221,7 @@ as $$
     'itf', jsonb_build_object('rate_bps', 100, 'min_staff', 5),
     'daily_workers_exempt', false,
     'adviser', jsonb_build_object(
+      'paye_method', 'cumulative_ytd',
       'minimum_wage_monthly_kobo', '7000000',
       'pension_min_employees', 3,
       'daily_pay_pensionable', true,
@@ -520,31 +526,33 @@ begin
       using errcode = 'MLYA5';
   end if;
   new.created_at := now();
-  if tg_table_name = 'payroll_opening_balances' and new.supersedes_id is not null
-    and not exists (
+  -- One branch per table, each in its own block: PL/pgSQL can't name a column the row lacks.
+  if tg_table_name = 'payroll_opening_balances' then
+    if new.supersedes_id is not null and not exists (
       select 1 from public.payroll_opening_balances b
       where b.organisation_id = new.organisation_id and b.id = new.supersedes_id
         and b.worker_id = new.worker_id and b.tax_year = new.tax_year
     ) then
-    raise exception 'A correction names an opening balance of the same worker and tax year.'
-      using errcode = 'MLYA2';
-  end if;
-  if tg_table_name = 'payroll_relief_declarations' and new.supersedes_id is not null
-    and not exists (
+      raise exception 'A correction names an opening balance of the same worker and tax year.'
+        using errcode = 'MLYA2';
+    end if;
+  elsif tg_table_name = 'payroll_relief_declarations' then
+    if new.supersedes_id is not null and not exists (
       select 1 from public.payroll_relief_declarations d
       where d.organisation_id = new.organisation_id and d.id = new.supersedes_id
         and d.worker_id = new.worker_id and d.tax_year = new.tax_year and d.kind = new.kind
     ) then
-    raise exception 'A correction names a declaration of the same worker, tax year and relief.'
-      using errcode = 'MLYA2';
-  end if;
-  if tg_table_name in ('payroll_relief_proofs', 'payroll_relief_verifications')
-    and not exists (
+      raise exception 'A correction names a declaration of the same worker, tax year and relief.'
+        using errcode = 'MLYA2';
+    end if;
+  elsif tg_table_name in ('payroll_relief_proofs', 'payroll_relief_verifications') then
+    if not exists (
       select 1 from public.payroll_relief_declarations d
       where d.organisation_id = new.organisation_id and d.id = new.declaration_id
         and d.worker_id = new.worker_id
     ) then
-    raise exception 'That declaration isn''t this worker''s.' using errcode = 'MLYA2';
+      raise exception 'That declaration isn''t this worker''s.' using errcode = 'MLYA2';
+    end if;
   end if;
   return new;
 end;
@@ -2434,6 +2442,13 @@ begin
             and x.pay_date >= v_year_start and x.pay_date < v_year_end
             and (ob.as_of_month is null
               or x.pay_date >= (ob.as_of_month + interval '1 month')::date)
+            -- A daily worker's payslip under a rule set that exempted them isn't in the year (the
+            -- server's rule: a later rule set never taxes months a dated rule exempted).
+            and not (o.employment_type = 'daily' and exists (
+              select 1 from public.tax_rule_sets t
+              where t.organisation_id = x.organisation_id and t.id = x.rule_set_id
+                and t.rules ->> 'daily_workers_exempt' = 'true'
+            ))
         )
     )
   ) then
