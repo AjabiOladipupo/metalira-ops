@@ -42,6 +42,8 @@ import { loadRetiredStaffIds } from "./staff-id-corrections";
  */
 export const PEOPLE_EDITORS = ["owner", "admin", "hr"] as const satisfies readonly ManagerRole[];
 
+const RENT_MESSAGE = "Only the owner or HR can change the declared rent.";
+
 type Client = SupabaseClient<Database>;
 /**
  * A workers update with money as a string of whole kobo: PostgREST casts it straight to bigint,
@@ -111,6 +113,9 @@ function fromDbError(error: PostgrestError, fields: { effectiveFrom?: string } =
       throw new MutationError("forbidden", "Your role can't make this change.");
     case "P0002":
       throw new MutationError("invalid", error.message);
+    case "MLFZ2":
+      // Slice 5.10: the declared rent is the owner's or HR's to change (workers_rent_declared_guard).
+      throw new MutationError("forbidden", RENT_MESSAGE, { annualRentDeclared: RENT_MESSAGE });
     case "MLLM1":
       return invalid("lineManagerWorkerId", error.message);
     case "MLLM2":
@@ -175,6 +180,16 @@ export const createWorkerSpec: MutationSpec<typeof createWorkerSchema, CreatedWo
       throw new MutationError("forbidden", "Only the owner or HR can set pay.", {
         payType: "Only the owner or HR can set pay. Leave pay blank; HR adds it later.",
       });
+    }
+    // Slice 5.10 (security review round 2, M1): declared rent changes PAYE (rent relief), so only
+    // the owner or HR set it; the database refuses anyone else too (workers_rent_declared_guard).
+    if (
+      data.annualRentDeclared !== null &&
+      data.annualRentDeclared !== undefined &&
+      data.annualRentDeclared !== 0n &&
+      !(isManagerRole(role) && canEditPay(role))
+    ) {
+      throw new MutationError("forbidden", RENT_MESSAGE, { annualRentDeclared: RENT_MESSAGE });
     }
     const id = randomUUID();
     const ctx = (column: string) => piiContext(organisationId, id, column);
@@ -348,7 +363,7 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
   module: "people",
   schema: updateWorkerSchema,
   roles: PEOPLE_EDITORS,
-  run: async ({ supabase, organisationId, userId, data }) => {
+  run: async ({ supabase, organisationId, userId, role, data }) => {
     const id = data.workerId;
     const ctx = (column: string) => piiContext(organisationId, id, column);
     const patch: WorkerUpdate = {};
@@ -370,7 +385,25 @@ export const updateWorkerSpec: MutationSpec<typeof updateWorkerSchema, UpdatedWo
     if (data.supervisorClockIn !== undefined) patch.supervisor_clock_in = data.supervisorClockIn;
     if (data.usualWorkDays !== undefined) patch.usual_work_days = data.usualWorkDays;
     if (data.annualRentDeclared !== undefined) {
-      patch.annual_rent_declared_kobo = data.annualRentDeclared?.toString() ?? null;
+      if (isManagerRole(role) && canEditPay(role)) {
+        patch.annual_rent_declared_kobo = data.annualRentDeclared?.toString() ?? null;
+      } else {
+        // Slice 5.10 (security review round 2, M1): an admin's form sends the rent it was shown;
+        // unchanged, it is left out of the update; changed, it is refused.
+        const { data: current, error: rentError } = await supabase
+          .from("workers")
+          .select("annual_rent_declared_kobo::text")
+          .eq("organisation_id", organisationId)
+          .eq("id", id)
+          .maybeSingle();
+        if (rentError) throw new Error(`Could not read the declared rent: ${rentError.code}`);
+        const was = (current as { annual_rent_declared_kobo: string | null } | null)
+          ?.annual_rent_declared_kobo;
+        const now = data.annualRentDeclared?.toString() ?? null;
+        if ((was ?? null) !== now) {
+          throw new MutationError("forbidden", RENT_MESSAGE, { annualRentDeclared: RENT_MESSAGE });
+        }
+      }
     }
 
     // One line manager: naming one clears the other.

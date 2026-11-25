@@ -8,6 +8,7 @@ import { z } from "zod";
 import { lagosToday } from "@/lib/dates";
 import { decodeLineManager } from "@/lib/people";
 import { parsePeopleFilters } from "@/lib/people-filters";
+import { hasPersonalNumber, PERSONAL_NUMBER_MESSAGE } from "@/lib/personal-number";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
 import type { ManagerRole } from "@/lib/roles";
 
@@ -63,11 +64,14 @@ export const peopleSelectionSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+// Slice 5.10 (security review round 2, L3): the reason goes to the audit log, so it never holds a
+// personal number (private.people_bulk_reason refuses one too).
 const reasonSchema = z
   .string("Give a reason for ending their employment")
   .trim()
   .min(3, "Give a reason for ending their employment")
-  .max(500, "Keep the reason to 500 characters");
+  .max(500, "Keep the reason to 500 characters")
+  .refine((v) => !hasPersonalNumber(v), PERSONAL_NUMBER_MESSAGE);
 
 export const previewBulkEndSchema = z.object({
   selection: peopleSelectionSchema,

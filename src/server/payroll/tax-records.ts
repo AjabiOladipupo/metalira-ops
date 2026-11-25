@@ -19,7 +19,7 @@ import {
 import type { ManagerRole } from "@/lib/roles";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
-import { encryptPiiForDb } from "@/server/crypto/pii";
+import { decryptPii, encryptPiiForDb } from "@/server/crypto/pii";
 import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database } from "@/types/db";
 
@@ -232,18 +232,42 @@ export const verifyReliefSchema = z
 
 export const proofLinkSchema = z.object({ proofId: z.uuid(reload) });
 
-export const nhfNumberSchema = z.object({
-  workerId: z.uuid(reload),
-  nhfNumber: z
-    .string()
-    .optional()
-    .transform((v) => (v ?? "").trim())
-    .refine(
-      (v) => v === "" || /^[A-Za-z0-9/-]{4,20}$/.test(v),
-      "An NHF number is 4 to 20 letters, digits, / or -",
-    ),
-  reason,
-});
+const NHF_IN_REASON = "Leave the NHF number out of the reason: the reason is kept in the audit log";
+
+/** Letters and digits only, lower case: how a number is compared with free text. */
+const alnum = (v: string) => v.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+
+/**
+ * Slice 5.10 (security review round 2, L6): the reason is kept in the audit log, so it never
+ * holds the NHF number being saved, however it is punctuated.
+ */
+export function reasonHoldsNumber(reason: string, number: string): boolean {
+  const n = alnum(number);
+  return n.length > 0 && alnum(reason).includes(n);
+}
+
+export const nhfNumberSchema = z
+  .object({
+    workerId: z.uuid(reload),
+    nhfNumber: z
+      .string()
+      .optional()
+      .transform((v) => (v ?? "").trim())
+      .refine(
+        (v) => v === "" || /^[A-Za-z0-9/-]{4,20}$/.test(v),
+        "An NHF number is 4 to 20 letters, digits, / or -",
+      ),
+    reason,
+  })
+  .superRefine((v, ctx) => {
+    if (v.nhfNumber !== "" && reasonHoldsNumber(v.reason, v.nhfNumber)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: NHF_IN_REASON,
+      });
+    }
+  });
 
 export const itfFlagSchema = z.object({
   value: z
@@ -829,6 +853,47 @@ export async function previewVerifyRelief(
   };
 }
 
+/**
+ * Slice 5.10 (security review round 2, L4): NHF is taken only with a number on file, so saving
+ * or removing one changes what the worker's next payslip deducts. Never the number: the last 4.
+ */
+export async function previewNhfNumber(
+  ctx: Ctx,
+  data: z.output<typeof nhfNumberSchema>,
+): Promise<CapabilityPreview> {
+  const [worker, current] = await Promise.all([
+    ctx.supabase
+      .from("workers")
+      .select("nhf_opt_in")
+      .eq("organisation_id", ctx.organisationId)
+      .eq("id", data.workerId)
+      .maybeSingle(),
+    ctx.supabase
+      .from("payroll_nhf_numbers")
+      .select("nhf_number_last4")
+      .eq("organisation_id", ctx.organisationId)
+      .eq("worker_id", data.workerId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1),
+  ]);
+  if (worker.error || current.error) throw new Error("Could not read the worker's NHF details");
+  if (!worker.data)
+    throw new MutationError("invalid", "That worker wasn't found. Reload the page.");
+  const before = current.data?.[0]?.nhf_number_last4 ?? null;
+  const after = data.nhfNumber === "" ? null : data.nhfNumber.slice(-4);
+  const masked = (last4: string | null) => (last4 ? `On file, ending ${last4}` : "None on file");
+  const effect = !worker.data.nhf_opt_in
+    ? "They haven't opted in to NHF, so nothing is deducted either way until they do."
+    : after
+      ? "From the next calculation, NHF of 2.5% of basic is deducted when their regular monthly pay is at or above the minimum wage."
+      : "From the next calculation, no NHF is deducted (the run flags it).";
+  return {
+    summary: `${after ? "Saves" : "Removes"} this worker's NHF number. ${effect} Runs worked out before need recalculating.`,
+    changes: [{ label: "NHF number", before: masked(before), after: masked(after) }],
+  };
+}
+
 export async function previewItfFlag(
   ctx: Ctx,
   data: z.output<typeof itfFlagSchema>,
@@ -1066,6 +1131,34 @@ export const nhfNumberSpec: MutationSpec<typeof nhfNumberSchema, { id: string }>
   schema: nhfNumberSchema,
   roles: TAX_RECORD_WRITERS,
   run: async ({ supabase, organisationId, data }) => {
+    // Slice 5.10 (security review round 2, L-3): on a removal or a change, the reason mustn't
+    // quote the number on file either. It is decrypted here, compared, and never kept or logged.
+    const { data: onFile, error: readError } = await supabase
+      .from("payroll_nhf_numbers")
+      .select("id, nhf_number_enc")
+      .eq("organisation_id", organisationId)
+      .eq("worker_id", data.workerId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1);
+    if (readError) throw new Error(`Could not read the NHF number on file (${readError.code})`);
+    const current = onFile?.[0];
+    if (current?.nhf_number_enc) {
+      let plain: string | null = null;
+      try {
+        plain = decryptPii(current.nhf_number_enc, {
+          organisationId,
+          table: "payroll_nhf_numbers",
+          column: "nhf_number_enc",
+          rowId: current.id,
+        });
+      } catch {
+        plain = null;
+      }
+      if (plain !== null && reasonHoldsNumber(data.reason, plain)) {
+        throw new MutationError("invalid", NHF_IN_REASON, { reason: NHF_IN_REASON });
+      }
+    }
     // Encrypted for this row (security review M2), like the RSA PIN: the number never reaches
     // the database in the clear; the last 4 characters are kept for display.
     const rowId = randomUUID();

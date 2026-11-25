@@ -393,6 +393,7 @@ import {
   previewImportOpeningBalances,
   previewRecordOpeningBalance,
   previewSetItfTurnover,
+  previewSetNhfNumber,
   previewVerifyPayrollRelief,
 } from "./payroll-previews";
 import {
@@ -2772,7 +2773,7 @@ export const CAPABILITIES: readonly Capability[] = [
     preview: previewSetPayrollHolidayPay,
     agent: false,
     agentNote:
-      "Changes how holiday work is paid: a company decision under its contracts, kept to the owner, HR or Finance on the screen.",
+      "Changes how holiday work is paid: a company decision under its contracts, kept to the owner or HR on the screen.",
   },
 
   // -------------------------------------------------------------------------
@@ -3450,12 +3451,14 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "payroll.set_nhf_number",
-    description: "Records or removes a worker's NHF number on file, shown masked to the last 4.",
-    kind: "write",
+    description:
+      "Records or removes a worker's NHF number (masked to the last 4); NHF is deducted only with one on file.",
+    kind: "money",
     audience: "manager",
     ...fromSpec(nhfNumberSpec),
     changes: "one",
     action: at("payroll/tax-records-actions", "setNhfNumberAction"),
+    preview: previewSetNhfNumber,
     agent: false,
     agentNote: REVEAL,
   },

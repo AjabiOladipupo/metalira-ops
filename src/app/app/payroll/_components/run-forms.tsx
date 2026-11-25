@@ -259,6 +259,18 @@ export function AddAdjustmentForm({
               />
               Counts toward pension (earnings only)
             </label>
+            {oneOffOnly ? null : (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name="regular"
+                  defaultChecked={valueOf(state, "regular") === "on"}
+                  className="size-4 accent-foreground"
+                />
+                A recurring allowance, part of regular monthly pay (earnings over 2 or more
+                instalments only; a bonus or arrears paid in instalments isn&apos;t)
+              </label>
+            )}
           </>
         );
       }}

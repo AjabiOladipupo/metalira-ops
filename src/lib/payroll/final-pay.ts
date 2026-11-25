@@ -174,6 +174,12 @@ export interface FinalPayPrefill {
   /** The run's rule set cap and what earlier items of the worker already used. */
   exemptCapKobo: Kobo;
   exemptUsedKobo: Kobo;
+  /**
+   * Slice 5.10 (money review round 2, M1): item types the worker already has on another standing
+   * run (not discarded, not reversed, drafts included). Another of the same type needs the
+   * "further item" confirmation with a reason.
+   */
+  otherRunItemTypes?: readonly FinalPayItemType[];
 }
 
 /**
@@ -185,6 +191,11 @@ export interface LeaveInLieuPrefill {
   monthsInYear: number;
   takenDays: number;
   serviceMonths: number;
+  /**
+   * Slice 5.10 (M1): leave-in-lieu days already on other standing runs' items, taken off the
+   * pre-fill so the same days aren't paid twice.
+   */
+  paidElsewhereDays?: number;
   days: number;
   year: number;
 }
@@ -195,7 +206,8 @@ export function leavePrefillText(leave: LeaveInLieuPrefill | null): string {
   if (leave.serviceMonths < LEAVE_IN_LIEU_MIN_SERVICE_MONTHS) {
     return `${leave.serviceMonths} months' service: not owed by law below 6 months, so 0 days.`;
   }
-  return `${leave.entitlementDays} days a year × ${leave.monthsInYear} of 12 months, rounded down, less ${leave.takenDays} taken in ${leave.year} = ${leave.days} ${leave.days === 1 ? "day" : "days"}.`;
+  const elsewhere = leave.paidElsewhereDays ?? 0;
+  return `${leave.entitlementDays} days a year × ${leave.monthsInYear} of 12 months, rounded down, less ${leave.takenDays} taken in ${leave.year}${elsewhere > 0 ? ` and ${elsewhere} already on another final-pay run` : ""} = ${leave.days} ${leave.days === 1 ? "day" : "days"}.`;
 }
 
 export interface FinalPayItemInput {

@@ -19,18 +19,18 @@ import type { Database } from "@/types/db";
  * The company's public-holiday pay multiplier (slice 5.9c; docs/RULES_NIGERIA.md adviser answer 24
  * and the owner's decision): every minute worked on a public holiday is paid at the overtime rate
  * × this multiplier, on top of normal pay. Default 1.0× (today's rule). Dated, insert-only
- * versions (`payroll_holiday_pay_rates`) from tomorrow or later; owner, hr and finance read and
- * add them in Settings > Payroll rules, audited. The earnings stage uses the version in force on
+ * versions (`payroll_holiday_pay_rates`) from tomorrow or later; owner, hr and finance read them,
+ * owner and hr add them (slice 5.10) in Settings > Payroll rules, audited. The earnings stage uses the version in force on
  * the day worked. Module: payroll.
  */
 
 type Client = SupabaseClient<Database>;
 
-export const HOLIDAY_PAY_EDITORS = [
-  "owner",
-  "hr",
-  "finance",
-] as const satisfies readonly ManagerRole[];
+/**
+ * Owner and hr only (slice 5.10, owner decision 25 Nov 2026, matching docs/PHASE_5.md's roles
+ * table: payroll settings are written by owner and hr). Finance reads it.
+ */
+export const HOLIDAY_PAY_EDITORS = ["owner", "hr"] as const satisfies readonly ManagerRole[];
 
 export function canSetHolidayPay(role: ManagerRole): boolean {
   return (HOLIDAY_PAY_EDITORS as readonly ManagerRole[]).includes(role);
@@ -107,10 +107,7 @@ export async function loadHolidayPay(
 
 export function fromHolidayPayDbError(error: Pick<PostgrestError, "code" | "message">): never {
   if (error.code === "42501") {
-    throw new MutationError(
-      "forbidden",
-      "Only an owner, HR or Finance can set the holiday pay rate.",
-    );
+    throw new MutationError("forbidden", "Only an owner or HR can set the holiday pay rate.");
   }
   if (error.code === "23514") {
     // Only the reason's column check holds the personal-number rule (security review L2).

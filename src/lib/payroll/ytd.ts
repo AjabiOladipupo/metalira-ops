@@ -11,11 +11,12 @@ import { PayrollInputError } from "./gross-to-net";
  * and these turn them into the engine's `YearToDate`.
  *
  * - The tax year is the calendar year of the pay date.
- * - Months elapsed run from the later of 1 January, the worker's start date and the company's
- *   payroll go-live month (the month of its earliest posted pay date, or this run's when there is
- *   none yet) through the pay date's month. With an opening balance the go-live month doesn't
- *   apply: the balance covers the months before go-live, so they count from 1 January or the
- *   start date.
+ * - Months elapsed run from the later of 1 January, the worker's start date and the worker's
+ *   first in-app pay month (the month of their earliest standing payslip in Metalira, or this
+ *   payslip's when there is none yet) through the pay date's month (slice 5.10, money review
+ *   round 2 M2: the company's go-live month spread a later joiner-to-Metalira's pay over months
+ *   they weren't paid here). With an opening balance the first pay month doesn't apply: the
+ *   balance covers the months before, so they count from 1 January or the start date.
  * - With an opening balance, only payslips paid after its as-of month count (the balance holds
  *   the months before; approval's check, migration 20261122230000, counts the same).
  */
@@ -37,6 +38,8 @@ const taxContextSchema = z
         worker_id: z.uuid(),
         has_nhf_number: z.boolean(),
         rent_declared_kobo: koboText,
+        // Slice 5.10 (M2): the month of the worker's earliest standing payslip, any year.
+        first_pay_month: isoDate.nullable().optional(),
         opening: z
           .object({
             id: z.uuid(),
@@ -67,6 +70,7 @@ const taxContextSchema = z
         {
           hasNhfNumber: w.has_nhf_number,
           rentDeclaredKobo: w.rent_declared_kobo,
+          firstPayMonth: w.first_pay_month ?? null,
           opening: w.opening
             ? ({
                 id: w.opening.id,
@@ -123,8 +127,11 @@ function monthAfter(month: string): string {
 export interface YearToDateArgs {
   payDate: string;
   startDate: string;
-  /** "YYYY-MM-01" of the company's earliest posted pay date, or null before the first. */
-  goLiveMonth: string | null;
+  /**
+   * "YYYY-MM-01" of the worker's earliest standing payslip in Metalira (any year), or null before
+   * the first (slice 5.10, M2; it replaced the company's go-live month).
+   */
+  firstPayMonth: string | null;
   worker: TaxWorker | null;
   /** The worker's standing payslips of the tax year (other runs). */
   slips: readonly YearSlip[];
@@ -138,14 +145,20 @@ export function yearToDateFor(a: YearToDateArgs): YearToDate {
   const joined = ym(a.startDate);
   if (joined.y === pay.y) start = Math.max(start, joined.m);
   else if (joined.y > pay.y) start = pay.m;
+  const naturalStart = start;
   if (!opening) {
-    // Go-live: the earliest posted pay date's month, never later than this payslip's.
-    const live =
-      a.goLiveMonth !== null && a.goLiveMonth.slice(0, 7) <= monthText(pay.y, pay.m)
-        ? ym(a.goLiveMonth)
+    // The worker's first payslip in Metalira, never later than this payslip's month.
+    const first =
+      a.firstPayMonth !== null && a.firstPayMonth.slice(0, 7) <= monthText(pay.y, pay.m)
+        ? ym(a.firstPayMonth)
         : pay;
-    if (live.y === pay.y) start = Math.max(start, live.m);
+    if (first.y === pay.y) start = Math.max(start, first.m);
   }
+  // No opening balance, and the year starts later than 1 January and the start date: the run
+  // warns (no_opening_balance).
+  // Only on the first payslip of the year (money review round 2, L-D), so HR acknowledges it once.
+  const fromFirstPayslip =
+    !opening && start > naturalStart && naturalStart < pay.m && a.slips.every((s) => s.exempt);
   // An opening balance covering this payslip's month would count the month twice (money review
   // M3): the engine refuses the payslip (a blocking calculation_failed) until it is corrected.
   if (opening && opening.asOfMonth >= monthText(pay.y, pay.m)) {
@@ -181,6 +194,7 @@ export function yearToDateFor(a: YearToDateArgs): YearToDate {
     payeKobo: sum((s) => s.payeKobo),
     opening,
     reliefIds: (a.worker?.reliefs ?? []).map((r) => r.id).sort(),
+    ...(fromFirstPayslip ? { fromFirstPayslip: true } : {}),
   };
 }
 

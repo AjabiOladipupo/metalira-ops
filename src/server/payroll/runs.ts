@@ -76,33 +76,48 @@ export const createRunSchema = z.object({
 });
 
 const amountMessage = "Enter an amount above ₦0, like 15000 or 15,000.50";
-export const adjustmentSchema = z.object({
-  runId: z.uuid(reload),
-  workerId: z.uuid("Choose a worker"),
-  kind: z.enum(["earning", "deduction"], "Choose an earning or a deduction"),
-  label: text(80, "Name the item"),
-  amount: z
-    .string(amountMessage)
-    .trim()
-    .transform((v, ctx): Kobo => {
-      try {
-        const kobo = parseNairaToKobo(v);
-        if (kobo <= 0n || kobo > 100_000_000_000n) throw new RangeError("out of range");
-        return kobo;
-      } catch {
-        ctx.addIssue({ code: "custom", message: amountMessage });
-        return z.NEVER;
-      }
-    }),
-  pensionable: checkbox,
-  instalments: z.coerce
-    .number("Instalments are 1 to 60")
-    .int("Instalments are 1 to 60")
-    .min(1, "Instalments are 1 to 60")
-    .max(60, "Instalments are 1 to 60")
-    .default(1),
-  reason: text(500, "Give a reason"),
-});
+export const adjustmentSchema = z
+  .object({
+    runId: z.uuid(reload),
+    workerId: z.uuid("Choose a worker"),
+    kind: z.enum(["earning", "deduction"], "Choose an earning or a deduction"),
+    label: text(80, "Name the item"),
+    amount: z
+      .string(amountMessage)
+      .trim()
+      .transform((v, ctx): Kobo => {
+        try {
+          const kobo = parseNairaToKobo(v);
+          if (kobo <= 0n || kobo > 100_000_000_000n) throw new RangeError("out of range");
+          return kobo;
+        } catch {
+          ctx.addIssue({ code: "custom", message: amountMessage });
+          return z.NEVER;
+        }
+      }),
+    pensionable: checkbox,
+    instalments: z.coerce
+      .number("Instalments are 1 to 60")
+      .int("Instalments are 1 to 60")
+      .min(1, "Instalments are 1 to 60")
+      .max(60, "Instalments are 1 to 60")
+      .default(1),
+    /**
+     * Slice 5.10 (money review round 2, L4): a recurring allowance, regular monthly pay in NSITF's
+     * base. Only an earning over 2 or more instalments; a bonus or arrears in instalments isn't.
+     */
+    regular: checkbox,
+    reason: text(500, "Give a reason"),
+  })
+  .superRefine((v, ctx) => {
+    if (v.regular && (v.kind !== "earning" || v.instalments < 2)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["regular"],
+        message: "Only an earning over 2 or more instalments is a recurring allowance",
+      });
+    }
+  });
 
 const OFF_CYCLE_REASON_IDS = Object.keys(OFF_CYCLE_REASONS) as [
   OffCycleReason,
@@ -420,7 +435,7 @@ async function reversedRunAdjustments(
   const { data: rows, error: adjError } = await supabase
     .from("payroll_adjustments")
     .select(
-      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, corrects_payslip_id",
+      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, corrects_payslip_id, regular",
     )
     .eq("organisation_id", organisationId)
     .eq("run_id", runId);
@@ -437,6 +452,7 @@ async function reversedRunAdjustments(
       instalment_number: number;
       instalment_count: number;
       corrects_payslip_id: string | null;
+      regular: boolean;
     }[]
   ).map((a) => ({
     correctsPayslipId: a.corrects_payslip_id,
@@ -449,6 +465,7 @@ async function reversedRunAdjustments(
     taxable: a.taxable,
     instalmentNumber: a.instalment_number,
     instalmentCount: a.instalment_count,
+    ...(a.regular ? { regular: true } : {}),
   }));
 }
 
@@ -485,6 +502,7 @@ export async function previewAddAdjustment(
     taxable: data.kind === "earning",
     instalmentNumber: 1,
     instalmentCount: data.instalments,
+    ...(data.regular ? { regular: true } : {}),
   } as const;
   const [before, after] = await Promise.all([
     calculateRun(ctx.supabase, ctx.organisationId, targetOf(run), options),
@@ -882,6 +900,7 @@ export const addAdjustmentSpec: MutationSpec<typeof adjustmentSchema, { runId: s
       p_taxable: d.kind === "earning",
       p_instalments: d.instalments,
       p_reason: d.reason,
+      p_regular: d.regular,
     });
     if (error) fromPayrollRunDbError(error);
     const run = await draftRun(ctx.supabase, ctx.organisationId, d.runId);

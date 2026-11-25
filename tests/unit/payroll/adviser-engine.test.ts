@@ -231,7 +231,8 @@ describe("NTA 2025 v2: the adviser's rule set", () => {
 
 describe("the golden fixture under NTA 2025 v2 (October is the first payroll)", () => {
   // October is these workers' first payroll in the app, with no opening balance: months elapsed
-  // count from go-live (October), one month, which is the month annualised. Their rent proof is
+  // count from their first payslip in Metalira (October; slice 5.10), one month, which is the
+  // month annualised. Their rent proof is
   // verified, so the server passes the declared rent.
   const ytdFirst: YearToDate = {
     monthsElapsed: 1,
@@ -297,7 +298,7 @@ describe("cumulative year-to-date PAYE", () => {
     const ytd = yearToDateFor({
       payDate: "2026-06-25",
       startDate: "2026-06-08",
-      goLiveMonth: "2026-01-01",
+      firstPayMonth: "2026-01-01",
       worker: null,
       slips: [],
     });
@@ -309,19 +310,19 @@ describe("cumulative year-to-date PAYE", () => {
       yearToDateFor({
         payDate: "2026-07-25",
         startDate: "2026-06-08",
-        goLiveMonth: "2026-01-01",
+        firstPayMonth: "2026-01-01",
         worker: null,
         slips: [],
       }),
     ).toMatchObject({ monthsElapsed: 2, fromMonth: "2026-06" });
   });
 
-  it("counts from go-live for a worker who started before it, with no opening balance", () => {
+  it("counts from the worker's first payslip in Metalira when they started before it, with no opening balance", () => {
     expect(
       yearToDateFor({
         payDate: "2026-10-25",
         startDate: "2024-03-01",
-        goLiveMonth: null,
+        firstPayMonth: null,
         worker: null,
         slips: [],
       }),
@@ -330,17 +331,17 @@ describe("cumulative year-to-date PAYE", () => {
       yearToDateFor({
         payDate: "2026-12-25",
         startDate: "2024-03-01",
-        goLiveMonth: "2026-10-01",
+        firstPayMonth: "2026-10-01",
         worker: null,
         slips: [],
       }),
     ).toMatchObject({ monthsElapsed: 3, fromMonth: "2026-10" });
-    // Go-live in an earlier year: from 1 January.
+    // A first payslip in an earlier year: from 1 January.
     expect(
       yearToDateFor({
         payDate: "2027-03-25",
         startDate: "2024-03-01",
-        goLiveMonth: "2026-10-01",
+        firstPayMonth: "2026-10-01",
         worker: null,
         slips: [],
       }),
@@ -389,8 +390,14 @@ describe("cumulative year-to-date PAYE", () => {
     const ytd = yearToDateFor({
       payDate: "2026-10-25",
       startDate: "2024-03-01",
-      goLiveMonth: null,
-      worker: { hasNhfNumber: false, rentDeclaredKobo: 0n, opening, reliefs: [] },
+      firstPayMonth: null,
+      worker: {
+        hasNhfNumber: false,
+        rentDeclaredKobo: 0n,
+        firstPayMonth: null,
+        opening,
+        reliefs: [],
+      },
       slips: [],
     });
     expect(ytd).toMatchObject({ monthsElapsed: 10, fromMonth: "2026-01", opening });
@@ -414,10 +421,11 @@ describe("cumulative year-to-date PAYE", () => {
     const ytd = yearToDateFor({
       payDate: "2026-10-25",
       startDate: "2024-03-01",
-      goLiveMonth: "2026-09-01",
+      firstPayMonth: "2026-09-01",
       worker: {
         hasNhfNumber: false,
         rentDeclaredKobo: 0n,
+        firstPayMonth: null,
         opening: {
           id: randomUUID(),
           asOfMonth: "2026-09",
@@ -777,7 +785,7 @@ describe("the year so far: money review fixes", () => {
     const ytd = yearToDateFor({
       payDate: "2026-12-25",
       startDate: "2025-01-06",
-      goLiveMonth: "2026-01-01",
+      firstPayMonth: "2026-01-01",
       worker: null,
       slips: [slipAt("2026-10-25", { exempt: true }), slipAt("2026-11-25", { exempt: true })],
     });
@@ -788,7 +796,7 @@ describe("the year so far: money review fixes", () => {
     const ytd = yearToDateFor({
       payDate: "2026-09-30",
       startDate: "2025-01-06",
-      goLiveMonth: "2026-09-01",
+      firstPayMonth: "2026-09-01",
       worker: null,
       slips: [slipAt("2026-10-25")],
     });
@@ -800,10 +808,11 @@ describe("the year so far: money review fixes", () => {
       yearToDateFor({
         payDate: "2026-10-25",
         startDate: "2025-01-06",
-        goLiveMonth: null,
+        firstPayMonth: null,
         worker: {
           hasNhfNumber: false,
           rentDeclaredKobo: 0n,
+          firstPayMonth: null,
           opening: {
             id: randomUUID(),
             asOfMonth: "2026-10",
@@ -876,14 +885,15 @@ describe("never block: cap and flag (coordinator decision M2, 25 Nov 2026)", () 
       },
     ]);
     const s = slip(salary(REGULAR, earnings));
-    // ₦24,000 stays so the employee pension (on the ₦300,000 pensionable salary) still comes off
-    // in full; ₦276,000 is clawed back before tax and ₦124,000 carried after tax.
-    expect(s.grossKobo).toBe(naira(24_000));
+    // Slice 5.10 (owner decision 25 Nov 2026, H1): the clawback counts inside the one-third cap,
+    // so ₦100,000 (a third of the ₦300,000 gross before recoveries) is clawed back before tax and
+    // ₦300,000 carried after tax. (Before 5.10 it took the ₦276,000 the month could bear.)
+    expect(s.grossKobo).toBe(naira(200_000));
     expect(s.pensionEmployeeKobo).toBe(naira(24_000));
-    expect(s.netKobo).toBe(0n);
-    expect(s.carriedForwardKobo).toBe(naira(124_000));
+    expect(s.carriedForwardKobo).toBe(naira(300_000));
     expect(s.flags).toContain("recovery_carried");
-    expect(s.lines.find((l) => l.code === "clawback")?.amountKobo).toBe(-naira(276_000));
+    expect(s.flags).toContain("deduction_capped");
+    expect(s.lines.find((l) => l.code === "clawback")?.amountKobo).toBe(-naira(100_000));
   });
 
   it("takes a clawback before tax only up to what the corrected payslip's taxable pay was", () => {
@@ -931,6 +941,8 @@ describe("regular pay, NHF's minimum-wage test and rent before proof", () => {
         taxable: true,
         instalmentNumber: 1,
         instalmentCount: 6,
+        // Slice 5.10 (L4): HR marks a recurring allowance; instalments alone don't make it regular.
+        regular: true,
       },
     ]);
     const refund: EarningLine = {
@@ -990,7 +1002,7 @@ describe("regular pay, NHF's minimum-wage test and rent before proof", () => {
     const ytd = yearToDateFor({
       payDate: "2026-12-25",
       startDate: "2025-01-06",
-      goLiveMonth: "2026-01-01",
+      firstPayMonth: "2026-01-01",
       worker: null,
       slips: exemptSlips,
     });
@@ -1025,6 +1037,7 @@ describe("the tax context read", () => {
     expect(ctx.workers.get(id)).toEqual({
       hasNhfNumber: true,
       rentDeclaredKobo: 36_000_000n,
+      firstPayMonth: null,
       opening: null,
       reliefs: [{ id: relief, kind: "rent", annualKobo: 36_000_000n }],
     });

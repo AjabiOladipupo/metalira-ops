@@ -177,15 +177,32 @@ test("a final pay takes pay in lieu of leave and a redundancy payment split at â
   await expectNoHorizontalScroll(page);
 });
 
-test("Finance sets the public holiday pay rate from tomorrow", async ({ page }) => {
-  test.setTimeout(120_000);
+// Slice 5.10 (owner decision, 25 Nov 2026): the owner and HR set the holiday pay rate; Finance
+// reads it (this test was Finance's before).
+test("HR sets the public holiday pay rate from tomorrow; Finance only reads it", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(150_000);
   const owner = await createOwner("phol-owner", `Coastline Security ${uniqueSuffix()}`);
+  const hr = await createAccount("phol-hr", "Oluwaseun Adeyemi");
+  await addMembership(owner.orgId, hr.userId, "hr");
   const finance = await createAccount("phol-fin", "Adaeze Okafor");
   await addMembership(owner.orgId, finance.userId, "finance");
   const tomorrow = addDays(lagosToday(), 1);
 
+  // Finance sees the rate but no form.
+  const financeContext = await browser.newContext();
+  const financePage = await financeContext.newPage();
+  await signInViaUi(financePage, finance.email, finance.password);
+  await expect(financePage).toHaveURL(/\/app(\/|$)/, { timeout: 15_000 });
+  await financePage.goto("/app/settings/payroll");
+  await expect(financePage.getByTestId("holiday-multiplier")).toContainText("1.0Ã—");
+  await expect(financePage.getByRole("form", { name: "Set the holiday pay rate" })).toHaveCount(0);
+  await financeContext.close();
+
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await signInViaUi(page, finance.email, finance.password);
+  await signInViaUi(page, hr.email, hr.password);
   await expect(page).toHaveURL(/\/app(\/|$)/, { timeout: 15_000 });
   await page.goto("/app/settings/payroll");
   const section = page.getByTestId("holiday-pay");

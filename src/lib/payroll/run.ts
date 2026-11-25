@@ -60,6 +60,12 @@ export interface RunAdjustment {
   preTaxCapKobo?: bigint;
   /** Slice 5.7a: the released payslip a correction names (null for other adjustments). */
   correctsPayslipId?: string | null;
+  /**
+   * Slice 5.10 (money review round 2, L4): HR marked this recurring earning a regular allowance
+   * (`payroll_adjustments.regular`), so it is regular monthly pay in NSITF's base. Everything else
+   * an adjustment pays, a bonus or arrears paid in instalments included, is irregular.
+   */
+  regular?: boolean;
 }
 
 /** "Supervisor allowance", or "Salary advance repayment, 2 of 3" for a recurring item. */
@@ -94,6 +100,7 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
         sources,
         recovery: true,
         ...(a.preTaxCapKobo !== undefined ? { recoveryCapKobo: a.preTaxCapKobo } : {}),
+        ...(a.correctsPayslipId ? { recoveryCapGroup: a.correctsPayslipId } : {}),
       });
     } else if (a.kind === "earning") {
       earnings.push({
@@ -104,8 +111,9 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
         nhfBase: false,
         taxable: a.taxable,
         sources,
-        // A recurring allowance is regular pay (NSITF's base; money review L4).
-        ...(a.instalmentCount > 1 ? { regular: true } : {}),
+        // Only an earning HR marked a recurring allowance is regular pay (NSITF's base; slice
+        // 5.10, money review round 2, L4); a bonus or arrears in instalments is irregular.
+        ...(a.regular === true ? { regular: true } : {}),
       });
     } else {
       deductions.push({
@@ -276,7 +284,17 @@ export type AnomalyCode =
   /** Slice 5.9a (money review M2): PAYE the payslip couldn't withhold; caught up later. */
   | "paye_not_withheld"
   /** Slice 5.9a (money review M2): a recovery larger than the month's pay; the rest carried. */
-  | "recovery_carried";
+  | "recovery_carried"
+  /**
+   * Slice 5.10 (money review round 2, M2): no opening balance, so the tax year starts at the
+   * worker's first payslip in Metalira, later than 1 January and their start date.
+   */
+  | "no_opening_balance"
+  /**
+   * Slice 5.10 (money review round 2, M3): a leaver's payslip carries a deduction (the cap, a cut
+   * or a clawback) that no later payslip will recover.
+   */
+  | "leaver_carry_unrecoverable";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -311,6 +329,8 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   rent_relief_unverified: "warning",
   paye_not_withheld: "warning",
   recovery_carried: "warning",
+  no_opening_balance: "warning",
+  leaver_carry_unrecoverable: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;
@@ -365,6 +385,11 @@ export interface WorkerAnomalyInput {
   rules: RuleSet;
   /** Slice 5.9a: rent is declared on the worker but no verified rent proof backs it. */
   rentUnverified?: boolean;
+  /**
+   * Slice 5.10 (M2): the tax year counts from the worker's first payslip in Metalira (no opening
+   * balance), later than 1 January and their start date.
+   */
+  ytdFromFirstPayslip?: boolean;
 }
 
 /** Percent change, rounded half away from zero to a whole percent (display only). */
@@ -466,8 +491,30 @@ export function workerAnomalies(w: WorkerAnomalyInput): RunAnomaly[] {
       }),
     );
   }
-  if (slip && slip.flags.includes("recovery_carried"))
-    out.push(anomaly("recovery_carried", w.workerId));
+  if (slip && slip.flags.includes("recovery_carried")) {
+    // Slice 5.10: say when the one-third cap, not the month's pay, made the clawback carry.
+    const overCap = slip.trace.some(
+      (t) => t.step === "recovery_carried" && t.formula.startsWith("Over the one-third cap"),
+    );
+    out.push(anomaly("recovery_carried", w.workerId, overCap ? { capped: true } : {}));
+  }
+  if (slip && w.ytdFromFirstPayslip) out.push(anomaly("no_opening_balance", w.workerId));
+  // Slice 5.10 (M3): a leaver has no later payslip, so a carry here can't be recovered through
+  // payroll. Whole naira in thousands groups and kobo, as refund_uncollected_carry.
+  if (
+    slip &&
+    slip.carriedForwardKobo > 0n &&
+    w.endDate !== null &&
+    w.endDate >= w.period.start &&
+    w.endDate <= w.period.end
+  ) {
+    out.push(
+      anomaly("leaver_carry_unrecoverable", w.workerId, {
+        naira: groupedNaira(slip.carriedForwardKobo / 100n),
+        kobo: Number(slip.carriedForwardKobo % 100n),
+      }),
+    );
+  }
   if (slip && slip.pensionEmployeeKobo > 0n && (!w.pfaName || !w.hasRsaPin)) {
     out.push(
       anomaly("no_pension_details", w.workerId, { no_pfa: !w.pfaName, no_rsa_pin: !w.hasRsaPin }),
@@ -514,6 +561,24 @@ export function runAnomalies(
     );
   }
   return out;
+}
+
+/**
+ * Slice 5.10 (money review round 2, L6): why a correction or one-off run's payslip would carry,
+ * for the blocking anomaly's message: the one-third cap (with no cap base at all), the corrected
+ * payslip's taxable pay, or what the run's pay can bear.
+ */
+export function carryBlockDetail(slip: PayslipResult): AnomalyDetail {
+  const steps = slip.trace.filter((t) => t.step === "recovery_carried");
+  const limits = new Set(steps.map((t) => String(t.inputs.limit ?? "pay")));
+  const capStep = slip.trace.find((t) => t.step === "deduction_cap");
+  return {
+    deduction_cut: true,
+    ...(slip.flags.includes("deduction_capped") ? { capped: true } : {}),
+    ...(slip.flags.includes("recovery_carried") ? { clawback: true } : {}),
+    ...(limits.has("corrected_taxable") ? { taxable_limit: true } : {}),
+    ...(capStep && capStep.valueKobo === 0n ? { no_cap_base: true } : {}),
+  };
 }
 
 /** A shared-account anomaly names at most this many workers (and gives the full count). */

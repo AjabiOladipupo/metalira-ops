@@ -107,6 +107,11 @@ export interface EarningLine {
   recovery?: boolean;
   /** Slice 5.9a (money review M6): the most a recovery may take before tax (the rest is carried). */
   recoveryCapKobo?: bigint;
+  /**
+   * Slice 5.10 (L3): recoveries sharing one cap (the clawbacks of one corrected payslip): the cap
+   * is the group's, and each takes what the earlier ones left.
+   */
+  recoveryCapGroup?: string;
 }
 
 /** An after-tax deduction (salary advance repayment, "2 of 3"), in the order it was added. */
@@ -202,6 +207,11 @@ export interface YearToDate {
   opening: OpeningBalance | null;
   /** Ids of the verified relief declarations counted (for the trace and approval's check). */
   reliefIds?: readonly string[];
+  /**
+   * Slice 5.10 (M2): no opening balance, so the year counts from the worker's first payslip in
+   * Metalira, later than 1 January and their start date (the run warns: no_opening_balance).
+   */
+  fromFirstPayslip?: boolean;
 }
 
 export interface OpeningBalance {

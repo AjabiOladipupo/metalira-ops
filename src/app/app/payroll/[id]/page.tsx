@@ -1118,6 +1118,7 @@ async function RunPage({
                   leave: p.leave,
                   exemptCapKobo: p.exemptCapKobo.toString(),
                   exemptUsedKobo: p.exemptUsedKobo.toString(),
+                  otherRunItemTypes: [...(p.otherRunItemTypes ?? [])],
                 },
               ]
             : [];
