@@ -148,6 +148,13 @@ import {
   startImportSpec,
 } from "@/server/people/imports/batches";
 import { saveMappingSpec } from "@/server/people/mapping";
+import {
+  bulkDepartmentSpec,
+  bulkEndEmploymentSpec,
+  bulkLineManagerSpec,
+  previewBulkEndSpec,
+  previewBulkReassignSpec,
+} from "@/server/people/bulk";
 import { checkWorkerBankSchema } from "@/server/people/schemas";
 import {
   ownBankChangeSchema,
@@ -363,6 +370,11 @@ import {
   previewSubmitPayrollRun,
   previewVoidRemittancePayment,
 } from "./payroll-previews";
+import {
+  previewBulkDepartment,
+  previewBulkEnd,
+  previewBulkLineManager,
+} from "./people-bulk-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { previewApproveClean, previewCorrection } from "./timesheet-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
@@ -412,6 +424,8 @@ const QUERY_DECISION =
   "A query is a disciplinary record about a person: raising, following up and closing one are a manager's decision.";
 const APPROVE_TIMESHEET =
   "Approving, rejecting or reopening a day decides what a person is paid and a client is billed: a person's decision (owner, Phase 4), with the preview on the screen.";
+const BULK_PEOPLE =
+  "Changes many employees at once (owner decision, slice U.1): a person confirms the preview on the screen.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -920,6 +934,71 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/actions", "saveMappingAction"),
     agent: false,
     agentNote: NO_PREVIEW,
+  },
+
+  // -------------------------------------------------------------------------
+  // People bulk actions (people/bulk-actions.ts, slice U.1)
+  // -------------------------------------------------------------------------
+  {
+    name: "people.bulk_end_employment",
+    description:
+      "Ends employment for up to 200 selected employees on one date with one reason, all or nothing.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(bulkEndEmploymentSpec),
+    changes: "many",
+    action: at("people/bulk-actions", "bulkEndEmploymentAction"),
+    preview: previewBulkEnd,
+    agent: false,
+    agentNote: BULK_PEOPLE,
+  },
+  {
+    name: "people.preview_bulk_end",
+    description:
+      "Lists, per selected employee, the future shifts and leave left after a last working day.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(previewBulkEndSpec),
+    changes: "none",
+    action: at("people/bulk-actions", "previewBulkEndEmploymentAction"),
+    agent: false,
+    agentNote: BULK_PEOPLE,
+  },
+  {
+    name: "people.bulk_set_line_manager",
+    description: "Sets one line manager for the selected employees, all or nothing.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(bulkLineManagerSpec),
+    changes: "many",
+    action: at("people/bulk-actions", "bulkSetLineManagerAction"),
+    preview: previewBulkLineManager,
+    agent: false,
+    agentNote: BULK_PEOPLE,
+  },
+  {
+    name: "people.bulk_set_department",
+    description: "Moves the selected employees into one department, all or nothing.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(bulkDepartmentSpec),
+    changes: "many",
+    action: at("people/bulk-actions", "bulkSetDepartmentAction"),
+    preview: previewBulkDepartment,
+    agent: false,
+    agentNote: BULK_PEOPLE,
+  },
+  {
+    name: "people.preview_bulk_reassign",
+    description:
+      "Lists the selected employees' line manager or department before and after a bulk change.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(previewBulkReassignSpec),
+    changes: "none",
+    action: at("people/bulk-actions", "previewBulkReassignAction"),
+    agent: false,
+    agentNote: BULK_PEOPLE,
   },
 
   // -------------------------------------------------------------------------
