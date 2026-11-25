@@ -9,7 +9,13 @@ import { formatLeaveRange } from "@/lib/leave/requests";
 import { formatNaira, koboToMajorString, sumKobo } from "@/lib/money";
 import { TAX_ADVISER_LINE } from "@/lib/payroll/rule-set";
 import { runMonth } from "@/lib/payroll/run-format";
-import { REMITTANCE_STATUS, remittanceTitle } from "@/lib/payroll/statutory";
+import {
+  DEADLINE_RULES,
+  REMITTANCE_KINDS,
+  REMITTANCE_STATUS,
+  annualPayeReturnDue,
+  remittanceTitle,
+} from "@/lib/payroll/statutory";
 import { loadRemittances, type RemittanceRow } from "@/server/payroll/remittance-data";
 import { canRecordRemittances } from "@/server/payroll/remittances";
 import { peoplePageContext } from "@/server/people/page-context";
@@ -33,10 +39,62 @@ function first(value: string | string[] | undefined): string | undefined {
 }
 
 function dueText(r: RemittanceRow): string {
-  if (r.dueDate) {
-    return `Due ${formatDate(r.dueDate)} (worked out on ${formatDate(r.createdAt.slice(0, 10))})`;
+  return `Due ${formatDate(r.dueDate)}`;
+}
+
+/**
+ * How the due date was worked out (slice 5.9b): pension from the upload date given at release
+ * (provisional from the pay date until then, with both dates shown when they differ); the other
+ * kinds from the pay date, an earlier working day used when the fixed date isn't one (until the
+ * adviser confirms); the company's own day when it is earlier; PAYE's penalty date.
+ */
+function DeadlineNotes({ r }: { r: RemittanceRow }) {
+  const d = r.deadline;
+  const notes: string[] = [];
+  if (r.kind === "pension") {
+    notes.push(
+      d.provisional
+        ? `Provisional: counted from the scheduled pay date, ${formatDate(d.paidOn)}, until the upload date is given at release.`
+        : `Counted from ${formatDate(d.paidOn)}, the day the bank file was uploaded.`,
+    );
+    if (d.provisionalDueDate) {
+      notes.push(
+        `Provisional date was ${formatDate(d.provisionalDueDate)} (from the pay date); actual ${formatDate(d.dueDate)}.`,
+      );
+    }
+  } else {
+    notes.push(`Counted from the pay date, ${formatDate(d.paidOn)}.`);
   }
-  return r.kind === "itf" ? "Accrued monthly; no due date set" : "No due date set";
+  if (d.rolledBackFrom) {
+    notes.push(
+      `${formatDate(d.rolledBackFrom)} isn't a working day: earlier working day used until confirmed.`,
+    );
+  }
+  if (d.customDay?.applied) {
+    notes.push(
+      `Your own day (the ${d.customDay.day}${ordinal(d.customDay.day)}) is earlier than the statutory ${formatDate(d.statutoryDate)}, so it applies.`,
+    );
+  } else if (d.customDay && d.customDay.date > d.statutoryDate) {
+    notes.push(
+      `Your own day (the ${d.customDay.day}${ordinal(d.customDay.day)}) is later than the statutory ${formatDate(d.statutoryDate)}, so it is ignored. A company day can only make a deadline earlier.`,
+    );
+  }
+  if (d.penaltyAfter) notes.push(`Statutory penalty after ${formatDate(d.penaltyAfter)}.`);
+  return (
+    <ul
+      className="m-0 flex list-none flex-col gap-1 p-0 text-xs text-fg-muted"
+      data-testid="deadline-notes"
+    >
+      {notes.map((n) => (
+        <li key={n}>{n}</li>
+      ))}
+    </ul>
+  );
+}
+
+function ordinal(day: number): string {
+  if (day % 100 >= 11 && day % 100 <= 13) return "th";
+  return ["th", "st", "nd", "rd"][day % 10] ?? "th";
 }
 
 function RemittanceCard({
@@ -72,12 +130,20 @@ function RemittanceCard({
             {r.workerCount} {r.workerCount === 1 ? "worker" : "workers"} · {dueText(r)}
           </p>
         </div>
-        {r.runVoid ? (
-          <Status tone="pending">Voided</Status>
-        ) : (
-          <Status tone={status.tone}>{status.label}</Status>
-        )}
+        <div className="flex flex-wrap gap-1.5">
+          {r.runVoid ? (
+            <Status tone="pending">Voided</Status>
+          ) : (
+            <Status tone={status.tone}>{status.label}</Status>
+          )}
+          {r.pastPenalty ? (
+            <span data-testid="past-penalty">
+              <Status tone="action">Past penalty date</Status>
+            </span>
+          ) : null}
+        </div>
       </div>
+      {r.runVoid ? null : <DeadlineNotes r={r} />}
       {r.runVoid ? (
         <p
           className="m-0 rounded-lg border border-line px-3 py-2 text-sm"
@@ -94,13 +160,13 @@ function RemittanceCard({
               </strong>
             ) : (
               <strong className="block font-semibold" data-testid="refund-needed">
-                Refund or offset needed:{" "}
+                Offset or refund needed:{" "}
                 {formatNaira(voidedPayment?.resolution.unresolvedKobo ?? paid.paidAmountKobo)} of
                 the {formatNaira(paid.paidAmountKobo)} already paid to the authority. The payment
                 record stays on file.{" "}
                 {voidedPayment ? (
                   <a href={`#payment-${voidedPayment.paymentId}`} className="text-signal">
-                    Record the refund or offset
+                    Offset it against a later remittance
                   </a>
                 ) : null}
               </strong>
@@ -224,6 +290,8 @@ async function RemittancesPage({
   const canRecord = canRecordRemittances(ctx.role);
   const all = runs.flatMap((r) => r.remittances);
   const overdue = all.filter((r) => r.overdue).length;
+  const pastPenalty = all.filter((r) => r.pastPenalty).length;
+  const h1Year = Number(ctx.today.slice(0, 4)) - (ctx.today.slice(5, 7) === "01" ? 1 : 0);
   const outstanding = sumKobo(all.map((r) => r.outstandingKobo));
 
   return (
@@ -232,7 +300,7 @@ async function RemittancesPage({
         back={{ href: "/app/payroll", label: "Payroll run" }}
         eyebrow="Payroll"
         title="Statutory remittances"
-        description={`${all.length} ${all.length === 1 ? "remittance" : "remittances"} · ${overdue} overdue · ${formatNaira(outstanding, { whole: true })} still to pay. You pay each authority from your own bank account; record each payment here with its receipt.`}
+        description={`${all.length} ${all.length === 1 ? "remittance" : "remittances"} · ${overdue} overdue${pastPenalty > 0 ? ` · ${pastPenalty} past the PAYE penalty date` : ""} · ${formatNaira(outstanding, { whole: true })} still to pay. You pay each authority from your own bank account; record each payment here with its receipt.`}
       />
 
       <div
@@ -240,16 +308,41 @@ async function RemittancesPage({
         data-testid="adviser-line"
       >
         <p className="m-0 text-[15px] font-semibold">{TAX_ADVISER_LINE}</p>
+        <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm text-fg-muted">
+          {REMITTANCE_KINDS.map((k) => (
+            <li key={k}>{DEADLINE_RULES[k]}</li>
+          ))}
+        </ul>
         <p className="m-0 text-sm text-fg-muted">
-          Pension is due by the 7th working day counting the pay date (or the working day before it,
-          when it falls on a weekend or holiday), leaving out weekends and your public holidays.
-          PAYE, NHF, NSITF and ITF have a due date only when you set one in{" "}
+          Working days leave out weekends and the{" "}
+          <Link href="/app/settings/holidays#official" className="text-signal">
+            official public holidays
+          </Link>{" "}
+          (federal, and the tax state&apos;s for PAYE), not your company&apos;s own days off. When a
+          fixed date falls on a non-working day, the earlier working day is used until the tax
+          adviser confirms which way it moves. Your own days in{" "}
           <Link href="/app/settings/payroll#due-days" className="text-signal">
             Payroll rules
-          </Link>
-          .
+          </Link>{" "}
+          apply only when they are earlier.
+        </p>
+        <p className="m-0 text-sm font-medium" data-testid="h1-note">
+          Annual PAYE return (Form H1) for {h1Year}: due {formatDate(annualPayeReturnDue(h1Year))}.
         </p>
       </div>
+
+      {overdue > 0 ? (
+        <p
+          className="m-0 rounded-xl border border-foreground px-4 py-3 text-sm font-medium"
+          data-testid="overdue-summary"
+        >
+          {overdue} overdue
+          {pastPenalty > 0
+            ? `, ${pastPenalty} of them PAYE past the statutory penalty date (after the 21st)`
+            : ""}
+          . Pay these first.
+        </p>
+      ) : null}
 
       <VoidedPayments payments={voidedPayments} canRecord={canRecord} today={ctx.today} />
 
@@ -274,8 +367,16 @@ async function RemittancesPage({
                   {run.kind === "off_cycle" ? " · off-cycle" : ""}
                 </h2>
                 <p className="m-0 text-sm text-fg-muted">
-                  {formatLeaveRange(run.periodStart, run.periodEnd)} · paid{" "}
-                  {formatDate(run.payDate)} ·{" "}
+                  {formatLeaveRange(run.periodStart, run.periodEnd)} · pay date{" "}
+                  {formatDate(run.payDate)}
+                  {run.uploadedOn
+                    ? `, bank file uploaded ${formatDate(run.uploadedOn)}`
+                    : run.status === "reversed"
+                      ? ", reversed"
+                      : run.status === "released"
+                        ? ", released (no upload date given)"
+                        : ", not uploaded to the bank yet"}{" "}
+                  ·{" "}
                   <Link href={`/app/payroll/${run.id}?step=submit`} className="text-signal">
                     Open the run
                   </Link>

@@ -159,6 +159,20 @@ export interface EarningsInput {
    * 5.2: pass the dated rule set version in force on each day.
    */
   policyOn?: (date: string) => DayPolicy;
+  /**
+   * Slice 5.9a (tax adviser): late unpaid leave of a payslip in this tax year is recovered before
+   * tax. Arrears whose posted period's pay date falls in this year (the period end's year: pay
+   * day comes after the 19th, in the same month) become negative `leave_deduction` lines that
+   * reduce taxable pay and the pension base; earlier years stay after-tax `leave_arrears`
+   * deductions with a note. Left out or null: every arrears line after tax (5.7c's default).
+   */
+  preTaxArrearsYear?: number | null;
+  /**
+   * Slice 5.9a (money review L3): the pay-date year of each posted period's run, by period start,
+   * so arrears decide "same tax year" as corrections do. A period missing here falls back to its
+   * end's year.
+   */
+  arrearsPayYears?: ReadonlyMap<string, number>;
 }
 
 export type EarningsFlag =
@@ -375,6 +389,7 @@ interface Contribution {
     | "adjustment_earning"
     | "arrears"
     | "leave_refund"
+    | "clawback"
   >;
   value: Fraction;
   minutes: number;
@@ -484,6 +499,7 @@ const ORDER: Record<EarningCode, number> = {
   adjustment_earning: 10,
   leave_deduction: 11,
   leave_refund: 12,
+  clawback: 13,
 };
 
 function plural(n: number, word: string): string {
@@ -1020,15 +1036,35 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     }
     for (const r of out.rates) usedRates.add(r);
     const total = -out.lines.reduce((n, l) => n + l.amountKobo, 0n);
+    const arrearsYear =
+      input.arrearsPayYears?.get(leave.periodStart) ?? Number(leave.periodEnd.slice(0, 4));
+    if (input.preTaxArrearsYear != null && arrearsYear === input.preTaxArrearsYear) {
+      // Same tax year: the leave deduction's own lines (basic, housing, transport with their
+      // bases), so taxable pay and the pension base come down this month; a later refund pays
+      // them back line by line, before tax too (5.7c's refund rule).
+      // Recoveries: cut to what this month's pay can bear, the rest carried (money review M2).
+      lines.push(...out.lines.map((l) => ({ ...l, recovery: true })));
+      trace.push({
+        ...out.trace,
+        formula: `${out.trace.formula}; recovered before tax (same tax year, tax adviser 24 Nov 2026)`,
+        valueKobo: -total,
+      });
+      continue;
+    }
+    const priorYear = input.preTaxArrearsYear != null && arrearsYear < input.preTaxArrearsYear;
     deductions.push({
       code: "leave_arrears",
-      label: out.trace.label,
+      label: priorYear
+        ? `${out.trace.label}, recovered after tax (${arrearsYear})`
+        : out.trace.label,
       amountKobo: total,
       sources: [source],
     });
     trace.push({
       ...out.trace,
-      formula: `${out.trace.formula}; recovered after tax (RULES_NIGERIA open point 5)`,
+      formula: priorYear
+        ? `${out.trace.formula}; recovered after tax: an earlier tax year (tax adviser 24 Nov 2026)`
+        : `${out.trace.formula}; recovered after tax (RULES_NIGERIA open point 5)`,
       valueKobo: total,
     });
   }
@@ -1056,6 +1092,26 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         nhfBase: component?.nhfBase ?? false,
         taxable: afterTax ? false : line.taxable,
         sources: [{ kind: "leave_refund", id: refund.requestId, from: refund.from, to: refund.to }],
+        // A refund of a leave deduction (regular pay) is regular too (money review L4).
+        regular: !afterTax,
+      });
+    }
+    // Slice 5.9a (5.7c's case D under NTA 2025 v2): a pre-tax leave deduction cut to fit carried
+    // its rest after tax; that rest is refunded after tax, after the pre-tax lines, so the worker
+    // nets ₦0 for the cancelled days while the carried balance is still collected.
+    for (const line of refund.lines) {
+      const carried = line.code === "leave_deduction" ? (line.carriedKobo ?? 0n) : 0n;
+      if (carried <= 0n) continue;
+      total += carried;
+      lines.push({
+        code: "leave_refund",
+        label: `Leave refund in ${range}, cancelled after posting (${days}), carried part, after tax`,
+        amountKobo: carried,
+        pensionable: false,
+        nhfBase: false,
+        taxable: false,
+        sources: [{ kind: "leave_refund", id: refund.requestId, from: refund.from, to: refund.to }],
+        regular: false,
       });
     }
     if (total === 0n) continue;

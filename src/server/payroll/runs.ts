@@ -420,7 +420,7 @@ async function reversedRunAdjustments(
   const { data: rows, error: adjError } = await supabase
     .from("payroll_adjustments")
     .select(
-      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count",
+      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, corrects_payslip_id",
     )
     .eq("organisation_id", organisationId)
     .eq("run_id", runId);
@@ -436,8 +436,10 @@ async function reversedRunAdjustments(
       taxable: boolean;
       instalment_number: number;
       instalment_count: number;
+      corrects_payslip_id: string | null;
     }[]
   ).map((a) => ({
+    correctsPayslipId: a.corrects_payslip_id,
     id: a.id,
     workerId: a.worker_id,
     kind: a.kind === "deduction" ? "deduction" : "earning",

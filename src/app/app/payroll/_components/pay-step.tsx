@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { bankFormat, bankFormatOptions } from "@/server/payroll/bank-formats";
 import { loadFileDownloads } from "@/server/payroll/payouts";
 import { loadPayoutDetail } from "@/server/payroll/payouts-data";
+import { approvalDay } from "@/server/payroll/release";
 import type { RunDetail } from "@/server/payroll/run-data";
 import { peoplePageContext } from "@/server/people/page-context";
 
@@ -241,7 +242,13 @@ export async function PayStep({ d, canMake }: { d: RunDetail; canMake: boolean }
             payslips, and the file can&apos;t be replaced. Someone who prepared or changed the run,
             or made this file, can&apos;t release it, and the file must have been downloaded.
           </p>
-          <ReleaseRunForm runId={run.id} batchId={active.id} fileSha256={active.fileSha256} />
+          <ReleaseRunForm
+            runId={run.id}
+            batchId={active.id}
+            fileSha256={active.fileSha256}
+            today={ctx.today}
+            minDate={run.approvedAt ? approvalDay(run.approvedAt) : ctx.today}
+          />
         </div>
       ) : null}
 

@@ -36,7 +36,7 @@ import { grossToNet } from "@/lib/payroll/gross-to-net";
 import { holidayHourExample, parseMultiplierBps } from "@/lib/payroll/holiday-pay";
 import { hasPersonalNumber } from "@/lib/personal-number";
 import type { PayRateInput } from "@/lib/payroll/inputs";
-import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
+import { NTA_2025_V1, NTA_2025_V2 } from "@/lib/payroll/rule-set";
 
 const naira = (n: string): Kobo => parseNairaToKobo(n);
 
@@ -493,5 +493,88 @@ describe("personal numbers in free text (security review L3)", () => {
     ["123.456.789", false],
   ])("%s → %s", (text, expected) => {
     expect(hasPersonalNumber(text)).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Final pay on the adviser's engine (NTA 2025 v2, slice 5.9a)
+// ---------------------------------------------------------------------------
+
+describe("final pay on the adviser's engine (NTA 2025 v2)", () => {
+  const salaryLines = (): EarningLine[] =>
+    (["basic", "housing", "transport"] as const).map((code, i) => ({
+      code,
+      label: code,
+      amountKobo: [6_000_000n, 3_600_000n, 2_400_000n][i]!,
+      pensionable: true,
+      nhfBase: code === "basic",
+      taxable: true,
+      sources: [],
+    }));
+  const asAdjustments = (lines: { label: string; amountKobo: Kobo; taxable: boolean }[]) =>
+    lines.map((l): EarningLine => ({
+      code: "adjustment_earning",
+      label: l.label,
+      amountKobo: l.amountKobo,
+      pensionable: false,
+      nhfBase: false,
+      taxable: l.taxable,
+      sources: [],
+    }));
+  const ytd = {
+    monthsElapsed: 10,
+    fromMonth: "2026-01",
+    payslips: 9,
+    grossKobo: 9n * 12_000_000n,
+    chargeableKobo: 9n * (12_000_000n - 960_000n),
+    payeKobo: 9n * 566_000n,
+    opening: null,
+  };
+  const pay = (extra: EarningLine[]) =>
+    grossToNet(
+      {
+        employmentType: "permanent",
+        earnings: [...salaryLines(), ...extra],
+        nhfOptIn: false,
+        annualRentKobo: 0n,
+        deductions: [],
+        carriedDeductionKobo: 0n,
+      },
+      NTA_2025_V2,
+      { itfApplies: false, yearToDate: ytd },
+    );
+
+  it("keeps the redundancy exempt part outside PAYE and every one-off outside NSITF", () => {
+    const loss = planFinalPayItem(PREFILL, {
+      type: "loss_of_office",
+      days: null,
+      amountKobo: naira("60,000,000"),
+      partOfSettlement: false,
+    });
+    const leave = planFinalPayItem(PREFILL, {
+      type: "leave_in_lieu",
+      days: 6,
+      amountKobo: naira("18,000"),
+      partOfSettlement: false,
+    });
+    const gratuity = planFinalPayItem(PREFILL, {
+      type: "gratuity",
+      days: null,
+      amountKobo: naira("500,000"),
+      partOfSettlement: false,
+    });
+    const all = [...loss.lines, ...leave.lines, ...gratuity.lines];
+    const withSplit = pay(asAdjustments(all));
+    const taxedOnly = pay(asAdjustments(all.filter((l) => l.taxable)));
+    const salaryOnly = pay([]);
+    expect(withSplit.grossKobo).toBe(12_000_000n + sumKobo(all.map((l) => l.amountKobo)));
+    // PAYE is the same as if the ₦50m exempt part weren't paid at all.
+    expect(withSplit.payeKobo).toBe(taxedOnly.payeKobo);
+    expect(withSplit.payeKobo).toBeGreaterThan(salaryOnly.payeKobo);
+    // NSITF on regular pay only: the salary, never the final-pay items.
+    expect(withSplit.nsitfKobo).toBe(salaryOnly.nsitfKobo);
+    expect(withSplit.nsitfKobo).toBe(120_000n);
+    // Nothing final-pay is pensionable.
+    expect(withSplit.pensionEmployeeKobo).toBe(salaryOnly.pensionEmployeeKobo);
   });
 });

@@ -16,6 +16,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import golden from "../../fixtures/october-2026-golden.json";
 import { adminClient } from "../rls/helpers/supabase";
+import { giveRuleSetV1 } from "../rls/helpers/rule-sets";
 import {
   NEEDS_SUPABASE,
   addMembership,
@@ -118,6 +119,10 @@ test("Finance makes the bank file with control totals, downloads it and releases
   const finance = await createAccount("ppay-fin", "Adaeze Okafor");
   await addMembership(owner.orgId, finance.userId, "finance");
   const [, saniId] = await seedWorkers(owner.orgId);
+  // Slice 5.9a: this spec tests the off-cycle and bank-file flows on NTA 2025 v1's figures (a
+  // dated rule set the company may hold); v2's tax engine is tested in payroll-run.spec.ts and the
+  // RLS and unit suites.
+  await giveRuleSetV1(adminClient(), owner.orgId);
   // Net pay ₦104,740 + ₦115,570 (the golden figures).
   expect(golden.workers[0]!.net + golden.workers[1]!.net).toBe(220_310);
 
@@ -236,6 +241,10 @@ test("Finance makes the bank file with control totals, downloads it and releases
   await expect(release.getByTestId("run-preview")).toContainText("Releases October 2026 payroll", {
     timeout: 30_000,
   });
+  // Slice 5.9b: the release asks for the upload date (today by default), which pension's
+  // deadline counts from.
+  await expect(release.getByLabel("Date you uploaded it to the bank")).toBeVisible();
+  await expect(release.getByTestId("run-preview")).toContainText("Uploaded to the bank on");
   await release.getByRole("button", { name: "Confirm and release" }).click();
   await expect(fin.getByTestId("released-note")).toContainText("Released", { timeout: 30_000 });
   await fin.reload();

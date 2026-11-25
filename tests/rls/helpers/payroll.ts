@@ -292,3 +292,5 @@ export async function seedPayrollRun(
   }
   return { runId, workerId, payRateId, adjustmentId };
 }
+
+export { giveRuleSetV1 } from "./rule-sets";

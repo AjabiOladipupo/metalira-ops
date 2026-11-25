@@ -2,22 +2,31 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { addDays } from "@/lib/dates";
 import { toKobo, type Kobo } from "@/lib/money";
 import { dueAfterOffsets } from "@/lib/payroll/remittance-offsets";
 import {
+  remittanceDeadline,
   remittanceIsOverdue,
+  remittanceIsPastPenalty,
   remittanceOutstanding,
   remittanceStatus,
   type RemitDueDays,
+  type RemittanceDeadline,
   type RemittanceKind,
   type RemittanceStatus,
 } from "@/lib/payroll/statutory";
 import type { Database } from "@/types/db";
 
+import { loadOfficialCalendar } from "./official-holidays";
+
 /**
  * Reads for statutory remittances (slice 5.6), under RLS as the signed-in member: owner, hr and
  * finance see a company's remittances, payments and receipts; everyone else gets no rows. Kobo is
- * read as text and turned into `bigint`. Status (due, overdue, paid) is worked out on read.
+ * read as text and turned into `bigint`. Status (due, overdue, paid) is worked out on read, and so
+ * is the due date (slice 5.9b): from the day salary was actually paid (the run's release), the
+ * official holiday calendar and the company's own days, provisionally from the scheduled pay date
+ * before release.
  */
 
 type Client = SupabaseClient<Database>;
@@ -50,12 +59,14 @@ export interface RemittanceRow {
   authorityName: string | null;
   /** Every spelling merged under the key; more than one shows a notice. */
   authorityVariants: string[];
-  /** When the remittance (and its due date) was worked out: the approval. */
+  /** When the remittance was made: the approval. */
   createdAt: string;
   /** Still owed: the whole amount unpaid, or a part payment's gap. */
   outstandingKobo: Kobo;
   /** Past due with something still owed. */
   overdue: boolean;
+  /** PAYE past its statutory penalty date (after the 21st) with something still owed. */
+  pastPenalty: boolean;
   amountKobo: Kobo;
   /**
    * Slice 5.7c: payments on remittances a reversal voided, offset against this one; it owes that
@@ -63,7 +74,10 @@ export interface RemittanceRow {
    */
   offsetsInKobo: Kobo;
   workerCount: number;
-  dueDate: string | null;
+  /** The date to pay by, worked out on read (slice 5.9b): `deadline.dueDate`. */
+  dueDate: string;
+  /** How the due date was worked out: the paid day, provisional or not, the company's day. */
+  deadline: RemittanceDeadline;
   status: RemittanceStatus;
   /** The standing payment, if one is recorded. */
   payment: RemittancePayment | null;
@@ -83,6 +97,11 @@ export interface RemittanceRun {
   periodStart: string;
   periodEnd: string;
   payDate: string;
+  /**
+   * The date the bank file was uploaded, as given at release (money review M4); null before
+   * release, or for a release made before the date was asked for.
+   */
+  uploadedOn: string | null;
   status: string;
   remittances: RemittanceRow[];
 }
@@ -97,7 +116,6 @@ type RemittanceRecord = {
   created_at: string;
   amount_kobo: string;
   worker_count: number;
-  due_date: string | null;
 };
 
 type PaymentRecord = {
@@ -155,11 +173,38 @@ export async function loadRemittances(
   if (runError) throw new Error(`Could not read payroll runs (${runError.code})`);
   if (!runs || runs.length === 0) return [];
   const runIds = runs.map((r) => r.id);
+  // The calendar from a week before the earliest pay date to the end of the year after the
+  // latest (ITF's 1 April and an upload date after the pay date fall inside), and today's year.
+  const payDates = runs.map((r) => r.pay_date).sort();
+  const lastYear = Math.max(
+    Number(payDates[payDates.length - 1]!.slice(0, 4)),
+    Number(today.slice(0, 4)),
+  );
+  const [calendar, dueDays, releases] = await Promise.all([
+    loadOfficialCalendar(supabase, {
+      from: addDays(payDates[0]!, -7),
+      to: `${lastYear + 1}-12-31`,
+    }),
+    loadRemitDueDays(supabase, organisationId),
+    supabase
+      .from("payroll_run_decisions")
+      .select("run_id, uploaded_on, created_at")
+      .eq("organisation_id", organisationId)
+      .eq("decision", "released")
+      .in("run_id", runIds)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (releases.error) throw new Error(`Could not read releases (${releases.error.code})`);
+  const uploadedOn = new Map<string, string | null>();
+  for (const d of releases.data ?? []) {
+    if (!uploadedOn.has(d.run_id)) uploadedOn.set(d.run_id, d.uploaded_on);
+  }
+  const payDateOf = new Map(runs.map((r) => [r.id, r.pay_date]));
 
   const { data: rems, error: remError } = await supabase
     .from("statutory_remittances")
     .select(
-      "id, run_id, kind, authority_key, authority_name, authority_variants, amount_kobo::text, worker_count, due_date, created_at",
+      "id, run_id, kind, authority_key, authority_name, authority_variants, amount_kobo::text, worker_count, created_at",
     )
     .eq("organisation_id", organisationId)
     .in("run_id", runIds);
@@ -248,20 +293,34 @@ export async function loadRemittances(
   for (const r of remRows) {
     const payments = payRows.filter((p) => p.remittance_id === r.id && p.entry === "payment");
     const standing = payments.find((p) => !voids.has(p.id)) ?? null;
+    const payDate = payDateOf.get(r.run_id);
+    // Money review L3: never guess a date (no fallback to the approval's UTC day).
+    if (payDate === undefined) throw new Error("A remittance's run wasn't read");
+    const kind = r.kind as RemittanceKind;
+    const deadline = remittanceDeadline({
+      kind,
+      authorityKey: r.authority_key,
+      payDate,
+      uploadedOn: uploadedOn.get(r.run_id) ?? null,
+      dueDays,
+      calendar,
+    });
     const row: RemittanceRow = {
       id: r.id,
       runId: r.run_id,
-      kind: r.kind as RemittanceKind,
+      kind,
       authorityKey: r.authority_key,
       authorityName: r.authority_name,
       authorityVariants: r.authority_variants ?? [],
       createdAt: r.created_at,
       outstandingKobo: 0n,
       overdue: false,
+      pastPenalty: false,
       amountKobo: toKobo(r.amount_kobo),
       offsetsInKobo: offsetsIn.get(r.id) ?? 0n,
       workerCount: r.worker_count,
-      dueDate: r.due_date,
+      dueDate: deadline.dueDate,
+      deadline,
       status: "due",
       payment: standing ? toPayment(standing) : null,
       voided: payments
@@ -294,6 +353,9 @@ export async function loadRemittances(
         : remittanceStatus(owed, today);
     row.outstandingKobo = row.runVoid ? 0n : remittanceOutstanding(owed);
     row.overdue = row.runVoid ? false : remittanceIsOverdue(owed, today);
+    row.pastPenalty = row.runVoid
+      ? false
+      : remittanceIsPastPenalty({ ...owed, penaltyAfter: deadline.penaltyAfter }, today);
     byRun.set(r.run_id, [...(byRun.get(r.run_id) ?? []), row]);
   }
   return runs.map((run) => ({
@@ -302,6 +364,7 @@ export async function loadRemittances(
     periodStart: run.period_start,
     periodEnd: run.period_end,
     payDate: run.pay_date,
+    uploadedOn: uploadedOn.get(run.id) ?? null,
     status: run.status,
     remittances: (byRun.get(run.id) ?? []).sort((a, b) => {
       const k = KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind);
@@ -358,7 +421,10 @@ export interface RemittanceSummary {
   due: number;
   /** Past due with something still owed (unpaid or part paid). */
   overdue: number;
-  noDueDate: number;
+  /** PAYE past its statutory penalty date (after the 21st) with something still owed. */
+  pastPenalty: number;
+  /** Pension due dates counted from the scheduled pay date: no upload date given yet. */
+  provisional: number;
   /** Voided because their run was reversed (slice 5.7a); left out of every other count. */
   voided: number;
   /** Still owed, part payments' gaps included, in kobo as a string. */
@@ -384,11 +450,14 @@ export async function loadRemittanceSummary(
  * apart and left out of every other count and the amount still to pay (money review M2).
  */
 export function summariseRemittances(
-  rows: readonly Pick<RemittanceRow, "status" | "overdue" | "outstandingKobo" | "dueDate">[],
+  rows: readonly (Pick<RemittanceRow, "status" | "overdue" | "outstandingKobo" | "dueDate"> & {
+    pastPenalty?: boolean;
+    deadline?: Pick<RemittanceDeadline, "provisional">;
+  })[],
 ): RemittanceSummary {
   const all = rows.filter((r) => r.status !== "voided");
   const owing = all.filter((r) => r.outstandingKobo > 0n);
-  const dues = owing.flatMap((r) => (r.dueDate ? [r.dueDate] : [])).sort();
+  const dues = owing.map((r) => r.dueDate).sort();
   return {
     remittances: all.length,
     paid: all.filter((r) => r.status === "paid").length,
@@ -396,7 +465,8 @@ export function summariseRemittances(
     overpaid: all.filter((r) => r.status === "overpaid").length,
     due: all.filter((r) => r.status === "due").length,
     overdue: all.filter((r) => r.overdue).length,
-    noDueDate: all.filter((r) => r.status === "no_due_date").length,
+    pastPenalty: all.filter((r) => r.pastPenalty).length,
+    provisional: owing.filter((r) => r.deadline?.provisional).length,
     voided: rows.length - all.length,
     outstandingKobo: owing.reduce((n, r) => n + r.outstandingKobo, 0n).toString(),
     nextDueDate: dues[0] ?? null,

@@ -191,7 +191,11 @@ beforeAll(async () => {
   worker.mine = await addWorker("Musa Ibrahim", { line_manager_membership_id: lmId }, site.apapa);
   worker.notMine = await addWorker("Daniel Okon", {}, site.apapa);
   // The other line manager's reportee works only at Ikoyi.
-  worker.theirs = await addWorker("Halima Bello", { line_manager_membership_id: lm2Id }, site.ikoyi);
+  worker.theirs = await addWorker(
+    "Halima Bello",
+    { line_manager_membership_id: lm2Id },
+    site.ikoyi,
+  );
 });
 
 afterAll(() => undefined);
@@ -234,7 +238,9 @@ describe("line managers assign within their crews", () => {
   it("refuses a worker who doesn't report to them", async () => {
     const { error } = await assign(post.apapaDay, day(1), worker.notMine, lineManager.client);
     expect(error?.code).toBe("42501");
-    expect(error?.message).toBe("You can assign only people who report to you, at your team's sites.");
+    expect(error?.message).toBe(
+      "You can assign only people who report to you, at your team's sites.",
+    );
   });
 
   it("refuses a reportee at a site outside their team's", async () => {
@@ -363,7 +369,9 @@ describe("My team reads", () => {
       });
       expect(res.error?.code, fn).toBe("42501");
     }
-    const leave = await ops.client.rpc("team_leave_open_shifts", { p_organisation_id: owner.orgId });
+    const leave = await ops.client.rpc("team_leave_open_shifts", {
+      p_organisation_id: owner.orgId,
+    });
     expect(leave.error?.code).toBe("42501");
   });
 });

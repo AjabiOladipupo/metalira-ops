@@ -22,7 +22,41 @@ export type EarningCode =
   | "leave_deduction" // negative
   | "adjustment_earning"
   | "arrears"
-  | "leave_refund"; // slice 5.7c: leave cancelled after a posted payslip deducted it
+  | "leave_refund" // slice 5.7c: leave cancelled after a posted payslip deducted it
+  | "clawback"; // slice 5.9a: a deduction correction of an overpaid earning, before tax (negative)
+
+/**
+ * Slice 5.9a (tax adviser, NSITF): regular monthly pay. Overtime, off-day and public-holiday
+ * pay, bonuses and other one-off or irregular payments, arrears, refunds and clawbacks of earlier
+ * months are irregular and stay out of the NSITF base. Derived from the line's code.
+ */
+export const REGULAR_EARNING_CODES: ReadonlySet<EarningCode> = new Set<EarningCode>([
+  "basic",
+  "housing",
+  "transport",
+  "other_allowances",
+  "daily_pay",
+  "hourly_pay",
+  "leave_deduction",
+]);
+
+export function isRegularEarning(code: string): boolean {
+  return REGULAR_EARNING_CODES.has(code as EarningCode);
+}
+
+/**
+ * Whether an earning line is regular pay (NSITF's base): the line's own `regular` when the stage
+ * that made it knew better (a refund of a regular leave deduction, a recurring allowance: money
+ * review L4), else its code.
+ */
+export function isRegularLine(line: { code: string; regular?: boolean }): boolean {
+  return line.regular ?? isRegularEarning(line.code);
+}
+
+/** Earning codes that may be negative (a reduction of pay): leave deductions and clawbacks. */
+export function isNegativeEarning(code: string): boolean {
+  return code === "leave_deduction" || code === "clawback";
+}
 
 /**
  * What a line pays, so a source is paid once (decision 10). The same shape as slice 5.1's
@@ -63,6 +97,16 @@ export interface EarningLine {
   nhfBase: boolean;
   taxable: boolean;
   sources: PaySourceRef[];
+  /** Slice 5.9a: regular pay or not, when the code alone doesn't say (see `isRegularLine`). */
+  regular?: boolean;
+  /**
+   * Slice 5.9a (money review M2): a recovery of an earlier overpayment before tax (a same-year
+   * clawback or leave arrears). It is cut to what this month's pay can bear, and the rest is
+   * carried forward after tax and flagged; it never blocks the run.
+   */
+  recovery?: boolean;
+  /** Slice 5.9a (money review M6): the most a recovery may take before tax (the rest is carried). */
+  recoveryCapKobo?: bigint;
 }
 
 /** An after-tax deduction (salary advance repayment, "2 of 3"), in the order it was added. */
@@ -89,6 +133,24 @@ export interface GrossToNetInput {
   deductions: DeductionLine[];
   /** Outstanding from earlier runs (open question 6's default). */
   carriedDeductionKobo: bigint;
+  /**
+   * Slice 5.9a: an NHF number is on file (NHF is taken only then, under the adviser's rules).
+   * Left out: true.
+   */
+  nhfNumberOnFile?: boolean;
+  /**
+   * Slice 5.9a: verified annual reliefs on chargeable income (NHIS or NHIA contributions, life
+   * assurance or deferred annuity premiums), counted only when the rule set allows them. Rent
+   * relief stays `annualRentKobo` (the server passes only a verified rent under the adviser's
+   * rules).
+   */
+  reliefs?: { nhisAnnualKobo: bigint; lifeAssuranceAnnualKobo: bigint };
+  /**
+   * Slice 5.9a (money review M3): rent relief for the months before the rule set required proof.
+   * The declared rent counts for those `months` of the year so far (relief already given under
+   * the earlier rule set stays); `annualRentKobo` (verified) counts for the whole year.
+   */
+  rentBeforeProof?: { annualRentKobo: bigint; months: number };
 }
 
 /** Per-run choices the gross-to-net stage needs beyond the worker's input. */
@@ -100,21 +162,56 @@ export interface GrossToNetOptions {
   /** Steps from the earnings stage, continued by gross to net. */
   priorTrace?: TraceStep[];
   /**
-   * Month-aggregate PAYE (owner decision, 24 Nov 2026, slice 5.7b): the worker's other standing
-   * payslips with a pay date in the same calendar month. PAYE is worked out on the month's total
-   * taxable pay and this payslip withholds the month's PAYE less what those already withheld,
-   * never below ₦0. Absent for a regular run with no off-cycle payslip in the month.
+   * Cumulative year-to-date PAYE (slice 5.9a, tax adviser): the worker's tax year so far. Left
+   * out, this is the worker's first payslip of the year with nothing before it (one month
+   * elapsed), which is exactly the month annualised.
    */
-  monthToDate?: MonthToDate;
+  yearToDate?: YearToDate;
+  /**
+   * Slice 5.9a: pension applies (the company has the rule set's minimum number of employees on
+   * the pay date). Left out: true.
+   */
+  pensionApplies?: boolean;
+  /**
+   * Slice 5.9a: this is the worker's last payslip of the tax year (a December pay date, or a
+   * leaver's final pay), so PAYE this payslip can't withhold needs settling at year end.
+   */
+  lastOfYear?: boolean;
 }
 
-export interface MonthToDate {
-  /** How many other payslips. */
+/**
+ * The worker's tax year before this payslip (slice 5.9a). The tax year is the calendar year of
+ * the pay date. Months elapsed count from the later of 1 January, the worker's start date and the
+ * company's payroll go-live month (1 January or the start date when an opening balance covers the
+ * months before go-live) through the pay date's month.
+ */
+export interface YearToDate {
+  /** Calendar months in the tax year so far, this payslip's month included (1 to 12). */
+  monthsElapsed: number;
+  /** "2026-10": the first month counted. */
+  fromMonth: string;
+  /** Standing (approved or released) payslips of the year counted, not this one. */
   payslips: number;
-  /** Their taxable pay less employee pension and NHF, summed (monthly kobo). */
-  taxableKobo: bigint;
+  /** Their gross pay (total income), summed. */
+  grossKobo: bigint;
+  /** Their chargeable pay (taxable pay less employee pension and NHF), summed. */
+  chargeableKobo: bigint;
   /** The PAYE they withheld, summed. */
   payeKobo: bigint;
+  /** The opening balance HR entered at go-live, if any (payroll_opening_balances). */
+  opening: OpeningBalance | null;
+  /** Ids of the verified relief declarations counted (for the trace and approval's check). */
+  reliefIds?: readonly string[];
+}
+
+export interface OpeningBalance {
+  id: string;
+  /** "2026-09": the last month the balance covers. */
+  asOfMonth: string;
+  grossKobo: bigint;
+  chargeableKobo: bigint;
+  payeKobo: bigint;
+  pensionKobo: bigint;
 }
 
 export type PayslipLineKind = "earning" | "deduction" | "statutory" | "employer";
@@ -140,6 +237,8 @@ export interface PayslipLine {
   pensionable: boolean;
   taxable: boolean;
   sources: PaySourceRef[];
+  /** Slice 5.9a: an earning line's regular flag (NSITF's base), stored on the line. */
+  regular?: boolean;
 }
 
 /**
@@ -148,7 +247,17 @@ export interface PayslipLine {
  */
 export type AnomalyCode =
   /** Other deductions were cut so net pay stays at ₦0 or more; the rest is carried (decision 6). */
-  "deduction_cut";
+  | "deduction_cut"
+  /** Slice 5.9a: other deductions were capped at a third of gross (Labour Act s.5(7)). */
+  | "deduction_capped"
+  /** Slice 5.9a: PAYE already withheld this year exceeds the tax due to date (not refunded). */
+  | "paye_overwithheld"
+  /** Slice 5.9a: opted in to NHF but no NHF number on file, or pay below the minimum wage. */
+  | "nhf_not_deducted"
+  /** Slice 5.9a (money review M2): PAYE above what the payslip can pay; caught up later. */
+  | "paye_not_withheld"
+  /** Slice 5.9a (money review M2): a recovery larger than this month's pay; the rest carried. */
+  | "recovery_carried";
 
 export interface PayslipResult {
   grossKobo: bigint;

@@ -371,7 +371,10 @@ const DUE_FIELDS = [
   { name: "itf", label: "ITF" },
 ] as const;
 
-/** Settings > Payroll rules: the company's own due day for each kind, or none. */
+/**
+ * Settings > Payroll rules: the company's own due day for each kind, or none (the statutory
+ * deadline). A day applies only when it is earlier than the statutory deadline (slice 5.9b).
+ */
 export function RemitDueDaysForm({
   values,
 }: {
@@ -393,7 +396,7 @@ export function RemitDueDaysForm({
             min={1}
             max={28}
             inputMode="numeric"
-            placeholder="None"
+            placeholder="Statutory"
             defaultValue={state?.values?.[f.name] ?? values[f.name]?.toString() ?? ""}
             error={state && !state.ok ? state.fieldErrors?.[f.name] : undefined}
           />

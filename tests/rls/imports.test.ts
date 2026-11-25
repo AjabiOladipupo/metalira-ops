@@ -758,7 +758,12 @@ describe("batch lifecycle", () => {
 
   it("lets only owner and hr cancel", async () => {
     const { id } = await createBatch();
-    for (const by of [people.admin.client, people.finance.client, people.ops.client, other.client]) {
+    for (const by of [
+      people.admin.client,
+      people.finance.client,
+      people.ops.client,
+      other.client,
+    ]) {
       const { error } = await by.rpc("cancel_import_batch", {
         p_organisation_id: owner.orgId,
         p_batch_id: id,
@@ -831,7 +836,12 @@ describe("writing import rows", () => {
 
   it("lets only owner and hr save a check", async () => {
     const { id } = await createBatch();
-    for (const by of [people.admin.client, people.finance.client, people.ops.client, other.client]) {
+    for (const by of [
+      people.admin.client,
+      people.finance.client,
+      people.ops.client,
+      other.client,
+    ]) {
       const { error } = await saveRows(id, [rowDoc(2)], by);
       expect(error?.code).toBe(PERMISSION_DENIED);
     }

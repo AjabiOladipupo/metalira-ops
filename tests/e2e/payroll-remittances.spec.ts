@@ -208,11 +208,18 @@ test("HR downloads the pension schedule and records the payment with its receipt
   await expect(cards).toHaveCount(3);
   const paye = page.getByRole("listitem", { name: "PAYE to Lagos State IRS" });
   await expect(paye.getByTestId("remittance-amount")).toHaveText("₦1,000.00");
-  await expect(paye).toContainText("No due date set");
+  // Slice 5.9b: PAYE is due the 10th of the following month, with the penalty date shown.
+  await expect(paye).toContainText("Due 10 Nov 2026");
+  await expect(paye.getByTestId("deadline-notes")).toContainText(
+    "Statutory penalty after 21 Nov 2026",
+  );
   const pension = page.getByRole("listitem", { name: "Pension to Stanbic IBTC Pensions" });
   await expect(pension.getByTestId("remittance-amount")).toHaveText("₦21,600.00");
-  // Sunday 25 Oct 2026 rolls back to Friday 23 Oct, the first of 7 working days.
-  await expect(pension).toContainText("Due 2 Nov 2026");
+  // Slice 5.9b: paid Sunday 25 Oct 2026, so Monday 26 Oct is day 1 of 7; provisional until the
+  // bank file is uploaded.
+  await expect(pension).toContainText("Due 3 Nov 2026");
+  await expect(pension.getByTestId("deadline-notes")).toContainText("Provisional");
+  await expect(page.getByTestId("h1-note")).toContainText("Form H1");
   await expect(
     page.getByRole("listitem", { name: "NSITF" }).getByTestId("remittance-amount"),
   ).toHaveText("₦1,200.00");
