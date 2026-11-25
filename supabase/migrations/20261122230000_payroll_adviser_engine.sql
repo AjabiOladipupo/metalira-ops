@@ -2918,12 +2918,11 @@ as $$
             and s.worker_id in (select w.worker_id from w)
         )
       )
-      -- Slice 5.9a (money review M1): cumulative PAYE counted the run's payslip in every later
-      -- payslip of the same tax year, so clause (c) widens from the pay date's month to the tax
-      -- year, for pay dates on or after the run's.
+      -- Slice 5.9a (money review M1): cumulative PAYE counts every standing payslip of the tax
+      -- year (a later pay date too: the months then run to it), so clause (c) widens from the pay
+      -- date's month to the whole tax year, whatever the pay date's order.
       or (
         date_trunc('year', x.pay_date) = date_trunc('year', o.pay_date)
-        and x.pay_date >= o.pay_date
         and (x.approved_at is null or o.approved_at is null or x.approved_at > o.approved_at)
         and exists (
           select 1 from public.payslips s

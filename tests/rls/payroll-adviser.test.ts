@@ -299,7 +299,7 @@ describe("reliefs and their proofs", () => {
     });
     expect(declared.error).toBeNull();
     declarationId = declared.data!;
-    const early = await c.hr.client.rpc("verify_payroll_relief", {
+    const early = await c.owner.client.rpc("verify_payroll_relief", {
       p_organisation_id: c.owner.orgId,
       p_declaration_id: declarationId,
       p_decision: "verified",
@@ -399,7 +399,7 @@ describe("reliefs and their proofs", () => {
       p_supersedes_id: declarationId,
     });
     expect(corrected.error).toBeNull();
-    const stale = await c.hr.client.rpc("verify_payroll_relief", {
+    const stale = await c.owner.client.rpc("verify_payroll_relief", {
       p_organisation_id: c.owner.orgId,
       p_declaration_id: declarationId,
       p_decision: "verified",

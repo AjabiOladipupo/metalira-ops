@@ -69,15 +69,24 @@ export const tables: TableSpec[] = [
     ...base("payroll_relief_declarations"),
     seed: async ({ admin, side }) => {
       const { workerId } = await addPayrollWorker(admin, side.orgId);
+      // A second person verifies (MLYA7), then leaves the company again, so the isolation suite's
+      // membership checks see only the owner.
+      const checker = await reliefChecker(admin, side.orgId);
       await verifyRelief(
         admin,
         { client: side.client, userId: side.id },
-        await reliefChecker(admin, side.orgId),
+        checker,
         side.orgId,
         workerId,
         "rent",
         36_000_000n,
       );
+      const left = await admin
+        .from("memberships")
+        .delete()
+        .eq("organisation_id", side.orgId)
+        .eq("user_id", checker.userId);
+      if (left.error) throw new Error(`relief checker: ${left.error.message}`);
     },
     attackInsert: ({ victim }) => ({
       organisation_id: victim.orgId,
