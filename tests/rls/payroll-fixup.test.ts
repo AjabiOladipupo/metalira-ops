@@ -200,6 +200,8 @@ const PAY_ENTITIES = [
   "payroll_approval_checks",
   "payroll_run_decisions",
   "payroll_run_workers",
+  "payroll_final_pay_items",
+  "payroll_holiday_pay_rates",
   "payslips",
   "payslip_lines",
   "payslip_sources",
@@ -838,6 +840,40 @@ describe("the rule set and pay rate guards are ENABLE ALWAYS", () => {
        select gen_random_uuid(), o.id, 100, false from public.organisations o limit 1`,
     ]);
     expect(pay.error).not.toBeNull();
+    // And a committed row of its own, deleted outright (slice 5.9c), so the row guard has something to refuse whatever ran before (the
+    // table may be empty when this file runs first).
+    const own = await company("paydel");
+    const { workerId } = await addPayrollWorker(admin, own.owner.orgId);
+    const typeId = randomUUID();
+    const requestId = randomUUID();
+    for (const [sql, params] of [
+      [
+        `insert into public.leave_types (id, organisation_id, code, name, counting, paid)
+         values ($1, $2, 'unpaid', 'Unpaid', 'working_days', false)`,
+        [typeId, own.owner.orgId],
+      ],
+      [
+        `insert into public.leave_requests (id, organisation_id, worker_id, leave_type_id,
+           leave_year, start_date, end_date, days, status, decided_at)
+         values ($1, $2, $3, $4, 2026, '2026-08-03', '2026-08-04', 2, 'approved', now())`,
+        [requestId, own.owner.orgId, workerId, typeId],
+      ],
+      [
+        `insert into public.leave_request_pay (request_id, organisation_id, pay_percent,
+           pay_below_service)
+         values ($1, $2, 0, false)`,
+        [requestId, own.owner.orgId],
+      ],
+    ] as const) {
+      const seeded = await asDbOwner(sql, [...params], true);
+      expect(seeded.error).toBeNull();
+    }
+    const ownPay = await asDbOwner(
+      "delete from public.leave_request_pay where request_id = $1",
+      [requestId],
+      true,
+    );
+    expect(ownPay.error).not.toBeNull();
   });
 });
 

@@ -174,6 +174,9 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
   if (
     /^MLPR[46ABCDF]$/.test(error.code) ||
     /^MLOC[1-9A]$/.test(error.code) ||
+    // Slice 5.9c: final-pay items (MLTB8 a final pay waits for the adviser engine; MLTB9 an
+    // earning is taxed unless it is a final-pay item's exempt row).
+    /^MLTB[1-9]$/.test(error.code) ||
     error.code === "22023"
   ) {
     throw new MutationError("invalid", error.message);
@@ -511,25 +514,36 @@ export async function previewRemoveAdjustment(
 ): Promise<CapabilityPreview> {
   const { data: adj, error } = await ctx.supabase
     .from("payroll_adjustments")
-    .select("id, run_id, worker_id, label")
+    .select("id, run_id, worker_id, label, final_pay_item_id")
     .eq("organisation_id", ctx.organisationId)
     .eq("id", data.adjustmentId)
     .maybeSingle();
   if (error) fromPayrollRunDbError(error);
   if (!adj) throw new MutationError("invalid", "That adjustment wasn't found. Reload the page.");
   const run = await draftRun(ctx.supabase, ctx.organisationId, adj.run_id);
+  // Slice 5.9c: removing a final-pay item's row removes the whole item (both parts of a split).
+  let without = [adj.id];
+  if (adj.final_pay_item_id) {
+    const { data: rows, error: rowsError } = await ctx.supabase
+      .from("payroll_adjustments")
+      .select("id")
+      .eq("organisation_id", ctx.organisationId)
+      .eq("final_pay_item_id", adj.final_pay_item_id);
+    if (rowsError) fromPayrollRunDbError(rowsError);
+    without = [...new Set([adj.id, ...(rows ?? []).map((r) => r.id)])];
+  }
   const options = { workerIds: [adj.worker_id], itfApplies: run.itfApplies };
   const [before, after] = await Promise.all([
     calculateRun(ctx.supabase, ctx.organisationId, targetOf(run), options),
     calculateRun(ctx.supabase, ctx.organisationId, targetOf(run), {
       ...options,
-      withoutAdjustmentIds: [adj.id],
+      withoutAdjustmentIds: without,
     }),
   ]);
   const b = workerNet(before, adj.worker_id);
   const a = workerNet(after, adj.worker_id);
   return {
-    summary: `Removes ${adj.label}: this worker's net pay ${b === null ? "can't be worked out" : money(b)} becomes ${a === null ? "something that can't be worked out" : money(a)}. The run is recalculated.`,
+    summary: `Removes ${adj.final_pay_item_id && without.length > 1 ? `the whole final-pay item (${without.length} lines)` : adj.label}: this worker's net pay ${b === null ? "can't be worked out" : money(b)} becomes ${a === null ? "something that can't be worked out" : money(a)}. The run is recalculated.`,
     changes: [
       {
         label: "Net pay",

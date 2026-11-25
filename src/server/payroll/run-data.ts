@@ -235,6 +235,8 @@ export interface AdjustmentRow {
   createdBy: string;
   createdByName: string | null;
   createdAt: string;
+  /** Slice 5.9c: the final-pay item this earning pays (removing it removes the whole item). */
+  finalPayItemId: string | null;
 }
 
 export interface DecisionRow {
@@ -369,7 +371,7 @@ export async function loadRunDetail(
     supabase
       .from("payroll_adjustments")
       .select(
-        "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, reason, created_by, created_at",
+        "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, reason, created_by, created_at, final_pay_item_id",
       )
       .eq("organisation_id", organisationId)
       .eq("run_id", runId)
@@ -526,6 +528,7 @@ export async function loadRunDetail(
       createdBy: a.created_by,
       createdByName: people.get(a.created_by) ?? null,
       createdAt: a.created_at,
+      finalPayItemId: a.final_pay_item_id,
     })),
     decisions: (decisions.data ?? []).map((d) => ({
       id: d.id,

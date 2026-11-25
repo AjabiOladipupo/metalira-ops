@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime, lagosToday } from "@/lib/dates";
+import { addDays, formatDate, formatDateTime, lagosToday } from "@/lib/dates";
 import { formatNaira } from "@/lib/money";
 import {
   TAX_ADVISER_LINE,
@@ -14,6 +14,11 @@ import {
   type RuleSet,
 } from "@/lib/payroll/rule-set";
 import { loadRemitDueDays } from "@/server/payroll/remittance-data";
+import {
+  canSetHolidayPay,
+  loadHolidayPay,
+  loadLossOfOfficeCap,
+} from "@/server/payroll/holiday-pay";
 import { canSetRemittanceDueDays } from "@/server/payroll/remittances";
 import { canConfirmPayrollRules, canEditPayrollRules } from "@/server/payroll/rule-sets";
 import { loadPayrollRules, type RuleSetVersion } from "@/server/payroll/rule-sets-data";
@@ -28,6 +33,7 @@ import { RouteGate } from "../../_shell/slots";
 import { RemitDueDaysForm } from "../../payroll/remittances/_components/remittance-forms";
 import { ConfirmAdviserForm } from "./_components/payroll-rules-forms";
 import { ImportOpeningForm, ItfTurnoverForm } from "../../people/_components/tax-relief-forms";
+import { HolidayPaySection } from "./_components/holiday-pay-section";
 
 export const metadata: Metadata = { title: "Payroll rules" };
 
@@ -75,10 +81,12 @@ async function PayrollRulesPage({
 }) {
   const [ctx, query] = await Promise.all([peoplePageContext(), searchParams]);
   const taxYear = Number(ctx.today.slice(0, 4));
-  const [rules, dueDays, tax] = await Promise.all([
+  const [rules, dueDays, tax, holidayPay, exemptCap] = await Promise.all([
     loadPayrollRules(ctx.supabase, ctx.organisationId),
     loadRemitDueDays(ctx.supabase, ctx.organisationId),
     loadCompanyTaxRecords(ctx.supabase, ctx.organisationId, taxYear),
+    loadHolidayPay(ctx.supabase, ctx.organisationId),
+    loadLossOfOfficeCap(ctx.supabase, ctx.organisationId),
   ]);
   const canEditTax = canWriteTaxRecords(ctx.role);
   const canEdit = canEditPayrollRules(ctx.role);
@@ -186,6 +194,13 @@ async function PayrollRulesPage({
           .
         </p>
       </section>
+
+      <HolidayPaySection
+        settings={holidayPay}
+        exemptCapKobo={exemptCap}
+        canEdit={canSetHolidayPay(ctx.role)}
+        minDate={addDays(lagosToday(), 1)}
+      />
 
       {canConfirm && !confirmed ? (
         <section

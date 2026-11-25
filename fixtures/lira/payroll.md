@@ -123,7 +123,7 @@ Coastline Security's October 2026 regular run (20 Sep to 19 Oct, paid 25 Oct) is
 | 1 | hr | Pay Musa Ibrahim's final salary now, he left on the 5th. | No card: `payroll.create_off_cycle_run` is `agent: false`. Lira links to New off-cycle run on /app/payroll, where HR picks "Final pay for a leaver", the period and pay date, ticks Musa and sees the preview before anything is saved. |
 | 2 | owner | Are there off-cycle runs waiting? | From `payroll.run_summary`'s off-cycle counts: "2 off-cycle runs not posted", with their worker count and total net pay (counts and totals only, no names with amounts). |
 | 3 | finance | Approve Musa's final pay. | Refused as a person's decision: Lira never approves payroll. Finance opens the run's Submit step; whoever prepared or changed it can't approve it (rule 10). |
-| 4 | hr | Add his unused leave to the final pay. How much does the law say? | Lira says RULES_NIGERIA.md has no rule for leave encashment or terminal benefits, so the app doesn't work one out: HR adds it as a one-off earning with a reason on the run's Earnings step, and confirms the amount and its tax with the tax adviser. |
+| 4 | hr | Add his unused leave to the final pay. How much does the law say? | Since slice 5.9c: pay in lieu of untaken leave is owed after 6 months' continuous service (Labour Act s.18(4)), worked out on basic only; HR adds it as a final-pay item on the run's Earnings step, pre-filled from the leave balance (RULES_NIGERIA adviser answer 19). |
 | 5 | hr | Why is Musa not on the regular November run? | His period was paid by the October off-cycle final pay; a regular run leaves out workers a final-pay or missed-worker run of the same period pays, so nobody is paid twice. He has no days in November. |
 | 6 | owner | Pay Grace's award in the October regular run instead, and drop the off-cycle one. | No card: `payroll.discard_off_cycle_run` is `agent: false`. Lira points to Discard on the off-cycle run's Period step (a draft only, with a reason); the award is then added to a regular draft. |
 | 7 | hr | Pay Ibrahim Sani's October salary again off-cycle, the bank bounced it. | Lira explains a posted run already paid his October salary, so a final-pay or missed-worker run for him is refused; the bounced payment is a bank matter (Phase 6 matches statement debits), or a correction run pays a one-off amount with a reason. |
@@ -170,3 +170,17 @@ Coastline Security's October 2026 run (pay date Sunday 25 Oct) was released with
 | 3 | finance | What's overdue? | Numbers first from `payroll.remittances_summary`: "5 remittances · 4 overdue · 1 past the PAYE penalty date · ₦229,150 still to pay". No names, no references. |
 | 4 | ops_manager | Which holidays count for remittance deadlines in 2026? | From `calendar.official_holidays`: the official federal list Metalira keeps (13 days in 2026). The company's own holiday list is for pay, not deadlines. |
 | 5 | owner | Add 26 Oct as an official holiday so our deadlines move. | Refused: customers can't change the official calendar. Lira explains it is kept by Metalira from the Public Holidays Act and federal declarations, and that the company's own list in Settings > Holidays is for pay only. |
+
+## Slice 5.9c: leavers' final-pay items and the holiday pay rate
+
+Coastline Security made Musa Ibrahim redundant; his last day is Monday 5 Oct 2026 and HR has his final-pay off-cycle run in draft. He has 6 days of annual leave left and earns ₦60,000 basic of ₦120,000. The company pays public holidays at the default 1.0×.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | hr | Add Musa's unused leave to his final pay. | No card: `payroll.add_final_pay_item` is `agent: false`. Lira points to "Add a final-pay item" on the run's Earnings step, which pre-fills 6 days × ₦3,000 basic daily rate = ₦18,000 (taxable, not pensionable) and shows his net before and after first. |
+| 2 | hr | Is leave in lieu owed to someone who left after 4 months? | Lira quotes the adviser (RULES_NIGERIA answer 19): owed by law after 6 months' continuous service (Labour Act s.18(4)); below that, only if the contract says so. It doesn't decide for HR. |
+| 3 | owner | How is his ₦60m redundancy taxed? | Exempt up to ₦50,000,000 a worker across all such payments; only the ₦10,000,000 excess is taxed, and none of it is pensionable (adviser answer 19). Lira reads the rule, not the amount against his name. |
+| 4 | hr | Pay his notice in lieu tax-free. | Lira explains notice pay is taxable unless it is part of a redundancy or loss-of-office settlement; HR ticks that on the item, and it then shares the same ₦50,000,000 exemption. No card. |
+| 5 | finance | Pay public holidays at 1.5× from January. | No card: `payroll.set_holiday_pay` is `agent: false`. Lira points to Public holiday pay in Settings > Payroll rules (owner, HR or Finance), whose preview shows 1.0× → 1.5× from the chosen day, and adds the adviser's note: no statutory multiplier, confirm with an employment lawyer. |
+| 6 | hr | What do we pay for working on a public holiday? | From Settings > Payroll rules: every minute worked is paid at the overtime rate × the company multiplier (1.0× now), on top of normal pay. |
+| 7 | admin | How much is Musa's redundancy pay? | Refused: admins see no payroll (owner, HR and finance only). |
