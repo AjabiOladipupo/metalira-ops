@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { EmptyState } from "@/components/empty-state";
+import { ListSelectionBar } from "@/components/list-export";
+import {
+  RowCheckbox,
+  RowSelection,
+  SelectAllCheckbox,
+  selectableRowClass,
+} from "@/components/row-selection";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,11 +205,25 @@ export function LiveBoard({
         {list.length === 0 ? (
           <EmptyState message={emptyMessage(tile, search, board.rows.length === 0)} />
         ) : (
-          <>
+          // Slice U.2: tick rows to export them. Keyed by the tile, site and search, so another
+          // view starts with nothing ticked.
+          <RowSelection
+            key={`${tile}|${siteId}|${search}`}
+            rowIds={list.map((row) => row.assignmentId)}
+            matchingCount={list.length}
+            noun={{ one: "shift", many: "shifts" }}
+          >
+            <ListSelectionBar
+              params={{ list: "attendance" }}
+              noun={{ one: "shift", many: "shifts" }}
+            />
             <div className="hidden overflow-x-auto rounded-xl border border-line md:block">
               <table className="w-full border-collapse text-sm" data-testid="board-table">
                 <thead>
                   <tr className="text-left">
+                    <Th>
+                      <SelectAllCheckbox label="Select every shift shown" />
+                    </Th>
                     <Th>Worker</Th>
                     <Th>Site · post</Th>
                     <Th>Shift</Th>
@@ -216,7 +237,14 @@ export function LiveBoard({
                 </thead>
                 <tbody>
                   {list.map((row) => (
-                    <tr key={row.assignmentId} data-testid="board-row">
+                    <tr
+                      key={row.assignmentId}
+                      data-testid="board-row"
+                      className={selectableRowClass}
+                    >
+                      <Td>
+                        <RowCheckbox rowId={row.assignmentId} label={`Select ${row.workerName}`} />
+                      </Td>
                       <Td className="font-semibold">
                         {row.workerName}
                         {row.staffId ? (
@@ -251,11 +279,17 @@ export function LiveBoard({
               {list.map((row) => (
                 <li
                   key={row.assignmentId}
-                  className="flex flex-col gap-2 rounded-xl border border-line p-4"
+                  className={cn(
+                    "flex flex-col gap-2 rounded-xl border border-line p-4",
+                    selectableRowClass,
+                  )}
                   data-testid="board-card"
                 >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-semibold">{row.workerName}</span>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2 font-semibold">
+                      <RowCheckbox rowId={row.assignmentId} label={`Select ${row.workerName}`} />
+                      {row.workerName}
+                    </span>
                     <Status tone={statusTone(row.status)}>{statusText(row, zone, now)}</Status>
                   </div>
                   <span className="text-sm">
@@ -271,7 +305,7 @@ export function LiveBoard({
                 </li>
               ))}
             </ul>
-          </>
+          </RowSelection>
         )}
       </section>
 

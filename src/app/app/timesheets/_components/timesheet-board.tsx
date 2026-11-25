@@ -6,6 +6,12 @@ import { useActionState, useMemo, useRef, useState, useTransition } from "react"
 import { EmptyState } from "@/components/empty-state";
 import { FormAlert, SelectField } from "@/components/form";
 import { Illustration } from "@/components/illustration";
+import {
+  RowCheckbox,
+  RowSelection,
+  SelectAllCheckbox,
+  selectableRowClass,
+} from "@/components/row-selection";
 import { Status, type StatusTone } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/dates";
@@ -40,6 +46,8 @@ import type {
   ReviewPunch,
   TimesheetReview,
 } from "@/server/workforce/timesheet-review-data";
+
+import { TimesheetBulkBar } from "./timesheet-bulk";
 
 /**
  * The timesheet board (slice 4.3, prototype Timesheets.dc.html): the period picker and "Approve
@@ -205,86 +213,111 @@ export function TimesheetBoard({
       ) : null}
 
       {days.length > 0 ? (
-        <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
-          <section
-            aria-label="Timesheet days"
-            className="min-w-0 overflow-hidden rounded-xl border border-line"
-          >
-            <ul className="m-0 list-none p-0" data-testid="timesheet-list">
-              {days.map((day) => {
-                const on = selected?.id === day.id;
-                const flag = headlineFlag(day.exceptions);
-                return (
-                  <li key={day.id}>
-                    <button
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => pick(day.id)}
-                      data-testid="timesheet-row"
-                      data-status={day.status}
-                      className={cn(
-                        "flex w-full min-w-0 gap-4 border-0 border-b border-line p-4 text-left text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal",
-                        on
-                          ? "bg-surface shadow-[inset_0_0_0_1.5px_var(--signal)]"
-                          : "bg-background hover:bg-surface",
-                      )}
-                    >
-                      <span className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="truncate font-semibold">{day.workerName}</span>
-                        <span className="text-[13px] break-words text-fg-muted">
-                          {where(day)} · {formatShortDay(day.workDate)}
-                        </span>
-                        {day.needsReview ? (
-                          <span className="text-[13px] font-medium" data-testid="review-why">
-                            {reviewReasons(day.exceptions, [
-                              reviewPunch(day.inPunch),
-                              reviewPunch(day.outPunch),
-                            ]).join(" · ")}
-                          </span>
-                        ) : null}
-                        {flag ? (
-                          <span className="flex flex-wrap gap-1.5">
-                            <span className="inline-flex h-6 items-center rounded border border-foreground px-2 text-xs font-medium whitespace-nowrap">
-                              {flag}
-                            </span>
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="flex shrink-0 flex-col items-end gap-1">
-                        <span className="font-display text-lg font-bold tabular-nums">
-                          {hours(day)}
-                        </span>
-                        <Status tone={STATUS_TONE[day.status]}>
-                          {day.status === "pending" && day.clean
-                            ? "Clean"
-                            : LINE_STATUS_TEXT[day.status]}
-                        </Status>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-
-          {selected ? (
+        // Slice U.2: tick days to approve them together or export them. Keyed by the period, so
+        // another period starts with nothing ticked.
+        <RowSelection
+          key={review.period.start}
+          rowIds={days.map((d) => d.id)}
+          matchingCount={days.length}
+          noun={{ one: "day", many: "days" }}
+        >
+          <TimesheetBulkBar period={review.period.start} canDecide={canCorrect} />
+          <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
             <section
-              ref={detailRef}
-              aria-label="Day detail"
-              className="flex min-w-0 scroll-mt-4 flex-col gap-4 self-start rounded-xl border border-line p-4 sm:p-5"
-              data-testid="timesheet-detail"
+              aria-label="Timesheet days"
+              className="min-w-0 overflow-hidden rounded-xl border border-line"
             >
-              <Detail
-                key={selected.id}
-                day={selected}
-                zone={zone}
-                canCorrect={canCorrect}
-                canReopen={canReopen}
-                canSeeSelfie={canSeeSelfie}
-              />
+              <div className="flex items-center gap-2 border-b border-line px-4 py-1.5">
+                <SelectAllCheckbox label="Select every day in this period" />
+                <span aria-hidden className="text-[13px] text-fg-muted">
+                  Select all
+                </span>
+              </div>
+              <ul className="m-0 list-none p-0" data-testid="timesheet-list">
+                {days.map((day) => {
+                  const on = selected?.id === day.id;
+                  const flag = headlineFlag(day.exceptions);
+                  return (
+                    <li
+                      key={day.id}
+                      className={cn("flex items-stretch border-b border-line", selectableRowClass)}
+                    >
+                      <span className="flex shrink-0 items-start pt-4 pl-4">
+                        <RowCheckbox
+                          rowId={day.id}
+                          label={`Select ${day.workerName}, ${formatShortDay(day.workDate)}`}
+                        />
+                      </span>
+                      <button
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => pick(day.id)}
+                        data-testid="timesheet-row"
+                        data-status={day.status}
+                        className={cn(
+                          "flex w-full min-w-0 gap-4 border-0 p-4 text-left text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal",
+                          on
+                            ? "bg-surface shadow-[inset_0_0_0_1.5px_var(--signal)]"
+                            : "bg-background hover:bg-surface",
+                        )}
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col gap-1">
+                          <span className="truncate font-semibold">{day.workerName}</span>
+                          <span className="text-[13px] break-words text-fg-muted">
+                            {where(day)} · {formatShortDay(day.workDate)}
+                          </span>
+                          {day.needsReview ? (
+                            <span className="text-[13px] font-medium" data-testid="review-why">
+                              {reviewReasons(day.exceptions, [
+                                reviewPunch(day.inPunch),
+                                reviewPunch(day.outPunch),
+                              ]).join(" · ")}
+                            </span>
+                          ) : null}
+                          {flag ? (
+                            <span className="flex flex-wrap gap-1.5">
+                              <span className="inline-flex h-6 items-center rounded border border-foreground px-2 text-xs font-medium whitespace-nowrap">
+                                {flag}
+                              </span>
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="flex shrink-0 flex-col items-end gap-1">
+                          <span className="font-display text-lg font-bold tabular-nums">
+                            {hours(day)}
+                          </span>
+                          <Status tone={STATUS_TONE[day.status]}>
+                            {day.status === "pending" && day.clean
+                              ? "Clean"
+                              : LINE_STATUS_TEXT[day.status]}
+                          </Status>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             </section>
-          ) : null}
-        </div>
+
+            {selected ? (
+              <section
+                ref={detailRef}
+                aria-label="Day detail"
+                className="flex min-w-0 scroll-mt-4 flex-col gap-4 self-start rounded-xl border border-line p-4 sm:p-5"
+                data-testid="timesheet-detail"
+              >
+                <Detail
+                  key={selected.id}
+                  day={selected}
+                  zone={zone}
+                  canCorrect={canCorrect}
+                  canReopen={canReopen}
+                  canSeeSelfie={canSeeSelfie}
+                />
+              </section>
+            ) : null}
+          </div>
+        </RowSelection>
       ) : null}
     </div>
   );

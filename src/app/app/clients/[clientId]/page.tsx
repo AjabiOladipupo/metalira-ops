@@ -3,7 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { EmptyState } from "@/components/empty-state";
+import { ListSelectionBar } from "@/components/list-export";
 import { PageHeader } from "@/components/page-header";
+import {
+  RowCheckbox,
+  RowSelection,
+  SelectAllCheckbox,
+  selectableRowClass,
+} from "@/components/row-selection";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { paymentTermsLabel } from "@/lib/company";
@@ -246,32 +253,51 @@ async function Sites({
         </p>
         {addSite}
       </div>
-      <ul className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0">
-        {sites.map((site) => (
-          <li key={site.id}>
-            <Link
-              href={`/app/clients/${client.id}/sites/${site.id}`}
-              className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-foreground no-underline hover:bg-surface"
-            >
-              <span className="flex min-w-0 flex-col">
-                <span className="font-semibold">{site.name}</span>
-                <span className="text-xs text-fg-muted">
-                  {[firstLine(site.address), site.state].filter(Boolean).join(", ") || "No address"}
+      {/* Slice U.2: tick sites to export them. */}
+      <RowSelection
+        rowIds={sites.map((site) => site.id)}
+        matchingCount={sites.length}
+        noun={{ one: "site", many: "sites" }}
+      >
+        <div className="flex items-center gap-2 px-1">
+          <SelectAllCheckbox label="Select all sites" />
+          <span aria-hidden className="text-sm text-fg-muted">
+            Select all
+          </span>
+        </div>
+        <ListSelectionBar
+          params={{ list: "sites", clientId: client.id }}
+          noun={{ one: "site", many: "sites" }}
+        />
+        <ul className="m-0 flex list-none flex-col divide-y divide-line rounded-xl border border-line p-0">
+          {sites.map((site) => (
+            <li key={site.id} className={cn("flex items-center pl-3", selectableRowClass)}>
+              <RowCheckbox rowId={site.id} label={`Select ${site.name}`} />
+              <Link
+                href={`/app/clients/${client.id}/sites/${site.id}`}
+                className="flex min-h-14 min-w-0 flex-1 flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-foreground no-underline hover:bg-surface"
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-semibold">{site.name}</span>
+                  <span className="text-xs text-fg-muted">
+                    {[firstLine(site.address), site.state].filter(Boolean).join(", ") ||
+                      "No address"}
+                  </span>
                 </span>
-              </span>
-              <span className="flex flex-wrap items-center gap-3 text-sm">
-                <span className="text-fg-muted" data-testid="site-geofence">
-                  {geofenceLabel(site)}
+                <span className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className="text-fg-muted" data-testid="site-geofence">
+                    {geofenceLabel(site)}
+                  </span>
+                  <span className="text-fg-muted tabular-nums">
+                    {plural(site.checkpointCount, "checkpoint", "checkpoints")}
+                  </span>
+                  <SiteState site={site} />
                 </span>
-                <span className="text-fg-muted tabular-nums">
-                  {plural(site.checkpointCount, "checkpoint", "checkpoints")}
-                </span>
-                <SiteState site={site} />
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </RowSelection>
     </div>
   );
 }

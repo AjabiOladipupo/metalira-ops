@@ -97,6 +97,12 @@ import {
 } from "@/server/identity/team";
 import { workerSignInSchema } from "@/server/identity/worker-sign-in";
 import { createInvitesSpec } from "@/server/identity/worker-invites";
+import { inviteBulkSpec, previewInviteBulkSpec } from "@/server/identity/worker-invite-bulk";
+import { bulkApproveLeaveSpec, previewBulkLeaveSpec } from "@/server/people/leave-bulk";
+import {
+  bulkApproveTimesheetSpec,
+  previewBulkTimesheetSpec,
+} from "@/server/workforce/timesheet-bulk";
 import {
   decideBankChangeSpec,
   requestBankChangeSpec,
@@ -394,6 +400,7 @@ import {
   previewBulkEnd,
   previewBulkLineManager,
 } from "./people-bulk-previews";
+import { previewBulkLeave, previewBulkTimesheet, previewInviteBulk } from "./list-bulk-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
 import { previewApproveClean, previewCorrection } from "./timesheet-previews";
 import { fromSpec, type ActionRef, type Capability } from "./types";
@@ -448,6 +455,8 @@ const APPROVE_TIMESHEET =
   "Approving, rejecting or reopening a day decides what a person is paid and a client is billed: a person's decision (owner, Phase 4), with the preview on the screen.";
 const BULK_PEOPLE =
   "Changes many employees at once (owner decision, slice U.1): a person confirms the preview on the screen.";
+const BULK_LIST =
+  "Approves, resends or cancels many rows at once (owner decision, slice U.2): a person confirms the preview on the screen.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -854,6 +863,32 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("identity/worker-invite-actions", "createInviteSheet"),
     agent: false,
     agentNote: NO_PREVIEW,
+  },
+  // Bulk resend and cancel (identity/worker-invite-bulk-actions.ts, slice U.2)
+  {
+    name: "people.bulk_invites",
+    description:
+      "Resends or cancels the invites of up to 500 chosen workers; resends follow the email caps and the rest are skipped.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(inviteBulkSpec),
+    changes: "many",
+    action: at("identity/worker-invite-bulk-actions", "inviteBulkAction"),
+    preview: previewInviteBulk,
+    agent: false,
+    agentNote: BULK_LIST,
+  },
+  {
+    name: "people.preview_bulk_invites",
+    description:
+      "Lists which chosen workers' invites a bulk resend or cancel would change, and who is skipped and why.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(previewInviteBulkSpec),
+    changes: "none",
+    action: at("identity/worker-invite-bulk-actions", "previewInviteBulkAction"),
+    agent: false,
+    agentNote: BULK_LIST,
   },
 
   // -------------------------------------------------------------------------
@@ -2821,6 +2856,32 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: APPROVE_TIMESHEET,
   },
+  // Bulk approve (workforce/timesheet-bulk-actions.ts, slice U.2)
+  {
+    name: "timesheets.bulk_approve",
+    description:
+      "Approves up to 500 selected timesheet days; flagged days and any that fail a check are skipped and listed.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(bulkApproveTimesheetSpec),
+    changes: "many",
+    action: at("workforce/timesheet-bulk-actions", "bulkApproveTimesheetAction"),
+    preview: previewBulkTimesheet,
+    agent: false,
+    agentNote: BULK_LIST,
+  },
+  {
+    name: "timesheets.preview_bulk_approve",
+    description:
+      "Lists which selected timesheet days a bulk approve would approve, and which it skips and why.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(previewBulkTimesheetSpec),
+    changes: "none",
+    action: at("workforce/timesheet-bulk-actions", "previewBulkTimesheetAction"),
+    agent: false,
+    agentNote: BULK_LIST,
+  },
   {
     name: "timesheets.reject",
     description:
@@ -3677,6 +3738,32 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote:
       "The final leave approval is a person's decision (PHASE_4.md): kept to HR, with its preview on the screen.",
+  },
+  // Bulk approve (people/leave-bulk-actions.ts, slice U.2)
+  {
+    name: "leave.bulk_approve",
+    description:
+      "Approves up to 500 selected leave requests at the caller's step; any that fail a check are skipped and listed.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(bulkApproveLeaveSpec),
+    changes: "many",
+    action: at("people/leave-bulk-actions", "bulkApproveLeaveAction"),
+    preview: previewBulkLeave,
+    agent: false,
+    agentNote: BULK_LIST,
+  },
+  {
+    name: "leave.preview_bulk_approve",
+    description:
+      "Lists which selected leave requests a bulk approve would approve, and which it skips and why.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(previewBulkLeaveSpec),
+    changes: "none",
+    action: at("people/leave-bulk-actions", "previewBulkLeaveAction"),
+    agent: false,
+    agentNote: BULK_LIST,
   },
   {
     name: "leave.cancel",

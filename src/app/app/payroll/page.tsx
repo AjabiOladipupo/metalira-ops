@@ -2,7 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { EmptyState } from "@/components/empty-state";
+import { ListSelectionBar } from "@/components/list-export";
 import { PageHeader } from "@/components/page-header";
+import {
+  RowCheckbox,
+  RowSelection,
+  SelectAllCheckbox,
+  selectableRowClass,
+} from "@/components/row-selection";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { addDays, formatDate } from "@/lib/dates";
@@ -161,69 +168,93 @@ async function PayrollRunsPage() {
       {runs.length === 0 ? (
         <EmptyState message="No payroll runs yet. Approve timesheets to prepare the first run." />
       ) : (
-        <div className="relative overflow-x-auto rounded-xl border border-line">
-          <table className="w-full border-collapse text-sm" aria-label="Payroll runs">
-            <thead className="bg-surface">
-              <tr>
-                <th scope="col" className="px-4 py-2.5 text-left font-semibold whitespace-nowrap">
-                  Period
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-left font-semibold whitespace-nowrap">
-                  Pay date
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-right font-semibold">
-                  Workers
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-right font-semibold whitespace-nowrap">
-                  Net pay
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-left font-semibold">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((r) => {
-                const reversal = r.kind === "reversal";
-                const status = r.discardedAt
-                  ? ({ label: "Discarded", tone: "partial" } as const)
-                  : (reversal ? REVERSAL_STATUS : RUN_STATUS)[r.status];
-                return (
-                  <tr key={r.id} className="border-t border-line">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <Link href={`/app/payroll/${r.id}`} className="font-semibold text-signal">
-                        {reversal ? `Reversal of ${runMonth(r.periodEnd)}` : runMonth(r.periodEnd)}
-                      </Link>
-                      {r.kind === "off_cycle" ? (
-                        <span
-                          data-testid="off-cycle-label"
-                          className="ml-2 rounded-md border border-line px-1.5 py-0.5 text-xs font-medium"
-                        >
-                          Off-cycle
+        // Slice U.2: tick runs to export them (totals in naira; owner, hr and finance only).
+        <RowSelection
+          rowIds={runs.map((r) => r.id)}
+          matchingCount={runs.length}
+          noun={{ one: "run", many: "runs" }}
+        >
+          <ListSelectionBar params={{ list: "payroll_runs" }} noun={{ one: "run", many: "runs" }} />
+          <div className="relative overflow-x-auto rounded-xl border border-line">
+            <table className="w-full border-collapse text-sm" aria-label="Payroll runs">
+              <thead className="bg-surface">
+                <tr>
+                  <th scope="col" className="w-10 px-4 py-2.5">
+                    <SelectAllCheckbox label="Select all runs" />
+                  </th>
+                  <th scope="col" className="px-4 py-2.5 text-left font-semibold whitespace-nowrap">
+                    Period
+                  </th>
+                  <th scope="col" className="px-4 py-2.5 text-left font-semibold whitespace-nowrap">
+                    Pay date
+                  </th>
+                  <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+                    Workers
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-4 py-2.5 text-right font-semibold whitespace-nowrap"
+                  >
+                    Net pay
+                  </th>
+                  <th scope="col" className="px-4 py-2.5 text-left font-semibold">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((r) => {
+                  const reversal = r.kind === "reversal";
+                  const status = r.discardedAt
+                    ? ({ label: "Discarded", tone: "partial" } as const)
+                    : (reversal ? REVERSAL_STATUS : RUN_STATUS)[r.status];
+                  return (
+                    <tr key={r.id} className={`border-t border-line ${selectableRowClass}`}>
+                      <td className="px-4 py-3">
+                        <RowCheckbox
+                          rowId={r.id}
+                          label={`Select ${reversal ? "reversal of " : ""}${runMonth(r.periodEnd)}`}
+                        />
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <Link href={`/app/payroll/${r.id}`} className="font-semibold text-signal">
+                          {reversal
+                            ? `Reversal of ${runMonth(r.periodEnd)}`
+                            : runMonth(r.periodEnd)}
+                        </Link>
+                        {r.kind === "off_cycle" ? (
+                          <span
+                            data-testid="off-cycle-label"
+                            className="ml-2 rounded-md border border-line px-1.5 py-0.5 text-xs font-medium"
+                          >
+                            Off-cycle
+                          </span>
+                        ) : null}
+                        <span className="block text-xs text-fg-muted">
+                          {formatLeaveRange(r.periodStart, r.periodEnd)}
+                          {r.offCycleReason
+                            ? ` · ${OFF_CYCLE_REASONS[r.offCycleReason].label}`
+                            : ""}
                         </span>
-                      ) : null}
-                      <span className="block text-xs text-fg-muted">
-                        {formatLeaveRange(r.periodStart, r.periodEnd)}
-                        {r.offCycleReason ? ` · ${OFF_CYCLE_REASONS[r.offCycleReason].label}` : ""}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.payDate)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{r.totals.workerCount}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
-                      {/* A reversal's totals count negatively (slice 5.7a's sign convention). */}
-                      {formatNaira(reversal ? -r.totals.netKobo : r.totals.netKobo, {
-                        whole: true,
-                      })}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Status tone={status.tone}>{status.label}</Status>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.payDate)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{r.totals.workerCount}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {/* A reversal's totals count negatively (slice 5.7a's sign convention). */}
+                        {formatNaira(reversal ? -r.totals.netKobo : r.totals.netKobo, {
+                          whole: true,
+                        })}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Status tone={status.tone}>{status.label}</Status>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </RowSelection>
       )}
 
       <CarriedPanel data={carried} />
