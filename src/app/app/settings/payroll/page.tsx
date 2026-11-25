@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime, lagosToday } from "@/lib/dates";
 import { formatNaira } from "@/lib/money";
 import {
   TAX_ADVISER_LINE,
@@ -27,10 +27,7 @@ import {
 import { RouteGate } from "../../_shell/slots";
 import { RemitDueDaysForm } from "../../payroll/remittances/_components/remittance-forms";
 import { ConfirmAdviserForm } from "./_components/payroll-rules-forms";
-import {
-  ImportOpeningForm,
-  ItfTurnoverForm,
-} from "../../people/_components/tax-relief-forms";
+import { ImportOpeningForm, ItfTurnoverForm } from "../../people/_components/tax-relief-forms";
 
 export const metadata: Metadata = { title: "Payroll rules" };
 
@@ -311,7 +308,9 @@ async function PayrollRulesPage({
             {tax.itfTurnoverOver50m ? "₦50 million or more" : "under ₦50 million"}.
           </p>
         </div>
-        {canEditTax ? <ItfTurnoverForm value={tax.itfTurnoverOver50m} /> : null}
+        {canEditTax ? (
+          <ItfTurnoverForm value={tax.itfTurnoverOver50m} today={lagosToday()} />
+        ) : null}
       </section>
 
       <section aria-labelledby="opening-balances" className="flex flex-col gap-3">

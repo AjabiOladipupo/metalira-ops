@@ -16,21 +16,31 @@
  * - A deduction of an overpayment paid more than 3 months ago is refused (MLYA1).
  * - NTA 2025 v2 is a company's starting rule set.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { NTA_2025_V2, ruleSetRulesJson } from "@/lib/payroll/rule-set";
+import { runMutation } from "@/server/identity/mutate";
+import { createRunSpec, recalculateRunSpec } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
-import { addPayrollWorker, OCT_START, resultsFor, saveResults, SHA } from "./helpers/payroll";
+import {
+  addPayrollWorker,
+  OCT_END,
+  OCT_START,
+  resultsFor,
+  saveResults,
+  SHA,
+} from "./helpers/payroll";
 import { approveRun, periodEnd, releaseRun, submitRunFor } from "./helpers/payslips";
 import { verifyRelief } from "./helpers/reliefs";
 import {
   adminClient,
   createTenantUser,
   createTestUser,
+  loadLocalEnv,
   pgClient,
   type Client,
   type TenantUser,
@@ -359,6 +369,25 @@ describe("reliefs and their proofs", () => {
     ).toEqual([{ id: declarationId, kind: "nhis", annual_kobo: "6000000" }]);
   });
 
+  it("refuses the person who declared a relief verifying it (two people, MLYA7)", async () => {
+    const declared = await c.hr.client.rpc("declare_payroll_relief", {
+      p_organisation_id: c.owner.orgId,
+      p_worker_id: workerId,
+      p_tax_year: 2026,
+      p_kind: "life_assurance",
+      p_annual_kobo: "1000000",
+      p_reason: "Policy schedule for 2026",
+    });
+    expect(declared.error).toBeNull();
+    const own = await c.hr.client.rpc("verify_payroll_relief", {
+      p_organisation_id: c.owner.orgId,
+      p_declaration_id: declared.data!,
+      p_decision: "rejected",
+      p_note: "No schedule attached",
+    });
+    expect(own.error?.code).toBe("MLYA7");
+  });
+
   it("can't verify a superseded declaration", async () => {
     const corrected = await c.hr.client.rpc("declare_payroll_relief", {
       p_organisation_id: c.owner.orgId,
@@ -389,17 +418,29 @@ describe("NHF numbers, the ITF switch and the tax context", () => {
   });
 
   it("records an NHF number (hr) and shows only whether one is on file", async () => {
+    const enc = `\\x${randomBytes(48).toString("hex")}`;
     const set = await c.hr.client.rpc("set_payroll_nhf_number", {
       p_organisation_id: c.owner.orgId,
       p_worker_id: workerId,
-      p_nhf_number: "NHF-2026-0042",
+      p_id: randomUUID(),
+      p_nhf_number_enc: enc,
+      p_last4: "0042",
       p_reason: "From the NHF card",
     });
     expect(set.error).toBeNull();
+    // Security review M2: no audit row holds the stored value (only on file and the last 4).
+    const { data: rows } = await admin
+      .from("audit_log")
+      .select("before, after")
+      .eq("organisation_id", c.owner.orgId);
+    expect(JSON.stringify(rows)).not.toContain(enc.slice(2, 40));
+    expect(JSON.stringify(rows)).not.toContain("nhf_number_enc");
     const byFinance = await c.finance.client.rpc("set_payroll_nhf_number", {
       p_organisation_id: c.owner.orgId,
       p_worker_id: workerId,
-      p_nhf_number: "NHF-1",
+      p_id: randomUUID(),
+      p_nhf_number_enc: `\\x${randomBytes(48).toString("hex")}`,
+      p_last4: "0001",
       p_reason: "Not mine",
     });
     expect(byFinance.error?.code).toBe(DENIED);
@@ -417,15 +458,31 @@ describe("NHF numbers, the ITF switch and the tax context", () => {
     const byFinance = await c.finance.client.rpc("set_itf_turnover_flag", {
       p_organisation_id: c.owner.orgId,
       p_value: true,
+      p_effective_from: "2026-01-01",
       p_reason: "Turnover over N50m",
     });
     expect(byFinance.error?.code).toBe(DENIED);
     const set = await c.hr.client.rpc("set_itf_turnover_flag", {
       p_organisation_id: c.owner.orgId,
       p_value: true,
+      p_effective_from: "2026-01-01",
       p_reason: "Audited accounts show turnover above N50m",
     });
     expect(set.error).toBeNull();
+    // Dated (money review L5): off again from 2027, and a 2026 pay date still sees it on.
+    const off = await c.hr.client.rpc("set_itf_turnover_flag", {
+      p_organisation_id: c.owner.orgId,
+      p_value: false,
+      p_effective_from: "2027-01-01",
+      p_reason: "Turnover fell below N50m",
+    });
+    expect(off.error).toBeNull();
+    const later = await c.finance.client.rpc("payroll_tax_context", {
+      p_organisation_id: c.owner.orgId,
+      p_pay_date: "2027-01-25",
+      p_worker_ids: [workerId],
+    });
+    expect((later.data as { itf_turnover_over_50m: boolean }).itf_turnover_over_50m).toBe(false);
   });
 
   it("gives the tax context to owner, hr and finance only", async () => {
@@ -595,6 +652,7 @@ describe("approval re-checks the tax year (5.8's month checks, extended)", () =>
     const reliefId = await verifyRelief(
       admin,
       { client: c.hr.client, userId: c.hr.id },
+      { client: c.owner.client, userId: c.owner.id },
       c.owner.orgId,
       worker.workerId,
       "life_assurance",
@@ -671,5 +729,284 @@ describe("overpayments older than 3 months (Labour Act s.5(5))", () => {
     expect(recent.error).toBeNull();
     // Unused here but keeps the period's helper honest.
     expect(periodEnd("2026-05-20")).toBe("2026-06-19");
+  });
+});
+
+describe("two people over the tax records (security review M3)", () => {
+  it("refuses an approver who verified a relief or recorded an opening balance of the run's workers", async () => {
+    const c = await company("touch");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    // The owner declares; finance can't verify (owner or hr only), so the second owner role here
+    // is hr, who then can't approve anyway. Use the owner as verifier of hr's declaration and have
+    // the owner try to approve a run hr prepared.
+    const hrRun = await c.hr.client.rpc("create_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: OCT_START,
+    });
+    expect(hrRun.error).toBeNull();
+    const saved = await saveResults(
+      admin,
+      c.owner,
+      hrRun.data!,
+      resultsFor({ ...worker, adjustmentId: null }, { anomalies: [] }),
+      c.hr.id,
+    );
+    expect(saved.error).toBeNull();
+    expect(
+      (
+        await c.hr.client.rpc("submit_payroll_run", {
+          p_organisation_id: c.owner.orgId,
+          p_run_id: hrRun.data!,
+        })
+      ).error,
+    ).toBeNull();
+    await verifyRelief(
+      admin,
+      { client: c.hr.client, userId: c.hr.id },
+      { client: c.owner.client, userId: c.owner.id },
+      c.owner.orgId,
+      worker.workerId,
+      "nhis",
+      1_000_000n,
+    );
+    const clock = await admin.rpc("payroll_clock");
+    await admin.rpc("record_payroll_approval_check", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: hrRun.data!,
+      p_actor: c.owner.id,
+      p_inputs_sha256: SHA,
+      p_read_started_at: clock.data!,
+    });
+    const refused = await c.owner.client.rpc("approve_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: hrRun.data!,
+    });
+    expect(refused.error?.code).toBe("MLPRE");
+  });
+});
+
+describe("an opening balance covering the pay-date month (money review M5)", () => {
+  it("refuses the approval (MLYA6)", async () => {
+    const c = await company("cover");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const run = await submitRunFor(admin, c.owner, worker, OCT_START);
+    const recorded = await opening(c.hr.client, c.owner.orgId, worker.workerId, {
+      p_as_of_month: "2026-10-01",
+    });
+    expect(recorded.error).toBeNull();
+    const clock = await admin.rpc("payroll_clock");
+    await admin.rpc("record_payroll_approval_check", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: run,
+      p_actor: c.finance.id,
+      p_inputs_sha256: SHA,
+      p_read_started_at: clock.data!,
+    });
+    const refused = await c.finance.client.rpc("approve_payroll_run", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: run,
+    });
+    expect(refused.error?.code).toBe("MLYA6");
+  });
+});
+
+describe("approval re-checks the engine's other inputs written after the read (money review L1)", () => {
+  it("refuses after an NHF number, the ITF switch or a worker changed", async () => {
+    const c = await company("l1");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const run = await submitRunFor(admin, c.owner, worker, OCT_START);
+    const check = async () => {
+      const clock = await admin.rpc("payroll_clock");
+      await admin.rpc("record_payroll_approval_check", {
+        p_organisation_id: c.owner.orgId,
+        p_run_id: run,
+        p_actor: c.finance.id,
+        p_inputs_sha256: SHA,
+        p_read_started_at: clock.data!,
+      });
+    };
+    const approve = () =>
+      c.finance.client.rpc("approve_payroll_run", {
+        p_organisation_id: c.owner.orgId,
+        p_run_id: run,
+      });
+    await check();
+    expect(
+      (
+        await c.hr.client.rpc("set_payroll_nhf_number", {
+          p_organisation_id: c.owner.orgId,
+          p_worker_id: worker.workerId,
+          p_id: randomUUID(),
+          p_nhf_number_enc: `\\x${randomBytes(48).toString("hex")}`,
+          p_last4: "1234",
+          p_reason: "From the NHF card",
+        })
+      ).error,
+    ).toBeNull();
+    expect((await approve()).error?.code).toBe("MLPRF");
+    await check();
+    expect(
+      (
+        await c.hr.client.rpc("set_itf_turnover_flag", {
+          p_organisation_id: c.owner.orgId,
+          p_value: true,
+          p_effective_from: "2026-01-01",
+          p_reason: "Audited accounts",
+        })
+      ).error,
+    ).toBeNull();
+    expect((await approve()).error?.code).toBe("MLPRF");
+    await check();
+    const { error } = await admin
+      .from("workers")
+      .update({ annual_rent_declared_kobo: 12_000_000 })
+      .eq("id", worker.workerId);
+    expect(error).toBeNull();
+    expect((await approve()).error?.code).toBe("MLPRF");
+    await check();
+    expect((await approve()).error).toBeNull();
+  });
+});
+
+describe("reversal waits for later runs of the same tax year (money review M1)", () => {
+  it("names a same-year run with a later pay date that isn't approved yet", async () => {
+    const c = await company("revyear");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const oct = await submitRunFor(admin, c.owner, worker, OCT_START);
+    await approveRun(admin, c.owner.orgId, oct, c.finance);
+    // A one-off paid 30 Nov for the same period: another month, the same tax year.
+    const later = await c.owner.client.rpc("create_off_cycle_run", {
+      p_organisation_id: c.owner.orgId,
+      p_period_start: OCT_START,
+      p_pay_date: "2026-11-30",
+      p_reason: "one_off",
+      p_note: "Long-service award",
+      p_worker_ids: [worker.workerId],
+    });
+    expect(later.error).toBeNull();
+    const bonus = await c.owner.client.rpc("add_payroll_adjustment", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: later.data!,
+      p_worker_id: worker.workerId,
+      p_kind: "earning",
+      p_label: "Long-service award",
+      p_amount_kobo: "1500000",
+      p_pensionable: false,
+      p_taxable: true,
+      p_instalments: 1,
+      p_reason: "Ten years with the company",
+    });
+    expect(bonus.error).toBeNull();
+    const doc = resultsFor(
+      { ...worker, adjustmentId: null },
+      {
+        anomalies: [],
+        mutate: (d) => {
+          const slip = (d.payslips as Record<string, unknown>[])[0]!;
+          slip.pay_rate_ids = [];
+          slip.lines = [
+            {
+              code: "adjustment_earning",
+              kind: "earning",
+              label: "Long-service award",
+              amount_kobo: "1500000",
+              pensionable: false,
+              taxable: true,
+              sources: [{ kind: "adjustment", id: bonus.data!, from: OCT_START, to: OCT_END }],
+            },
+            {
+              code: "nsitf",
+              kind: "employer",
+              label: "NSITF 1%",
+              amount_kobo: "15000",
+              pensionable: false,
+              taxable: false,
+              sources: [],
+            },
+          ];
+          Object.assign(slip, {
+            gross_kobo: "1500000",
+            paye_kobo: "0",
+            pension_employee_kobo: "0",
+            net_kobo: "1500000",
+            pension_employer_kobo: "0",
+            nsitf_kobo: "15000",
+            employer_cost_kobo: "1515000",
+          });
+          d.totals = {
+            gross_kobo: "1500000",
+            paye_kobo: "0",
+            pension_employee_kobo: "0",
+            pension_employer_kobo: "0",
+            nhf_kobo: "0",
+            other_deductions_kobo: "0",
+            net_kobo: "1500000",
+            nsitf_kobo: "15000",
+            itf_kobo: "0",
+            employer_cost_kobo: "1515000",
+            carried_forward_kobo: "0",
+            worker_count: 1,
+          };
+        },
+      },
+    );
+    expect((await saveResults(admin, c.owner, later.data!, doc)).error).toBeNull();
+    expect(
+      (
+        await c.owner.client.rpc("submit_payroll_run", {
+          p_organisation_id: c.owner.orgId,
+          p_run_id: later.data!,
+        })
+      ).error,
+    ).toBeNull();
+    const blocker = await c.finance.client.rpc("payroll_reversal_blocker", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: oct,
+    });
+    expect(blocker.error).toBeNull();
+    expect(blocker.data).toBe("October 2026 off-cycle: A one-off payment");
+  });
+});
+
+describe("the server engine under NTA 2025 v2 (coverage)", () => {
+  it("caps other deductions at a third of gross and carries the rest", async () => {
+    const env = loadLocalEnv();
+    process.env.NEXT_PUBLIC_SUPABASE_URL = env.apiUrl;
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = env.publishableKey;
+    process.env.SUPABASE_SECRET_KEY = env.secretKey;
+    const c = await company("cap");
+    const worker = await addPayrollWorker(admin, c.owner.orgId);
+    const ctx = { supabase: c.hr.client, userId: c.hr.id, organisationId: c.owner.orgId, role: "hr" as const };
+    const created = await runMutation(ctx, createRunSpec, { periodStart: OCT_START });
+    const loan = await c.hr.client.rpc("add_payroll_adjustment", {
+      p_organisation_id: c.owner.orgId,
+      p_run_id: created.runId,
+      p_worker_id: worker.workerId,
+      p_kind: "deduction",
+      p_label: "Salary advance",
+      p_amount_kobo: "10000000",
+      p_pensionable: false,
+      p_taxable: false,
+      p_instalments: 1,
+      p_reason: "Advance in September",
+    });
+    expect(loan.error).toBeNull();
+    await runMutation(ctx, recalculateRunSpec, { runId: created.runId });
+    const { data: slip } = await admin
+      .from("payslips")
+      .select("gross_kobo::text, other_deductions_kobo::text, carried_forward_kobo::text")
+      .eq("run_id", created.runId)
+      .single();
+    // ₦120,000 gross: at most ₦40,000 of other deductions; ₦60,000 of the ₦100,000 carried.
+    expect(slip).toEqual({
+      gross_kobo: "12000000",
+      other_deductions_kobo: "4000000",
+      carried_forward_kobo: "6000000",
+    });
+    const { data: anomalies } = await admin
+      .from("payroll_anomalies")
+      .select("code")
+      .eq("run_id", created.runId);
+    expect(anomalies!.map((a) => a.code)).toContain("deduction_capped");
   });
 });

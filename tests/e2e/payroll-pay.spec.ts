@@ -16,7 +16,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import golden from "../../fixtures/october-2026-golden.json";
 import { adminClient } from "../rls/helpers/supabase";
-import { signedInClient, verifyDeclaredRents } from "../rls/helpers/reliefs";
+import { giveRuleSetV1 } from "../rls/helpers/rule-sets";
 import {
   NEEDS_SUPABASE,
   addMembership,
@@ -119,12 +119,10 @@ test("Finance makes the bank file with control totals, downloads it and releases
   const finance = await createAccount("ppay-fin", "Adaeze Okafor");
   await addMembership(owner.orgId, finance.userId, "finance");
   const [, saniId] = await seedWorkers(owner.orgId);
-  // Slice 5.9a: rent relief needs verified proof under NTA 2025 v2 (the tax adviser).
-  await verifyDeclaredRents(
-    adminClient(),
-    { client: await signedInClient(owner.email, owner.password), userId: owner.userId },
-    owner.orgId,
-  );
+  // Slice 5.9a: this spec tests the off-cycle and bank-file flows on NTA 2025 v1's figures (a
+  // dated rule set the company may hold); v2's tax engine is tested in payroll-run.spec.ts and the
+  // RLS and unit suites.
+  await giveRuleSetV1(adminClient(), owner.orgId);
   // Net pay ₦104,740 + ₦115,570 (the golden figures).
   expect(golden.workers[0]!.net + golden.workers[1]!.net).toBe(220_310);
 

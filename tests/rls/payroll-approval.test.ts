@@ -30,7 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, lagosToday } from "@/lib/dates";
 import { NTA_2025_V1, ruleSetPolicyJson, ruleSetRulesJson } from "@/lib/payroll/rule-set";
 import { runMutation } from "@/server/identity/mutate";
-import { createRunSpec } from "@/server/payroll/runs";
+import { approveRunSpec, createRunSpec } from "@/server/payroll/runs";
 import type { Database } from "@/types/db";
 
 import {
@@ -749,6 +749,72 @@ describe("leave in a posted period: corrected in the next run (slice 5.7c lifts 
     // they are recovered before tax as leave deduction lines, like November's own leave; no
     // after-tax leave_arrears line (5.7c's default, now for an earlier tax year only).
     expect(new Set(codes!.map((c) => c.code))).toEqual(new Set(["leave_deduction"]));
+
+    // Slice 5.9a coverage (server level, NTA 2025 v2): November posts with the pre-tax arrears;
+    // the leave is then cancelled, and December refunds those lines before tax too (taxable,
+    // pensionable as deducted), not as an after-tax refund.
+    const { data: novAnomalies } = await admin
+      .from("payroll_anomalies")
+      .select("id, severity")
+      .eq("run_id", nov.runId);
+    expect(novAnomalies!.filter((a) => a.severity === "blocking")).toEqual([]);
+    const ack = await hr.client.rpc("acknowledge_payroll_anomalies", {
+      p_organisation_id: owner.orgId,
+      p_run_id: nov.runId,
+      p_anomaly_ids: novAnomalies!.map((a) => a.id),
+    });
+    expect(ack.error).toBeNull();
+    expect(
+      (await hr.client.rpc("submit_payroll_run", {
+        p_organisation_id: owner.orgId,
+        p_run_id: nov.runId,
+      })).error,
+    ).toBeNull();
+    await runMutation(
+      { supabase: finance.client, userId: finance.id, organisationId: owner.orgId, role: "finance" },
+      approveRunSpec,
+      { runId: nov.runId },
+    );
+    expect(
+      (await hr.client.rpc("cancel_leave_request", {
+        p_organisation_id: owner.orgId,
+        p_request_id: id,
+        p_reason: "Came to work after all",
+      })).error,
+    ).toBeNull();
+    const dec = await runMutation(
+      { supabase: hr.client, userId: hr.id, organisationId: owner.orgId, role: "hr" },
+      createRunSpec,
+      { periodStart: "2026-11-20" },
+    );
+    expect(dec.calculated).toBe(true);
+    const { data: decSlip } = await admin
+      .from("payslips")
+      .select("id")
+      .eq("run_id", dec.runId)
+      .eq("worker_id", posted.workerId)
+      .single();
+    const { data: refundLines } = await admin
+      .from("payslip_lines")
+      .select("code, taxable, regular")
+      .eq("payslip_id", decSlip!.id)
+      .eq("code", "leave_refund");
+    expect(refundLines!.length).toBeGreaterThan(0);
+    expect(refundLines!.every((l) => l.taxable && l.regular)).toBe(true);
+
+    // November is reversed again (asked by Finance, approved by the owner), so the rest of this
+    // suite sees October as the latest posted period, as before.
+    const asked = await finance.client.rpc("reverse_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: nov.runId,
+      p_reason: "Coverage run, undone",
+    });
+    expect(asked.error).toBeNull();
+    const undone = await owner.client.rpc("approve_payroll_reversal", {
+      p_organisation_id: owner.orgId,
+      p_run_id: asked.data!,
+    });
+    expect(undone.error).toBeNull();
   });
 });
 

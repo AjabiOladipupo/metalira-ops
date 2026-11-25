@@ -2,7 +2,7 @@ import { applyBps, BPS_DENOMINATOR, roundHalfUp, sumKobo, type Kobo } from "@/li
 
 import {
   isNegativeEarning,
-  isRegularEarning,
+  isRegularLine,
   type AnomalyCode,
   type GrossToNetInput,
   type GrossToNetOptions,
@@ -80,6 +80,7 @@ const REF = {
   nhfConditions: "Tax adviser 24 Nov 2026: NHF Act",
   nsitf: "Tax adviser 24 Nov 2026: NSITF on regular pay (ECA 2010)",
   cap: "Labour Act s.5(7), owner decision pending a lawyer",
+  recovery: "Coordinator decision 25 Nov 2026: recoveries never block the run",
 } as const;
 
 function assertInput(input: GrossToNetInput): void {
@@ -161,7 +162,7 @@ export function grossToNet(
   // The rule set decides which salary components count toward the pension and NHF bases; a
   // line's own flag counts only for other codes (overtime, adjustments, leave deductions). From
   // NTA 2025 v2 a daily rate's consolidated pay counts toward the pension base (it has no split).
-  const earnings = input.earnings.map((e) => {
+  const earnings: GrossToNetInput["earnings"] = input.earnings.map((e) => {
     const component = salaryComponent(e.code);
     const dailyPensionable = e.code === "daily_pay" && adviser?.dailyPayPensionable === true;
     if (!component && !dailyPensionable) return e;
@@ -188,6 +189,58 @@ export function grossToNet(
     return { ...e, pensionable, nhfBase };
   });
 
+  // 0. Recoveries before tax (money review M2, M6): each is cut to what this month's pay can bear
+  //    (gross and, for a pensionable one, the pension base stay at ₦0 or more) and to its cap; the
+  //    rest is carried forward after tax and flagged. It never blocks the run.
+  let recoveryCarried = 0n;
+  {
+    let roomGross = sumKobo(earnings.filter((e) => !e.recovery).map((e) => e.amountKobo));
+    let roomPension = sumKobo(
+      earnings.filter((e) => !e.recovery && e.pensionable).map((e) => e.amountKobo),
+    );
+    const exemptDaily = input.employmentType === "daily" && r.dailyWorkersExempt;
+    const nhfReserve =
+      input.nhfOptIn && !exemptDaily
+        ? applyBps(
+            sumKobo(earnings.filter((e) => !e.recovery && e.nhfBase).map((e) => e.amountKobo)),
+            r.nhf.rateBps,
+          )
+        : 0n;
+    for (let i = 0; i < earnings.length; i += 1) {
+      const e = earnings[i]!;
+      if (!e.recovery) continue;
+      const wanted = -e.amountKobo;
+      let taken = wanted;
+      if (e.recoveryCapKobo !== undefined && taken > e.recoveryCapKobo) taken = e.recoveryCapKobo;
+      // Leave room for the employee pension and NHF on what stays (they always come off in full),
+      // so the payslip can still pay them.
+      const reserve =
+        (!exemptDaily && (options.pensionApplies ?? true)
+          ? applyBps(roomPension > 0n ? roomPension : 0n, r.pension.employeeBps)
+          : 0n) + nhfReserve;
+      const fits = roomGross - reserve;
+      if (taken > fits) taken = fits > 0n ? fits : 0n;
+      if (e.pensionable && taken > roomPension) taken = roomPension > 0n ? roomPension : 0n;
+      roomGross -= taken;
+      if (e.pensionable) roomPension -= taken;
+      if (taken < wanted) {
+        recoveryCarried += wanted - taken;
+        earnings[i] = { ...e, amountKobo: -taken };
+        trace.push(
+          traceStep(
+            "recovery_carried",
+            `${e.label}: ${traceNaira(taken)} before tax, ${traceNaira(wanted - taken)} carried`,
+            "More than this month's pay can bear: the rest comes off after tax in later runs",
+            wanted - taken,
+            REF.recovery,
+            { wanted_kobo: wanted.toString(), taken_kobo: taken.toString() },
+          ),
+        );
+      }
+    }
+    if (recoveryCarried > 0n) flags.push("recovery_carried");
+  }
+
   // 1. Gross.
   for (const e of earnings) {
     lines.push({
@@ -198,6 +251,7 @@ export function grossToNet(
       pensionable: e.pensionable,
       taxable: e.taxable,
       sources: e.sources,
+      regular: isRegularLine(e),
     });
   }
   const gross = sumKobo(earnings.map((e) => e.amountKobo));
@@ -220,6 +274,7 @@ export function grossToNet(
   let nhf = 0n;
   let nhfTaken = false;
   let paye = 0n;
+  let payeNotWithheld = 0n;
 
   if (exempt) {
     trace.push(
@@ -272,7 +327,9 @@ export function grossToNet(
     if (input.nhfOptIn) {
       const needs = adviser !== null && adviser.nhfNeedsNumberAndMinimumWage;
       const noNumber = needs && input.nhfNumberOnFile === false;
-      const belowMinimum = needs && gross < adviser.minimumWageMonthlyKobo;
+      // The worker's regular monthly pay, not this payslip's gross (money review L7).
+      const regularPay = sumKobo(earnings.filter((e) => isRegularLine(e)).map((e) => e.amountKobo));
+      const belowMinimum = needs && regularPay < adviser.minimumWageMonthlyKobo;
       if (noNumber || belowMinimum) {
         flags.push("nhf_not_deducted");
         trace.push(
@@ -281,7 +338,7 @@ export function grossToNet(
             "NHF not taken",
             noNumber
               ? "Opted in, but no NHF number is on file"
-              : `Pay ${traceNaira(gross)} is below the minimum wage of ${traceNaira(adviser!.minimumWageMonthlyKobo)}`,
+              : `Regular pay ${traceNaira(regularPay)} is below the minimum wage of ${traceNaira(adviser!.minimumWageMonthlyKobo)}`,
             0n,
             REF.nhfConditions,
             { no_number: noNumber, below_minimum_wage: belowMinimum },
@@ -328,11 +385,18 @@ export function grossToNet(
       ? (input.reliefs?.lifeAssuranceAnnualKobo ?? 0n)
       : 0n;
     const reliefsScaled = rentScaled + (nhisAnnual + lifeAnnual) * BPS_DENOMINATOR;
+    // Rent relief for the months before proof was required (money review M3): the declared rent's
+    // relief for those months of the year so far, kept exact (× k ÷ m of the annual figure).
+    const before = input.rentBeforeProof;
+    const beforeMonths = before ? BigInt(Math.max(0, Math.min(before.months, Number(m)))) : 0n;
+    const beforeRaw = before ? before.annualRentKobo * BigInt(r.rentRelief.rateBps) : 0n;
+    const beforeScaled = beforeRaw < reliefCap ? beforeRaw : reliefCap;
     const relief: Fraction = { num: rentScaled, den: BPS_DENOMINATOR };
 
     // Annualised taxable = C × 12 ÷ m − reliefs, exact: (C × 12 × 10,000 − reliefs × 10,000 × m)
     // ÷ (m × 10,000). With m = 1 it is 5.0's month annualised, to the kobo.
-    let taxableNum = chargeableToDate * 12n * BPS_DENOMINATOR - reliefsScaled * m;
+    let taxableNum =
+      chargeableToDate * 12n * BPS_DENOMINATOR - reliefsScaled * m - beforeScaled * beforeMonths;
     const floored = taxableNum < 0n;
     if (floored) taxableNum = 0n;
     const taxable: Fraction = { num: taxableNum, den: m * BPS_DENOMINATOR };
@@ -440,6 +504,21 @@ export function grossToNet(
         },
       ),
     );
+    if (beforeMonths > 0n && beforeScaled > 0n) {
+      trace.push(
+        traceStep(
+          "rent_relief_before_proof",
+          `Less rent relief for ${beforeMonths} ${beforeMonths === 1n ? "month" : "months"} before proof was required`,
+          `${formatBps(r.rentRelief.rateBps)} of ${traceNaira(before!.annualRentKobo)} declared rent (cap ${traceNaira(r.rentRelief.capKobo)}), for ${beforeMonths} of ${m} months`,
+          roundHalfUp(beforeScaled * beforeMonths, BPS_DENOMINATOR * m),
+          REF.rent,
+          {
+            annual_rent_kobo: before!.annualRentKobo.toString(),
+            months: Number(beforeMonths),
+          },
+        ),
+      );
+    }
     if (nhisAnnual > 0n) {
       trace.push(
         traceStep(
@@ -585,6 +664,29 @@ export function grossToNet(
         ),
       );
     }
+    // Never more PAYE than the payslip can pay after pension and NHF (money review M2): the rest
+    // is caught up by the year-to-date maths next time, and flagged.
+    const available = gross - pensionEmployee - nhf;
+    if (available >= 0n && paye > available) {
+      payeNotWithheld = paye - available;
+      paye = available;
+      flags.push("paye_not_withheld");
+      trace.push(
+        traceStep(
+          "paye_not_withheld",
+          `PAYE ${traceNaira(payeNotWithheld)} couldn't be withheld this month`,
+          options.lastOfYear
+            ? "More than this payslip can pay; it is the last of the tax year, so it needs settling at year end"
+            : "More than this payslip can pay; it will be caught up next month",
+          payeNotWithheld,
+          REF.ytd,
+          {
+            not_withheld_kobo: payeNotWithheld.toString(),
+            last_of_year: options.lastOfYear === true,
+          },
+        ),
+      );
+    }
     if (shortfall > 0n) {
       flags.push("paye_overwithheld");
       trace.push(
@@ -668,7 +770,8 @@ export function grossToNet(
   let room = netBefore;
   let capRoom = cap;
   let other = 0n;
-  let carriedForward = 0n;
+  // Recoveries that didn't fit before tax are carried after tax (money review M2).
+  let carriedForward = recoveryCarried;
   let wasCut = false;
   let wasCapped = false;
   const take = (wanted: Kobo): Kobo => {
@@ -755,7 +858,7 @@ export function grossToNet(
   if (!exempt) {
     const regularOnly = adviser?.nsitfRegularOnly === true;
     let nsitfBase = regularOnly
-      ? sumKobo(earnings.filter((e) => isRegularEarning(e.code)).map((e) => e.amountKobo))
+      ? sumKobo(earnings.filter((e) => isRegularLine(e)).map((e) => e.amountKobo))
       : gross;
     if (nsitfBase < 0n) nsitfBase = 0n;
     nsitf = applyBps(nsitfBase, r.nsitf.rateBps);

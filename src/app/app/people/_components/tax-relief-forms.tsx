@@ -113,8 +113,7 @@ function PreviewSaveForm({
 
 const err = (state: TaxFormState, name: string) =>
   state && !state.ok ? state.fieldErrors?.[name] : undefined;
-const val = (state: TaxFormState, name: string, fallback = "") =>
-  state?.values?.[name] ?? fallback;
+const val = (state: TaxFormState, name: string, fallback = "") => state?.values?.[name] ?? fallback;
 
 export interface OpeningDefaults {
   id: string | null;
@@ -511,7 +510,7 @@ export function NhfNumberForm({ workerId, onFile }: { workerId: string; onFile: 
 }
 
 /** Settings > Payroll rules: the company's ITF turnover switch. */
-export function ItfTurnoverForm({ value }: { value: boolean }) {
+export function ItfTurnoverForm({ value, today }: { value: boolean; today: string }) {
   return (
     <PreviewSaveForm
       action={setItfTurnoverAction}
@@ -531,6 +530,15 @@ export function ItfTurnoverForm({ value }: { value: boolean }) {
             ]}
             defaultValue={val(state, "value", value ? "true" : "false")}
             error={err(state, "value")}
+          />
+          <Field
+            label="From"
+            name="effectiveFrom"
+            type="date"
+            required
+            hint="Runs paid from this date use it; earlier runs keep the value they had."
+            defaultValue={val(state, "effectiveFrom", today)}
+            error={err(state, "effectiveFrom")}
           />
           <Field
             label="Reason"
@@ -580,7 +588,9 @@ export function ImportOpeningForm({ taxYear }: { taxYear: number }) {
               required
               rows={6}
               spellCheck={false}
-              placeholder={"MLS-0001, 1080000, 993600, 50940, 86400\nMLS-0002, 1215000, 1117800, 77670, 97200"}
+              placeholder={
+                "MLS-0001, 1080000, 993600, 50940, 86400\nMLS-0002, 1215000, 1117800, 77670, 97200"
+              }
               defaultValue={val(state, "rows")}
               aria-invalid={err(state, "rows") ? true : undefined}
               className="w-full min-w-0 rounded-lg border border-line bg-background px-3 py-2 font-mono text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal aria-invalid:border-foreground"

@@ -137,6 +137,12 @@ export interface EarningsInput {
    * deductions with a note. Left out or null: every arrears line after tax (5.7c's default).
    */
   preTaxArrearsYear?: number | null;
+  /**
+   * Slice 5.9a (money review L3): the pay-date year of each posted period's run, by period start,
+   * so arrears decide "same tax year" as corrections do. A period missing here falls back to its
+   * end's year.
+   */
+  arrearsPayYears?: ReadonlyMap<string, number>;
 }
 
 export type EarningsFlag =
@@ -965,12 +971,14 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     }
     for (const r of out.rates) usedRates.add(r);
     const total = -out.lines.reduce((n, l) => n + l.amountKobo, 0n);
-    const arrearsYear = Number(leave.periodEnd.slice(0, 4));
+    const arrearsYear =
+      input.arrearsPayYears?.get(leave.periodStart) ?? Number(leave.periodEnd.slice(0, 4));
     if (input.preTaxArrearsYear != null && arrearsYear === input.preTaxArrearsYear) {
       // Same tax year: the leave deduction's own lines (basic, housing, transport with their
       // bases), so taxable pay and the pension base come down this month; a later refund pays
       // them back line by line, before tax too (5.7c's refund rule).
-      lines.push(...out.lines);
+      // Recoveries: cut to what this month's pay can bear, the rest carried (money review M2).
+      lines.push(...out.lines.map((l) => ({ ...l, recovery: true })));
       trace.push({
         ...out.trace,
         formula: `${out.trace.formula}; recovered before tax (same tax year, tax adviser 24 Nov 2026)`,
@@ -1019,6 +1027,8 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         nhfBase: component?.nhfBase ?? false,
         taxable: afterTax ? false : line.taxable,
         sources: [{ kind: "leave_refund", id: refund.requestId, from: refund.from, to: refund.to }],
+        // A refund of a leave deduction (regular pay) is regular too (money review L4).
+        regular: !afterTax,
       });
     }
     if (total === 0n) continue;

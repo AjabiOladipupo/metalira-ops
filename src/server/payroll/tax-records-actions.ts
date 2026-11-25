@@ -58,12 +58,14 @@ function failure(error: unknown): Failure {
     }
   }
   const cause = error instanceof MutationError ? error.cause : error;
-  console.error("payroll_tax_records.failed:", cause instanceof Error ? cause.name : "unknown error");
+  console.error(
+    "payroll_tax_records.failed:",
+    cause instanceof Error ? cause.name : "unknown error",
+  );
   return { ok: false, message: FAILED };
 }
 
-export type TaxFormState =
-  (NonNullable<CompanyFormState> & { preview?: CapabilityPreview }) | null;
+export type TaxFormState = (NonNullable<CompanyFormState> & { preview?: CapabilityPreview }) | null;
 
 function refused(error: unknown, values: Record<string, string>): TaxFormState {
   const failed = failure(error);
@@ -187,15 +189,10 @@ export async function setItfTurnoverAction(
   _prev: TaxFormState,
   formData: FormData,
 ): Promise<TaxFormState> {
-  return previewThenSave(
-    formData,
-    previewSpec(itfFlagSchema, previewItfFlag),
-    itfFlagSpec,
-    () => ({
-      message: "Saved. Runs use it from their next calculation.",
-      paths: [SETTINGS_PATH],
-    }),
-  );
+  return previewThenSave(formData, previewSpec(itfFlagSchema, previewItfFlag), itfFlagSpec, () => ({
+    message: "Saved. Runs use it from their next calculation.",
+    paths: [SETTINGS_PATH],
+  }));
 }
 
 /** "NHF number": set or remove the number on file (shown masked). */
@@ -248,12 +245,14 @@ export async function recordReliefProofAction(input: {
   fileExt: string;
   workerId: string;
 }): Promise<{ ok: true } | Failure> {
+  let workerId: string;
   try {
-    await mutate(recordProofSpec, input);
+    ({ workerId } = await mutate(recordProofSpec, input));
   } catch (error) {
     return failure(error);
   }
-  revalidatePath(`/app/people/${input.workerId}`);
+  // The worker from the RLS-checked read, never the raw input (security review L3).
+  revalidatePath(`/app/people/${workerId}`);
   revalidatePath(SETTINGS_PATH);
   return { ok: true };
 }

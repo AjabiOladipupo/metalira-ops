@@ -53,6 +53,11 @@ export interface RunAdjustment {
   preTax?: boolean;
   /** Slice 5.9a: a correction of a payslip of an earlier tax year, recovered after tax. */
   priorTaxYear?: number | null;
+  /**
+   * Slice 5.9a (money review M6): the most a same-year clawback takes before tax: what the
+   * corrected payslip's taxable earnings paid. The rest is carried after tax.
+   */
+  preTaxCapKobo?: bigint;
   /** Slice 5.7a: the released payslip a correction names (null for other adjustments). */
   correctsPayslipId?: string | null;
 }
@@ -87,6 +92,8 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
         nhfBase: false,
         taxable: true,
         sources,
+        recovery: true,
+        ...(a.preTaxCapKobo !== undefined ? { recoveryCapKobo: a.preTaxCapKobo } : {}),
       });
     } else if (a.kind === "earning") {
       earnings.push({
@@ -97,6 +104,8 @@ export function adjustmentLines(adjustments: readonly RunAdjustment[]): {
         nhfBase: false,
         taxable: a.taxable,
         sources,
+        // A recurring allowance is regular pay (NSITF's base; money review L4).
+        ...(a.instalmentCount > 1 ? { regular: true } : {}),
       });
     } else {
       deductions.push({
@@ -126,6 +135,8 @@ export interface WorkerPayslipInput {
   nhfNumberOnFile?: boolean;
   /** Slice 5.9a: verified annual NHIS and life assurance reliefs. */
   reliefs?: { nhisAnnualKobo: Kobo; lifeAssuranceAnnualKobo: Kobo };
+  /** Slice 5.9a: rent relief for the months before proof was required. */
+  rentBeforeProof?: { annualRentKobo: Kobo; months: number };
 }
 
 export interface WorkerPayslipOptions {
@@ -133,6 +144,8 @@ export interface WorkerPayslipOptions {
   ruleSetId: string;
   /** Slice 5.9a: the company has enough employees for pension (left out: true). */
   pensionApplies?: boolean;
+  /** Slice 5.9a: the worker's last payslip of the tax year. */
+  lastOfYear?: boolean;
 }
 
 /** One worker's payslip: the earnings stage's lines and trace, the adjustments, gross to net. */
@@ -174,6 +187,7 @@ export function workerPayslip(
       carriedDeductionKobo: input.carriedDeductionKobo,
       ...(input.nhfNumberOnFile !== undefined ? { nhfNumberOnFile: input.nhfNumberOnFile } : {}),
       ...(input.reliefs ? { reliefs: input.reliefs } : {}),
+      ...(input.rentBeforeProof ? { rentBeforeProof: input.rentBeforeProof } : {}),
     },
     rules,
     {
@@ -182,6 +196,7 @@ export function workerPayslip(
       priorTrace,
       ...(input.yearToDate ? { yearToDate: input.yearToDate } : {}),
       ...(options.pensionApplies !== undefined ? { pensionApplies: options.pensionApplies } : {}),
+      ...(options.lastOfYear ? { lastOfYear: true } : {}),
     },
   );
 }
@@ -257,7 +272,11 @@ export type AnomalyCode =
   /** Slice 5.9a: opted in to NHF, but no NHF number on file or pay below the minimum wage. */
   | "nhf_not_deducted"
   /** Slice 5.9a: rent declared, but its proof isn't verified, so no rent relief. */
-  | "rent_relief_unverified";
+  | "rent_relief_unverified"
+  /** Slice 5.9a (money review M2): PAYE the payslip couldn't withhold; caught up later. */
+  | "paye_not_withheld"
+  /** Slice 5.9a (money review M2): a recovery larger than the month's pay; the rest carried. */
+  | "recovery_carried";
 
 /** Blocking anomalies are fixed, never acknowledged (MUST 4: no_rostered_days blocks). */
 export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
@@ -290,6 +309,8 @@ export const ANOMALY_SEVERITY: Record<AnomalyCode, AnomalySeverity> = {
   paye_overwithheld: "warning",
   nhf_not_deducted: "warning",
   rent_relief_unverified: "warning",
+  paye_not_withheld: "warning",
+  recovery_carried: "warning",
 };
 
 export type AnomalyDetail = Record<string, string | number | boolean | string[]>;
@@ -434,6 +455,19 @@ export function workerAnomalies(w: WorkerAnomalyInput): RunAnomaly[] {
     );
   }
   if (slip && !exempt && w.rentUnverified) out.push(anomaly("rent_relief_unverified", w.workerId));
+  if (slip && slip.flags.includes("paye_not_withheld")) {
+    const step = slip.trace.find((t) => t.step === "paye_not_withheld");
+    const k = BigInt(String(step?.inputs.not_withheld_kobo ?? "0"));
+    out.push(
+      anomaly("paye_not_withheld", w.workerId, {
+        naira: groupedNaira(k / 100n),
+        kobo: Number(k % 100n),
+        year_end: step?.inputs.last_of_year === "true",
+      }),
+    );
+  }
+  if (slip && slip.flags.includes("recovery_carried"))
+    out.push(anomaly("recovery_carried", w.workerId));
   if (slip && slip.pensionEmployeeKobo > 0n && (!w.pfaName || !w.hasRsaPin)) {
     out.push(
       anomaly("no_pension_details", w.workerId, { no_pfa: !w.pfaName, no_rsa_pin: !w.hasRsaPin }),
@@ -829,6 +863,7 @@ export interface ResultsPayload {
       pensionable: boolean;
       taxable: boolean;
       sources: StoredSource[];
+      regular?: boolean;
     }[];
   }[];
   anomalies: { worker_id: string | null; code: string; severity: string; detail: AnomalyDetail }[];
@@ -890,6 +925,7 @@ export function resultsPayload(
         pensionable: l.pensionable,
         taxable: l.taxable,
         sources: l.sources.map((s) => storedSource(s, period)),
+        ...(l.kind === "earning" ? { regular: l.regular ?? false } : {}),
       })),
     })),
     anomalies: anomalies.map((a) => ({

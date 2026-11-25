@@ -830,7 +830,13 @@ describe("the rule set and pay rate guards are ENABLE ALWAYS", () => {
         "timesheets_no_truncate",
       ].map((tgname) => ({ tgname, tgenabled: "A" })),
     );
-    const pay = await asDbOwner("delete from public.leave_request_pay", [], true);
+    // A row to delete in the same transaction, so the check doesn't depend on another suite having
+    // left leave pay rows behind (replica mode skips the foreign key's system triggers, not the
+    // ENABLE ALWAYS guard). The transaction rolls back.
+    const pay = await asDbOwner("delete from public.leave_request_pay", [], true, [
+      `insert into public.leave_request_pay (request_id, organisation_id, pay_percent, pay_below_service)
+       select gen_random_uuid(), o.id, 100, false from public.organisations o limit 1`,
+    ]);
     expect(pay.error).not.toBeNull();
   });
 });

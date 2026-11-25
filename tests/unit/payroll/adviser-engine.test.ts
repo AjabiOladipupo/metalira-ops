@@ -828,6 +828,180 @@ describe("the year so far: money review fixes", () => {
   });
 });
 
+describe("never block: cap and flag (coordinator decision M2, 25 Nov 2026)", () => {
+  it("caps PAYE at what the payslip can pay and flags the rest, caught up next month", () => {
+    // Two months on ₦300,000 with nothing withheld (an opening balance that withheld ₦0), then a
+    // ₦50,000 month: the year's tax due is far more than ₦50,000 less pension can pay.
+    const ytd: YearToDate = {
+      ...ytdAfter([], 3),
+      chargeableKobo: naira(552_000),
+      grossKobo: naira(600_000),
+    };
+    const s = slip(salary(naira(50_000)), { ytd });
+    expect(s.payeKobo).toBe(naira(50_000) - naira(4_000));
+    expect(s.netKobo).toBe(0n);
+    expect(s.flags).toContain("paye_not_withheld");
+    const step = s.trace.find((t) => t.step === "paye_not_withheld")!;
+    expect(step.formula).toContain("caught up next month");
+    const last = grossToNet(
+      {
+        employmentType: "permanent",
+        earnings: salary(naira(50_000)),
+        nhfOptIn: false,
+        annualRentKobo: 0n,
+        deductions: [],
+        carriedDeductionKobo: 0n,
+      },
+      V2,
+      { itfApplies: false, yearToDate: ytd, lastOfYear: true },
+    );
+    expect(last.trace.find((t) => t.step === "paye_not_withheld")!.formula).toContain("year end");
+  });
+
+  it("cuts a pre-tax clawback larger than the month's pay and carries the rest after tax", () => {
+    const { earnings } = adjustmentLines([
+      {
+        id: randomUUID(),
+        workerId: randomUUID(),
+        kind: "deduction",
+        label: "Overpaid allowance",
+        amountKobo: naira(400_000),
+        pensionable: false,
+        taxable: false,
+        instalmentNumber: 1,
+        instalmentCount: 1,
+        correctsPayslipId: randomUUID(),
+        preTax: true,
+        preTaxCapKobo: naira(500_000),
+      },
+    ]);
+    const s = slip(salary(REGULAR, earnings));
+    // ₦24,000 stays so the employee pension (on the ₦300,000 pensionable salary) still comes off
+    // in full; ₦276,000 is clawed back before tax and ₦124,000 carried after tax.
+    expect(s.grossKobo).toBe(naira(24_000));
+    expect(s.pensionEmployeeKobo).toBe(naira(24_000));
+    expect(s.netKobo).toBe(0n);
+    expect(s.carriedForwardKobo).toBe(naira(124_000));
+    expect(s.flags).toContain("recovery_carried");
+    expect(s.lines.find((l) => l.code === "clawback")?.amountKobo).toBe(-naira(276_000));
+  });
+
+  it("takes a clawback before tax only up to what the corrected payslip's taxable pay was", () => {
+    const { earnings } = adjustmentLines([
+      {
+        id: randomUUID(),
+        workerId: randomUUID(),
+        kind: "deduction",
+        label: "Overpaid overtime",
+        amountKobo: naira(20_000),
+        pensionable: false,
+        taxable: false,
+        instalmentNumber: 1,
+        instalmentCount: 1,
+        correctsPayslipId: randomUUID(),
+        preTax: true,
+        preTaxCapKobo: naira(5_000),
+      },
+    ]);
+    const s = slip(salary(REGULAR, earnings));
+    expect(s.lines.find((l) => l.code === "clawback")?.amountKobo).toBe(-naira(5_000));
+    expect(s.carriedForwardKobo).toBe(naira(15_000));
+  });
+});
+
+describe("regular pay, NHF's minimum-wage test and rent before proof", () => {
+  it("tests NHF's minimum wage on regular pay, not this payslip's gross (money review L7)", () => {
+    const s = slip(salary(naira(60_000), [overtime(naira(30_000))]), {
+      nhfOptIn: true,
+      nhfNumberOnFile: true,
+    });
+    expect(s.nhfKobo).toBe(0n);
+    expect(s.flags).toContain("nhf_not_deducted");
+  });
+
+  it("counts a recurring allowance and a refund of a leave deduction as regular (money review L4)", () => {
+    const { earnings } = adjustmentLines([
+      {
+        id: randomUUID(),
+        workerId: randomUUID(),
+        kind: "earning",
+        label: "Transport top-up",
+        amountKobo: naira(10_000),
+        pensionable: false,
+        taxable: true,
+        instalmentNumber: 1,
+        instalmentCount: 6,
+      },
+    ]);
+    const refund: EarningLine = {
+      code: "leave_refund",
+      label: "Leave refund",
+      amountKobo: naira(5_000),
+      pensionable: true,
+      nhfBase: false,
+      taxable: true,
+      sources: [],
+      regular: true,
+    };
+    const s = slip(salary(REGULAR, [...earnings, refund]));
+    expect(s.nsitfKobo).toBe(naira(3_150));
+    expect(s.lines.filter((l) => l.kind === "earning").every((l) => l.regular)).toBe(true);
+  });
+
+  it("keeps rent relief for the months before proof was required (money review M3)", () => {
+    const months = year(() => salary(REGULAR), 11);
+    const dec = slip(salary(REGULAR), { ytd: ytdAfter(months, 12) });
+    const kept = grossToNet(
+      {
+        employmentType: "permanent",
+        earnings: salary(REGULAR),
+        nhfOptIn: false,
+        annualRentKobo: 0n,
+        deductions: [],
+        carriedDeductionKobo: 0n,
+        rentBeforeProof: { annualRentKobo: naira(360_000), months: 10 },
+      },
+      V2,
+      { itfApplies: true, yearToDate: ytdAfter(months, 12) },
+    );
+    // ₦72,000 a year of relief for 10 of 12 months: ₦60,000 at 18% = ₦10,800 less PAYE.
+    expect(dec.payeKobo - kept.payeKobo).toBe(naira(10_800));
+    expect(kept.trace.some((t) => t.step === "rent_relief_before_proof")).toBe(true);
+  });
+
+  it("charges a daily worker exempt under v1 until November only December's PAYE in v2", () => {
+    const daily = (amount: Kobo): EarningLine => ({
+      code: "daily_pay",
+      label: "Daily pay",
+      amountKobo: amount,
+      pensionable: false,
+      nhfBase: false,
+      taxable: true,
+      sources: [],
+    });
+    const exemptSlips: YearSlip[] = Array.from({ length: 11 }, (_, i) => ({
+      payslipId: randomUUID(),
+      payDate: `2026-${String(i + 1).padStart(2, "0")}-25`,
+      grossKobo: naira(150_000),
+      chargeableKobo: naira(150_000),
+      payeKobo: 0n,
+      exempt: true,
+    }));
+    const ytd = yearToDateFor({
+      payDate: "2026-12-25",
+      startDate: "2025-01-06",
+      goLiveMonth: "2026-01-01",
+      worker: null,
+      slips: exemptSlips,
+    });
+    expect(ytd).toMatchObject({ monthsElapsed: 1, payslips: 0 });
+    const dec = slip([daily(naira(150_000))], { employmentType: "daily", ytd });
+    const alone = slip([daily(naira(150_000))], { employmentType: "daily" });
+    expect(dec.payeKobo).toBe(alone.payeKobo);
+    expect(dec.payeKobo).toBeLessThan(naira(150_000) / 4n);
+  });
+});
+
 describe("the tax context read", () => {
   it("parses payroll_tax_context's jsonb", () => {
     const id = randomUUID();

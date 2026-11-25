@@ -44,6 +44,15 @@ export function isRegularEarning(code: string): boolean {
   return REGULAR_EARNING_CODES.has(code as EarningCode);
 }
 
+/**
+ * Whether an earning line is regular pay (NSITF's base): the line's own `regular` when the stage
+ * that made it knew better (a refund of a regular leave deduction, a recurring allowance: money
+ * review L4), else its code.
+ */
+export function isRegularLine(line: { code: string; regular?: boolean }): boolean {
+  return line.regular ?? isRegularEarning(line.code);
+}
+
 /** Earning codes that may be negative (a reduction of pay): leave deductions and clawbacks. */
 export function isNegativeEarning(code: string): boolean {
   return code === "leave_deduction" || code === "clawback";
@@ -88,6 +97,16 @@ export interface EarningLine {
   nhfBase: boolean;
   taxable: boolean;
   sources: PaySourceRef[];
+  /** Slice 5.9a: regular pay or not, when the code alone doesn't say (see `isRegularLine`). */
+  regular?: boolean;
+  /**
+   * Slice 5.9a (money review M2): a recovery of an earlier overpayment before tax (a same-year
+   * clawback or leave arrears). It is cut to what this month's pay can bear, and the rest is
+   * carried forward after tax and flagged; it never blocks the run.
+   */
+  recovery?: boolean;
+  /** Slice 5.9a (money review M6): the most a recovery may take before tax (the rest is carried). */
+  recoveryCapKobo?: bigint;
 }
 
 /** An after-tax deduction (salary advance repayment, "2 of 3"), in the order it was added. */
@@ -126,6 +145,12 @@ export interface GrossToNetInput {
    * rules).
    */
   reliefs?: { nhisAnnualKobo: bigint; lifeAssuranceAnnualKobo: bigint };
+  /**
+   * Slice 5.9a (money review M3): rent relief for the months before the rule set required proof.
+   * The declared rent counts for those `months` of the year so far (relief already given under
+   * the earlier rule set stays); `annualRentKobo` (verified) counts for the whole year.
+   */
+  rentBeforeProof?: { annualRentKobo: bigint; months: number };
 }
 
 /** Per-run choices the gross-to-net stage needs beyond the worker's input. */
@@ -147,6 +172,11 @@ export interface GrossToNetOptions {
    * the pay date). Left out: true.
    */
   pensionApplies?: boolean;
+  /**
+   * Slice 5.9a: this is the worker's last payslip of the tax year (a December pay date, or a
+   * leaver's final pay), so PAYE this payslip can't withhold needs settling at year end.
+   */
+  lastOfYear?: boolean;
 }
 
 /**
@@ -207,6 +237,8 @@ export interface PayslipLine {
   pensionable: boolean;
   taxable: boolean;
   sources: PaySourceRef[];
+  /** Slice 5.9a: an earning line's regular flag (NSITF's base), stored on the line. */
+  regular?: boolean;
 }
 
 /**
@@ -221,7 +253,11 @@ export type AnomalyCode =
   /** Slice 5.9a: PAYE already withheld this year exceeds the tax due to date (not refunded). */
   | "paye_overwithheld"
   /** Slice 5.9a: opted in to NHF but no NHF number on file, or pay below the minimum wage. */
-  | "nhf_not_deducted";
+  | "nhf_not_deducted"
+  /** Slice 5.9a (money review M2): PAYE above what the payslip can pay; caught up later. */
+  | "paye_not_withheld"
+  /** Slice 5.9a (money review M2): a recovery larger than this month's pay; the rest carried. */
+  | "recovery_carried";
 
 export interface PayslipResult {
   grossKobo: bigint;

@@ -236,13 +236,31 @@ export function describeAnomaly(
         detail.no_number === true
           ? "no NHF number is on file. Add it on their page, then recalculate"
           : detail.below_minimum_wage === true
-            ? "their pay this month is below the minimum wage"
+            ? "their regular monthly pay is below the minimum wage"
             : "the NHF conditions aren't met";
       return {
         title: `NHF not taken · ${name}`,
         body: `Opted in to NHF, but ${why}.`,
       };
     }
+    case "paye_not_withheld": {
+      const amount =
+        typeof detail.naira === "string"
+          ? `₦${detail.naira}${typeof detail.kobo === "number" && detail.kobo > 0 ? `.${String(detail.kobo).padStart(2, "0")}` : ""}`
+          : "Some PAYE";
+      return {
+        title: `PAYE ${amount} couldn't be withheld this month · ${name}`,
+        body:
+          detail.year_end === true
+            ? "This payslip can't pay all the PAYE due to date, and it is their last payslip of the tax year, so it needs settling at year end."
+            : "This payslip can't pay all the PAYE due to date; it will be caught up next month by the year-to-date maths.",
+      };
+    }
+    case "recovery_carried":
+      return {
+        title: `Clawback larger than this month's pay · ${name}`,
+        body: "What this month's pay could bear came off before tax; the rest is carried forward and comes off after tax in later runs.",
+      };
     case "rent_relief_unverified":
       return {
         title: `Rent relief not applied: proof not verified · ${name}`,

@@ -18,9 +18,11 @@
 --    tax year, insert-only and superseded like opening balances; proofs in the private bucket
 --    payroll-relief-proofs (checked by the server like 5.6 receipts); a declaration counts only
 --    once owner or hr verify it (insert-only verifications, the latest decides).
--- 4. NHF numbers on file (payroll_nhf_numbers, insert-only, the latest row per worker counts;
---    owner, hr and finance read) and the company's ITF turnover switch
---    (organisations.itf_turnover_over_50m: ITF applies at 5 employees OR with the switch on).
+-- 4. NHF numbers on file (payroll_nhf_numbers: encrypted at column level by the server like the
+--    RSA PIN, last 4 kept for display; insert-only, the latest row per worker counts; owner, hr
+--    and finance read; no row audit, so the number never reaches audit_log) and the company's ITF
+--    turnover switch (payroll_itf_turnover: dated, insert-only; ITF applies at 5 employees OR with
+--    the switch on as of the pay date).
 -- 5. payroll_tax_context: the one read the engine needs beyond 5.1's inputs (headcount on the pay
 --    date, the ITF switch, go-live month, and per worker: NHF number on file, rent declared, the
 --    opening balance in force, verified reliefs).
@@ -47,6 +49,8 @@
 --   MLYA3 posted payslips already cover the opening balance's months
 --   MLYA4 a relief can be verified only with a proof on file, and only while it stands
 --   MLYA5 records are kept as written (no update, delete or truncate)
+--   MLYA6 an opening balance covers the run's pay-date month (correct it to an earlier month)
+--   MLYA7 the person who declared a relief can't verify it (two people)
 --   22023 bad input; 42501 the wrong role or an untrusted session; P0002 not in the company
 
 -- ---------------------------------------------------------------------------
@@ -306,12 +310,27 @@ $$;
 -- ---------------------------------------------------------------------------
 
 -- The company's ITF switch (tax adviser, ITF Act): liable at 5 employees OR with a turnover of
--- N50 million or more, which the app can't know, so the company says so.
-alter table public.organisations
-  add column itf_turnover_over_50m boolean not null default false;
+-- N50 million or more, which the app can't know, so the company says so. Dated and insert-only
+-- (money review L5): recalculating a period uses the value in force on its pay date. Read by
+-- owner, hr and finance only (a payroll fact here, unlike an organisations column every member
+-- reads; security review L5).
+create table public.payroll_itf_turnover (
+  id uuid primary key default gen_random_uuid(),
+  organisation_id uuid not null references public.organisations (id),
+  over_50m boolean not null,
+  effective_from date not null
+    constraint payroll_itf_turnover_from check (effective_from between '2000-01-01' and '2100-12-31'),
+  reason text not null,
+  created_by uuid not null,
+  created_at timestamptz not null default now(),
+  constraint payroll_itf_turnover_organisation_id_id_key unique (organisation_id, id)
+);
 
-comment on column public.organisations.itf_turnover_over_50m is
-  'The company says its turnover is N50 million or more, so ITF applies whatever its headcount (slice 5.9a, tax adviser: ITF Act). Set by owner or hr with a reason, audited.';
+create index payroll_itf_turnover_org_idx
+  on public.payroll_itf_turnover (organisation_id, effective_from desc, created_at desc);
+
+comment on table public.payroll_itf_turnover is
+  'The company says its turnover is N50 million or more (or no longer), from a date (slice 5.9a, tax adviser: ITF Act). Insert-only; the latest row in force on a pay date counts. Owner or hr with a reason, audited.';
 
 -- A text a person typed: trimmed, 1 to p_max characters, no control characters, < >, web
 -- addresses or personal numbers. Null when it isn't one.
@@ -335,6 +354,9 @@ $$;
 revoke all on function private.payroll_tax_text(text, integer) from public, anon;
 -- Pure, and used in column checks, so every role that may insert can evaluate it.
 grant execute on function private.payroll_tax_text(text, integer) to authenticated, service_role;
+
+alter table public.payroll_itf_turnover
+  add constraint payroll_itf_turnover_reason check (private.payroll_tax_text(reason, 500) = reason);
 
 create table public.payroll_opening_balances (
   id uuid primary key default gen_random_uuid(),
@@ -494,14 +516,17 @@ create table public.payroll_nhf_numbers (
   id uuid primary key default gen_random_uuid(),
   organisation_id uuid not null references public.organisations (id),
   worker_id uuid not null,
-  -- Null records that the number was removed.
-  nhf_number text
-    constraint payroll_nhf_numbers_format check (nhf_number is null or nhf_number ~ '^[A-Za-z0-9/-]{4,20}$'),
+  -- Encrypted by the server (src/server/crypto/pii.ts, bound to this row's nhf_number_enc), with
+  -- its last 4 characters for display; both null record that the number was removed.
+  nhf_number_enc bytea,
+  nhf_number_last4 text
+    constraint payroll_nhf_numbers_last4 check (nhf_number_last4 ~ '^[A-Za-z0-9/-]{1,4}$'),
   reason text not null
     constraint payroll_nhf_numbers_reason check (private.payroll_tax_text(reason, 500) = reason),
   created_by uuid not null,
   created_at timestamptz not null default now(),
   constraint payroll_nhf_numbers_organisation_id_id_key unique (organisation_id, id),
+  constraint payroll_nhf_numbers_pair check ((nhf_number_enc is null) = (nhf_number_last4 is null)),
   constraint payroll_nhf_numbers_worker_fkey foreign key (organisation_id, worker_id)
     references public.workers (organisation_id, id)
 );
@@ -579,7 +604,7 @@ declare
 begin
   foreach v_table in array array[
     'payroll_opening_balances', 'payroll_relief_declarations', 'payroll_relief_proofs',
-    'payroll_relief_verifications', 'payroll_nhf_numbers'
+    'payroll_relief_verifications', 'payroll_nhf_numbers', 'payroll_itf_turnover'
   ] loop
     execute format(
       'create trigger %I before insert or update or delete on public.%I '
@@ -614,8 +639,8 @@ create trigger payroll_relief_declarations_audit after insert on public.payroll_
   for each row execute function private.audit_row_change();
 create trigger payroll_relief_verifications_audit after insert on public.payroll_relief_verifications
   for each row execute function private.audit_row_change();
-create trigger payroll_nhf_numbers_audit after insert on public.payroll_nhf_numbers
-  for each row execute function private.audit_row_change();
+-- No row audit on payroll_nhf_numbers or payroll_itf_turnover: their functions write the event
+-- (the NHF one with on file and the last 4 only, never the number; security review M2).
 
 -- Proofs: PDF, PNG and JPEG, 10 MB or less. No storage policy: signed-in users can't list, read,
 -- write or delete objects; the server writes through a signed upload token for one path and opens
@@ -654,6 +679,27 @@ as $$
 $$;
 
 revoke all on function private.payroll_year_lock(uuid, uuid, integer) from public, anon, authenticated;
+
+-- The company's payroll tax lock (money review L1): writers of the NHF numbers and the ITF switch
+-- take it exclusively, approval takes it shared, so an approval never misses one of those writes
+-- committed while it ran. No role check: only definers call it.
+create function private.payroll_tax_org_lock(p_organisation_id uuid, p_shared boolean)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+begin
+  if p_shared then
+    perform pg_advisory_xact_lock_shared(hashtextextended('payroll_tax:' || p_organisation_id::text, 0));
+  else
+    perform pg_advisory_xact_lock(hashtextextended('payroll_tax:' || p_organisation_id::text, 0));
+  end if;
+end;
+$$;
+
+revoke all on function private.payroll_tax_org_lock(uuid, boolean) from public, anon, authenticated;
 
 -- Owner or hr of the organisation, in a trusted session. Returns the user.
 create function private.require_payroll_tax_writer(p_organisation_id uuid)
@@ -931,7 +977,9 @@ begin
     raise exception 'Each worker appears once in an import.' using errcode = '22023';
   end if;
   for v_row in
-    select e from jsonb_array_elements(p_rows) e order by e ->> 'worker_id'
+    -- In uuid order, as approval takes the year locks (money review L2).
+    select e from jsonb_array_elements(p_rows) e
+    order by case when e ->> 'worker_id' ~* '^[0-9a-f-]{36}$' then (e ->> 'worker_id')::uuid end
   loop
     begin
       v_worker := (v_row ->> 'worker_id')::uuid;
@@ -1244,6 +1292,11 @@ begin
     raise exception 'That declaration wasn''t found.' using errcode = 'P0002';
   end if;
   perform private.payroll_year_lock(p_organisation_id, v_decl.worker_id, v_decl.tax_year);
+  -- Two people (security review M3): whoever declared the relief can't verify its proof.
+  if v_decl.created_by = v_uid then
+    raise exception 'You declared this relief, so a different person must check its proof.'
+      using errcode = 'MLYA7';
+  end if;
   if exists (
     select 1 from public.payroll_relief_declarations x
     where x.organisation_id = p_organisation_id and x.supersedes_id = v_decl.id
@@ -1297,12 +1350,15 @@ $$;
 revoke all on function public.verify_payroll_relief(uuid, uuid, text, text) from public, anon;
 grant execute on function public.verify_payroll_relief(uuid, uuid, text, text) to authenticated;
 
--- Records a worker's NHF number, or its removal with null (owner or hr). The audit row says only
--- whether a number is on file and its last 4 characters.
+-- Records a worker's NHF number, or its removal (owner or hr). The server encrypts the number for
+-- this row (p_id, its nhf_number_enc) and passes the ciphertext and the last 4 characters; null
+-- for both records a removal. The audit row says only whether a number is on file and its last 4.
 create function private.set_payroll_nhf_number(
   p_organisation_id uuid,
   p_worker_id uuid,
-  p_nhf_number text,
+  p_id uuid,
+  p_nhf_number_enc bytea,
+  p_last4 text,
   p_reason text
 )
 returns uuid
@@ -1314,10 +1370,10 @@ as $$
 declare
   v_uid uuid := private.require_payroll_tax_writer(p_organisation_id);
   v_reason text := private.payroll_tax_text(p_reason, 500);
-  v_number text := nullif(btrim(coalesce(p_nhf_number, '')), '');
-  v_id uuid;
 begin
-  if v_number is not null and v_number !~ '^[A-Za-z0-9/-]{4,20}$' then
+  if p_id is null or (p_nhf_number_enc is null) <> (p_last4 is null)
+    or (p_last4 is not null and p_last4 !~ '^[A-Za-z0-9/-]{1,4}$')
+    or (p_nhf_number_enc is not null and octet_length(p_nhf_number_enc) not between 30 and 200) then
     raise exception 'An NHF number is 4 to 20 letters, digits, / or -.' using errcode = '22023';
   end if;
   if v_reason is null then
@@ -1330,28 +1386,31 @@ begin
   ) then
     raise exception 'That worker wasn''t found.' using errcode = 'P0002';
   end if;
-  insert into public.payroll_nhf_numbers (organisation_id, worker_id, nhf_number, reason, created_by)
-  values (p_organisation_id, p_worker_id, v_number, v_reason, v_uid)
-  returning id into v_id;
+  perform private.payroll_tax_org_lock(p_organisation_id, false);
+  insert into public.payroll_nhf_numbers (
+    id, organisation_id, worker_id, nhf_number_enc, nhf_number_last4, reason, created_by
+  )
+  values (p_id, p_organisation_id, p_worker_id, p_nhf_number_enc, p_last4, v_reason, v_uid);
   perform private.log_audit_impl(
-    p_organisation_id, 'payroll.nhf_number_set', 'payroll_nhf_numbers', v_id, null,
+    p_organisation_id, 'payroll.nhf_number_set', 'payroll_nhf_numbers', p_id, null,
     jsonb_build_object(
-      'worker_id', p_worker_id, 'on_file', v_number is not null,
-      'last4', case when v_number is null then null else right(v_number, 4) end
+      'worker_id', p_worker_id, 'on_file', p_last4 is not null, 'last4', p_last4
     ),
     v_reason
   );
-  return v_id;
+  return p_id;
 end;
 $$;
 
-revoke all on function private.set_payroll_nhf_number(uuid, uuid, text, text) from public, anon;
-grant execute on function private.set_payroll_nhf_number(uuid, uuid, text, text) to authenticated;
+revoke all on function private.set_payroll_nhf_number(uuid, uuid, uuid, bytea, text, text) from public, anon;
+grant execute on function private.set_payroll_nhf_number(uuid, uuid, uuid, bytea, text, text) to authenticated;
 
 create function public.set_payroll_nhf_number(
   p_organisation_id uuid,
   p_worker_id uuid,
-  p_nhf_number text,
+  p_id uuid,
+  p_nhf_number_enc bytea,
+  p_last4 text,
   p_reason text
 )
 returns uuid
@@ -1360,19 +1419,23 @@ volatile
 security invoker
 set search_path = ''
 as $$
-  select private.set_payroll_nhf_number(p_organisation_id, p_worker_id, p_nhf_number, p_reason)
+  select private.set_payroll_nhf_number(
+    p_organisation_id, p_worker_id, p_id, p_nhf_number_enc, p_last4, p_reason
+  )
 $$;
 
-revoke all on function public.set_payroll_nhf_number(uuid, uuid, text, text) from public, anon;
-grant execute on function public.set_payroll_nhf_number(uuid, uuid, text, text) to authenticated;
+revoke all on function public.set_payroll_nhf_number(uuid, uuid, uuid, bytea, text, text) from public, anon;
+grant execute on function public.set_payroll_nhf_number(uuid, uuid, uuid, bytea, text, text) to authenticated;
 
--- Sets the company's ITF turnover switch (owner or hr, with a reason, audited).
+-- Sets the company's ITF turnover switch from a date (owner or hr, with a reason, audited): a new
+-- dated row (insert-only, money review L5). A run uses the value in force on its pay date.
 create function private.set_itf_turnover_flag(
   p_organisation_id uuid,
   p_value boolean,
+  p_effective_from date,
   p_reason text
 )
-returns void
+returns uuid
 language plpgsql
 volatile
 security definer
@@ -1381,53 +1444,127 @@ as $$
 declare
   v_uid uuid := private.require_payroll_tax_writer(p_organisation_id);
   v_reason text := private.payroll_tax_text(p_reason, 500);
-  v_before boolean;
+  v_id uuid;
 begin
-  if p_value is null then
-    raise exception 'Say whether the turnover is N50 million or more.' using errcode = '22023';
+  if p_value is null or p_effective_from is null
+    or p_effective_from not between '2000-01-01' and '2100-12-31' then
+    raise exception 'Say whether the turnover is N50 million or more, and from when.' using errcode = '22023';
   end if;
   if v_reason is null then
     raise exception 'Give a reason of up to 500 characters, with no web addresses or personal numbers.'
       using errcode = '22023';
   end if;
-  select o.itf_turnover_over_50m into v_before
-  from public.organisations o
-  where o.id = p_organisation_id
-  for update;
-  update public.organisations o set itf_turnover_over_50m = p_value where o.id = p_organisation_id;
+  perform private.payroll_tax_org_lock(p_organisation_id, false);
+  insert into public.payroll_itf_turnover (organisation_id, over_50m, effective_from, reason, created_by)
+  values (p_organisation_id, p_value, p_effective_from, v_reason, v_uid)
+  returning id into v_id;
   perform private.log_audit_impl(
-    p_organisation_id, 'payroll.itf_turnover_set', 'organisations', p_organisation_id,
-    jsonb_build_object('itf_turnover_over_50m', v_before),
-    jsonb_build_object('itf_turnover_over_50m', p_value, 'actor', v_uid),
+    p_organisation_id, 'payroll.itf_turnover_set', 'payroll_itf_turnover', v_id, null,
+    jsonb_build_object('over_50m', p_value, 'effective_from', p_effective_from),
     v_reason
   );
+  return v_id;
 end;
 $$;
 
-revoke all on function private.set_itf_turnover_flag(uuid, boolean, text) from public, anon;
-grant execute on function private.set_itf_turnover_flag(uuid, boolean, text) to authenticated;
+revoke all on function private.set_itf_turnover_flag(uuid, boolean, date, text) from public, anon;
+grant execute on function private.set_itf_turnover_flag(uuid, boolean, date, text) to authenticated;
 
 create function public.set_itf_turnover_flag(
   p_organisation_id uuid,
   p_value boolean,
+  p_effective_from date,
   p_reason text
 )
-returns void
+returns uuid
 language sql
 volatile
 security invoker
 set search_path = ''
 as $$
-  select private.set_itf_turnover_flag(p_organisation_id, p_value, p_reason)
+  select private.set_itf_turnover_flag(p_organisation_id, p_value, p_effective_from, p_reason)
 $$;
 
-revoke all on function public.set_itf_turnover_flag(uuid, boolean, text) from public, anon;
-grant execute on function public.set_itf_turnover_flag(uuid, boolean, text) to authenticated;
+revoke all on function public.set_itf_turnover_flag(uuid, boolean, date, text) from public, anon;
+grant execute on function public.set_itf_turnover_flag(uuid, boolean, date, text) to authenticated;
+
+-- The ITF switch in force on a date: the latest row from that date or before. No role check:
+-- only definers call it.
+create function private.itf_turnover_on(p_organisation_id uuid, p_on date)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select t.over_50m from public.payroll_itf_turnover t
+    where t.organisation_id = p_organisation_id and t.effective_from <= p_on
+    order by t.effective_from desc, t.created_at desc, t.id desc
+    limit 1
+  ), false)
+$$;
+
+revoke all on function private.itf_turnover_on(uuid, date) from public, anon, authenticated;
+
+-- Relief-proof uploads that never became a proof (security review M1): objects in
+-- payroll-relief-proofs at least p_older_than_minutes old that no payroll_relief_proofs row names.
+-- The secret key only; src/server/payroll/relief-proof-sweep.ts deletes them through the Storage
+-- API from the existing daily cron.
+create function private.orphan_relief_proof_objects(
+  p_older_than_minutes integer default 120,
+  p_limit integer default 500
+)
+returns setof text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if coalesce(auth.role(), '') <> 'service_role' or auth.uid() is not null then
+    raise exception 'Only the server sweeps proof uploads.' using errcode = '42501';
+  end if;
+  if p_older_than_minutes is null or p_older_than_minutes < 60
+    or p_limit is null or p_limit not between 1 and 1000 then
+    raise exception 'Sweep uploads at least an hour old, up to 1000 at a time.' using errcode = '22023';
+  end if;
+  return query
+    select o.name
+    from storage.objects o
+    where o.bucket_id = 'payroll-relief-proofs'
+      and o.created_at < now() - make_interval(mins => p_older_than_minutes)
+      and not exists (
+        select 1 from public.payroll_relief_proofs r where r.storage_path = o.name
+      )
+    order by o.created_at
+    limit p_limit;
+end;
+$$;
+
+revoke all on function private.orphan_relief_proof_objects(integer, integer) from public, anon, authenticated;
+grant execute on function private.orphan_relief_proof_objects(integer, integer) to service_role;
+
+create function public.orphan_relief_proof_objects(
+  p_older_than_minutes integer default 120,
+  p_limit integer default 500
+)
+returns setof text
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select private.orphan_relief_proof_objects(p_older_than_minutes, p_limit)
+$$;
+
+revoke all on function public.orphan_relief_proof_objects(integer, integer) from public, anon, authenticated;
+grant execute on function public.orphan_relief_proof_objects(integer, integer) to service_role;
 
 -- What the engine needs beyond 5.1's inputs for a pay date (owner, hr, finance or the secret
 -- key): {version, headcount (workers employed on the pay date, daily workers included),
 -- itf_turnover_over_50m, go_live_month (the first month of the earliest pay date of a posted
--- run, reversals left out; null before the first), workers: [{worker_id, has_nhf_number,
+-- run, approved or released only; null before the first), workers: [{worker_id, has_nhf_number,
 -- rent_declared_kobo, opening: {id, as_of_month, gross_kobo, chargeable_kobo, paye_kobo,
 -- pension_kobo} | null, reliefs: [{id, kind, annual_kobo}]}]}, workers in id order. No personal
 -- numbers (an NHF number only as on file or not).
@@ -1459,21 +1596,19 @@ begin
       where w.organisation_id = p_organisation_id
         and w.start_date <= p_pay_date and (w.end_date is null or w.end_date >= p_pay_date)
     ),
-    'itf_turnover_over_50m', (
-      select o.itf_turnover_over_50m from public.organisations o where o.id = p_organisation_id
-    ),
+    'itf_turnover_over_50m', private.itf_turnover_on(p_organisation_id, p_pay_date),
     'go_live_month', (
       select to_char(date_trunc('month', min(r.pay_date)), 'YYYY-MM-DD')
       from public.payroll_runs r
       where r.organisation_id = p_organisation_id and r.kind <> 'reversal'
-        and r.status in ('approved', 'released', 'reversed')
+        and r.status in ('approved', 'released')
     ),
     'workers', coalesce((
       select jsonb_agg(
         jsonb_build_object(
           'worker_id', w.id,
           'has_nhf_number', coalesce((
-            select n.nhf_number is not null from public.payroll_nhf_numbers n
+            select n.nhf_number_enc is not null from public.payroll_nhf_numbers n
             where n.organisation_id = w.organisation_id and n.worker_id = w.id
             order by n.created_at desc, n.id desc
             limit 1
@@ -1549,14 +1684,10 @@ alter table public.payslip_lines
 -- Regular monthly pay (tax adviser, NSITF): derived from the code, as
 -- src/lib/payroll/contract.ts REGULAR_EARNING_CODES. Overtime, off-day and public-holiday pay,
 -- adjustments (bonuses, one-offs), arrears, refunds and clawbacks are irregular.
-alter table public.payslip_lines
-  add column regular boolean generated always as (
-    code in ('basic', 'housing', 'transport', 'other_allowances', 'daily_pay', 'hourly_pay',
-      'leave_deduction')
-  ) stored;
+alter table public.payslip_lines add column regular boolean;
 
 comment on column public.payslip_lines.regular is
-  'Regular monthly pay, which NSITF is taken on (slice 5.9a, tax adviser); derived from the code.';
+  'Regular monthly pay, which NSITF is taken on (slice 5.9a, tax adviser), as the engine decided it: from the code (src/lib/payroll/contract.ts REGULAR_EARNING_CODES), a refund of a regular leave deduction, or a recurring allowance. Null on lines saved before slice 5.9a and on non-earning lines.';
 
 -- A deduction correcting an overpaid earning may carry the pensionable flag of the earning it
 -- claws back (the pension base it reduces before tax in the same tax year). Other deductions stay
@@ -1695,6 +1826,16 @@ begin
       using errcode = 'MLRVC';
   end if;
 
+  -- Slice 5.9a (money review M6): a pensionable deduction claws back pensionable pay, so it is at
+  -- most the corrected payslip's pensionable earnings.
+  if p_kind = 'deduction' and coalesce(p_pensionable, false) and v_amount > coalesce((
+    select sum(l.amount_kobo) from public.payslip_lines l
+    where l.organisation_id = p_organisation_id and l.payslip_id = p_payslip_id
+      and l.kind = 'earning' and l.pensionable
+  ), 0) then
+    raise exception 'A pensionable correction is at most the pensionable pay that payslip paid.'
+      using errcode = '22023';
+  end if;
   -- Slice 5.9a: a deduction keeps the pensionable flag (payroll_adjustments_deduction_flags allows
   -- it on corrections only).
   insert into public.payroll_adjustments (
@@ -1937,13 +2078,16 @@ begin
         raise exception 'A payslip line isn''t in the expected shape.' using errcode = 'MLPR6';
       end if;
       begin
+        -- Slice 5.9a: an earning line's regular flag (NSITF's base), as the engine decided it.
         insert into public.payslip_lines (
           organisation_id, payslip_id, run_id, position, code, kind, label, amount_kobo,
-          pensionable, taxable
+          pensionable, taxable, regular
         )
         values (
           p_organisation_id, v_slip_id, p_run_id, v_pos, v_code, v_kind, v_line ->> 'label',
-          v_amount, (v_line ->> 'pensionable')::boolean, (v_line ->> 'taxable')::boolean
+          v_amount, (v_line ->> 'pensionable')::boolean, (v_line ->> 'taxable')::boolean,
+          case when v_kind = 'earning' and jsonb_typeof(v_line -> 'regular') = 'boolean'
+            then (v_line ->> 'regular')::boolean end
         );
       exception
         when check_violation or not_null_violation then
@@ -2042,10 +2186,29 @@ begin
           if not (
             (v_code = 'adjustment_earning' and v_adj.kind = 'earning' and v_amount = v_adj.amount_kobo)
             or (v_code = 'deduction' and v_adj.kind = 'deduction' and v_amount <= v_adj.amount_kobo)
-            -- Slice 5.9a: a deduction correcting an earning of the same tax year, recovered before
-            -- tax in full, with the correction's pensionable flag.
+            -- Slice 5.9a: a deduction correcting an earning of a payslip in the same tax year as
+            -- this run, recovered before tax up to what that payslip's taxable earnings paid (the
+            -- rest carried after tax: money review M2, M6; security review L1), with the
+            -- correction's pensionable flag (add_payroll_correction checks it against the
+            -- corrected payslip's pensionable pay).
             or (v_code = 'clawback' and v_adj.kind = 'deduction'
-              and v_adj.corrects_payslip_id is not null and v_amount = -v_adj.amount_kobo
+              and v_adj.corrects_payslip_id is not null
+              and v_amount <= 0
+              and -v_amount <= least(v_adj.amount_kobo, coalesce((
+                select sum(cl.amount_kobo)
+                from public.payslip_lines cl
+                where cl.organisation_id = p_organisation_id
+                  and cl.payslip_id = v_adj.corrects_payslip_id
+                  and cl.kind = 'earning' and cl.taxable
+              ), 0))
+              and exists (
+                select 1
+                from public.payslips cs
+                join public.payroll_runs cr
+                  on cr.organisation_id = cs.organisation_id and cr.id = cs.run_id
+                where cs.organisation_id = p_organisation_id and cs.id = v_adj.corrects_payslip_id
+                  and extract(year from cr.pay_date) = extract(year from v_run.pay_date)
+              )
               and (v_line ->> 'pensionable')::boolean = v_adj.pensionable
               and (v_line ->> 'taxable')::boolean)
           ) then
@@ -2332,6 +2495,29 @@ begin
     raise exception 'You prepared or changed this run, so a different person must approve it.'
       using errcode = 'MLPRE';
   end if;
+  -- Slice 5.9a (security review M3): whoever recorded an opening balance in force, or verified a
+  -- relief in force, for one of the run's workers in its tax year changed what the run pays.
+  if exists (
+    select 1
+    from public.payslips s
+    cross join lateral private.payroll_opening_in_force(
+      p_organisation_id, s.worker_id, extract(year from v_run.pay_date)::integer
+    ) b
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id and b.created_by = v_uid
+  ) or exists (
+    select 1
+    from public.payslips s
+    cross join lateral private.payroll_verified_reliefs(
+      p_organisation_id, s.worker_id, extract(year from v_run.pay_date)::integer
+    ) r
+    join public.payroll_relief_verifications v
+      on v.organisation_id = p_organisation_id and v.declaration_id = r.id
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+      and v.created_by = v_uid
+  ) then
+    raise exception 'You prepared or changed this run, so a different person must approve it.'
+      using errcode = 'MLPRE';
+  end if;
   if v_run.needs_recalculation or v_run.calculated_at is null or v_run.inputs_sha256 is null then
     raise exception 'The run needs recalculating. Return it to HR.' using errcode = 'MLPRD';
   end if;
@@ -2379,6 +2565,8 @@ begin
   -- before the read and committed after it, which a timestamp can't show.
   v_year_start := date_trunc('year', v_run.pay_date)::date;
   v_year_end := (v_year_start + interval '1 year')::date;
+  -- Shared with writers of NHF numbers and the ITF switch, who take it exclusively (money L1).
+  perform private.payroll_tax_org_lock(p_organisation_id, true);
   for v_worker in
     select distinct s.worker_id from public.payslips s
     where s.organisation_id = p_organisation_id and s.run_id = p_run_id
@@ -2451,6 +2639,40 @@ begin
             ))
         )
     )
+  ) then
+    raise exception 'Something changed while you were approving. Try again.'
+      using errcode = 'MLPRF';
+  end if;
+  -- Slice 5.9a (money review M5): an opening balance covering the pay date's month would count it
+  -- twice.
+  if exists (
+    select 1
+    from public.payslips s
+    cross join lateral private.payroll_opening_in_force(
+      p_organisation_id, s.worker_id, extract(year from v_run.pay_date)::integer
+    ) b
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+      and b.as_of_month >= date_trunc('month', v_run.pay_date)::date
+  ) then
+    raise exception 'An opening balance covers this run''s pay-date month. Correct it to an earlier month, then recalculate.'
+      using errcode = 'MLYA6';
+  end if;
+  -- Slice 5.9a (money review L1, security review M4): the engine's other inputs written after the
+  -- read began: an NHF number of one of the run's workers, the ITF switch, or any worker of the
+  -- company (headcount, start and end dates, declared rent).
+  if exists (
+    select 1 from public.payroll_nhf_numbers n
+    where n.organisation_id = p_organisation_id and n.created_at > v_check.read_started_at
+      and n.worker_id in (
+        select s.worker_id from public.payslips s
+        where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+      )
+  ) or exists (
+    select 1 from public.payroll_itf_turnover t
+    where t.organisation_id = p_organisation_id and t.created_at > v_check.read_started_at
+  ) or exists (
+    select 1 from public.workers w
+    where w.organisation_id = p_organisation_id and w.updated_at > v_check.read_started_at
   ) then
     raise exception 'Something changed while you were approving. Try again.'
       using errcode = 'MLPRF';
@@ -2603,7 +2825,7 @@ $$;
 -- 8. Anomaly severities
 -- ---------------------------------------------------------------------------
 
--- 5.8's private.payroll_anomaly_severity (its latest version), with four warnings added.
+-- 5.8's private.payroll_anomaly_severity (its latest version), with six warnings added.
 create or replace function private.payroll_anomaly_severity(p_code text)
 returns text
 language sql
@@ -2621,7 +2843,283 @@ as $$
       'bank_shared_unchecked', 'first_pay', 'final_pay', 'net_change', 'deduction_cut',
       'no_pension_details', 'recurring_not_carried', 'on_off_cycle_run',
       'leave_correction_pending', 'carry_settled_later', 'refund_uncollected_carry',
-      'deduction_capped', 'paye_overwithheld', 'nhf_not_deducted', 'rent_relief_unverified'
+      'deduction_capped', 'paye_overwithheld', 'nhf_not_deducted', 'rent_relief_unverified',
+      'paye_not_withheld', 'recovery_carried'
     ) then 'warning'
   end
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 9. Reversals and the tax year (money review M1)
+-- ---------------------------------------------------------------------------
+
+-- 5.8's private.payroll_reversal_blocker (its only version), with clause (c) widened to the tax
+-- year (marked "Slice 5.9a"). Grants stand.
+create or replace function private.payroll_reversal_blocker(p_organisation_id uuid, p_run_id uuid)
+returns text
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with o as (
+    select r.id, r.period_start, r.period_end, r.pay_date, r.approved_at
+    from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.id = p_run_id
+  ),
+  w as (
+    select distinct s.worker_id
+    from public.payslips s
+    where s.organisation_id = p_organisation_id and s.run_id = p_run_id
+  )
+  select
+    to_char(x.period_end, 'FMMonth YYYY')
+      || case
+        when x.kind = 'off_cycle' then ' off-cycle' || case x.off_cycle_reason
+          when 'final_pay' then ': Final pay for a leaver'
+          when 'missed_worker' then ': A worker the regular run missed'
+          when 'correction' then ': A correction'
+          when 'one_off' then ': A one-off payment'
+          else ''
+        end
+        else ''
+      end
+  from public.payroll_runs x
+  cross join o
+  where x.organisation_id = p_organisation_id
+    and x.id <> o.id
+    and x.kind <> 'reversal'
+    and x.status in ('review', 'approved', 'released')
+    and (
+      (
+        x.period_start > o.period_start
+        and exists (
+          select 1 from public.payslip_sources s
+          where s.organisation_id = x.organisation_id and s.run_id = x.id and s.stands
+            and s.from_date <= o.period_end and s.to_date >= o.period_start
+        )
+      )
+      or (
+        x.period_start > o.period_start
+        and (x.approved_at is null or o.approved_at is null or x.approved_at > o.approved_at)
+        and exists (
+          select 1 from public.payslips s
+          where s.organisation_id = x.organisation_id and s.run_id = x.id
+            and s.worker_id in (select w.worker_id from w)
+        )
+      )
+      or (
+        x.period_start < o.period_start
+        and x.kind = 'off_cycle' and x.off_cycle_reason in ('final_pay', 'missed_worker')
+        and (x.approved_at is null or o.approved_at is null or x.approved_at > o.approved_at)
+        and exists (
+          select 1 from public.payslips s
+          where s.organisation_id = x.organisation_id and s.run_id = x.id
+            and s.worker_id in (select w.worker_id from w)
+        )
+      )
+      -- Slice 5.9a (money review M1): cumulative PAYE counted the run's payslip in every later
+      -- payslip of the same tax year, so clause (c) widens from the pay date's month to the tax
+      -- year, for pay dates on or after the run's.
+      or (
+        date_trunc('year', x.pay_date) = date_trunc('year', o.pay_date)
+        and x.pay_date >= o.pay_date
+        and (x.approved_at is null or o.approved_at is null or x.approved_at > o.approved_at)
+        and exists (
+          select 1 from public.payslips s
+          where s.organisation_id = x.organisation_id and s.run_id = x.id
+            and s.worker_id in (select w.worker_id from w)
+        )
+      )
+    )
+  order by x.period_start desc, x.approved_at desc nulls first, x.created_at desc, x.id
+  limit 1
+$$;
+
+-- 5.7a's private.approve_payroll_reversal (its only version), with the tax year's locks added
+-- (marked "Slice 5.9a"). Grants stand.
+create or replace function private.approve_payroll_reversal(
+  p_organisation_id uuid,
+  p_run_id uuid,
+  p_not_uploaded boolean default false
+)
+returns uuid
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_uid uuid := private.require_payroll_approver(p_organisation_id);
+  v_rev public.payroll_runs%rowtype;
+  v_orig public.payroll_runs%rowtype;
+  v_reason text;
+  v_batch public.payout_batches%rowtype;
+  v_downloaded timestamptz;
+  v_freed integer;
+  v_voided integer;
+  v_totals record;
+  v_id uuid;
+begin
+  v_rev := private.payroll_lock_run(p_organisation_id, p_run_id);
+  if v_rev.kind <> 'reversal' then
+    raise exception 'That run isn''t a reversal.' using errcode = 'MLRV6';
+  end if;
+  if v_rev.status <> 'review' then
+    raise exception 'Only a reversal waiting for approval is approved.' using errcode = 'MLRV6';
+  end if;
+  if v_uid = any (private.payroll_run_touchers(p_organisation_id, p_run_id)) then
+    raise exception 'You asked for this reversal, so a different person must approve it.'
+      using errcode = 'MLRV4';
+  end if;
+  v_orig := private.payroll_lock_run(p_organisation_id, v_rev.reverses_run_id);
+  -- Slice 5.9a (money review M1): the tax year's locks, in worker order, as approve_payroll_run
+  -- takes them, so a reversal and a same-year approval for one worker run one after the other.
+  perform private.payroll_year_lock(
+    p_organisation_id, w.worker_id, extract(year from v_orig.pay_date)::integer
+  )
+  from (
+    select distinct s.worker_id from public.payslips s
+    where s.organisation_id = p_organisation_id and s.run_id = v_orig.id
+    order by s.worker_id
+  ) w;
+  if v_orig.status = 'released' then
+    raise exception 'The run was released: the money has gone. Correct it in a later run instead.'
+      using errcode = 'MLRV1';
+  end if;
+  if v_orig.status <> 'approved' then
+    raise exception 'Only an approved run that isn''t released is reversed.' using errcode = 'MLRV2';
+  end if;
+
+  -- The copies: one per payslip of the original, each with as many lines, and totals equal to
+  -- the original's and to the sums of the copies.
+  select
+    coalesce(sum(s.gross_kobo), 0) as gross, coalesce(sum(s.paye_kobo), 0) as paye,
+    coalesce(sum(s.pension_employee_kobo), 0) as pee, coalesce(sum(s.pension_employer_kobo), 0) as per,
+    coalesce(sum(s.nhf_kobo), 0) as nhf, coalesce(sum(s.other_deductions_kobo), 0) as other,
+    coalesce(sum(s.net_kobo), 0) as net, coalesce(sum(s.nsitf_kobo), 0) as nsitf,
+    coalesce(sum(s.itf_kobo), 0) as itf, coalesce(sum(s.employer_cost_kobo), 0) as cost,
+    coalesce(sum(s.carried_forward_kobo), 0) as carried, count(*)::integer as n
+  into v_totals
+  from public.payslips s
+  where s.organisation_id = p_organisation_id and s.run_id = p_run_id;
+  if (v_totals.gross, v_totals.paye, v_totals.pee, v_totals.per, v_totals.nhf, v_totals.other,
+      v_totals.net, v_totals.nsitf, v_totals.itf, v_totals.cost, v_totals.carried, v_totals.n)
+    is distinct from
+     (v_orig.gross_kobo, v_orig.paye_kobo, v_orig.pension_employee_kobo, v_orig.pension_employer_kobo,
+      v_orig.nhf_kobo, v_orig.other_deductions_kobo, v_orig.net_kobo, v_orig.nsitf_kobo,
+      v_orig.itf_kobo, v_orig.employer_cost_kobo, v_orig.carried_forward_kobo, v_orig.worker_count)
+    or (v_rev.gross_kobo, v_rev.paye_kobo, v_rev.pension_employee_kobo, v_rev.pension_employer_kobo,
+        v_rev.nhf_kobo, v_rev.other_deductions_kobo, v_rev.net_kobo, v_rev.nsitf_kobo,
+        v_rev.itf_kobo, v_rev.employer_cost_kobo, v_rev.carried_forward_kobo, v_rev.worker_count)
+    is distinct from
+     (v_orig.gross_kobo, v_orig.paye_kobo, v_orig.pension_employee_kobo, v_orig.pension_employer_kobo,
+      v_orig.nhf_kobo, v_orig.other_deductions_kobo, v_orig.net_kobo, v_orig.nsitf_kobo,
+      v_orig.itf_kobo, v_orig.employer_cost_kobo, v_orig.carried_forward_kobo, v_orig.worker_count)
+    or exists (
+      select 1 from public.payslips o
+      where o.organisation_id = p_organisation_id and o.run_id = v_orig.id
+        and not exists (
+          select 1 from public.payslips c
+          where c.organisation_id = o.organisation_id and c.run_id = p_run_id
+            and c.reverses_payslip_id = o.id
+        )
+    )
+    or exists (
+      select 1 from public.payslips c
+      where c.organisation_id = p_organisation_id and c.run_id = p_run_id
+        and (
+          select count(*) from public.payslip_lines l
+          where l.organisation_id = c.organisation_id and l.payslip_id = c.id
+        ) <> (
+          select count(*) from public.payslip_lines l
+          where l.organisation_id = c.organisation_id and l.payslip_id = c.reverses_payslip_id
+        )
+    ) then
+    raise exception 'The reversal doesn''t mirror the run it reverses. Ask for a new reversal.'
+      using errcode = 'MLRV7';
+  end if;
+
+  select d.reason into v_reason
+  from public.payroll_run_decisions d
+  where d.organisation_id = p_organisation_id and d.run_id = p_run_id and d.decision = 'submitted'
+  order by d.created_at desc
+  limit 1;
+  v_reason := coalesce(v_reason, 'Run reversed');
+
+  -- 5.4's void path: the original's active bank file, its pending items with it.
+  select b.* into v_batch
+  from public.payout_batches b
+  where b.organisation_id = p_organisation_id and b.run_id = v_orig.id and b.status = 'active'
+  for update;
+  if v_batch.id is not null then
+    v_downloaded := private.payroll_active_file_downloaded(p_organisation_id, v_orig.id);
+    if v_downloaded is not null and not coalesce(p_not_uploaded, false) then
+      raise exception 'The bank file was downloaded. Confirm it wasn''t uploaded to the bank before approving the reversal, or the money may be paid.'
+        using errcode = 'MLRV5';
+    end if;
+    update public.payout_batches b
+    set status = 'voided', voided_by = v_uid, voided_at = now(),
+        void_reason = case
+          when v_downloaded is not null
+            then 'Run reversed (confirmed the file was not uploaded to the bank)'
+          else 'Run reversed'
+        end
+    where b.id = v_batch.id;
+    update public.payout_items i
+    set status = 'voided'
+    where i.organisation_id = p_organisation_id and i.batch_id = v_batch.id
+      and i.status = 'pending';
+  end if;
+
+  update public.payroll_runs r set status = 'reversed' where r.id = v_orig.id;
+
+  update public.payslip_sources s
+  set stands = false
+  where s.organisation_id = p_organisation_id and s.run_id = v_orig.id and s.stands;
+  get diagnostics v_freed = row_count;
+
+  v_voided := private.void_run_remittances(p_organisation_id, v_orig.id, v_reason, v_uid);
+
+  update public.payroll_runs r
+  set status = 'approved', approved_at = now(), approved_by = v_uid
+  where r.id = p_run_id;
+
+  insert into public.payroll_run_decisions (
+    organisation_id, run_id, decision, actor_id, inputs_sha256, gross_kobo, net_kobo, worker_count
+  )
+  values (
+    p_organisation_id, p_run_id, 'approved', v_uid, v_rev.inputs_sha256, v_rev.gross_kobo,
+    v_rev.net_kobo, v_rev.worker_count
+  )
+  returning id into v_id;
+  insert into public.payroll_run_decisions (
+    organisation_id, run_id, decision, reason, actor_id, inputs_sha256, gross_kobo, net_kobo,
+    worker_count
+  )
+  values (
+    p_organisation_id, v_orig.id, 'reversed', v_reason, v_uid, v_orig.inputs_sha256,
+    v_orig.gross_kobo, v_orig.net_kobo, v_orig.worker_count
+  );
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.reversal_approved', 'payroll_runs', p_run_id, null,
+    jsonb_build_object(
+      'decision_id', v_id, 'reverses_run_id', v_orig.id,
+      'gross_kobo', (-v_rev.gross_kobo)::text, 'net_kobo', (-v_rev.net_kobo)::text,
+      'worker_count', v_rev.worker_count
+    ),
+    null
+  );
+  perform private.log_audit_impl(
+    p_organisation_id, 'payroll.run_reversed', 'payroll_runs', v_orig.id,
+    jsonb_build_object('status', 'approved'),
+    jsonb_build_object(
+      'status', 'reversed', 'reversal_run_id', p_run_id, 'sources_freed', v_freed,
+      'remittances_voided', v_voided, 'bank_file_voided', v_batch.id,
+      'confirmed_not_uploaded', v_downloaded is not null
+    ),
+    v_reason
+  );
+  return v_id;
+end;
 $$;

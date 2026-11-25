@@ -4,13 +4,13 @@
  * the SQL functions (the proof with the secret key, as the server does); signed-in roles have no
  * write grants and the rows are insert-only, so every attack is refused.
  */
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { TableSpec } from "../helpers/registry";
 import { addPayrollWorker } from "../helpers/payroll";
-import { verifyRelief } from "../helpers/reliefs";
+import { reliefChecker, verifyRelief } from "../helpers/reliefs";
 import type { Client } from "../helpers/supabase";
 
 async function firstId(admin: Client, table: string, orgId: string): Promise<string> {
@@ -72,6 +72,7 @@ export const tables: TableSpec[] = [
       await verifyRelief(
         admin,
         { client: side.client, userId: side.id },
+        await reliefChecker(admin, side.orgId),
         side.orgId,
         workerId,
         "rent",
@@ -124,7 +125,10 @@ export const tables: TableSpec[] = [
       const { error } = await side.client.rpc("set_payroll_nhf_number", {
         p_organisation_id: side.orgId,
         p_worker_id: workerId,
-        p_nhf_number: "NHF-0042",
+        p_id: randomUUID(),
+        // Stands in for the server's ciphertext (the database never sees the number).
+        p_nhf_number_enc: `\\x${randomBytes(48).toString("hex")}`,
+        p_last4: "0042",
         p_reason: "Isolation seed",
       });
       if (error) throw new Error(`payroll_nhf_numbers: ${error.message}`);
@@ -132,10 +136,30 @@ export const tables: TableSpec[] = [
     attackInsert: ({ victim }) => ({
       organisation_id: victim.orgId,
       worker_id: randomUUID(),
-      nhf_number: "NHF-9999",
+      nhf_number_last4: "9999",
       reason: "Attack",
       created_by: randomUUID(),
     }),
     patch: { reason: "Changed" },
+  },
+  {
+    ...base("payroll_itf_turnover"),
+    seed: async ({ side }) => {
+      const { error } = await side.client.rpc("set_itf_turnover_flag", {
+        p_organisation_id: side.orgId,
+        p_value: true,
+        p_effective_from: "2026-01-01",
+        p_reason: "Isolation seed",
+      });
+      if (error) throw new Error(`payroll_itf_turnover: ${error.message}`);
+    },
+    attackInsert: ({ victim }) => ({
+      organisation_id: victim.orgId,
+      over_50m: true,
+      effective_from: "2026-01-01",
+      reason: "Attack",
+      created_by: randomUUID(),
+    }),
+    patch: { over_50m: false },
   },
 ];

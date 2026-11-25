@@ -699,14 +699,14 @@ isOneToOne: false
                   ]
                 },"organisations": {
                   Row: {
-                    "address": string | null,"auto_email_receipts": boolean,"business_type": string,"company_code": string,"created_at": string,"created_by": string | null,"default_work_days": (number)[],"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"itf_remit_day": number | null,"itf_turnover_over_50m": boolean,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"nhf_remit_day": number | null,"no_show_after_minutes": number,"nsitf_remit_day": number | null,"pay_cycle_start_day": number,"pay_day": number,"paye_remit_day": number | null,"payment_terms_days": number,"payroll_enabled": boolean,"people_enabled": boolean,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"shifts_enabled": boolean,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
+                    "address": string | null,"auto_email_receipts": boolean,"business_type": string,"company_code": string,"created_at": string,"created_by": string | null,"default_work_days": (number)[],"expected_workers": number | null,"head_office_state": string | null,"hourly_rate_divisor_days": number,"id": string,"industry": string | null,"invoice_email": string | null,"invoice_number_start": number,"itf_remit_day": number | null,"late_grace_minutes": number,"legal_name": string | null,"logo_path": string | null,"name": string,"nhf_remit_day": number | null,"no_show_after_minutes": number,"nsitf_remit_day": number | null,"pay_cycle_start_day": number,"pay_day": number,"paye_remit_day": number | null,"payment_terms_days": number,"payroll_enabled": boolean,"people_enabled": boolean,"phone": string | null,"plan": string,"rc_number": string | null,"setup_completed_at": string | null,"setup_step": number,"shifts_enabled": boolean,"standard_shift_minutes": number,"timezone": string,"tin": string | null,"trading_name": string | null,"updated_at": string,"vat_registered": boolean,"work_days_per_week": number
                   }
                   ComputedFields: never
                   Insert: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code": string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"itf_turnover_over_50m"?: boolean,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code": string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name": string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Update: {
-                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"itf_turnover_over_50m"?: boolean,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
+                    "address"?: string | null,"auto_email_receipts"?: boolean,"business_type"?: string,"company_code"?: string,"created_at"?: string,"created_by"?: string | null,"default_work_days"?: (number)[],"expected_workers"?: number | null,"head_office_state"?: string | null,"hourly_rate_divisor_days"?: number,"id"?: string,"industry"?: string | null,"invoice_email"?: string | null,"invoice_number_start"?: number,"itf_remit_day"?: number | null,"late_grace_minutes"?: number,"legal_name"?: string | null,"logo_path"?: string | null,"name"?: string,"nhf_remit_day"?: number | null,"no_show_after_minutes"?: number,"nsitf_remit_day"?: number | null,"pay_cycle_start_day"?: number,"pay_day"?: number,"paye_remit_day"?: number | null,"payment_terms_days"?: number,"payroll_enabled"?: boolean,"people_enabled"?: boolean,"phone"?: string | null,"plan"?: string,"rc_number"?: string | null,"setup_completed_at"?: string | null,"setup_step"?: number,"shifts_enabled"?: boolean,"standard_shift_minutes"?: number,"timezone"?: string,"tin"?: string | null,"trading_name"?: string | null,"updated_at"?: string,"vat_registered"?: boolean,"work_days_per_week"?: number
                   }
                   Relationships: [
                     
@@ -999,16 +999,36 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
-                },"payroll_nhf_numbers": {
+                },"payroll_itf_turnover": {
                   Row: {
-                    "created_at": string,"created_by": string,"id": string,"nhf_number": string | null,"organisation_id": string,"reason": string,"worker_id": string
+                    "created_at": string,"created_by": string,"effective_from": string,"id": string,"organisation_id": string,"over_50m": boolean,"reason": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "created_at"?: string,"created_by": string,"id"?: string,"nhf_number"?: string | null,"organisation_id": string,"reason": string,"worker_id": string
+                    "created_at"?: string,"created_by": string,"effective_from": string,"id"?: string,"organisation_id": string,"over_50m": boolean,"reason": string
                   }
                   Update: {
-                    "created_at"?: string,"created_by"?: string,"id"?: string,"nhf_number"?: string | null,"organisation_id"?: string,"reason"?: string,"worker_id"?: string
+                    "created_at"?: string,"created_by"?: string,"effective_from"?: string,"id"?: string,"organisation_id"?: string,"over_50m"?: boolean,"reason"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "payroll_itf_turnover_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"payroll_nhf_numbers": {
+                  Row: {
+                    "created_at": string,"created_by": string,"id": string,"nhf_number_enc": string | null,"nhf_number_last4": string | null,"organisation_id": string,"reason": string,"worker_id": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"created_by": string,"id"?: string,"nhf_number_enc"?: string | null,"nhf_number_last4"?: string | null,"organisation_id": string,"reason": string,"worker_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string,"id"?: string,"nhf_number_enc"?: string | null,"nhf_number_last4"?: string | null,"organisation_id"?: string,"reason"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -1281,10 +1301,10 @@ isOneToOne: false
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"code": string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"regular"?: never,"run_id": string,"sign"?: number,"taxable": boolean
+                    "amount_kobo": number,"code": string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind": string,"label": string,"organisation_id": string,"payslip_id": string,"pensionable": boolean,"position": number,"regular"?: boolean | null,"run_id": string,"sign"?: number,"taxable": boolean
                   }
                   Update: {
-                    "amount_kobo"?: number,"code"?: string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"regular"?: never,"run_id"?: string,"sign"?: number,"taxable"?: boolean
+                    "amount_kobo"?: number,"code"?: string,"copies_line_id"?: string | null,"currency"?: string,"id"?: string,"kind"?: string,"label"?: string,"organisation_id"?: string,"payslip_id"?: string,"pensionable"?: boolean,"position"?: number,"regular"?: boolean | null,"run_id"?: string,"sign"?: number,"taxable"?: boolean
                   }
                   Relationships: [
                     {
@@ -2842,6 +2862,9 @@ isOneToOne: false
               "account_name": string,"bank_account_last4": string,"bank_name": string,"id": string,"in_force_from": string
             }[]
                            },
+"orphan_relief_proof_objects":
+{ Args: { "p_limit"?: number,"p_older_than_minutes"?: number }; Returns: string[]
+                           },
 "orphan_statutory_receipt_objects":
 { Args: { "p_limit"?: number,"p_older_than_minutes"?: number }; Returns: string[]
                            },
@@ -3087,10 +3110,10 @@ isOneToOne: false
 { Args: { "p_organisation_id": string,"p_payroll_enabled": boolean,"p_people_enabled": boolean,"p_shifts_enabled": boolean }; Returns: Json
                            },
 "set_itf_turnover_flag":
-{ Args: { "p_organisation_id": string,"p_reason": string,"p_value": boolean }; Returns: undefined
+{ Args: { "p_effective_from": string,"p_organisation_id": string,"p_reason": string,"p_value": boolean }; Returns: string
                            },
 "set_payroll_nhf_number":
-{ Args: { "p_nhf_number": string,"p_organisation_id": string,"p_reason": string,"p_worker_id": string }; Returns: string
+{ Args: { "p_id": string,"p_last4": string,"p_nhf_number_enc": string,"p_organisation_id": string,"p_reason": string,"p_worker_id": string }; Returns: string
                            },
 "set_remittance_due_days":
 { Args: { "p_itf"?: number,"p_nhf"?: number,"p_nsitf"?: number,"p_organisation_id": string,"p_paye"?: number }; Returns: undefined

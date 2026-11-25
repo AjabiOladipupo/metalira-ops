@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { formatDate, lagosToday } from "@/lib/dates";
 import { formatNaira, parseNairaToKobo, toKobo, type Kobo } from "@/lib/money";
 import { PERSONAL_NUMBER_MESSAGE, hasPersonalNumber } from "@/lib/personal-number";
 import {
@@ -18,6 +19,7 @@ import {
 import type { ManagerRole } from "@/lib/roles";
 import type { CapabilityPreview } from "@/server/capabilities/types";
 import { MutationError, type MutationContext, type MutationSpec } from "@/server/identity/mutate";
+import { encryptPiiForDb } from "@/server/crypto/pii";
 import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database } from "@/types/db";
 
@@ -247,8 +249,24 @@ export const itfFlagSchema = z.object({
   value: z
     .union([z.boolean(), z.string()])
     .transform((v) => v === true || v === "true" || v === "on"),
+  /** From when (money review L5: the switch is dated; a run uses the value on its pay date). */
+  effectiveFrom: z.iso.date("Choose the date it applies from"),
   reason,
 });
+
+/** The ITF switch in force on a date: the latest dated row from that date or before. */
+async function itfTurnoverOn(supabase: Client, organisationId: string, on: string) {
+  const { data, error } = await supabase
+    .from("payroll_itf_turnover")
+    .select("over_50m")
+    .eq("organisation_id", organisationId)
+    .lte("effective_from", on)
+    .order("effective_from", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Could not read the ITF switch (${error.code})`);
+  return data?.[0]?.over_50m === true;
+}
 
 /** Database refusals in plain English. */
 export function fromTaxRecordsDbError(error: Pick<PostgrestError, "code" | "message">): never {
@@ -324,7 +342,9 @@ interface OpeningRow {
 }
 
 /** The row nobody superseded (the chain's head). */
-function head<T extends { id: string; supersedes_id: string | null }>(rows: readonly T[]): T | null {
+function head<T extends { id: string; supersedes_id: string | null }>(
+  rows: readonly T[],
+): T | null {
   const superseded = new Set(rows.flatMap((r) => (r.supersedes_id ? [r.supersedes_id] : [])));
   return rows.find((r) => !superseded.has(r.id)) ?? null;
 }
@@ -353,7 +373,7 @@ export async function loadWorkerTaxRecords(
       .eq("tax_year", year),
     supabase
       .from("payroll_nhf_numbers")
-      .select("nhf_number, created_at, id")
+      .select("nhf_number_last4, created_at, id")
       .eq("organisation_id", organisationId)
       .eq("worker_id", workerId)
       .order("created_at", { ascending: false })
@@ -404,7 +424,8 @@ export async function loadWorkerTaxRecords(
   for (const v of verifications.data ?? []) {
     if (!latest.has(v.declaration_id)) latest.set(v.declaration_id, v);
   }
-  const number = nhf.data?.[0]?.nhf_number ?? null;
+  // Only the last 4 characters: the number itself is encrypted (security review M2).
+  const number = nhf.data?.[0]?.nhf_number_last4 ?? null;
   return {
     taxYear: year,
     opening: opening
@@ -468,11 +489,7 @@ export async function loadCompanyTaxRecords(
   year: number,
 ): Promise<CompanyTaxRecords> {
   const [org, openings, declarations] = await Promise.all([
-    supabase
-      .from("organisations")
-      .select("itf_turnover_over_50m")
-      .eq("id", organisationId)
-      .maybeSingle(),
+    itfTurnoverOn(supabase, organisationId, lagosToday()),
     supabase
       .from("payroll_opening_balances")
       .select("id, worker_id, supersedes_id")
@@ -486,7 +503,7 @@ export async function loadCompanyTaxRecords(
       .eq("tax_year", year)
       .limit(10000),
   ]);
-  if (org.error || openings.error || declarations.error) {
+  if (openings.error || declarations.error) {
     throw new Error("Could not read the payroll tax records");
   }
   const superseded = new Set(
@@ -543,7 +560,7 @@ export async function loadCompanyTaxRecords(
   }
   return {
     taxYear: year,
-    itfTurnoverOver50m: org.data?.itf_turnover_over_50m === true,
+    itfTurnoverOver50m: org,
     openingBalances: openingCount,
     awaiting: waiting
       .map((d) => ({
@@ -816,17 +833,11 @@ export async function previewItfFlag(
   ctx: Ctx,
   data: z.output<typeof itfFlagSchema>,
 ): Promise<CapabilityPreview> {
-  const { data: org, error } = await ctx.supabase
-    .from("organisations")
-    .select("itf_turnover_over_50m")
-    .eq("id", ctx.organisationId)
-    .maybeSingle();
-  if (error) throw new Error(`Could not read the company (${error.code})`);
-  const before = org?.itf_turnover_over_50m === true;
+  const before = await itfTurnoverOn(ctx.supabase, ctx.organisationId, data.effectiveFrom);
   return {
     summary: data.value
-      ? "Says the company's turnover is ₦50 million or more, so ITF applies to runs calculated from now on whatever the headcount."
-      : "Says the company's turnover is under ₦50 million, so ITF applies only with 5 or more employees on the pay date, from the next calculation.",
+      ? `Says the company's turnover is ₦50 million or more from ${formatDate(data.effectiveFrom)}, so ITF applies to runs paid from then whatever the headcount.`
+      : `Says the company's turnover is under ₦50 million from ${formatDate(data.effectiveFrom)}, so ITF applies only with 5 or more employees on a run's pay date.`,
     changes: [
       {
         label: "Turnover ₦50 million or more",
@@ -933,7 +944,13 @@ export const startProofSpec: MutationSpec<typeof startProofSchema, StartedProof>
       .storage.from(RELIEF_PROOFS_BUCKET)
       .createSignedUploadUrl(path);
     if (error || !signed) throw new Error("Could not prepare the proof upload");
-    return { proofId, path, token: signed.token, fileExt, contentType: RECEIPT_TYPES[fileExt].mime };
+    return {
+      proofId,
+      path,
+      token: signed.token,
+      fileExt,
+      contentType: RECEIPT_TYPES[fileExt].mime,
+    };
   },
 };
 
@@ -954,7 +971,10 @@ async function deleteRefusedProof(path: string): Promise<void> {
  * Step 2: the file is in the bucket. Check its bytes and record it with the secret key, naming the
  * user `mutate()` verified.
  */
-export const recordProofSpec: MutationSpec<typeof recordProofSchema, { proofId: string }> = {
+export const recordProofSpec: MutationSpec<
+  typeof recordProofSchema,
+  { proofId: string; workerId: string }
+> = {
   module: "payroll",
   schema: recordProofSchema,
   roles: TAX_RECORD_WRITERS,
@@ -964,6 +984,7 @@ export const recordProofSpec: MutationSpec<typeof recordProofSchema, { proofId: 
     const admin = createAdminSupabase();
     const download = await admin.storage.from(RELIEF_PROOFS_BUCKET).download(path);
     if (download.error || !download.data) {
+      await deleteRefusedProof(path);
       throw new MutationError("invalid", "The file didn't arrive. Choose it again.");
     }
     const bytes = new Uint8Array(await download.data.arrayBuffer());
@@ -984,10 +1005,11 @@ export const recordProofSpec: MutationSpec<typeof recordProofSchema, { proofId: 
       p_sha256: sha256,
     });
     if (error) {
-      if (error.code === "22023") await deleteRefusedProof(path);
+      // Any refusal: the file never became a proof, so it goes (security review M1).
+      await deleteRefusedProof(path);
       fromTaxRecordsDbError(error);
     }
-    return { proofId: data.proofId };
+    return { proofId: data.proofId, workerId: d.workerId };
   },
 };
 
@@ -1044,11 +1066,28 @@ export const nhfNumberSpec: MutationSpec<typeof nhfNumberSchema, { id: string }>
   schema: nhfNumberSchema,
   roles: TAX_RECORD_WRITERS,
   run: async ({ supabase, organisationId, data }) => {
+    // Encrypted for this row (security review M2), like the RSA PIN: the number never reaches
+    // the database in the clear; the last 4 characters are kept for display.
+    const rowId = randomUUID();
+    const sealed =
+      data.nhfNumber === ""
+        ? null
+        : {
+            enc: encryptPiiForDb(data.nhfNumber, {
+              organisationId,
+              table: "payroll_nhf_numbers",
+              column: "nhf_number_enc",
+              rowId,
+            }),
+            last4: data.nhfNumber.slice(-4),
+          };
     const { data: id, error } = await supabase.rpc("set_payroll_nhf_number", {
       p_organisation_id: organisationId,
       p_worker_id: data.workerId,
-      // An empty number records its removal (the function trims it to null).
-      p_nhf_number: data.nhfNumber,
+      p_id: rowId,
+      // Null for both records a removal.
+      p_nhf_number_enc: sealed?.enc ?? (null as unknown as string),
+      p_last4: sealed?.last4 ?? (null as unknown as string),
       p_reason: data.reason,
     });
     if (error) fromTaxRecordsDbError(error);
@@ -1064,6 +1103,7 @@ export const itfFlagSpec: MutationSpec<typeof itfFlagSchema, null> = {
     const { error } = await supabase.rpc("set_itf_turnover_flag", {
       p_organisation_id: organisationId,
       p_value: data.value,
+      p_effective_from: data.effectiveFrom,
       p_reason: data.reason,
     });
     if (error) fromTaxRecordsDbError(error);
