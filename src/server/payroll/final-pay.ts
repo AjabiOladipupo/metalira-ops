@@ -95,6 +95,14 @@ export const finalPayItemSchema = z
       .union([text(500, "Give the reason for the change"), z.literal("")])
       .optional()
       .transform((v) => (v ? v : null)),
+    /**
+     * Slice 5.10 (money review round 2, M1): the worker already has an item of this type on
+     * another standing run, so this one is confirmed as a further item, with why.
+     */
+    furtherReason: z
+      .union([text(500, "Say why this is a further item"), z.literal("")])
+      .optional()
+      .transform((v) => (v ? v : null)),
   })
   .superRefine((v, ctx) => {
     if (FINAL_PAY_ITEMS[v.itemType].byDays && v.days === null) {
@@ -121,12 +129,14 @@ const prefillRow = z.object({
       months_in_year: z.number().int(),
       taken_days: z.number().int(),
       service_months: z.number().int(),
+      paid_elsewhere_days: z.number().int().min(0).optional(),
       days: z.number().int(),
       year: z.number().int(),
     })
     .nullable(),
   exempt_cap_kobo: z.string().regex(/^\d+$/),
   exempt_used_kobo: z.string().regex(/^\d+$/),
+  other_run_item_types: z.array(z.enum(FINAL_PAY_ITEM_TYPES)).optional(),
 });
 
 /** What the screen pre-fills from, per worker on a final-pay run. */
@@ -156,12 +166,14 @@ export async function loadFinalPayPrefill(
               monthsInYear: r.leave.months_in_year,
               takenDays: r.leave.taken_days,
               serviceMonths: r.leave.service_months,
+              paidElsewhereDays: r.leave.paid_elsewhere_days ?? 0,
               days: r.leave.days,
               year: r.leave.year,
             }
           : null,
         exemptCapKobo: toKobo(r.exempt_cap_kobo),
         exemptUsedKobo: toKobo(r.exempt_used_kobo),
+        otherRunItemTypes: r.other_run_item_types ?? [],
       },
     ]),
   );
@@ -171,6 +183,7 @@ export async function loadFinalPayPrefill(
 const PERSONAL_NUMBER_CHECKS = [
   "payroll_final_pay_items_reason_text",
   "payroll_final_pay_items_change_reason_text",
+  "payroll_final_pay_items_further_reason_text",
   "payroll_adjustments_label_no_personal_number",
   "payroll_adjustments_reason_no_personal_number",
 ];
@@ -185,6 +198,9 @@ export function fromFinalPayDbError(error: Pick<PostgrestError, "code" | "messag
       "invalid",
       "That item breaks a payroll rule. Check the figures and try again.",
     );
+  }
+  if (error.code === "MLFZ1") {
+    throw new MutationError("invalid", error.message, { furtherReason: error.message });
   }
   if (/^MLTB[1-5]$/.test(error.code)) {
     if (error.code === "MLTB4") {
@@ -227,6 +243,12 @@ async function planFor(
         ? "There's no pre-filled amount for this worker's pay rate: say how the amount was worked out"
         : "The days or amount differ from the pre-filled figure: give the reason for the change";
     throw new MutationError("invalid", message, { changeReason: message });
+  }
+  // Slice 5.10 (M1): an item of a type the worker already has on another standing run could pay
+  // the same leave, notice or gratuity twice; it needs the explicit further-item reason.
+  if ((prefill.otherRunItemTypes ?? []).includes(data.itemType) && !data.furtherReason) {
+    const message = `This worker already has ${FINAL_PAY_ITEMS[data.itemType].label.toLowerCase()} on another final-pay run. If this is a further item, not the same one again, say why`;
+    throw new MutationError("invalid", message, { furtherReason: message });
   }
   return { run, prefill, plan };
 }
@@ -322,6 +344,7 @@ export const addFinalPayItemSpec: MutationSpec<typeof finalPayItemSchema, { runI
         : {}),
       p_part_of_settlement: settlement,
       ...(d.changeReason ? { p_change_reason: d.changeReason } : {}),
+      ...(d.furtherReason ? { p_further_reason: d.furtherReason } : {}),
     });
     if (error) fromFinalPayDbError(error);
     const fresh = await draftRun(ctx.supabase, ctx.organisationId, run.id);

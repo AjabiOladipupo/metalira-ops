@@ -202,6 +202,11 @@ export interface YearToDate {
   opening: OpeningBalance | null;
   /** Ids of the verified relief declarations counted (for the trace and approval's check). */
   reliefIds?: readonly string[];
+  /**
+   * Slice 5.10 (M2): no opening balance, so the year counts from the worker's first payslip in
+   * Metalira, later than 1 January and their start date (the run warns: no_opening_balance).
+   */
+  fromFirstPayslip?: boolean;
 }
 
 export interface OpeningBalance {

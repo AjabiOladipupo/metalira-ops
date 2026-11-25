@@ -1,6 +1,6 @@
 /**
  * Slice 5.9c against the real database (docs/PHASE_5.md "As built in 5.9c"):
- * - The holiday pay multiplier: owner, hr and finance add dated versions from tomorrow or later
+ * - The holiday pay multiplier: owner and hr add dated versions from tomorrow or later (finance reads)
  *   (MLTB3 otherwise), audited; others are refused (42501); rows never change or go, for the
  *   database owner too.
  * - Every rule set version carries the loss-of-office cap, ₦50,000,000 by default, never changed
@@ -103,14 +103,16 @@ describe("the holiday pay multiplier", () => {
       p_reason: reason,
     });
 
-  it("lets owner, hr and finance add versions from tomorrow or later, audited", async () => {
+  it("lets owner and hr add versions from tomorrow or later, audited; finance only reads", async () => {
     const a = await set(owner.client, 15_000, later(3));
     expect(a.error).toBeNull();
     expect(a.data).toMatchObject({ before_bps: 10_000, after_bps: 15_000 });
     const b = await set(hr.client, 20_000, later(5));
     expect(b.error).toBeNull();
     expect(b.data).toMatchObject({ before_bps: 15_000, after_bps: 20_000 });
-    const c = await set(finance.client, 10_000, later(7));
+    // Slice 5.10 (owner decision 25 Nov 2026): finance reads the rate but doesn't set it.
+    expect((await set(finance.client, 10_000, later(7))).error?.code).toBe(DENIED);
+    const c = await set(owner.client, 10_000, later(7));
     expect(c.error).toBeNull();
 
     const { data: rows } = await finance.client
@@ -308,6 +310,8 @@ describe("final-pay items", () => {
         leave: null,
         exempt_cap_kobo: "5000000000",
         exempt_used_kobo: "0",
+        // Slice 5.10 (money review round 2, M1): item types on other standing runs.
+        other_run_item_types: [],
       },
     ]);
     // An annual leave type of 15 days a year, with 3 days taken in 2026 (owner decision, 25 Nov):
@@ -345,6 +349,7 @@ describe("final-pay items", () => {
       months_in_year: 9,
       taken_days: 3,
       service_months: 21,
+      paid_elsewhere_days: 0,
       days: 8,
       year: 2026,
     });
@@ -390,6 +395,7 @@ describe("final-pay items", () => {
       months_in_year: 4,
       taken_days: 0,
       service_months: 4,
+      paid_elsewhere_days: 0,
       days: 0,
       year: 2026,
     });
@@ -763,7 +769,7 @@ describe("the exemption room across runs (money review M4)", () => {
       expect(error).toBeNull();
       return data!;
     };
-    const loss = (runId: string, amount: string, exempt: string) =>
+    const loss = (runId: string, amount: string, exempt: string, further?: string) =>
       owner.client.rpc("add_final_pay_item", {
         p_organisation_id: owner.orgId,
         p_run_id: runId,
@@ -772,6 +778,7 @@ describe("the exemption room across runs (money review M4)", () => {
         p_amount_kobo: amount,
         p_exempt_kobo: exempt,
         p_reason: "Redundancy settlement",
+        ...(further ? { p_further_reason: further } : {}),
       });
     const first = await create(OCT_START, "2026-10-16");
     expect((await loss(first, "4000000000", "4000000000")).error).toBeNull();
@@ -780,9 +787,13 @@ describe("the exemption room across runs (money review M4)", () => {
     const moved = await admin.from("workers").update({ end_date: "2026-11-05" }).eq("id", workerId);
     expect(moved.error).toBeNull();
     const second = await create("2026-10-20", "2026-11-16");
+    // Slice 5.10 (money review round 2, M1): a second redundancy item while the first run stands
+    // is confirmed as a further item, with why.
+    expect((await loss(second, "2000000000", "1000000000")).error?.code).toBe("MLFZ1");
+    const further = "Second tranche agreed on 2 November";
     // ₦40m already used: ₦10m of a ₦20m payment is exempt.
-    expect((await loss(second, "2000000000", "2000000000")).error?.code).toBe("MLTB5");
-    const ok = await loss(second, "2000000000", "1000000000");
+    expect((await loss(second, "2000000000", "2000000000", further)).error?.code).toBe("MLTB5");
+    const ok = await loss(second, "2000000000", "1000000000", further);
     expect(ok.error).toBeNull();
     const { data: item } = await admin
       .from("payroll_final_pay_items")

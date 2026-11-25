@@ -59,6 +59,18 @@ export function describeAnomaly(
           body: `A later run${later ? ` (from ${formatDate(later)})` : ""} already settled this worker's carried deductions, so nothing this run cuts can carry forward. Lower or remove the deduction so it fits what the run pays. This blocks the run.`,
         };
       }
+      if (detail.deduction_cut === true && (detail.capped === true || detail.clawback === true)) {
+        // Slice 5.10 (money review round 2, L6): the one exception to "never block": a correction
+        // or one-off run has no later run of its own to carry to.
+        const why =
+          detail.capped === true
+            ? "Clawbacks and deductions together are over a third of gross pay (Labour Act s.5(7)), so part of them would carry forward"
+            : "The clawback is more than this run's pay can bear before tax, so part of it would carry forward";
+        return {
+          title: `Deduction can't carry from this run · ${name}`,
+          body: `${why}, and a correction or one-off run can't carry anything to a later run. Lower the deduction to what fits (Explain shows the cap), or remove it here and add it to the next regular run, which carries the rest. This blocks the run.`,
+        };
+      }
       if (detail.deduction_cut === true) {
         // Slice 5.7b: a correction or one-off run can't carry a deduction to a later run.
         return {
@@ -256,7 +268,29 @@ export function describeAnomaly(
             : "This payslip can't pay all the PAYE due to date; it will be caught up next month by the year-to-date maths.",
       };
     }
+    case "no_opening_balance":
+      return {
+        title: `No opening balance: year to date starts at this worker's first payslip in Metalira · ${name}`,
+        body: "PAYE counts the tax year from their first payslip here, not from 1 January or their start date. If they were paid earlier this year outside Metalira, record an opening balance on their page, then recalculate.",
+      };
+    case "leaver_carry_unrecoverable": {
+      const naira = str(detail, "naira")?.replace(/,/g, "") ?? null;
+      const amount =
+        naira !== null && /^\d{1,15}$/.test(naira)
+          ? BigInt(naira) * 100n + BigInt(Math.trunc(num(detail, "kobo")))
+          : null;
+      return {
+        title: `${amount === null ? "An amount" : formatNaira(amount)} can't be recovered through payroll: the worker is leaving · ${name}`,
+        body: "The one-third cap or what this payslip can pay leaves part of a deduction or clawback for a later run, and this is their last payslip. Recover the rest another way, outside payroll, or lower it here.",
+      };
+    }
     case "recovery_carried":
+      if (detail.capped === true) {
+        return {
+          title: `Clawback over the one-third cap · ${name}`,
+          body: "Clawbacks and other deductions are at most a third of gross pay before recoveries (Labour Act s.5(7)). What fits came off before tax; the rest is carried forward and comes off after tax in later runs.",
+        };
+      }
       return {
         title: `Clawback larger than this month's pay · ${name}`,
         body: "What this month's pay could bear came off before tax; the rest is carried forward and comes off after tax in later runs.",

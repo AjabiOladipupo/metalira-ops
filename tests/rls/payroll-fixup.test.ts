@@ -216,8 +216,23 @@ const PAY_ENTITIES = [
   "statutory_receipts",
   "statutory_remittance_voids",
   "statutory_payment_resolutions",
+  // Slice 5.10 (security review round 2, L5): 5.9a's tax records.
+  "payroll_opening_balances",
+  "payroll_relief_declarations",
+  "payroll_relief_proofs",
+  "payroll_relief_verifications",
+  "payroll_nhf_numbers",
+  "payroll_itf_turnover",
 ];
-const PAY_ACTIONS = ["payroll.adjustments_moved", "payroll.run_approved", "statutory.anything"];
+const PAY_ACTIONS = [
+  "payroll.adjustments_moved",
+  "payroll.run_approved",
+  "statutory.anything",
+  // Slice 5.10 (security review round 2, L5 and M1).
+  "payroll.opening_balances_imported",
+  "payroll.relief_proof_opened",
+  "payroll.rent_declared_set",
+];
 
 describe("the audit log hides every payroll and statutory row from admins", () => {
   let c: Company;

@@ -18,10 +18,11 @@ Abbreviations: NTA (Nigeria Tax Act 2025), NTAA (Nigeria Tax Administration Act 
 
 **Confirmed by the tax adviser** (answer 1): the bands, NTA s.58 and the Fourth Schedule.
 
-Starting values stored as NTA 2025 v1 (slice 5.0):
-- Taxable income = annual gross − employee pension − NHF (if opted in) − rent relief.
+How PAYE is worked out (every run, since slice 5.9a; NTA 2025 v1 and v2 alike):
+- Chargeable pay = taxable earnings − employee pension − NHF (if taken).
 - Rent relief = 20% of annual rent declared, capped at ₦500,000.
-- Monthly PAYE = annual tax ÷ 12, rounded to the nearest kobo; remit to the worker's tax state.
+- **Cumulative year to date** (adviser answer 4, NTAA s.51(6)): the year's chargeable pay so far (standing payslips and the opening balance) plus this payslip's, annualised over the months elapsed, less annual reliefs (rent relief: 20% of the rent, capped at ₦500,000; v2's NHIS and life assurance); band tax on that × months elapsed ÷ 12 is the tax due to date; PAYE = tax due to date − PAYE already withheld this year, rounded once to the kobo, never below ₦0. Remit to the worker's tax state.
+- With nothing earlier in the year this is exactly the month annualised (annual tax ÷ 12), which is what slice 5.0 first built and what the golden fixture checks. The "annual tax ÷ 12" method is no longer used on its own.
 
 The adviser's answers, which slice 5.9a builds into the engine:
 - **Chargeable income** (answer 2, NTA s.30): gross income less employee pension, NHF, rent relief, NHIS/NHIA contributions, and life assurance or deferred annuity premiums. The old consolidated relief allowance (CRA) is abolished. Interest on a loan for an owner-occupied house is claimed by the worker through self-assessment, not through payroll.
@@ -107,7 +108,7 @@ These are product defaults stored per organisation (`organisations` pay settings
 - **Special project or task overtime**: a pay multiplier can be set on a project or task; overtime worked on it is paid at normal hourly rate × that multiplier.
 - **Off-day work**: a worker approved to work on an off day is paid one overtime shift of 8 hours at the overtime rate.
 - **Public holidays**: work done on a public holiday is paid as holiday work (below). Each organisation keeps its own public holiday list, because federal holidays are declared year by year.
-- **Extra pay for holiday work** (adviser answer 24; **Owner decision**, slice 5.9c): set per company as `payroll_holiday_pay_rates.multiplier_bps`, dated versions (default 10000, 1.0×). Every minute worked on a public holiday earns normal pay plus extra pay of the hourly (overtime) rate × the multiplier: at ₦750 an hour and 1.5×, ₦750 normal + ₦1,125 extra = ₦1,875 an hour. Owner, HR and Finance change it in Settings > Payroll rules, from tomorrow or later, audited; the earnings stage uses the multiplier in force on the day worked. The adviser: holiday pay is contract-driven and there is no statutory multiplier (Public Holidays Act s.4; Labour Act s.13 and s.17). **Confirm with an employment lawyer.** The app allows 1.0× to 5.0× (a product limit: below 1.0× the holiday line would also underpay the day's overtime minutes).
+- **Extra pay for holiday work** (adviser answer 24; **Owner decision**, slice 5.9c): set per company as `payroll_holiday_pay_rates.multiplier_bps`, dated versions (default 10000, 1.0×). Every minute worked on a public holiday earns normal pay plus extra pay of the hourly (overtime) rate × the multiplier: at ₦750 an hour and 1.5×, ₦750 normal + ₦1,125 extra = ₦1,875 an hour. The owner and HR change it in Settings > Payroll rules (Finance reads it; owner decision, 25 Nov 2026, slice 5.10), from tomorrow or later, audited; the earnings stage uses the multiplier in force on the day worked. The adviser: holiday pay is contract-driven and there is no statutory multiplier (Public Holidays Act s.4; Labour Act s.13 and s.17). **Confirm with an employment lawyer.** The app allows 1.0× to 5.0× (a product limit: below 1.0× the holiday line would also underpay the day's overtime minutes).
 - **Daily workers** (`employment_type = daily`): paid daily rate × days worked. Overtime is allowed and paid at their normal hourly rate. Starting rule set NTA 2025 v1 (slice 5.0): No PAYE, no pension, no NSITF, no ITF, and they are left out of the employer levy base. **Superseded** by adviser answer 9, now also the **Owner decision**: PAYE (with the minimum-wage exemption), pension, NSITF and ITF all apply to daily workers; NHF is optional. Slice 5.9a builds it.
 
 Phase 5 defaults (docs/PHASE_5.md, built in slices 5.1 to 5.8), with the adviser's answers:
@@ -123,7 +124,9 @@ Phase 5 defaults (docs/PHASE_5.md, built in slices 5.1 to 5.8), with the adviser
 ### Deductions from wages
 
 - **Cap** (answer 26, Labour Act s.5(7), with s.5(1), s.4 and s.5(5)): deductions from a worker's wages may not exceed one-third of the monthly wages. **Owner decision**: statutory deductions (PAYE, pension, NHF) sit outside the cap pending a lawyer's view. Slice 5.9a builds the cap. **Confirm with an employment lawyer.**
+- **What the cap covers** (**Owner decision**, 25 Nov 2026, slice 5.10, pending an employment lawyer): the one-third is of the payslip's gross before recoveries. Inside it: a same-year pre-tax clawback of an earlier overpayment, together with loans, advances, the carried deduction and other non-statutory deductions (the clawback first, then the carried deduction, then the others in the order added). Whatever doesn't fit carries forward after tax. Outside it: late-approved unpaid leave arrears, which the adviser treats as a reduction of earned wages rather than a deduction.
 - **Net pay below ₦0** is never paid; the rest of a deduction is carried to the next run (Phase 5 open question 6, product rule).
+- **A leaver** has no later payslip, so a carry on their final payslip can't be recovered through payroll; the run warns "₦X can't be recovered through payroll: the worker is leaving" (slice 5.10).
 
 ### The old open points, closed (25 Nov 2026)
 
@@ -143,8 +146,34 @@ Phase 5 defaults (docs/PHASE_5.md, built in slices 5.1 to 5.8), with the adviser
 - Public holiday pay (answer 24): no statutory multiplier; the company's multiplier follows its contracts (Public Holidays Act s.4; Labour Act s.13 and s.17).
 - Maternity (answer 25): preset A's Labour Act s.54 figures, and pay below 6 months' service (Phase 5 open question 3).
 - The deduction cap (answer 26): one-third of monthly wages, and whether statutory deductions sit outside it.
+- **Clawbacks inside the cap** (owner decision, 25 Nov 2026): a same-year pre-tax clawback of an earlier overpayment counts inside the one-third (Labour Act s.5(7)) with loans, advances and other non-statutory deductions; the rest carries forward after tax.
+- **Leave arrears outside the cap** (owner decision, 25 Nov 2026): late-approved unpaid leave arrears are a reduction of earned wages (the adviser's reading), not a deduction under s.5(7).
+- **s.5(7) on final settlements**: whether the one-third cap applies to a leaver's final payslip, where nothing can carry to a later run (the app warns and leaves recovery outside payroll).
+- **The 3-month window** (Labour Act s.5(5)): measured from the corrected payslip's pay date to the day the correction is added, and again to the approval day (see the product readings below).
 - Notice periods (Labour Act s.11): not in the adviser text; the app takes the notice days from HR.
 - The leave-in-lieu pre-fill formula and the s.18 / s.18(4) reading (owner decision, above).
+
+### Product readings the code applies (slice 5.10, from the round-2 money review)
+
+The adviser's 27 answers leave these points open. The code applies each reading below until the adviser or a lawyer answers; none is presented to a customer as law.
+
+1. **A deadline that falls on a weekend or holiday rolls to the earlier working day**, not the later one (the 10th, 15th, a month on, 1 April). Product decision (coordinator, 25 Nov 2026, slice 5.9b money review M3), pending adviser.
+2. **State public holidays count for PAYE deadlines only**; pension, NHF, NSITF and ITF count federal holidays only. Product decision (coordinator, 25 Nov 2026, slice 5.9b), pending adviser.
+3. **Pension on a daily worker's consolidated pay**: a daily rate has no basic, housing and transport split, so the whole daily pay is the pension base. Product decision (owner, 24 Nov 2026, slice 5.9a, with answer 9), pending adviser.
+4. **The headcount** for pension (3 or more) and ITF (5 or more) is the workers employed on the run's pay date (start date on or before it, no end date before it), daily workers included. Product decision (coordinator, 25 Nov 2026, slice 5.9a), pending adviser.
+5. **The minimum-wage test basis** (answer 10): a worker is PAYE-exempt when their total income annualised on the year-to-date basis (gross pay to date × 12 ÷ months elapsed) is ₦840,000 or less; above it the bands apply to all chargeable income. Gross includes exempt income (a redundancy payment's exempt part) and refunds of leave deductions. Product decision (coordinator, 25 Nov 2026, slice 5.9a), pending adviser.
+6. **NHF's minimum-wage test uses regular monthly pay**, not the month's gross (overtime, bonuses and arrears don't lift a worker over it). Product decision (coordinator, 25 Nov 2026, slice 5.9a money review L7), pending adviser.
+7. **PAYE is capped at what the payslip can bear** after pension and NHF; the rest is caught up by the year-to-date maths next month (or flagged for settling at year end), and PAYE over-withheld earlier in the year is not refunded on a payslip (it is carried on the trace for HR). Product decision (coordinator, 25 Nov 2026, slice 5.9a money review M2: payroll never blocks), pending adviser.
+8. **Months elapsed** in the year-to-date method run from the later of 1 January, the worker's start date and the worker's first payslip in Metalira (not the company's go-live month), unless an opening balance covers the months before; a payslip of a later month already in the year extends them. A worker with no opening balance whose year starts later than 1 January and their start date raises "No opening balance: year to date starts at this worker's first payslip in Metalira". Product decision (coordinator, 25 Nov 2026, slice 5.10 money review M2), pending adviser.
+9. **Rent relief before NTA 2025 v2**: for the months of the year before the rule set that requires proof, the declared rent keeps its relief; from it, only verified rent counts, and relief never verified is not caught up for the earlier months. Product decision (coordinator, 25 Nov 2026, slice 5.9a money review M3), pending adviser.
+10. **Clawbacks are cut to fit and carried**: a same-year clawback comes off before tax up to what the corrected payslip's taxable earnings paid (less earlier clawbacks of the same payslip), what the month's pay can bear and the one-third cap; the rest is recovered after tax in later runs. Owner decision on the cap (25 Nov 2026), pending lawyer; the cut-and-carry mechanics are a product decision (coordinator, 25 Nov 2026), pending adviser.
+11. **The 3-month window** (answer 17, Labour Act s.5(5)) is measured from the corrected payslip's pay date to today, in calendar months with the day clamped to the month's end (25 Nov reaches back to 25 Aug), when the correction is added and again at approval. Product decision (coordinator, 25 Nov 2026, slice 5.10 money review L5), pending lawyer.
+12. **NSITF's regular payroll** (answer 7): basic, housing, transport, other allowances, daily and hourly pay, leave deductions, refunds of regular leave deductions, and run adjustments HR marks as a recurring allowance (an earning over 2 or more instalments). Irregular, left out: overtime, off-day and public-holiday pay, one-off earnings, bonuses and arrears even when paid in instalments, clawbacks and every final-pay item. Product decision (coordinator, 25 Nov 2026, slice 5.10 money review L4: an explicit flag on the adjustment), pending adviser.
+
+### Still for the tax adviser (slice 5.10)
+
+- **Exempt and refund income in the minimum-wage test** (money review round 2, L2): the test counts gross pay, which includes the exempt part of a redundancy payment and refunds of leave deductions. Should either be left out? No code change until answered.
+- Each "pending adviser" reading above.
 
 ### The tax adviser's 27 answers, in brief
 

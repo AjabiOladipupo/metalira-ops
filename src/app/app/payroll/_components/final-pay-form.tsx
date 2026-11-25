@@ -36,6 +36,8 @@ export interface FinalPayWorker {
   leave: LeaveInLieuPrefill | null;
   exemptCapKobo: string;
   exemptUsedKobo: string;
+  /** Slice 5.10 (M1): item types already on another standing run for this worker. */
+  otherRunItemTypes: FinalPayItemType[];
 }
 
 function prefillOf(w: FinalPayWorker): FinalPayPrefill {
@@ -48,6 +50,7 @@ function prefillOf(w: FinalPayWorker): FinalPayPrefill {
     leave: w.leave,
     exemptCapKobo: toKobo(w.exemptCapKobo),
     exemptUsedKobo: toKobo(w.exemptUsedKobo),
+    otherRunItemTypes: w.otherRunItemTypes,
   };
 }
 
@@ -100,8 +103,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
   };
   const amountKobo = koboOf(amount);
   const daysChanged =
-    type === "leave_in_lieu" &&
-    (!prefill?.leave || Number(days) !== prefill.leave.days);
+    type === "leave_in_lieu" && (!prefill?.leave || Number(days) !== prefill.leave.days);
   const amountChanged = rule.byDays && (prefilled === null || amountKobo !== prefilled);
   const needsChange = rule.byDays && (daysChanged || amountChanged);
   const rate = prefill ? basicDailyRateText(prefill) : null;
@@ -231,6 +233,18 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
           defaultValue={valueOf(state, "changeReason")}
           hint="The days or amount differ from the pre-filled figure."
           error={errors?.changeReason}
+        />
+      ) : null}
+      {prefill && (prefill.otherRunItemTypes ?? []).includes(type) ? (
+        <Field
+          label="Why this is a further item"
+          name="furtherReason"
+          required
+          maxLength={500}
+          placeholder="Notice extended by agreement after the first final pay"
+          defaultValue={valueOf(state, "furtherReason")}
+          hint={`This worker already has ${rule.label.toLowerCase()} on another final-pay run. Add it again only if it isn't the same item.`}
+          error={errors?.furtherReason}
         />
       ) : null}
       <Field

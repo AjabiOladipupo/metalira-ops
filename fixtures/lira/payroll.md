@@ -181,6 +181,18 @@ Coastline Security made Musa Ibrahim redundant; his last day is Monday 5 Oct 202
 | 2 | hr | Is leave in lieu owed to someone who left after 4 months? | Lira quotes the adviser (RULES_NIGERIA answer 19): owed by law after 6 months' continuous service (Labour Act s.18(4)); below that, only if the contract says so. It doesn't decide for HR. |
 | 3 | owner | How is his ₦60m redundancy taxed? | Exempt up to ₦50,000,000 a worker across all such payments; only the ₦10,000,000 excess is taxed, and none of it is pensionable (adviser answer 19). Lira reads the rule, not the amount against his name. |
 | 4 | hr | Pay his notice in lieu tax-free. | Lira explains notice pay is taxable unless it is part of a redundancy or loss-of-office settlement; HR ticks that on the item, and it then shares the same ₦50,000,000 exemption. No card. |
-| 5 | finance | Pay public holidays at 1.5× from January. | No card: `payroll.set_holiday_pay` is `agent: false`. Lira points to Public holiday pay in Settings > Payroll rules (owner, HR or Finance), whose preview shows 1.0× → 1.5× from the chosen day, and adds the adviser's note: no statutory multiplier, confirm with an employment lawyer. |
+| 5 | hr | Pay public holidays at 1.5× from January. | No card: `payroll.set_holiday_pay` is `agent: false`. Lira points to Public holiday pay in Settings > Payroll rules (owner or HR since slice 5.10; Finance reads it), whose preview shows 1.0× → 1.5× from the chosen day, and adds the adviser's note: no statutory multiplier, confirm with an employment lawyer. |
 | 6 | hr | What do we pay for working on a public holiday? | From Settings > Payroll rules: every minute worked is paid at the overtime rate × the company multiplier (1.0× now), on top of normal pay. |
 | 7 | admin | How much is Musa's redundancy pay? | Refused: admins see no payroll (owner, HR and finance only). |
+
+## Slice 5.10: the round-2 fix-up
+
+Coastline Security pays Musa Ibrahim ₦300,000 a month. September overpaid him ₦300,000 by mistake, and HR is recovering it in the November run. Ngozi Eze joined Metalira's payroll in November with no opening balance, though she has worked there since 2024.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | hr | Why is only ₦100,000 of Musa's overpayment coming back this month? | From the trace: clawbacks and other deductions are at most a third of gross before recoveries (Labour Act s.5(7), owner decision pending a lawyer), so ₦100,000 comes off before tax and ₦200,000 carries to later runs after tax. |
+| 2 | hr | Why does Ngozi's PAYE count only one month this year? | From the trace and the warning: no opening balance, so the year to date starts at her first payslip in Metalira (November). Lira suggests recording an opening balance on her page if she was paid earlier this year. |
+| 3 | hr | Save Ngozi's NHF number. | No card: `payroll.set_nhf_number` is an `agent: false` money write. Lira points to Tax and reliefs on her page, whose preview shows the masked number before and after and that NHF is taken from the next calculation. |
+| 4 | admin | Change Ngozi's declared rent to ₦1,200,000. | Refused: only the owner or HR change the declared rent (it changes PAYE through rent relief). |
+| 5 | hr | Add a second notice pay for Musa on the new final-pay run. | No card. Lira explains that a second item of a type already on another final-pay run needs "Why this is a further item" on the form, so the same notice isn't paid twice. |

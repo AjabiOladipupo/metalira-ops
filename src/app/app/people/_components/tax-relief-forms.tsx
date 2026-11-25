@@ -7,7 +7,6 @@ import { Field, FormAlert, SelectField, SubmitButton } from "@/components/form";
 import { PAYROLL_LINK_SECONDS, checkChosenReceipt, RECEIPT_ACCEPT } from "@/lib/payroll/receipts";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 import type { CapabilityPreview } from "@/server/capabilities/types";
-import type { CompanyFormState } from "@/server/identity/company-form-state";
 import {
   declareReliefAction,
   importOpeningBalancesAction,
@@ -472,40 +471,47 @@ export function ProofLinkButton({ proofId, label }: { proofId: string; label: st
   );
 }
 
-/** "NHF number": set or remove; the number is never shown back in full. */
+/**
+ * "NHF number": set or remove; the number is never shown back in full. A money write (slice 5.10):
+ * the first press previews, the second saves. The number is held in this component's state, never
+ * sent back by the server, and cleared once saved.
+ */
 export function NhfNumberForm({ workerId, onFile }: { workerId: string; onFile: boolean }) {
-  const [state, formAction] = useActionState<CompanyFormState, FormData>(setNhfNumberAction, null);
-  const errors = state && !state.ok ? state.fieldErrors : undefined;
+  const [number, setNumber] = useState("");
   return (
-    <form action={formAction} aria-label="NHF number" className="flex flex-col gap-3">
-      <input type="hidden" name="workerId" value={workerId} />
-      <div key={JSON.stringify(state?.values ?? null)} className={GRID}>
-        <Field
-          label={onFile ? "New NHF number (leave empty to remove)" : "NHF number"}
-          name="nhfNumber"
-          autoComplete="off"
-          maxLength={20}
-          error={errors?.nhfNumber}
-        />
-        <Field
-          label="Reason"
-          name="reason"
-          required
-          maxLength={500}
-          defaultValue={state && !state.ok ? (state.values?.reason ?? "") : ""}
-          error={errors?.reason}
-        />
-      </div>
-      <FormAlert message={state && !state.ok ? state.formError : undefined} />
-      {state?.ok && state.message ? (
-        <p role="status" className="m-0 text-sm font-medium">
-          {state.message}
-        </p>
-      ) : null}
-      <SubmitButton pendingLabel="Saving…" className="sm:w-auto sm:self-start sm:px-5">
-        {onFile ? "Change NHF number" : "Save NHF number"}
-      </SubmitButton>
-    </form>
+    <PreviewSaveForm
+      action={async (prev, formData) => {
+        const next = await setNhfNumberAction(prev, formData);
+        if (next?.ok && next.message) setNumber("");
+        return next;
+      }}
+      label="NHF number"
+      hidden={{ workerId }}
+      previewLabel={onFile ? "Check the change" : "Check the NHF number"}
+      saveLabel="Confirm and save"
+    >
+      {(state) => (
+        <div className={GRID}>
+          <Field
+            label={onFile ? "New NHF number (leave empty to remove)" : "NHF number"}
+            name="nhfNumber"
+            autoComplete="off"
+            maxLength={20}
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+            error={err(state, "nhfNumber")}
+          />
+          <Field
+            label="Reason"
+            name="reason"
+            required
+            maxLength={500}
+            defaultValue={val(state, "reason")}
+            error={err(state, "reason")}
+          />
+        </div>
+      )}
+    </PreviewSaveForm>
   );
 }
 

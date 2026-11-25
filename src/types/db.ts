@@ -925,14 +925,14 @@ isOneToOne: false
                   ]
                 },"payroll_adjustments": {
                   Row: {
-                    "amount_kobo": number,"corrects_payslip_id": string | null,"created_at": string,"created_by": string,"currency": string,"final_pay_item_id": string | null,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
+                    "amount_kobo": number,"corrects_payslip_id": string | null,"created_at": string,"created_by": string,"currency": string,"final_pay_item_id": string | null,"id": string,"instalment_count": number,"instalment_number": number,"kind": string,"label": string,"organisation_id": string,"pensionable": boolean,"reason": string,"regular": boolean,"run_id": string,"series_id": string,"taxable": boolean,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"corrects_payslip_id"?: string | null,"created_at"?: string,"created_by": string,"currency"?: string,"final_pay_item_id"?: string | null,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind": string,"label": string,"organisation_id": string,"pensionable"?: boolean,"reason": string,"run_id": string,"series_id": string,"taxable"?: boolean,"worker_id": string
+                    "amount_kobo": number,"corrects_payslip_id"?: string | null,"created_at"?: string,"created_by": string,"currency"?: string,"final_pay_item_id"?: string | null,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind": string,"label": string,"organisation_id": string,"pensionable"?: boolean,"reason": string,"regular"?: boolean,"run_id": string,"series_id": string,"taxable"?: boolean,"worker_id": string
                   }
                   Update: {
-                    "amount_kobo"?: number,"corrects_payslip_id"?: string | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"final_pay_item_id"?: string | null,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind"?: string,"label"?: string,"organisation_id"?: string,"pensionable"?: boolean,"reason"?: string,"run_id"?: string,"series_id"?: string,"taxable"?: boolean,"worker_id"?: string
+                    "amount_kobo"?: number,"corrects_payslip_id"?: string | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"final_pay_item_id"?: string | null,"id"?: string,"instalment_count"?: number,"instalment_number"?: number,"kind"?: string,"label"?: string,"organisation_id"?: string,"pensionable"?: boolean,"reason"?: string,"regular"?: boolean,"run_id"?: string,"series_id"?: string,"taxable"?: boolean,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -1027,14 +1027,14 @@ isOneToOne: false
                   ]
                 },"payroll_final_pay_items": {
                   Row: {
-                    "amount_kobo": number,"basic_monthly_kobo": number | null,"change_reason": string | null,"computed_kobo": number | null,"created_at": string,"created_by": string,"currency": string,"days": number | null,"divisor_days": number | null,"exempt_cap_kobo": number | null,"exempt_kobo": number,"exempt_used_kobo": number | null,"id": string,"item_type": string,"organisation_id": string,"part_of_settlement": boolean,"prefill_days": number | null,"reason": string,"run_id": string,"worker_id": string
+                    "amount_kobo": number,"basic_monthly_kobo": number | null,"change_reason": string | null,"computed_kobo": number | null,"created_at": string,"created_by": string,"currency": string,"days": number | null,"divisor_days": number | null,"exempt_cap_kobo": number | null,"exempt_kobo": number,"exempt_used_kobo": number | null,"further_reason": string | null,"id": string,"item_type": string,"organisation_id": string,"part_of_settlement": boolean,"prefill_days": number | null,"reason": string,"run_id": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by": string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"id"?: string,"item_type": string,"organisation_id": string,"part_of_settlement"?: boolean,"prefill_days"?: number | null,"reason": string,"run_id": string,"worker_id": string
+                    "amount_kobo": number,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by": string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"further_reason"?: string | null,"id"?: string,"item_type": string,"organisation_id": string,"part_of_settlement"?: boolean,"prefill_days"?: number | null,"reason": string,"run_id": string,"worker_id": string
                   }
                   Update: {
-                    "amount_kobo"?: number,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"id"?: string,"item_type"?: string,"organisation_id"?: string,"part_of_settlement"?: boolean,"prefill_days"?: number | null,"reason"?: string,"run_id"?: string,"worker_id"?: string
+                    "amount_kobo"?: number,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"further_reason"?: string | null,"id"?: string,"item_type"?: string,"organisation_id"?: string,"part_of_settlement"?: boolean,"prefill_days"?: number | null,"reason"?: string,"run_id"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {
@@ -2596,7 +2596,7 @@ isOneToOne: false
 { Args: { "p_contract_id": string,"p_note"?: string,"p_organisation_id": string,"p_site_id": string }; Returns: Json
                            },
 "add_final_pay_item":
-{ Args: { "p_amount_kobo": string,"p_change_reason"?: string,"p_computed_kobo"?: string,"p_days"?: number,"p_exempt_kobo"?: string,"p_item_type": string,"p_organisation_id": string,"p_part_of_settlement"?: boolean,"p_reason": string,"p_run_id": string,"p_worker_id": string }; Returns: string
+{ Args: { "p_amount_kobo": string,"p_change_reason"?: string,"p_computed_kobo"?: string,"p_days"?: number,"p_exempt_kobo"?: string,"p_further_reason"?: string,"p_item_type": string,"p_organisation_id": string,"p_part_of_settlement"?: boolean,"p_reason": string,"p_run_id": string,"p_worker_id": string }; Returns: string
                            },
 "add_leave_entitlement_version":
 { Args: { "p_carry_over_cap_days"?: number,"p_days_per_year": number,"p_dry_run"?: boolean,"p_from": string,"p_leave_type_id": string,"p_organisation_id": string,"p_pay_min_service_months"?: number,"p_pay_percent": number }; Returns: Json
@@ -2605,7 +2605,7 @@ isOneToOne: false
 { Args: { "p_organisation_id": string,"p_rate": Json,"p_worker_id": string }; Returns: string
                            },
 "add_payroll_adjustment":
-{ Args: { "p_amount_kobo": string,"p_instalments": number,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_pensionable": boolean,"p_reason": string,"p_run_id": string,"p_taxable": boolean,"p_worker_id": string }; Returns: string
+{ Args: { "p_amount_kobo": string,"p_instalments": number,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_pensionable": boolean,"p_reason": string,"p_regular"?: boolean,"p_run_id": string,"p_taxable": boolean,"p_worker_id": string }; Returns: string
                            },
 "add_payroll_correction":
 { Args: { "p_amount_kobo": string,"p_kind": string,"p_label": string,"p_organisation_id": string,"p_payslip_id": string,"p_pensionable": boolean,"p_reason": string,"p_repeat"?: boolean,"p_run_id": string }; Returns: string

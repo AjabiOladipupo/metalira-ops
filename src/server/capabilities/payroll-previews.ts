@@ -31,11 +31,13 @@ import {
   previewDeclareRelief,
   previewImportOpening,
   previewItfFlag,
+  previewNhfNumber,
   previewOpeningBalance,
   previewVerifyRelief,
   type declareReliefSchema,
   type importOpeningSchema,
   type itfFlagSchema,
+  type nhfNumberSchema,
   type openingBalanceSchema,
   type verifyReliefSchema,
 } from "@/server/payroll/tax-records";
@@ -199,3 +201,6 @@ export const previewVerifyPayrollRelief: PreviewFn<typeof verifyReliefSchema> = 
   previewVerifyRelief(ctx, ctx.data);
 export const previewSetItfTurnover: PreviewFn<typeof itfFlagSchema> = (ctx) =>
   previewItfFlag(ctx, ctx.data);
+/** Slice 5.10 (security review round 2, L4): the NHF number is a money write with a preview. */
+export const previewSetNhfNumber: PreviewFn<typeof nhfNumberSchema> = (ctx) =>
+  previewNhfNumber(ctx, ctx.data);

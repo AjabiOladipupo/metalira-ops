@@ -197,7 +197,15 @@ describe("first import during unfinished setup", () => {
       "select coalesce(before::text, '') || coalesce(after::text, '') as doc from public.audit_log where entity_id = $1",
       [workerId],
     );
-    expect(rows.map((r) => r.doc).join(" ")).not.toContain("7712");
+    // Ids in the rows are uuids, which hold "7712" by chance now and then: take them out first
+    // (as payouts.test.ts does), so the check still catches the account's last 4 anywhere else
+    // in the audit rows (slice 5.10: the known flake, fixed without weakening the check).
+    expect(
+      rows
+        .map((r) => r.doc)
+        .join(" ")
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ""),
+    ).not.toContain("7712");
   });
 
   it("a later import by the owner, even during setup, keeps the hold", async () => {

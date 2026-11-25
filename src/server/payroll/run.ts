@@ -195,7 +195,7 @@ async function runAdjustments(
   const { data, error } = await supabase
     .from("payroll_adjustments")
     .select(
-      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, created_at, corrects_payslip_id",
+      "id, worker_id, kind, label, amount_kobo::text, pensionable, taxable, instalment_number, instalment_count, created_at, corrects_payslip_id, regular",
     )
     .eq("organisation_id", organisationId)
     .eq("run_id", runId)
@@ -213,6 +213,8 @@ async function runAdjustments(
     taxable: a.taxable,
     instalmentNumber: a.instalment_number,
     instalmentCount: a.instalment_count,
+    // Slice 5.10 (L4): present only when set, so other runs keep their inputs hash.
+    ...(a.regular ? { regular: true } : {}),
   }));
 }
 
@@ -629,8 +631,9 @@ async function correctedPayDates(
   supabase: Client,
   organisationId: string,
   payslipIds: readonly string[],
-): Promise<Map<string, { payDate: string; taxableKobo: bigint }>> {
-  const out = new Map<string, { payDate: string; taxableKobo: bigint }>();
+  runId: string | null,
+): Promise<Map<string, { payDate: string; taxableKobo: bigint; clawedBackKobo: bigint }>> {
+  const out = new Map<string, { payDate: string; taxableKobo: bigint; clawedBackKobo: bigint }>();
   if (payslipIds.length === 0) return out;
   const { data: slips, error } = await supabase
     .from("payslips")
@@ -661,11 +664,110 @@ async function correctedPayDates(
   for (const l of (lines ?? []) as unknown as { payslip_id: string; amount_kobo: string }[]) {
     taxable.set(l.payslip_id, (taxable.get(l.payslip_id) ?? 0n) + toKobo(l.amount_kobo));
   }
+  // Slice 5.10 (L3): what earlier corrections of the same payslips already clawed back before
+  // tax on other runs whose payslips stand (the sources free up when a run is reversed), as
+  // save_payroll_results counts it.
+  const clawed = await earlierClawbacks(supabase, organisationId, payslipIds, runId);
   for (const x of slips ?? []) {
     const d = dates.get(x.run_id);
-    if (d) out.set(x.id, { payDate: d, taxableKobo: taxable.get(x.id) ?? 0n });
+    if (d) {
+      out.set(x.id, {
+        payDate: d,
+        taxableKobo: taxable.get(x.id) ?? 0n,
+        clawedBackKobo: clawed.get(x.id) ?? 0n,
+      });
+    }
   }
   return out;
+}
+
+/**
+ * Slice 5.10 (money review round 2, L3): per corrected payslip, what clawbacks of it took before
+ * tax on other runs' standing payslips (the `clawback` lines their adjustment sources back).
+ */
+async function earlierClawbacks(
+  supabase: Client,
+  organisationId: string,
+  payslipIds: readonly string[],
+  runId: string | null,
+): Promise<Map<string, bigint>> {
+  const clawed = new Map<string, bigint>();
+  // Paged, so nothing is cut at the API's row cap (money review round 2, L-E).
+  const PAGE = 1000;
+  const correcting = new Map<string, string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data: earlier, error } = await supabase
+      .from("payroll_adjustments")
+      .select("id, corrects_payslip_id")
+      .eq("organisation_id", organisationId)
+      .eq("kind", "deduction")
+      .in("corrects_payslip_id", [...payslipIds])
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`Could not read earlier corrections (${error.code})`);
+    for (const a of earlier ?? []) {
+      if (a.corrects_payslip_id) correcting.set(a.id, a.corrects_payslip_id);
+    }
+    if ((earlier ?? []).length < PAGE) break;
+  }
+  if (correcting.size === 0) return clawed;
+  const ids = [...correcting.keys()];
+  const sources: {
+    payslip_id: string;
+    source_id: string;
+    line_positions: number[] | null;
+    run_id: string;
+  }[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    for (let from = 0; ; from += PAGE) {
+      let q = supabase
+        .from("payslip_sources")
+        .select("payslip_id, source_id, line_positions, run_id")
+        .eq("organisation_id", organisationId)
+        .eq("source_kind", "adjustment")
+        .eq("stands", true)
+        .in("source_id", ids.slice(i, i + 200));
+      if (runId) q = q.neq("run_id", runId);
+      const { data, error: sourceError } = await q.order("id").range(from, from + PAGE - 1);
+      if (sourceError) throw new Error(`Could not read earlier clawbacks (${sourceError.code})`);
+      sources.push(...((data ?? []) as typeof sources));
+      if ((data ?? []).length < PAGE) break;
+    }
+  }
+  const bySlip = new Map<string, { corrected: string; positions: readonly number[] }[]>();
+  for (const src of sources) {
+    const corrected = correcting.get(src.source_id);
+    if (!corrected) continue;
+    const list = bySlip.get(src.payslip_id) ?? [];
+    list.push({ corrected, positions: src.line_positions ?? [] });
+    bySlip.set(src.payslip_id, list);
+  }
+  if (bySlip.size === 0) return clawed;
+  const slipIds = [...bySlip.keys()];
+  const lines: { payslip_id: string; position: number; amount_kobo: string }[] = [];
+  for (let i = 0; i < slipIds.length; i += 200) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error: lineError } = await supabase
+        .from("payslip_lines")
+        .select("id, payslip_id, position, amount_kobo::text")
+        .eq("organisation_id", organisationId)
+        .eq("code", "clawback")
+        .in("payslip_id", slipIds.slice(i, i + 200))
+        .order("id")
+        .range(from, from + PAGE - 1);
+      if (lineError) throw new Error(`Could not read earlier clawback lines (${lineError.code})`);
+      lines.push(...((data ?? []) as unknown as typeof lines));
+      if ((data ?? []).length < PAGE) break;
+    }
+  }
+  for (const l of lines) {
+    for (const src of bySlip.get(l.payslip_id) ?? []) {
+      if (!src.positions.includes(l.position)) continue;
+      // Clawback lines are negative: what they took is the amount's opposite.
+      clawed.set(src.corrected, (clawed.get(src.corrected) ?? 0n) - toKobo(l.amount_kobo));
+    }
+  }
+  return clawed;
 }
 
 /**
@@ -913,7 +1015,13 @@ export async function calculateRun(
           .map((a) => a.correctsPayslipId!),
       ),
     ].sort(),
+    target.runId,
   );
+  // Slice 5.10 (money review round 2, L3): the cap is cumulative across every correction of
+  // the same payslip: what earlier clawbacks of it took before tax on other standing runs comes
+  // off what its taxable earnings paid, and this run's corrections of it share what is left in
+  // the order added (each is allotted at most its own amount).
+  const allotted = new Map<string, bigint>();
   const adjustments: RunAdjustment[] = gathered.map((a) => {
     const paid =
       a.kind === "deduction" && a.correctsPayslipId
@@ -921,9 +1029,12 @@ export async function calculateRun(
         : undefined;
     if (!paid || !adviser?.clawback.preTaxSameTaxYear) return a;
     const year = Number(paid.payDate.slice(0, 4));
-    return year === taxYear
-      ? { ...a, preTax: true, preTaxCapKobo: paid.taxableKobo }
-      : { ...a, priorTaxYear: year };
+    if (year !== taxYear) return { ...a, priorTaxYear: year };
+    const used = allotted.get(a.correctsPayslipId!) ?? 0n;
+    const room = paid.taxableKobo - paid.clawedBackKobo - used;
+    const cap = room > 0n ? (room < a.amountKobo ? room : a.amountKobo) : 0n;
+    allotted.set(a.correctsPayslipId!, used + cap);
+    return { ...a, preTax: true, preTaxCapKobo: cap };
   });
 
   // A correction or one-off run pays only workers with an item on it (or, for a correction, an
@@ -969,7 +1080,7 @@ export async function calculateRun(
     yearToDateFor({
       payDate: target.payDate,
       startDate: startOf.get(workerId) ?? target.payDate,
-      goLiveMonth: tax.goLiveMonth,
+      firstPayMonth: tax.workers.get(workerId)?.firstPayMonth ?? null,
       worker: tax.workers.get(workerId) ?? null,
       slips: year.get(workerId) ?? [],
     });
@@ -1142,16 +1253,22 @@ export async function calculateRun(
         paidBefore: historyOf(w.workerId).paidBefore,
         rules,
         rentUnverified: rentFor(w.workerId, w.statutory.annualRentKobo).unverified,
+        ytdFromFirstPayslip: ytdOf(w.workerId).fromFirstPayslip === true,
       }),
     );
     // A correction or one-off run can't carry a deduction to a later run: what it deducts must
-    // fit what it pays (slice 5.7b).
+    // fit what it pays (slice 5.7b). Slice 5.10 (L6): the one exception to "never block", with
+    // why it carries (the one-third cap, or a clawback larger than the run's pay) in the detail.
     if (adjustmentsOnly && slip && slip.carriedForwardKobo > 0n) {
       anomalies.push({
         workerId: w.workerId,
         code: "calculation_failed",
         severity: "blocking",
-        detail: { deduction_cut: true },
+        detail: {
+          deduction_cut: true,
+          ...(slip.flags.includes("deduction_capped") ? { capped: true } : {}),
+          ...(slip.flags.includes("recovery_carried") ? { clawback: true } : {}),
+        },
       });
     }
     // Slice 5.8: a later posted run already settled this worker's carry, so none is taken here

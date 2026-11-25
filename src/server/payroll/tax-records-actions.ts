@@ -18,11 +18,13 @@ import {
   importOpeningSpec,
   itfFlagSchema,
   itfFlagSpec,
+  nhfNumberSchema,
   nhfNumberSpec,
   openingBalanceSchema,
   previewDeclareRelief,
   previewImportOpening,
   previewItfFlag,
+  previewNhfNumber,
   previewOpeningBalance,
   previewVerifyRelief,
   proofLinkSpec,
@@ -195,23 +197,26 @@ export async function setItfTurnoverAction(
   }));
 }
 
-/** "NHF number": set or remove the number on file (shown masked). */
+/**
+ * "NHF number": set or remove the number on file (shown masked). A money write since slice 5.10
+ * (security review round 2, L4): NHF is taken only with a number on file. Preview on the first
+ * press, save on the confirm step; the number never comes back in the form state (the field keeps
+ * what was typed in the browser).
+ */
 export async function setNhfNumberAction(
-  _prev: CompanyFormState,
+  _prev: TaxFormState,
   formData: FormData,
-): Promise<CompanyFormState> {
+): Promise<TaxFormState> {
   const values = formFields(formData);
+  const echo = { ...values, nhfNumber: "" };
   try {
+    if (values.intent !== "save") {
+      const preview = await mutate(previewSpec(nhfNumberSchema, previewNhfNumber), values);
+      return { ok: true, status: 200, preview, values: echo };
+    }
     await mutate(nhfNumberSpec, values);
   } catch (error) {
-    const failed = failure(error);
-    return {
-      ok: false,
-      status: error instanceof MutationError && error.code === "forbidden" ? 403 : 400,
-      formError: failed.message,
-      fieldErrors: failed.fieldErrors,
-      values: { ...values, nhfNumber: "" },
-    };
+    return refused(error, echo);
   }
   for (const p of workerPath(values)) revalidatePath(p);
   return {
