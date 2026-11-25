@@ -293,6 +293,8 @@ import {
   voidPaymentSpec,
 } from "@/server/payroll/remittances";
 import { PAYSLIP_PUBLISHERS } from "@/server/payroll/payslip-documents";
+import { addFinalPayItemSpec } from "@/server/payroll/final-pay";
+import { setHolidayPaySpec } from "@/server/payroll/holiday-pay";
 import {
   declareReliefSpec,
   importOpeningSpec,
@@ -350,6 +352,7 @@ import {
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
 import { previewSetModules } from "./company-previews";
+import { previewAddPayrollFinalPayItem, previewSetPayrollHolidayPay } from "./leavers-previews";
 import {
   previewAddPost,
   previewCancelRequirementChange,
@@ -2757,6 +2760,20 @@ export const CAPABILITIES: readonly Capability[] = [
     agent: false,
     agentNote: "A statement about the tax adviser's advice: only the owner can make it.",
   },
+  {
+    name: "payroll.set_holiday_pay",
+    description:
+      "Sets the company's public-holiday pay multiplier on the overtime rate from tomorrow or later (default 1.0x).",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(setHolidayPaySpec),
+    changes: "one",
+    action: at("payroll/leavers-actions", "setHolidayPayAction"),
+    preview: previewSetPayrollHolidayPay,
+    agent: false,
+    agentNote:
+      "Changes how holiday work is paid: a company decision under its contracts, kept to the owner, HR or Finance on the screen.",
+  },
 
   // -------------------------------------------------------------------------
   // Timesheets (workforce/timesheet-actions.ts, slice 4.2)
@@ -3059,6 +3076,19 @@ export const CAPABILITIES: readonly Capability[] = [
     changes: "many",
     action: at("payroll/run-actions", "removeAdjustmentAction"),
     preview: previewRemovePayrollAdjustment,
+    agent: false,
+    agentNote: NO_PAYROLL,
+  },
+  {
+    name: "payroll.add_final_pay_item",
+    description:
+      "Adds pay in lieu of leave or notice, a gratuity or a redundancy payment to a leaver's final-pay draft, with a reason.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(addFinalPayItemSpec),
+    changes: "many",
+    action: at("payroll/leavers-actions", "addFinalPayItemAction"),
+    preview: previewAddPayrollFinalPayItem,
     agent: false,
     agentNote: NO_PAYROLL,
   },

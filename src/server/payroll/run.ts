@@ -6,7 +6,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { toKobo } from "@/lib/money";
 import type { EmploymentType, PayslipResult } from "@/lib/payroll/contract";
-import { computeEarnings, type DayPolicy, type EarningsResult } from "@/lib/payroll/earnings";
+import {
+  computeEarnings,
+  holidayMultiplierOn,
+  type DayPolicy,
+  type EarningsResult,
+  type HolidayRateVersion,
+} from "@/lib/payroll/earnings";
 import {
   parseLeaveCorrections,
   parsePayrollInputs,
@@ -157,6 +163,27 @@ async function ruleSetVersions(supabase: Client, organisationId: string): Promis
     set: parseRuleSet(r.name, r.rules, r.policy),
     rules: r.rules,
     policy: r.policy,
+  }));
+}
+
+/**
+ * Slice 5.9c: the company's dated holiday pay multipliers (`payroll_holiday_pay_rates`,
+ * insert-only, oldest first). None means 1.0x on every day.
+ */
+export async function holidayRateVersions(
+  supabase: Client,
+  organisationId: string,
+): Promise<(HolidayRateVersion & { id: string })[]> {
+  const { data, error } = await supabase
+    .from("payroll_holiday_pay_rates")
+    .select("id, effective_from, multiplier_bps")
+    .eq("organisation_id", organisationId)
+    .order("effective_from");
+  if (error) throw new Error(`Could not read the holiday pay rates (${error.code})`);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    effectiveFrom: r.effective_from,
+    multiplierBps: r.multiplier_bps,
   }));
 }
 
@@ -836,7 +863,10 @@ export async function calculateRun(
         );
 
   // Decision 15: one rule set for the whole run, the version in force on the pay date.
-  const versions = await ruleSetVersions(supabase, organisationId);
+  const [versions, holidayRates] = await Promise.all([
+    ruleSetVersions(supabase, organisationId),
+    holidayRateVersions(supabase, organisationId),
+  ]);
   const runVersion = target.ruleSetId
     ? (versions.find((v) => v.id === target.ruleSetId) ?? null)
     : inForce(versions, target.payDate);
@@ -844,14 +874,20 @@ export async function calculateRun(
   const rules = runVersion?.set ?? NTA_2025_V2;
   const ruleSetId = runVersion?.id ?? null;
   // The pay-policy figures of the version in force on each day worked (arrears included).
+  // Slice 5.9c: and the company's holiday multiplier in force on the day worked.
   const policyOn = (date: string): DayPolicy => {
     const v = inForce(versions, date);
+    const holiday =
+      holidayRates.length > 0
+        ? { holidayMultiplierBps: holidayMultiplierOn(holidayRates, date) }
+        : {};
     return v
       ? {
           overtimeMultiplierBps: v.set.policy.overtimeMultiplierBps,
           offDayPaidMinutes: v.set.policy.offDayPaidMinutes,
+          ...holiday,
         }
-      : {};
+      : holiday;
   };
   const policy = payPolicyFor(inputs, {
     overtimeMultiplierBps: rules.policy.overtimeMultiplierBps,
@@ -1216,6 +1252,10 @@ export async function calculateRun(
     });
   }
 
+  // The latest holiday a holiday multiplier can price (slice 5.9c); "" when there is none.
+  const lastHoliday = inputs.holidays
+    .filter((d) => d <= period.end)
+    .reduce((m, d) => (d > m ? d : m), "");
   // Decision 7: the canonical inputs, key order ignored. No personal numbers.
   const inputsSha256 = sha256(
     canonicalJson({
@@ -1233,6 +1273,21 @@ export async function calculateRun(
         policy: v.policy,
       })),
       inputs: raw,
+      // Slice 5.9c: present only when a holiday multiplier can price one of the run's holidays
+      // (it starts on or before the latest holiday the inputs hold up to the period's end), so
+      // other runs keep the hash they had before and a rate scheduled for later doesn't send a
+      // run back.
+      ...(holidayRates.some((h) => h.effectiveFrom <= lastHoliday)
+        ? {
+            holiday_rates: holidayRates
+              .filter((h) => h.effectiveFrom <= lastHoliday)
+              .map((h) => ({
+                id: h.id,
+                from: h.effectiveFrom,
+                bps: h.multiplierBps,
+              })),
+          }
+        : {}),
       // Present only when there is something to correct, so runs without corrections keep the
       // hash they had before slice 5.7c.
       ...(corrections.parsed.byWorker.size > 0 ? { leave_corrections: corrections.raw } : {}),
