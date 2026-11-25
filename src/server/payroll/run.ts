@@ -1034,6 +1034,10 @@ export async function calculateRun(
     });
   }
 
+  // The latest holiday a holiday multiplier can price (slice 5.9c); "" when there is none.
+  const lastHoliday = inputs.holidays
+    .filter((d) => d <= period.end)
+    .reduce((m, d) => (d > m ? d : m), "");
   // Decision 7: the canonical inputs, key order ignored. No personal numbers.
   const inputsSha256 = sha256(
     canonicalJson({
@@ -1051,13 +1055,14 @@ export async function calculateRun(
         policy: v.policy,
       })),
       inputs: raw,
-      // Slice 5.9c: present only when the company set a holiday multiplier that can touch the
-      // run's days (from before its period ends; arrears days are earlier still), so other runs
-      // keep the hash they had before and a rate scheduled for later doesn't send a run back.
-      ...(holidayRates.some((h) => h.effectiveFrom <= period.end)
+      // Slice 5.9c: present only when a holiday multiplier can price one of the run's holidays
+      // (it starts on or before the latest holiday the inputs hold up to the period's end), so
+      // other runs keep the hash they had before and a rate scheduled for later doesn't send a
+      // run back.
+      ...(holidayRates.some((h) => h.effectiveFrom <= lastHoliday)
         ? {
             holiday_rates: holidayRates
-              .filter((h) => h.effectiveFrom <= period.end)
+              .filter((h) => h.effectiveFrom <= lastHoliday)
               .map((h) => ({
                 id: h.id,
                 from: h.effectiveFrom,

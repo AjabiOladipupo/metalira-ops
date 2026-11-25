@@ -251,6 +251,9 @@ export function planFinalPayItem(prefill: FinalPayPrefill, input: FinalPayItemIn
 /** "₦3,000 a day (basic ₦60,000 ÷ 20 days)", or null without a monthly basic. */
 export function basicDailyRateText(prefill: FinalPayPrefill): string | null {
   if (prefill.basicMonthlyKobo === null) return null;
+  // Display only: the amount is days × basic ÷ divisor, rounded once, so the daily figure here
+  // is shown as about when it isn't whole kobo.
+  const exact = prefill.basicMonthlyKobo % BigInt(prefill.divisorDays) === 0n;
   const daily = roundHalfUp(prefill.basicMonthlyKobo, BigInt(prefill.divisorDays));
-  return `${formatNaira(daily)} a day (basic ${formatNaira(prefill.basicMonthlyKobo)} ÷ ${prefill.divisorDays} days)`;
+  return `${exact ? "" : "about "}${formatNaira(daily)} a day (basic ${formatNaira(prefill.basicMonthlyKobo)} ÷ ${prefill.divisorDays} days)`;
 }
