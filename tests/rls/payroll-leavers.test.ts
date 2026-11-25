@@ -11,6 +11,8 @@
  *   exempt part capped per worker across payments; nothing is pensionable; removing either row
  *   removes the item; items never change (MLTB6).
  */
+import { randomUUID } from "node:crypto";
+
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -349,10 +351,35 @@ describe("final-pay items", () => {
   });
 
   it("pre-fills 0 leave days below 6 months' service (Labour Act s.18(4))", async () => {
-    const { workerId: newcomer } = await addPayrollWorker(admin, owner.orgId, {
-      start_date: "2026-06-01",
-      end_date: "2026-10-05",
+    // A joiner on 1 Jun 2026 (the helper's pay rate starts in 2025, so the worker and the rate are
+    // written here).
+    const { data: joiner, error: joinerError } = await admin
+      .from("workers")
+      .insert({
+        organisation_id: owner.orgId,
+        staff_id: `PR-${randomUUID().slice(0, 8)}`,
+        first_name: "Ada",
+        last_name: "Obi",
+        employment_type: "permanent",
+        start_date: "2026-06-01",
+        end_date: "2026-10-05",
+        tax_state: "Lagos",
+      })
+      .select("id")
+      .single();
+    expect(joinerError).toBeNull();
+    const newcomer = joiner!.id;
+    const rate = await admin.from("pay_rates").insert({
+      organisation_id: owner.orgId,
+      worker_id: newcomer,
+      pay_type: "monthly",
+      basic_kobo: 6_000_000,
+      housing_kobo: 3_600_000,
+      transport_kobo: 2_400_000,
+      other_allowances_kobo: 0,
+      effective_from: "2026-06-01",
     });
+    expect(rate.error).toBeNull();
     const run = await createRun([newcomer]);
     const { data } = await owner.client.rpc("payroll_final_pay_prefill", {
       p_organisation_id: owner.orgId,
