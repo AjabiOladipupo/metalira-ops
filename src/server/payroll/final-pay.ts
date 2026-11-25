@@ -115,7 +115,16 @@ const prefillRow = z.object({
   end_date: z.iso.date(),
   basic_monthly_kobo: z.string().regex(/^\d+$/).nullable(),
   divisor_days: z.number().int().min(1),
-  annual_balance_days: z.number().int().nullable(),
+  leave: z
+    .object({
+      entitlement_days: z.number().int(),
+      months_in_year: z.number().int(),
+      taken_days: z.number().int(),
+      service_months: z.number().int(),
+      days: z.number().int(),
+      year: z.number().int(),
+    })
+    .nullable(),
   exempt_cap_kobo: z.string().regex(/^\d+$/),
   exempt_used_kobo: z.string().regex(/^\d+$/),
 });
@@ -141,7 +150,16 @@ export async function loadFinalPayPrefill(
         endDate: r.end_date,
         basicMonthlyKobo: r.basic_monthly_kobo === null ? null : toKobo(r.basic_monthly_kobo),
         divisorDays: r.divisor_days,
-        annualBalanceDays: r.annual_balance_days,
+        leave: r.leave
+          ? {
+              entitlementDays: r.leave.entitlement_days,
+              monthsInYear: r.leave.months_in_year,
+              takenDays: r.leave.taken_days,
+              serviceMonths: r.leave.service_months,
+              days: r.leave.days,
+              year: r.leave.year,
+            }
+          : null,
         exemptCapKobo: toKobo(r.exempt_cap_kobo),
         exemptUsedKobo: toKobo(r.exempt_used_kobo),
       },
@@ -149,8 +167,25 @@ export async function loadFinalPayPrefill(
   );
 }
 
+/** The column checks that hold the personal-number rule (security review L2). */
+const PERSONAL_NUMBER_CHECKS = [
+  "payroll_final_pay_items_reason_text",
+  "payroll_final_pay_items_change_reason_text",
+  "payroll_adjustments_label_no_personal_number",
+  "payroll_adjustments_reason_no_personal_number",
+];
+
 /** Database refusals in plain English. */
 export function fromFinalPayDbError(error: Pick<PostgrestError, "code" | "message">): never {
+  if (error.code === "23514") {
+    if (PERSONAL_NUMBER_CHECKS.some((name) => error.message.includes(name))) {
+      throw new MutationError("invalid", `${PERSONAL_NUMBER_MESSAGE}.`);
+    }
+    throw new MutationError(
+      "invalid",
+      "That item breaks a payroll rule. Check the figures and try again.",
+    );
+  }
   if (/^MLTB[1-5]$/.test(error.code)) {
     if (error.code === "MLTB4") {
       throw new MutationError("invalid", error.message, { changeReason: error.message });
@@ -294,3 +329,54 @@ export const addFinalPayItemSpec: MutationSpec<typeof finalPayItemSchema, { runI
     return { runId: run.id };
   },
 };
+
+/**
+ * Exempt splits that went stale (money review L1): an item's exempt part is fixed when it is
+ * added, so when a run whose items used the worker's cap is later discarded or reversed, an item
+ * here could now be exempt on more. Returns those items' ids; the screen asks HR to remove and add
+ * them again. Never the other way: a split can't exceed the cap, because later items count it.
+ */
+export async function staleExemptItems(
+  supabase: Client,
+  organisationId: string,
+  runId: string,
+  prefill: Map<string, FinalPayPrefill>,
+): Promise<Set<string>> {
+  const { data: mine, error } = await supabase
+    .from("payroll_final_pay_items")
+    .select("id, worker_id, amount_kobo::text, exempt_kobo::text, exempt_cap_kobo")
+    .eq("organisation_id", organisationId)
+    .eq("run_id", runId)
+    .not("exempt_cap_kobo", "is", null);
+  if (error) throw new Error(`Could not read the final-pay items (${error.code})`);
+  const stale = new Set<string>();
+  if (!mine || mine.length === 0) return stale;
+  const workers = [...new Set(mine.map((i) => i.worker_id))];
+  const { data: all, error: allError } = await supabase
+    .from("payroll_final_pay_items")
+    .select(
+      "id, worker_id, exempt_kobo::text, payroll_runs!payroll_final_pay_items_run_fkey ( status, kind, discarded_at )",
+    )
+    .eq("organisation_id", organisationId)
+    .in("worker_id", workers);
+  if (allError) throw new Error(`Could not read the final-pay items (${allError.code})`);
+  const live = (all ?? []).filter(
+    (i) =>
+      i.payroll_runs !== null &&
+      i.payroll_runs.status !== "reversed" &&
+      i.payroll_runs.kind !== "reversal" &&
+      i.payroll_runs.discarded_at === null,
+  );
+  for (const item of mine) {
+    const p = prefill.get(item.worker_id);
+    if (!p) continue;
+    const others = live
+      .filter((i) => i.worker_id === item.worker_id && i.id !== item.id)
+      .reduce((n, i) => n + toKobo(i.exempt_kobo), 0n);
+    const room = p.exemptCapKobo - others > 0n ? p.exemptCapKobo - others : 0n;
+    const amount = toKobo(item.amount_kobo);
+    const now = amount < room ? amount : room;
+    if (now > toKobo(item.exempt_kobo)) stale.add(item.id);
+  }
+  return stale;
+}

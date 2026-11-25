@@ -48,7 +48,8 @@ export const FINAL_PAY_ITEMS: Record<FinalPayItemType, FinalPayItemRule> = {
   leave_in_lieu: {
     label: "Pay in lieu of untaken leave",
     owed: "Owed by law after 6 months' continuous service (Labour Act s.18(4)).",
-    calculation: "Untaken annual leave days × basic daily rate, from the leave balance.",
+    calculation:
+      "Untaken days × basic daily rate. Days: yearly entitlement × months worked this leave year ÷ 12, less days taken.",
     tax: "Taxable. Not pensionable.",
     pensionable: false,
     byDays: true,
@@ -90,14 +91,36 @@ export function isFinalPayItemType(v: unknown): v is FinalPayItemType {
 /** The starting cap, as stored on every rule set version (`loss_of_office_exempt_kobo`). */
 export const LOSS_OF_OFFICE_EXEMPT_DEFAULT_KOBO: Kobo = 5_000_000_000n;
 
-/** Months of continuous service from the start date to the last day, whole months only. */
+/** `iso` + `months` calendar months, the day clamped to the month's end (31 Jan + 1 = 28 Feb). */
+function addMonthsClamped(iso: string, months: number): string {
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  const index = y * 12 + (m - 1) + months;
+  const year = Math.floor(index / 12);
+  const month = (index % 12) + 1;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(Math.min(d, last)).padStart(2, "0")}`;
+}
+
+/**
+ * Complete months of continuous service from the start date to the last day (money review M2):
+ * the largest N with start + N months (the day clamped to the month's end) on or before the day
+ * after the last day. 1 Jan to 30 Jun is 6; 31 Jan to 26 Feb is 0 and to 27 Feb is 1 (31 Jan
+ * + 1 month is 28 Feb). The
+ * database's private.payroll_complete_months is the same rule.
+ */
 export function serviceMonths(startDate: string, endDate: string): number {
-  const [sy, sm, sd] = startDate.split("-").map(Number) as [number, number, number];
-  const [ey, em, ed] = endDate.split("-").map(Number) as [number, number, number];
-  let months = (ey - sy) * 12 + (em - sm);
-  // The month is complete on the day before the start day of the month (5 Jan to 4 Jul is 6).
-  if (ed + 1 < sd) months -= 1;
-  return Math.max(0, months);
+  const after = addDaysIso(endDate, 1);
+  if (after <= startDate) return 0;
+  const [sy, sm] = startDate.split("-").map(Number) as [number, number];
+  const [ay, am] = after.split("-").map(Number) as [number, number];
+  let n = (ay - sy) * 12 + (am - sm);
+  if (addMonthsClamped(startDate, n) > after) n -= 1;
+  return Math.max(0, n);
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 /** Leave in lieu is owed by law from 6 months' continuous service (Labour Act s.18(4)). */
@@ -143,11 +166,36 @@ export interface FinalPayPrefill {
   /** The pay version in force on the last day: monthly basic, or null for daily and hourly. */
   basicMonthlyKobo: Kobo | null;
   divisorDays: number;
-  /** The annual leave balance (Phase 4 ledger) for the last day's year; null with no annual type. */
-  annualBalanceDays: number | null;
+  /**
+   * The leave-in-lieu pre-fill (owner decision, 25 Nov 2026), worked out by the database's
+   * private.payroll_leave_in_lieu; null when the company has no active `annual` leave type.
+   */
+  leave: LeaveInLieuPrefill | null;
   /** The run's rule set cap and what earlier items of the worker already used. */
   exemptCapKobo: Kobo;
   exemptUsedKobo: Kobo;
+}
+
+/**
+ * Yearly annual entitlement × complete months worked in the leave year ÷ 12, less days taken that
+ * year, rounded down to whole days; 0 below 6 months' continuous service (Labour Act s.18(4)).
+ */
+export interface LeaveInLieuPrefill {
+  entitlementDays: number;
+  monthsInYear: number;
+  takenDays: number;
+  serviceMonths: number;
+  days: number;
+  year: number;
+}
+
+/** The pre-fill's working, for the form: "15 days × 9 of 12 months, less 3 taken in 2026 = 8 days". */
+export function leavePrefillText(leave: LeaveInLieuPrefill | null): string {
+  if (leave === null) return "No annual leave type is set up: enter the days.";
+  if (leave.serviceMonths < LEAVE_IN_LIEU_MIN_SERVICE_MONTHS) {
+    return `${leave.serviceMonths} months' service: not owed by law below 6 months, so 0 days.`;
+  }
+  return `${leave.entitlementDays} days a year × ${leave.monthsInYear} of 12 months, rounded down, less ${leave.takenDays} taken in ${leave.year} = ${leave.days} ${leave.days === 1 ? "day" : "days"}.`;
 }
 
 export interface FinalPayItemInput {
@@ -203,8 +251,7 @@ export function planFinalPayItem(prefill: FinalPayPrefill, input: FinalPayItemIn
       ? basicDaysAmount(input.days!, prefill.basicMonthlyKobo, prefill.divisorDays)
       : null;
   const daysChanged =
-    input.type === "leave_in_lieu" &&
-    (prefill.annualBalanceDays === null || input.days !== prefill.annualBalanceDays);
+    input.type === "leave_in_lieu" && (prefill.leave === null || input.days !== prefill.leave.days);
   const amountChanged = rule.byDays && (computedKobo === null || input.amountKobo !== computedKobo);
   const exempt = usesExemption(input.type, input.partOfSettlement);
   const split = exempt
@@ -254,6 +301,6 @@ export function basicDailyRateText(prefill: FinalPayPrefill): string | null {
   // Display only: the amount is days × basic ÷ divisor, rounded once, so the daily figure here
   // is shown as about when it isn't whole kobo.
   const exact = prefill.basicMonthlyKobo % BigInt(prefill.divisorDays) === 0n;
-  const daily = roundHalfUp(prefill.basicMonthlyKobo, BigInt(prefill.divisorDays));
+  const daily = roundHalfUp(prefill.basicMonthlyKobo, BigInt(prefill.divisorDays)); // half up
   return `${exact ? "" : "about "}${formatNaira(daily)} a day (basic ${formatNaira(prefill.basicMonthlyKobo)} ÷ ${prefill.divisorDays} days)`;
 }

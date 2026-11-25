@@ -4,8 +4,9 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 import { formatDate, lagosToday, addDays } from "@/lib/dates";
-import { HOLIDAY_MULTIPLIER_DEFAULT_BPS, holidayMultiplierOn } from "@/lib/payroll/earnings";
+import { holidayMultiplierOn } from "@/lib/payroll/earnings";
 import { formatNaira, toKobo, type Kobo } from "@/lib/money";
+import { holidayHourExample, parseMultiplierBps } from "@/lib/payroll/holiday-pay";
 import { LOSS_OF_OFFICE_EXEMPT_DEFAULT_KOBO } from "@/lib/payroll/final-pay";
 import { formatMultiplier } from "@/lib/payroll/rule-set";
 import { hasPersonalNumber, PERSONAL_NUMBER_MESSAGE } from "@/lib/personal-number";
@@ -37,14 +38,6 @@ export function canSetHolidayPay(role: ManagerRole): boolean {
 
 const multiplierMessage = "Enter a multiplier from 1.0 to 5.0, like 1.5";
 const reasonMessage = "Give a reason in up to 500 characters, with no web addresses";
-
-/** "1.5" → 15000 basis points; 1.0 to 5.0, up to two decimals. */
-export function parseMultiplierBps(input: string): number | null {
-  const m = /^(\d)(?:\.(\d{1,2}))?$/.exec(input.trim().replace(/[x×]$/i, ""));
-  if (!m) return null;
-  const bps = Number(m[1]) * 10_000 + Number((m[2] ?? "").padEnd(2, "0")) * 100;
-  return bps >= 10_000 && bps <= 50_000 ? bps : null;
-}
 
 export const holidayPaySchema = z.object({
   multiplier: z.string(multiplierMessage).transform((v, ctx): number => {
@@ -119,16 +112,25 @@ export function fromHolidayPayDbError(error: Pick<PostgrestError, "code" | "mess
       "Only an owner, HR or Finance can set the holiday pay rate.",
     );
   }
-  if (error.code === "23514") throw new MutationError("invalid", `${PERSONAL_NUMBER_MESSAGE}.`);
+  if (error.code === "23514") {
+    // Only the reason's column check holds the personal-number rule (security review L2).
+    throw new MutationError(
+      "invalid",
+      error.message.includes("payroll_holiday_pay_rates_reason_text")
+        ? `${PERSONAL_NUMBER_MESSAGE}.`
+        : "That rate breaks a payroll rule. Check it and try again.",
+    );
+  }
   if (error.code === "MLTB3" || error.code === "22023") {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code})`);
 }
 
-/** 8 hours at ₦750 an hour × the multiplier, in kobo (the preview's example). */
-const eightHours = (bps: number) =>
-  (600_000n * BigInt(bps)) / BigInt(HOLIDAY_MULTIPLIER_DEFAULT_BPS);
+const hourText = (bps: number) => {
+  const h = holidayHourExample(bps);
+  return `${formatNaira(h.normal, { whole: true })} normal + ${formatNaira(h.extra, { whole: true })} extra = ${formatNaira(h.total, { whole: true })}`;
+};
 
 /** The preview: the multiplier from that day before and after, and what an hour pays. */
 export async function previewSetHolidayPay(
@@ -151,18 +153,18 @@ export async function previewSetHolidayPay(
     data.effectiveFrom,
   );
   return {
-    summary: `From ${formatDate(data.effectiveFrom)}, public-holiday work is paid at the overtime rate × ${formatMultiplier(data.multiplier)} on top of normal pay (${formatMultiplier(before)} before). Days worked before then keep the rate in force on the day. Runs already worked out change only when recalculated.`,
+    summary: `From ${formatDate(data.effectiveFrom)}, holiday work earns extra pay of ${formatMultiplier(data.multiplier)} the hourly rate on top of normal pay (${formatMultiplier(before)} before). Days worked before then keep the rate in force on the day. Runs already worked out change only when recalculated.`,
     changes: [
       {
-        label: "Holiday pay multiplier",
+        label: "Extra pay for holiday work",
         before: formatMultiplier(before),
         after: formatMultiplier(data.multiplier),
       },
       { label: "From", after: formatDate(data.effectiveFrom) },
       {
-        label: "8 hours on a holiday, at ₦750 an hour overtime",
-        before: formatNaira(eightHours(before), { whole: true }),
-        after: formatNaira(eightHours(data.multiplier), { whole: true }),
+        label: "An hour of holiday work at ₦750 normal pay",
+        before: hourText(before),
+        after: hourText(data.multiplier),
       },
     ],
   };

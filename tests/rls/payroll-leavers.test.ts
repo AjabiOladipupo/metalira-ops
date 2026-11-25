@@ -17,7 +17,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, lagosToday } from "@/lib/dates";
 import type { Database } from "@/types/db";
 
-import { addPayrollWorker, OCT_START } from "./helpers/payroll";
+import {
+  addPayrollWorker,
+  OCT_END,
+  OCT_START,
+  resultsFor,
+  saveResults,
+  SHA,
+} from "./helpers/payroll";
 import {
   adminClient,
   createTenantUser,
@@ -283,7 +290,7 @@ describe("final-pay items", () => {
     runId = await createRun([workerId]);
   });
 
-  it("pre-fills from the last day's basic, the divisor, the leave balance and the cap", async () => {
+  it("pre-fills from the last day's basic, the divisor, the owner's leave formula and the cap", async () => {
     const before = await hr.client.rpc("payroll_final_pay_prefill", {
       p_organisation_id: owner.orgId,
       p_run_id: runId,
@@ -296,12 +303,13 @@ describe("final-pay items", () => {
         end_date: "2026-10-05",
         basic_monthly_kobo: "6000000",
         divisor_days: 20,
-        annual_balance_days: null,
+        leave: null,
         exempt_cap_kobo: "5000000000",
         exempt_used_kobo: "0",
       },
     ]);
-    // An annual leave type with 6 days on the 2026 ledger.
+    // An annual leave type of 15 days a year, with 3 days taken in 2026 (owner decision, 25 Nov):
+    // 15 × 9 complete months (1 Jan to 5 Oct) ÷ 12 = 11.25, rounded down to 11, less 3 = 8 days.
     const type = await asDbOwner(
       `insert into public.leave_types (organisation_id, code, name) values ($1, 'annual', 'Annual')
        returning id`,
@@ -309,27 +317,75 @@ describe("final-pay items", () => {
       true,
     );
     expect(type.error).toBeNull();
-    const ledger = await asDbOwner(
-      `insert into public.leave_ledger
-         (organisation_id, worker_id, leave_type_id, leave_year, kind, days, reason, actor)
-       values ($1, $2, $3, 2026, 'adjustment', 6, 'Seeded balance', $4)`,
-      [owner.orgId, workerId, (type.result!.rows[0] as { id: string }).id, owner.id],
+    const typeId = (type.result!.rows[0] as { id: string }).id;
+    const entitlement = await asDbOwner(
+      `insert into public.leave_entitlements
+         (organisation_id, leave_type_id, effective_from, days_per_year)
+       values ($1, $2, '2026-01-01', 15)`,
+      [owner.orgId, typeId],
       true,
     );
-    expect(ledger.error).toBeNull();
+    expect(entitlement.error).toBeNull();
+    const taken = await asDbOwner(
+      `insert into public.leave_ledger
+         (organisation_id, worker_id, leave_type_id, leave_year, kind, days, request_id)
+       values ($1, $2, $3, 2026, 'taken', -3, gen_random_uuid())`,
+      [owner.orgId, workerId, typeId],
+      true,
+    );
+    expect(taken.error).toBeNull();
     const after = await finance.client.rpc("payroll_final_pay_prefill", {
       p_organisation_id: owner.orgId,
       p_run_id: runId,
     });
-    expect((after.data as { annual_balance_days: number }[])[0]!.annual_balance_days).toBe(6);
+    expect((after.data as { leave: unknown }[])[0]!.leave).toEqual({
+      entitlement_days: 15,
+      months_in_year: 9,
+      taken_days: 3,
+      service_months: 21,
+      days: 8,
+      year: 2026,
+    });
+  });
+
+  it("pre-fills 0 leave days below 6 months' service (Labour Act s.18(4))", async () => {
+    const { workerId: newcomer } = await addPayrollWorker(admin, owner.orgId, {
+      start_date: "2026-06-01",
+      end_date: "2026-10-05",
+    });
+    const run = await createRun([newcomer]);
+    const { data } = await owner.client.rpc("payroll_final_pay_prefill", {
+      p_organisation_id: owner.orgId,
+      p_run_id: run,
+    });
+    expect((data as { leave: unknown }[])[0]!.leave).toEqual({
+      entitlement_days: 15,
+      months_in_year: 4,
+      taken_days: 0,
+      service_months: 4,
+      days: 0,
+      year: 2026,
+    });
+    // Paying it anyway (a contract may give it) needs the reason for the change.
+    const paid = await owner.client.rpc("add_final_pay_item", {
+      p_organisation_id: owner.orgId,
+      p_run_id: run,
+      p_worker_id: newcomer,
+      p_item_type: "leave_in_lieu",
+      p_days: 2,
+      p_amount_kobo: "600000",
+      p_computed_kobo: "600000",
+      p_reason: "Contract gives leave from the first month",
+    });
+    expect(paid.error?.code).toBe("MLTB4");
   });
 
   it("adds leave in lieu on basic only, checked against days x basic ÷ 20", async () => {
-    // 6 days x ₦60,000 ÷ 20 = ₦18,000.
+    // 8 days x ₦60,000 ÷ 20 = ₦24,000.
     const stale = await add(hr.client, {
       p_item_type: "leave_in_lieu",
-      p_days: 6,
-      p_amount_kobo: "1800000",
+      p_days: 8,
+      p_amount_kobo: "2400000",
       p_computed_kobo: "3600000",
     });
     expect(stale.error?.code).toBe("MLTB5");
@@ -342,28 +398,28 @@ describe("final-pay items", () => {
     expect(changed.error?.code).toBe("MLTB4");
     const ok = await add(hr.client, {
       p_item_type: "leave_in_lieu",
-      p_days: 6,
-      p_amount_kobo: "1800000",
-      p_computed_kobo: "1800000",
+      p_days: 8,
+      p_amount_kobo: "2400000",
+      p_computed_kobo: "2400000",
     });
     expect(ok.error).toBeNull();
     const { data: item } = await admin
       .from("payroll_final_pay_items")
-      .select("item_type, days, balance_days, basic_monthly_kobo, divisor_days, computed_kobo")
+      .select("item_type, days, prefill_days, basic_monthly_kobo, divisor_days, computed_kobo")
       .eq("id", ok.data!)
       .single();
     expect(item).toEqual({
       item_type: "leave_in_lieu",
-      days: 6,
-      balance_days: 6,
+      days: 8,
+      prefill_days: 8,
       basic_monthly_kobo: 6_000_000,
       divisor_days: 20,
-      computed_kobo: 1_800_000,
+      computed_kobo: 2_400_000,
     });
     expect(await adjustments()).toEqual([
       {
-        label: "Pay in lieu of untaken leave, 6 days",
-        amount_kobo: 1_800_000,
+        label: "Pay in lieu of untaken leave, 8 days",
+        amount_kobo: 2_400_000,
         taxable: true,
         pensionable: false,
         final_pay_item_id: ok.data!,
@@ -372,9 +428,9 @@ describe("final-pay items", () => {
     // One of each type a worker on a run.
     const again = await add(hr.client, {
       p_item_type: "leave_in_lieu",
-      p_days: 6,
-      p_amount_kobo: "1800000",
-      p_computed_kobo: "1800000",
+      p_days: 8,
+      p_amount_kobo: "2400000",
+      p_computed_kobo: "2400000",
     });
     expect(again.error?.code).toBe("23505");
   });
@@ -524,5 +580,321 @@ describe("final-pay items", () => {
       p_run_id: fresh,
     });
     expect((prefill.data as { exempt_used_kobo: string }[])[0]!.exempt_used_kobo).toBe("0");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Review fixes
+// ---------------------------------------------------------------------------
+
+describe("no other path exempts pay (money and security review M1)", () => {
+  it("refuses an earning not taxed through add_payroll_adjustment, on any run", async () => {
+    const owner = await createTenantUser("leave-m1", "Exempt Bypass Org");
+    const { workerId: leaver } = await addPayrollWorker(admin, owner.orgId, {
+      end_date: "2026-10-05",
+    });
+    const { workerId: stayer } = await addPayrollWorker(admin, owner.orgId);
+    const finalPay = await owner.client.rpc("create_off_cycle_run", {
+      p_organisation_id: owner.orgId,
+      p_period_start: OCT_START,
+      p_pay_date: "2026-10-16",
+      p_reason: "final_pay",
+      p_note: "Made redundant",
+      p_worker_ids: [leaver],
+    });
+    expect(finalPay.error).toBeNull();
+    const regular = await owner.client.rpc("create_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_period_start: OCT_START,
+    });
+    expect(regular.error).toBeNull();
+    for (const [runId, workerId] of [
+      [finalPay.data!, leaver],
+      [regular.data!, stayer],
+    ] as const) {
+      const exempt = await owner.client.rpc("add_payroll_adjustment", {
+        p_organisation_id: owner.orgId,
+        p_run_id: runId,
+        p_worker_id: workerId,
+        p_kind: "earning",
+        p_label: "Redundancy pay",
+        p_amount_kobo: "6000000000",
+        p_pensionable: false,
+        p_taxable: false,
+        p_instalments: 1,
+        p_reason: "Trying to skip the cap",
+      });
+      expect(exempt.error?.code).toBe("MLTB9");
+      const taxed = await owner.client.rpc("add_payroll_adjustment", {
+        p_organisation_id: owner.orgId,
+        p_run_id: runId,
+        p_worker_id: workerId,
+        p_kind: "earning",
+        p_label: "Bonus",
+        p_amount_kobo: "100000",
+        p_pensionable: false,
+        p_taxable: true,
+        p_instalments: 1,
+        p_reason: "Long service",
+      });
+      expect(taxed.error).toBeNull();
+    }
+    // Not for the database owner either.
+    const { error } = await asDbOwner(
+      `insert into public.payroll_adjustments (organisation_id, run_id, worker_id, kind, label,
+         amount_kobo, taxable, series_id, reason, created_by)
+       values ($1, $2, $3, 'earning', 'Exempt', 100, false, gen_random_uuid(), 'x', $4)`,
+      [owner.orgId, regular.data!, stayer, owner.id],
+      true,
+    );
+    expect(error?.code).toBe("MLTB9");
+  });
+});
+
+async function hasAdviserEngine(orgId: string, runId: string): Promise<boolean> {
+  const { data: run } = await admin
+    .from("payroll_runs")
+    .select("rule_set_id")
+    .eq("id", runId)
+    .single();
+  const { rows } = await db.query<{ has: boolean }>(
+    "select private.tax_rule_set_has_adviser_engine($1, $2) as has",
+    [orgId, run!.rule_set_id],
+  );
+  return rows[0]!.has;
+}
+
+describe("a final pay waits for the adviser's engine (MLTB8)", () => {
+  it("refuses to submit a final-pay run holding items on a rule set without it", async () => {
+    const owner = await createTenantUser("leave-engine", "Final Pay Engine Org");
+    const leaver = await addPayrollWorker(admin, owner.orgId, { end_date: "2026-10-05" });
+    const run = await owner.client.rpc("create_off_cycle_run", {
+      p_organisation_id: owner.orgId,
+      p_period_start: OCT_START,
+      p_pay_date: "2026-10-16",
+      p_reason: "final_pay",
+      p_note: "Resigned",
+      p_worker_ids: [leaver.workerId],
+    });
+    expect(run.error).toBeNull();
+    const item = await owner.client.rpc("add_final_pay_item", {
+      p_organisation_id: owner.orgId,
+      p_run_id: run.data!,
+      p_worker_id: leaver.workerId,
+      p_item_type: "gratuity",
+      p_amount_kobo: "5000000",
+      p_reason: "Contract clause 12",
+    });
+    expect(item.error).toBeNull();
+    const { data: adj } = await admin
+      .from("payroll_adjustments")
+      .select("id")
+      .eq("final_pay_item_id", item.data!)
+      .single();
+    const doc = resultsFor(
+      { workerId: leaver.workerId, payRateId: leaver.payRateId, adjustmentId: null },
+      {
+        anomalies: [],
+        extra: [
+          {
+            code: "adjustment_earning",
+            label: "Gratuity",
+            amount: 5_000_000,
+            sources: [{ kind: "adjustment", id: adj!.id, from: OCT_START, to: OCT_END }],
+          },
+        ],
+      },
+    );
+    expect((await saveResults(admin, owner, run.data!, doc)).error).toBeNull();
+    const engine = await hasAdviserEngine(owner.orgId, run.data!);
+    const submitted = await owner.client.rpc("submit_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: run.data!,
+    });
+    if (engine) {
+      // Slice 5.9a merged: the rule set carries year-to-date PAYE and NSITF on regular pay.
+      expect(submitted.error).toBeNull();
+    } else {
+      expect(submitted.error?.code).toBe("MLTB8");
+    }
+  });
+});
+
+describe("the exemption room across runs (money review M4)", () => {
+  it("gives a second final-pay run only the room left, and a discarded draft frees it", async () => {
+    const owner = await createTenantUser("leave-room", "Exempt Room Org");
+    const { workerId } = await addPayrollWorker(admin, owner.orgId, { end_date: "2026-10-05" });
+    const create = async (periodStart: string, payDate: string) => {
+      const { data, error } = await owner.client.rpc("create_off_cycle_run", {
+        p_organisation_id: owner.orgId,
+        p_period_start: periodStart,
+        p_pay_date: payDate,
+        p_reason: "final_pay",
+        p_note: "Made redundant",
+        p_worker_ids: [workerId],
+      });
+      expect(error).toBeNull();
+      return data!;
+    };
+    const loss = (runId: string, amount: string, exempt: string) =>
+      owner.client.rpc("add_final_pay_item", {
+        p_organisation_id: owner.orgId,
+        p_run_id: runId,
+        p_worker_id: workerId,
+        p_item_type: "loss_of_office",
+        p_amount_kobo: amount,
+        p_exempt_kobo: exempt,
+        p_reason: "Redundancy settlement",
+      });
+    const first = await create(OCT_START, "2026-10-16");
+    expect((await loss(first, "4000000000", "4000000000")).error).toBeNull();
+
+    // The last day moves into November (corrected): a second final pay, there.
+    const moved = await admin.from("workers").update({ end_date: "2026-11-05" }).eq("id", workerId);
+    expect(moved.error).toBeNull();
+    const second = await create("2026-10-20", "2026-11-16");
+    // ₦40m already used: ₦10m of a ₦20m payment is exempt.
+    expect((await loss(second, "2000000000", "2000000000")).error?.code).toBe("MLTB5");
+    const ok = await loss(second, "2000000000", "1000000000");
+    expect(ok.error).toBeNull();
+    const { data: item } = await admin
+      .from("payroll_final_pay_items")
+      .select("exempt_kobo, exempt_used_kobo")
+      .eq("id", ok.data!)
+      .single();
+    expect(item).toEqual({ exempt_kobo: 1_000_000_000, exempt_used_kobo: 4_000_000_000 });
+
+    // Discarding the first draft frees its ₦40m: only the second run's ₦10m stays used.
+    const discarded = await owner.client.rpc("discard_off_cycle_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: first,
+      p_reason: "Wrong period",
+    });
+    expect(discarded.error).toBeNull();
+    const { data: prefill } = await owner.client.rpc("payroll_final_pay_prefill", {
+      p_organisation_id: owner.orgId,
+      p_run_id: second,
+    });
+    expect((prefill as { exempt_used_kobo: string }[])[0]!.exempt_used_kobo).toBe("1000000000");
+  });
+
+  it("frees the room when an approved final pay is reversed", async () => {
+    const owner = await createTenantUser("leave-rev", "Exempt Reversal Org");
+    const finance = await createTestUser("leave-rev-fin");
+    const finance2 = await createTestUser("leave-rev-fin2");
+    await addMember(finance, "finance", owner.orgId);
+    await addMember(finance2, "finance", owner.orgId);
+    const leaver = await addPayrollWorker(admin, owner.orgId, { end_date: "2026-10-05" });
+    const create = async (note: string) => {
+      const { data, error } = await owner.client.rpc("create_off_cycle_run", {
+        p_organisation_id: owner.orgId,
+        p_period_start: OCT_START,
+        p_pay_date: "2026-10-16",
+        p_reason: "final_pay",
+        p_note: note,
+        p_worker_ids: [leaver.workerId],
+      });
+      expect(error).toBeNull();
+      return data!;
+    };
+    const runId = await create("Made redundant");
+    const item = await owner.client.rpc("add_final_pay_item", {
+      p_organisation_id: owner.orgId,
+      p_run_id: runId,
+      p_worker_id: leaver.workerId,
+      p_item_type: "loss_of_office",
+      p_amount_kobo: "4000000000",
+      p_exempt_kobo: "4000000000",
+      p_reason: "Redundancy settlement",
+    });
+    expect(item.error).toBeNull();
+    // A final pay with items is approved only on the adviser's engine (MLTB8). Until slice 5.9a
+    // merges no rule set has it, so there is no approved final pay to reverse yet; this test runs
+    // in full once it does.
+    if (!(await hasAdviserEngine(owner.orgId, runId))) return;
+    const { data: adj } = await admin
+      .from("payroll_adjustments")
+      .select("id")
+      .eq("final_pay_item_id", item.data!)
+      .single();
+    const doc = resultsFor(
+      { workerId: leaver.workerId, payRateId: leaver.payRateId, adjustmentId: null },
+      {
+        anomalies: [],
+        extra: [
+          {
+            code: "adjustment_earning",
+            label: "Redundancy or loss-of-office compensation, exempt part",
+            amount: 4_000_000_000,
+            sources: [{ kind: "adjustment", id: adj!.id, from: OCT_START, to: OCT_END }],
+          },
+        ],
+        mutate: (d) => {
+          const slip = (d.payslips as { lines: Record<string, unknown>[] }[])[0]!;
+          slip.lines.find((l) => l.code === "adjustment_earning")!.taxable = false;
+        },
+      },
+    );
+    expect((await saveResults(admin, owner, runId, doc)).error).toBeNull();
+    const submitted = await owner.client.rpc("submit_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: runId,
+    });
+    expect(submitted.error).toBeNull();
+    const { data: clock } = await admin.rpc("payroll_clock");
+    const checked = await admin.rpc("record_payroll_approval_check", {
+      p_organisation_id: owner.orgId,
+      p_run_id: runId,
+      p_actor: finance.id,
+      p_inputs_sha256: SHA,
+      p_read_started_at: clock!,
+    });
+    expect(checked.error).toBeNull();
+    const approved = await finance.client.rpc("approve_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: runId,
+    });
+    expect(approved.error).toBeNull();
+    const reversal = await finance.client.rpc("reverse_payroll_run", {
+      p_organisation_id: owner.orgId,
+      p_run_id: runId,
+      p_reason: "Settlement withdrawn",
+    });
+    expect(reversal.error).toBeNull();
+    const reversed = await finance2.client.rpc("approve_payroll_reversal", {
+      p_organisation_id: owner.orgId,
+      p_run_id: reversal.data!,
+    });
+    expect(reversed.error).toBeNull();
+    // A new final pay for the worker starts with the whole cap again.
+    const again = await create("Redundancy, second settlement");
+    const { data: prefill } = await owner.client.rpc("payroll_final_pay_prefill", {
+      p_organisation_id: owner.orgId,
+      p_run_id: again,
+    });
+    expect((prefill as { exempt_used_kobo: string }[])[0]!.exempt_used_kobo).toBe("0");
+  });
+});
+
+describe("personal numbers in free text (security review L3)", () => {
+  it("ignores every character but letters and digits, in SQL and TypeScript alike", async () => {
+    const { hasPersonalNumber } = await import("@/lib/personal-number");
+    for (const [text, expected] of [
+      ["080.1234.5678", true],
+      ["0801/234/5678", true],
+      ["(0801) 234 5678", true],
+      ["NIN: 123_456_789_01", true],
+      ["P.E.N 1234-5678-9012", true],
+      ["Resigned 05/10/2026", false],
+      ["123.456.789", false],
+      ["Award for 10 years, 2026", false],
+    ] as const) {
+      const { rows } = await db.query<{ has: boolean }>(
+        "select private.has_personal_number($1) as has",
+        [text],
+      );
+      expect(rows[0]!.has, text).toBe(expected);
+      expect(hasPersonalNumber(text), text).toBe(expected);
+    }
   });
 });

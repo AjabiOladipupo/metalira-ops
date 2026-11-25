@@ -1,7 +1,8 @@
 /**
  * Slice 5.9c in the browser.
  * 1. A leaver's final pay with typed items: Musa Ibrahim (₦120,000 a month, ₦60,000 basic) is made
- *    redundant with his last day on Monday 5 Oct 2026 and 6 days of annual leave left. On his
+ *    redundant with his last day on Monday 5 Oct 2026, on 8 days of annual leave a year (6 days for
+ *    the 9 complete months of 2026, the owner's pre-fill). On his
  *    final-pay off-cycle run the owner adds pay in lieu of untaken leave, pre-filled as 6 days ×
  *    ₦3,000 basic daily rate = ₦18,000 (taxable, not pensionable), and a ₦60,000,000 redundancy
  *    payment, split into ₦50,000,000 exempt from PAYE and ₦10,000,000 taxable. Gross pay is the
@@ -35,8 +36,8 @@ async function expectNoHorizontalScroll(page: Page) {
   expect(overflow).toBeLessThanOrEqual(0);
 }
 
-/** The leaver, with 6 days of annual leave on the 2026 ledger. */
-async function seedLeaver(orgId: string, ownerId: string): Promise<void> {
+/** The leaver, with an annual leave type of 8 days a year. */
+async function seedLeaver(orgId: string): Promise<void> {
   const admin = adminClient();
   const { data: worker, error } = await admin
     .from("workers")
@@ -71,17 +72,14 @@ async function seedLeaver(orgId: string, ownerId: string): Promise<void> {
     .select("id")
     .single();
   if (typeError) throw new Error(typeError.message);
-  const ledger = await admin.from("leave_ledger").insert({
+  // 8 days a year: 8 × 9 complete months of 2026 ÷ 12 = 6 days, none taken (owner decision).
+  const entitlement = await admin.from("leave_entitlements").insert({
     organisation_id: orgId,
-    worker_id: worker.id,
     leave_type_id: type.id,
-    leave_year: 2026,
-    kind: "adjustment",
-    days: 6,
-    reason: "Balance carried from the old system",
-    actor: ownerId,
+    effective_from: "2026-01-01",
+    days_per_year: 8,
   });
-  if (ledger.error) throw new Error(ledger.error.message);
+  if (entitlement.error) throw new Error(entitlement.error.message);
 }
 
 test("a final pay takes pay in lieu of leave and a redundancy payment split at ₦50m", async ({
@@ -89,7 +87,7 @@ test("a final pay takes pay in lieu of leave and a redundancy payment split at �
 }) => {
   test.setTimeout(240_000);
   const owner = await createOwner("pfp-owner", `Coastline Security ${uniqueSuffix()}`);
-  await seedLeaver(owner.orgId, owner.userId);
+  await seedLeaver(owner.orgId);
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await signInViaUi(page, owner.email, owner.password);
@@ -116,6 +114,9 @@ test("a final pay takes pay in lieu of leave and a redundancy payment split at �
   await expect(items.getByLabel("Worker")).toContainText("Musa Ibrahim");
   await expect(items.getByLabel("Item")).toHaveValue("leave_in_lieu");
   await expect(items.getByLabel("Untaken leave days")).toHaveValue("6");
+  await expect(items).toContainText(
+    "8 days a year × 9 of 12 months, rounded down, less 0 taken in 2026 = 6 days.",
+  );
   await expect(items.getByLabel("Amount (₦)")).toHaveValue("18000.00");
   await expect(items.getByTestId("final-pay-rule")).toContainText("Labour Act s.18(4)");
   await expect(items.getByLabel("Reason for the change")).toHaveCount(0);
@@ -193,12 +194,17 @@ test("Finance sets the public holiday pay rate from tomorrow", async ({ page }) 
   await expect(section).toContainText("Confirm it with an employment lawyer");
 
   const form = page.getByRole("form", { name: "Set the holiday pay rate" });
-  await form.getByLabel("Multiplier on the overtime rate").fill("1.5");
+  await form
+    .getByLabel("Extra pay for holiday work (× hourly rate, on top of normal pay)")
+    .fill("1.5");
+  await expect(form.getByTestId("holiday-worked")).toContainText(
+    "At ₦750 an hour: ₦750 normal + ₦1,125 extra = ₦1,875 an hour.",
+  );
   await form.getByLabel("From").fill(tomorrow);
   await form.getByLabel("Reason").fill("New guard contracts pay public holidays at 1.5 times");
   await form.getByRole("button", { name: "Preview" }).click();
   const preview = form.getByTestId("run-preview");
-  await expect(preview).toContainText("overtime rate × 1.5×", { timeout: 15_000 });
+  await expect(preview).toContainText("extra pay of 1.5× the hourly rate", { timeout: 15_000 });
   await expect(preview).toContainText("1.0× → 1.5×");
   await form.getByRole("button", { name: "Save the rate" }).click();
   await expect(form.getByRole("status")).toContainText("Holiday pay rate saved", {

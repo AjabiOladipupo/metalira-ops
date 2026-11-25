@@ -1007,14 +1007,14 @@ isOneToOne: false
                   ]
                 },"payroll_final_pay_items": {
                   Row: {
-                    "amount_kobo": number,"balance_days": number | null,"basic_monthly_kobo": number | null,"change_reason": string | null,"computed_kobo": number | null,"created_at": string,"created_by": string,"currency": string,"days": number | null,"divisor_days": number | null,"exempt_cap_kobo": number | null,"exempt_kobo": number,"exempt_used_kobo": number | null,"id": string,"item_type": string,"organisation_id": string,"part_of_settlement": boolean,"reason": string,"run_id": string,"worker_id": string
+                    "amount_kobo": number,"basic_monthly_kobo": number | null,"change_reason": string | null,"computed_kobo": number | null,"created_at": string,"created_by": string,"currency": string,"days": number | null,"divisor_days": number | null,"exempt_cap_kobo": number | null,"exempt_kobo": number,"exempt_used_kobo": number | null,"id": string,"item_type": string,"organisation_id": string,"part_of_settlement": boolean,"prefill_days": number | null,"reason": string,"run_id": string,"worker_id": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "amount_kobo": number,"balance_days"?: number | null,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by": string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"id"?: string,"item_type": string,"organisation_id": string,"part_of_settlement"?: boolean,"reason": string,"run_id": string,"worker_id": string
+                    "amount_kobo": number,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by": string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"id"?: string,"item_type": string,"organisation_id": string,"part_of_settlement"?: boolean,"prefill_days"?: number | null,"reason": string,"run_id": string,"worker_id": string
                   }
                   Update: {
-                    "amount_kobo"?: number,"balance_days"?: number | null,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"id"?: string,"item_type"?: string,"organisation_id"?: string,"part_of_settlement"?: boolean,"reason"?: string,"run_id"?: string,"worker_id"?: string
+                    "amount_kobo"?: number,"basic_monthly_kobo"?: number | null,"change_reason"?: string | null,"computed_kobo"?: number | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"days"?: number | null,"divisor_days"?: number | null,"exempt_cap_kobo"?: number | null,"exempt_kobo"?: number,"exempt_used_kobo"?: number | null,"id"?: string,"item_type"?: string,"organisation_id"?: string,"part_of_settlement"?: boolean,"prefill_days"?: number | null,"reason"?: string,"run_id"?: string,"worker_id"?: string
                   }
                   Relationships: [
                     {

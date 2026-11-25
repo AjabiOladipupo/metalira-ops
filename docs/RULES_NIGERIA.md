@@ -59,6 +59,7 @@ The adviser's answers, which slice 5.9a builds into the engine:
 **Confirmed by the tax adviser**, with these refinements (slice 5.9a builds the NSITF base):
 - **NSITF** (answer 7, ECA 2010 s.33; NECA–NSITF guidelines): 1% of the regular monthly payroll, leaving out pension, bonuses, overtime and irregular payments. Borne by the employer. Due by the 15th of the following month (answer 22, ECA s.33(1)).
 - **ITF** (answer 8, ITF (Amendment) Act 2011 s.6): 1% of annual payroll, for employers with 5 or more employees OR a turnover of ₦50m or more. Due by 1 April (answer 22, s.6(2)).
+- **Open point: redundancy pay in the ITF base.** The adviser text doesn't say whether redundancy or loss-of-office pay (or other final-pay items) is part of the annual payroll ITF is worked on. The app leaves it to slice 5.9a's engine and flags it for the adviser.
 
 ## Remittance due dates and working days
 
@@ -77,16 +78,17 @@ The adviser's answers, which slice 5.9a builds into the engine:
 
 | Item | Owed? | Calculation | Tax |
 | --- | --- | --- | --- |
-| Pay in lieu of untaken annual leave | By law after 6 months' continuous service (Labour Act s.18(4)) | Basic money wages only: untaken days × basic daily rate. Pre-filled from the Phase 4 leave balance; editable with a reason | Taxable |
+| Pay in lieu of untaken annual leave | By law after 6 months' continuous service (Labour Act s.18(4)) | Basic money wages only: untaken days × basic daily rate. Days pre-filled by the owner's formula below; editable with a reason | Taxable |
 | Pay in lieu of notice | Where notice isn't given (Labour Act s.11(6) to (9)) | Basic money wages only: notice days × basic daily rate; editable with a reason | Taxable, unless part of a redundancy or loss-of-office settlement |
 | Gratuity | Only if the contract says so | Amount entered by HR | Taxable |
 | Redundancy, or compensation for loss of employment | Labour Act s.20; the amount is negotiated | Amount entered by HR | Exempt up to ₦50,000,000; only the excess is taxable |
 
 How the app applies it, and the gaps the adviser text leaves (product readings, flagged for the adviser):
 - **Basic daily rate.** The adviser says "basic daily rate" without defining it. The app uses the basic monthly pay of the pay version in force on the last day ÷ the company's `hourly_rate_divisor_days` (20), the divisor the pay policy already uses. Daily and hourly pay rates get no pre-fill: HR enters the amount with a reason.
-- **Leave balance.** The pre-fill is the annual leave type's ledger balance (code `annual`) for the year of the last day. It isn't prorated for the rest of the year after leaving; HR changes the days with a reason where the company prorates.
+- **Untaken leave days** (**Owner decision**, 25 Nov 2026, pending an employment lawyer): the yearly entitlement of the annual leave type (code `annual`) in force on the last day × the complete months worked in that leave year (from 1 January, or the start date when later) ÷ 12, less the days already taken that year, rounded down to whole days. It applies from 6 months' continuous service (Labour Act s.18(4)); below 6 months the pre-fill is 0 with the note "not owed by law below 6 months". Between 6 and 12 months' service under preset A the entitlement is still prorated from the start date (preset A's 12-month wait for taking leave isn't applied to pay on leaving). HR can change the days with a reason, and the form shows how the pre-fill was worked out. A month counts once the day after the last day reaches the start date plus that many months, the start day clamped to the month's end.
+- **Labour Act s.18 and s.18(4).** Preset A's annual leave row cites s.18 as a whole (6 working days after 12 months' continuous service, from secondary sources); the adviser's answer 19 cites s.18(4) for pay in lieu of untaken leave on leaving, owed after 6 months' continuous service. They are read as two rules, not a conflict: preset A says when leave can be taken; s.18(4) says what is paid for untaken leave when employment ends. **Confirm with an employment lawyer.**
 - **Notice period.** The app holds no notice period, and the Labour Act s.11 notice lengths aren't in the adviser text, so HR enters the notice days (1 week is 5, 1 month is 20); the amount is pre-filled from them.
-- **The ₦50,000,000 cap** is stored on each dated rule set version (`tax_rule_sets.loss_of_office_exempt_kobo`). Whether the cap is per payment or per worker across all such payments isn't settled by the adviser text, so the app takes the **conservative reading: per worker, cumulative** across every redundancy item (and notice pay marked as part of the settlement) on runs not discarded or reversed, drafts included. Payments made before the company used Metalira aren't known to the app.
+- **The ₦50,000,000 cap** is stored on each dated rule set version (`tax_rule_sets.loss_of_office_exempt_kobo`). It is **per person, cumulative** (**Owner decision**, 25 Nov 2026; the adviser text didn't settle per payment or per person): across every redundancy item (and notice pay marked as part of the settlement) on runs not discarded or reversed, drafts included. No other earning can be exempt from PAYE (the database refuses one). Payments made before the company used Metalira aren't known to the app.
 - **Notice pay in a settlement** shares the same cap as the redundancy payment (the app's reading of "unless part of a redundancy or loss-of-office settlement").
 - Below 6 months' service the app still lets HR pay leave in lieu (a contract may give it) and says it isn't owed by law.
 
@@ -105,7 +107,7 @@ These are product defaults stored per organisation (`organisations` pay settings
 - **Special project or task overtime**: a pay multiplier can be set on a project or task; overtime worked on it is paid at normal hourly rate × that multiplier.
 - **Off-day work**: a worker approved to work on an off day is paid one overtime shift of 8 hours at the overtime rate.
 - **Public holidays**: work done on a public holiday is paid as holiday work (below). Each organisation keeps its own public holiday list, because federal holidays are declared year by year.
-- **Public holiday pay rate** (adviser answer 24; **Owner decision**, slice 5.9c): set per company as `holiday_pay_multiplier_bps`, a dated version in `payroll_holiday_pay_rates` (default 10000, 1.0×). Every minute worked on a public holiday is paid at the overtime rate × the multiplier, on top of normal pay. Owner, HR and Finance change it in Settings > Payroll rules, from tomorrow or later, audited; the earnings stage uses the multiplier in force on the day worked. The adviser: holiday pay is contract-driven and there is no statutory multiplier (Public Holidays Act s.4; Labour Act s.13 and s.17). **Confirm with an employment lawyer.** The app allows 1.0× to 5.0× (a product limit: below 1.0× the holiday line would also underpay the day's overtime minutes).
+- **Extra pay for holiday work** (adviser answer 24; **Owner decision**, slice 5.9c): set per company as `payroll_holiday_pay_rates.multiplier_bps`, dated versions (default 10000, 1.0×). Every minute worked on a public holiday earns normal pay plus extra pay of the hourly (overtime) rate × the multiplier: at ₦750 an hour and 1.5×, ₦750 normal + ₦1,125 extra = ₦1,875 an hour. Owner, HR and Finance change it in Settings > Payroll rules, from tomorrow or later, audited; the earnings stage uses the multiplier in force on the day worked. The adviser: holiday pay is contract-driven and there is no statutory multiplier (Public Holidays Act s.4; Labour Act s.13 and s.17). **Confirm with an employment lawyer.** The app allows 1.0× to 5.0× (a product limit: below 1.0× the holiday line would also underpay the day's overtime minutes).
 - **Daily workers** (`employment_type = daily`): paid daily rate × days worked. Overtime is allowed and paid at their normal hourly rate. Starting rule set NTA 2025 v1 (slice 5.0): No PAYE, no pension, no NSITF, no ITF, and they are left out of the employer levy base. **Superseded** by adviser answer 9, now also the **Owner decision**: PAYE (with the minimum-wage exemption), pension, NSITF and ITF all apply to daily workers; NHF is optional. Slice 5.9a builds it.
 
 Phase 5 defaults (docs/PHASE_5.md, built in slices 5.1 to 5.8), with the adviser's answers:
@@ -142,6 +144,7 @@ Phase 5 defaults (docs/PHASE_5.md, built in slices 5.1 to 5.8), with the adviser
 - Maternity (answer 25): preset A's Labour Act s.54 figures, and pay below 6 months' service (Phase 5 open question 3).
 - The deduction cap (answer 26): one-third of monthly wages, and whether statutory deductions sit outside it.
 - Notice periods (Labour Act s.11): not in the adviser text; the app takes the notice days from HR.
+- The leave-in-lieu pre-fill formula and the s.18 / s.18(4) reading (owner decision, above).
 
 ### The tax adviser's 27 answers, in brief
 

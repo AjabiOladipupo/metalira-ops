@@ -174,6 +174,9 @@ export function fromPayrollRunDbError(error: Pick<PostgrestError, "code" | "mess
   if (
     /^MLPR[46ABCDF]$/.test(error.code) ||
     /^MLOC[1-9A]$/.test(error.code) ||
+    // Slice 5.9c: final-pay items (MLTB8 a final pay waits for the adviser engine; MLTB9 an
+    // earning is taxed unless it is a final-pay item's exempt row).
+    /^MLTB[1-9]$/.test(error.code) ||
     error.code === "22023"
   ) {
     throw new MutationError("invalid", error.message);

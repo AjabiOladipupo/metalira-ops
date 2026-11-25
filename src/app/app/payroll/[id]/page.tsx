@@ -43,7 +43,7 @@ import {
 } from "../_components/run-forms";
 import { PayStep } from "../_components/pay-step";
 import { AddFinalPayItemForm, type FinalPayWorker } from "../_components/final-pay-form";
-import { loadFinalPayPrefill } from "@/server/payroll/final-pay";
+import { loadFinalPayPrefill, staleExemptItems } from "@/server/payroll/final-pay";
 import {
   AddCorrectionForm,
   ApproveReversalForm,
@@ -253,7 +253,8 @@ function EarningsStep({
   d,
   canPrepare,
   finalPayWorkers,
-}: StepProps & { finalPayWorkers: FinalPayWorker[] | null }) {
+  staleItems,
+}: StepProps & { finalPayWorkers: FinalPayWorker[] | null; staleItems: Set<string> }) {
   const draft = d.run.status === "draft" && !d.run.discardedAt;
   const offCycle = d.run.kind === "off_cycle";
   const finalPay = offCycle && d.run.offCycleReason === "final_pay";
@@ -302,6 +303,12 @@ function EarningsStep({
                           : "exempt from PAYE, not pensionable"}
                       </span>
                     ) : null}
+                    {a.finalPayItemId && staleItems.has(a.finalPayItemId) ? (
+                      <span className="block text-xs font-medium" data-testid="stale-exempt">
+                        More of this payment can now be exempt (a run that used the exemption was
+                        discarded or reversed). Remove it and add it again.
+                      </span>
+                    ) : null}
                     <span className="block text-xs text-fg-muted">{a.reason}</span>
                   </td>
                   <td className={TDN}>
@@ -339,10 +346,10 @@ function EarningsStep({
         >
           <h3 className="m-0 type-h3">Add a final-pay item</h3>
           <p className="m-0 text-sm text-fg-muted">
-            Pay in lieu of untaken leave or notice is pre-filled from the leave balance and the
-            basic pay on the last day; change it with a reason. None of these items counts toward
-            pension. Redundancy pay is exempt from PAYE up to ₦50,000,000 a worker; only the excess
-            is taxed.
+            Pay in lieu of untaken leave or notice is pre-filled from the annual entitlement for the
+            months worked this leave year, less leave taken, and the basic pay on the last day;
+            change it with a reason. None of these items counts toward pension. Redundancy pay is
+            exempt from PAYE up to ₦50,000,000 a worker; only the excess is taxed.
           </p>
           <AddFinalPayItemForm runId={d.run.id} workers={finalPayWorkers} />
         </div>
@@ -1059,36 +1066,43 @@ async function RunPage({
   const shownNet = reversal ? -d.run.totals.netKobo : d.run.totals.netKobo;
   const offCycle = d.run.kind === "off_cycle";
   // Slice 5.9c: a final-pay draft's pre-fill figures, for the final-pay items form.
-  const finalPayWorkers: FinalPayWorker[] | null =
+  const finalPayDraft =
     step === "earnings" &&
     props.canPrepare &&
     offCycle &&
     d.run.offCycleReason === "final_pay" &&
     d.run.status === "draft" &&
-    !d.run.discardedAt
-      ? await loadFinalPayPrefill(ctx.supabase, ctx.organisationId, d.run.id).then((m) =>
-          d.offCycleWorkers.flatMap((w) => {
-            const p = m.get(w.id);
-            return p
-              ? [
-                  {
-                    id: w.id,
-                    name: w.name,
-                    staffId: w.staffId,
-                    startDate: p.startDate,
-                    endDate: p.endDate,
-                    basicMonthlyKobo:
-                      p.basicMonthlyKobo === null ? null : p.basicMonthlyKobo.toString(),
-                    divisorDays: p.divisorDays,
-                    annualBalanceDays: p.annualBalanceDays,
-                    exemptCapKobo: p.exemptCapKobo.toString(),
-                    exemptUsedKobo: p.exemptUsedKobo.toString(),
-                  },
-                ]
-              : [];
-          }),
-        )
-      : null;
+    !d.run.discardedAt;
+  const prefillMap = finalPayDraft
+    ? await loadFinalPayPrefill(ctx.supabase, ctx.organisationId, d.run.id)
+    : null;
+  // Money review L1: exempt splits a discarded or reversed run has since left too small.
+  const staleItems = prefillMap
+    ? await staleExemptItems(ctx.supabase, ctx.organisationId, d.run.id, prefillMap)
+    : new Set<string>();
+  const finalPayWorkers: FinalPayWorker[] | null = prefillMap
+    ? ((m) =>
+        d.offCycleWorkers.flatMap((w) => {
+          const p = m.get(w.id);
+          return p
+            ? [
+                {
+                  id: w.id,
+                  name: w.name,
+                  staffId: w.staffId,
+                  startDate: p.startDate,
+                  endDate: p.endDate,
+                  basicMonthlyKobo:
+                    p.basicMonthlyKobo === null ? null : p.basicMonthlyKobo.toString(),
+                  divisorDays: p.divisorDays,
+                  leave: p.leave,
+                  exemptCapKobo: p.exemptCapKobo.toString(),
+                  exemptUsedKobo: p.exemptUsedKobo.toString(),
+                },
+              ]
+            : [];
+        }))(prefillMap)
+    : null;
 
   return (
     <>
@@ -1121,7 +1135,9 @@ async function RunPage({
       <StepNav runId={d.run.id} step={step} />
       {step === "period" ? <PeriodStep {...props} /> : null}
       {step === "timesheets" ? <TimesheetsStep {...props} /> : null}
-      {step === "earnings" ? <EarningsStep {...props} finalPayWorkers={finalPayWorkers} /> : null}
+      {step === "earnings" ? (
+        <EarningsStep {...props} finalPayWorkers={finalPayWorkers} staleItems={staleItems} />
+      ) : null}
       {step === "anomalies" ? <AnomaliesStep {...props} /> : null}
       {step === "gross-to-net" ? (
         <GrossToNetStep {...props} explain={first(query.explain)} />

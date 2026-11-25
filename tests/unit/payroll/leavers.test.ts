@@ -26,12 +26,15 @@ import {
   finalPayLabel,
   FINAL_PAY_ITEMS,
   LOSS_OF_OFFICE_EXEMPT_DEFAULT_KOBO,
+  leavePrefillText,
   lossOfOfficeSplit,
   planFinalPayItem,
   serviceMonths,
   type FinalPayPrefill,
 } from "@/lib/payroll/final-pay";
 import { grossToNet } from "@/lib/payroll/gross-to-net";
+import { holidayHourExample, parseMultiplierBps } from "@/lib/payroll/holiday-pay";
+import { hasPersonalNumber } from "@/lib/personal-number";
 import type { PayRateInput } from "@/lib/payroll/inputs";
 import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
 
@@ -43,7 +46,14 @@ const PREFILL: FinalPayPrefill = {
   endDate: "2026-10-05",
   basicMonthlyKobo: naira("60,000"),
   divisorDays: 20,
-  annualBalanceDays: 6,
+  leave: {
+    entitlementDays: 8,
+    monthsInYear: 9,
+    takenDays: 0,
+    serviceMonths: 21,
+    days: 6,
+    year: 2026,
+  },
   exemptCapKobo: LOSS_OF_OFFICE_EXEMPT_DEFAULT_KOBO,
   exemptUsedKobo: 0n,
 };
@@ -99,11 +109,45 @@ describe("pay in lieu of untaken leave", () => {
     expect(serviceMonths("2026-05-06", "2026-11-05")).toBe(6);
     expect(serviceMonths("2026-05-06", "2026-11-04")).toBe(5);
     expect(serviceMonths("2025-01-06", "2026-10-05")).toBe(21);
+    // Money review M2: a start on the 1st, the 31st and in February.
+    expect(serviceMonths("2026-01-01", "2026-06-30")).toBe(6);
+    expect(serviceMonths("2026-01-01", "2026-06-29")).toBe(5);
+    expect(serviceMonths("2026-01-31", "2026-02-27")).toBe(1); // 31 Jan + 1 month = 28 Feb
+    expect(serviceMonths("2026-01-31", "2026-02-26")).toBe(0);
+    expect(serviceMonths("2026-01-31", "2026-07-30")).toBe(6);
+    expect(serviceMonths("2026-02-28", "2026-03-27")).toBe(1);
+    expect(serviceMonths("2024-02-29", "2025-02-27")).toBe(12); // clamped to 28 Feb 2025
+    expect(serviceMonths("2024-02-29", "2025-02-26")).toBe(11);
+    expect(serviceMonths("2026-10-05", "2026-10-04")).toBe(0);
     const plan = planFinalPayItem(
       { ...PREFILL, startDate: "2026-06-01", endDate: "2026-10-05" },
       { type: "leave_in_lieu", days: 6, amountKobo: naira("18,000"), partOfSettlement: false },
     );
     expect(plan.belowLeaveService).toBe(true);
+  });
+
+  it("shows how the owner's pre-fill was worked out", () => {
+    expect(
+      leavePrefillText({
+        entitlementDays: 15,
+        monthsInYear: 9,
+        takenDays: 3,
+        serviceMonths: 21,
+        days: 8,
+        year: 2026,
+      }),
+    ).toBe("15 days a year × 9 of 12 months, rounded down, less 3 taken in 2026 = 8 days.");
+    expect(
+      leavePrefillText({
+        entitlementDays: 15,
+        monthsInYear: 4,
+        takenDays: 0,
+        serviceMonths: 4,
+        days: 0,
+        year: 2026,
+      }),
+    ).toBe("4 months' service: not owed by law below 6 months, so 0 days.");
+    expect(leavePrefillText(null)).toBe("No annual leave type is set up: enter the days.");
   });
 
   it("has no pre-fill for a daily or hourly pay rate", () => {
@@ -391,11 +435,29 @@ describe("the public-holiday pay multiplier", () => {
     expect(at(15_000).lines.some((l) => l.code === "off_day")).toBe(false);
   });
 
-  it("leaves the golden fixture unchanged at the default", () => {
+  it("shows the extra pay as normal + extra = total an hour", () => {
+    expect(parseMultiplierBps("1.5")).toBe(15_000);
+    expect(parseMultiplierBps("1.25×")).toBe(12_500);
+    expect(parseMultiplierBps("0.5")).toBeNull();
+    expect(holidayHourExample(15_000)).toEqual({
+      normal: 75_000n,
+      extra: 112_500n,
+      total: 187_500n,
+    });
+    expect(holidayHourExample(10_000).total).toBe(150_000n);
+    // ₦750 × 1.33 = ₦997.50, rounded half up (money review L7).
+    expect(holidayHourExample(13_300).extra).toBe(99_750n);
+  });
+
+  it.each([
+    ["no public holiday", [] as string[]],
+    // Money review L4: an October holiday, not worked, at 10000 bps.
+    ["an October holiday at 1.0×", ["2026-10-01"]],
+  ])("leaves the golden fixture unchanged at the default, %s", (_label, holidays) => {
     for (const g of golden.workers) {
       const gross = parseNairaToKobo(String(g.gross));
       const w = worker({ payRates: [monthly(gross)] });
-      const input = { period: OCT, holidays: [], defaultWorkDays: [1, 2, 3, 4, 5], worker: w };
+      const input = { period: OCT, holidays, defaultWorkDays: [1, 2, 3, 4, 5], worker: w };
       const plain = computeEarnings(input, POLICY);
       const atDefault = computeEarnings(
         { ...input, policyOn: () => ({ holidayMultiplierBps: 10_000 }) },
@@ -417,5 +479,19 @@ describe("the public-holiday pay multiplier", () => {
       expect(slip.grossKobo).toBe(gross);
       expect(slip.netKobo).toBe(parseNairaToKobo(String(g.net)));
     }
+  });
+});
+
+describe("personal numbers in free text (security review L3)", () => {
+  it.each([
+    ["080.1234.5678", true],
+    ["0801/234/5678", true],
+    ["(0801) 234 5678", true],
+    ["NIN: 123_456_789_01", true],
+    ["P.E.N 1234-5678-9012", true],
+    ["Resigned 05/10/2026", false],
+    ["123.456.789", false],
+  ])("%s → %s", (text, expected) => {
+    expect(hasPersonalNumber(text)).toBe(expected);
   });
 });

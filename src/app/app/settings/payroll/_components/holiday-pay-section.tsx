@@ -32,9 +32,9 @@ export function HolidayPaySection({
           Public holiday pay
         </h2>
         <p className="m-0 text-sm text-fg-muted">
-          Every minute worked on a public holiday is paid at the overtime rate ×{" "}
-          {formatMultiplier(settings.inForceBps)}, on top of normal pay. The law sets no multiplier:
-          it follows your employment contracts. Confirm it with an employment lawyer.
+          Extra pay for holiday work: every hour worked on a public holiday earns normal pay plus{" "}
+          {formatMultiplier(settings.inForceBps)} the hourly rate on top. The law sets no
+          multiplier: it follows your employment contracts. Confirm it with an employment lawyer.
         </p>
       </div>
       <dl className="m-0 flex flex-col divide-y divide-line rounded-xl border border-line">

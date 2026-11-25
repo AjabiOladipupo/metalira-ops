@@ -28,7 +28,16 @@
 --   MLTB4 the days or amount differ from the pre-filled figure: give the reason for the change;
 --   MLTB5 the figures sent don't match what the database works out (reload and try again);
 --   MLTB6 a final-pay item never changes, and goes only with its draft adjustment;
---   MLTB7 a rule set's loss-of-office cap never changes.
+--   MLTB7 a rule set's loss-of-office cap never changes;
+--   MLTB8 a final-pay run with final-pay items is submitted only on a rule set with the tax
+--         adviser's engine (slice 5.9a: year-to-date PAYE and NSITF on regular pay only);
+--   MLTB9 an earning not taxed is only a final-pay item's exempt row (no other path can exempt pay).
+--
+-- Review fixes (25 Nov 2026): the leave-in-lieu pre-fill is the owner's formula (yearly annual
+-- entitlement x complete months worked in the leave year ÷ 12, less days taken that year, rounded
+-- down; 0 below 6 months' service); private.has_personal_number ignores every character but
+-- letters and digits; the new tables keep the functions' semantic audit rows only (no row
+-- trigger); the functions set the audit channel.
 --
 -- SQL does no money maths beyond the checks: the server works out the pre-filled amount and the
 -- exempt part (src/lib/payroll/final-pay.ts) and the function checks them against the same
@@ -158,8 +167,8 @@ alter table public.payroll_holiday_pay_rates enable always trigger payroll_holid
 create trigger payroll_holiday_pay_rates_no_truncate before truncate on public.payroll_holiday_pay_rates
   for each statement execute function private.payroll_no_truncate();
 alter table public.payroll_holiday_pay_rates enable always trigger payroll_holiday_pay_rates_no_truncate;
-create trigger payroll_holiday_pay_rates_audit after insert on public.payroll_holiday_pay_rates
-  for each row execute function private.audit_row_change();
+-- Audited by set_holiday_pay_multiplier's semantic row (payroll.holiday_pay_rate_added), not a row
+-- trigger, so each change has one audit row (security review L1).
 
 -- Adds a version (owner, hr or finance, trusted session) from tomorrow or later. Returns the
 -- version in force before it and the new one. Refused when the multiplier is already the one in
@@ -197,6 +206,7 @@ begin
     raise exception 'Give a reason of up to 500 characters, with no web addresses or personal numbers.'
       using errcode = '22023';
   end if;
+  perform set_config('metalira.audit_channel', 'web', true);
   perform pg_advisory_xact_lock(hashtextextended('payroll_holiday_pay:' || p_organisation_id::text, 0));
   select h.multiplier_bps into v_before
   from public.payroll_holiday_pay_rates h
@@ -271,11 +281,11 @@ create table public.payroll_final_pay_items (
     constraint payroll_final_pay_items_type_value check (
       item_type in ('leave_in_lieu', 'notice_in_lieu', 'gratuity', 'loss_of_office')
     ),
-  -- Leave and notice: the days paid; leave also the balance the screen pre-filled.
+  -- Leave and notice: the days paid; leave also the days the owner's formula pre-filled.
   days integer
     constraint payroll_final_pay_items_days_range check (days between 1 and 366),
-  balance_days integer
-    constraint payroll_final_pay_items_balance_range check (balance_days between -366 and 366),
+  prefill_days integer
+    constraint payroll_final_pay_items_prefill_range check (prefill_days between 0 and 366),
   -- Leave and notice on a monthly pay version: the basic of the version in force on the last
   -- day, the divisor, and days x basic ÷ divisor rounded half up (what the screen pre-filled).
   basic_monthly_kobo bigint
@@ -319,7 +329,7 @@ create table public.payroll_final_pay_items (
   constraint payroll_final_pay_items_exempt check (exempt_kobo between 0 and amount_kobo),
   constraint payroll_final_pay_items_shape check (
     (item_type in ('leave_in_lieu', 'notice_in_lieu')) = (days is not null)
-    and (item_type = 'leave_in_lieu' or balance_days is null)
+    and (item_type = 'leave_in_lieu' or prefill_days is null)
     and (item_type in ('leave_in_lieu', 'notice_in_lieu')
       or (basic_monthly_kobo is null and divisor_days is null and computed_kobo is null))
     and ((basic_monthly_kobo is null) = (computed_kobo is null))
@@ -407,8 +417,8 @@ alter table public.payroll_final_pay_items enable always trigger payroll_final_p
 create trigger payroll_final_pay_items_no_truncate before truncate on public.payroll_final_pay_items
   for each statement execute function private.payroll_no_truncate();
 alter table public.payroll_final_pay_items enable always trigger payroll_final_pay_items_no_truncate;
-create trigger payroll_final_pay_items_audit after insert or delete on public.payroll_final_pay_items
-  for each row execute function private.audit_row_change();
+-- Audited by add_final_pay_item (payroll.final_pay_item_added) and the removal trigger below
+-- (payroll.final_pay_item_removed), not a row trigger (security review L1).
 
 -- An item and its adjustment rows are whole at commit: every row is an earning of the item's run
 -- and worker, never pensionable; the rows not taxable sum to the exempt part and the taxable rows
@@ -493,10 +503,23 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_item public.payroll_final_pay_items%rowtype;
 begin
   if old.final_pay_item_id is not null then
     delete from public.payroll_final_pay_items i
-    where i.organisation_id = old.organisation_id and i.id = old.final_pay_item_id;
+    where i.organisation_id = old.organisation_id and i.id = old.final_pay_item_id
+    returning i.* into v_item;
+    if v_item.id is not null then
+      perform private.log_audit_impl(
+        old.organisation_id, 'payroll.final_pay_item_removed', 'payroll_runs', old.run_id,
+        jsonb_build_object(
+          'item_id', v_item.id, 'worker_id', v_item.worker_id, 'item_type', v_item.item_type,
+          'amount_kobo', v_item.amount_kobo::text, 'exempt_kobo', v_item.exempt_kobo::text
+        ),
+        null, null
+      );
+    end if;
   end if;
   return null;
 end;
@@ -508,6 +531,95 @@ create trigger payroll_adjustments_final_pay_removed after delete on public.payr
   for each row when (old.final_pay_item_id is not null)
   execute function private.payroll_adjustments_final_pay_removed();
 alter table public.payroll_adjustments enable always trigger payroll_adjustments_final_pay_removed;
+
+-- Complete months from p_start to p_end (money review M2): the largest N with
+-- p_start + N months <= p_end + 1 day, the start day clamped to the month's end (Postgres date
+-- arithmetic clamps 31 Jan + 1 month to 28 Feb). src/lib/payroll/final-pay.ts serviceMonths is
+-- the same rule.
+create function private.payroll_complete_months(p_start date, p_end date)
+returns integer
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  v_after date := p_end + 1;
+  v_n integer;
+begin
+  if p_start is null or p_end is null or v_after <= p_start then
+    return 0;
+  end if;
+  v_n := (extract(year from v_after)::integer - extract(year from p_start)::integer) * 12
+    + (extract(month from v_after)::integer - extract(month from p_start)::integer);
+  if (p_start + make_interval(months => v_n))::date > v_after then
+    v_n := v_n - 1;
+  end if;
+  return greatest(v_n, 0);
+end;
+$$;
+
+revoke all on function private.payroll_complete_months(date, date) from public, anon, authenticated;
+
+-- The leave-in-lieu pre-fill (owner decision, 25 Nov 2026, pending an employment lawyer): the
+-- yearly entitlement of the active `annual` leave type in force on the last day x complete months
+-- worked in that leave year (from 1 January, or the start date when later) ÷ 12, less the days
+-- taken that year (ledger `taken` and `returned`), rounded down to whole days, never below 0.
+-- Below 6 months' continuous service it is 0 (Labour Act s.18(4)). Between 6 and 12 months the
+-- entitlement is still prorated from the start date (preset A's 12-month wait isn't applied).
+-- Whole days only; no money. Null when the company has no active `annual` type.
+create function private.payroll_leave_in_lieu(
+  p_organisation_id uuid,
+  p_worker_id uuid,
+  p_start date,
+  p_end date
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_type uuid;
+  v_year integer := extract(year from p_end)::integer;
+  v_entitlement integer;
+  v_months integer;
+  v_service integer;
+  v_taken integer;
+  v_days integer;
+begin
+  select t.id into v_type from public.leave_types t
+  where t.organisation_id = p_organisation_id and t.code = 'annual' and t.status = 'active';
+  if v_type is null then
+    return null;
+  end if;
+  select e.days_per_year into v_entitlement
+  from public.leave_entitlements e
+  where e.organisation_id = p_organisation_id and e.leave_type_id = v_type
+    and e.effective_from <= p_end and (e.effective_to is null or e.effective_to >= p_end)
+  order by e.effective_from desc
+  limit 1;
+  v_entitlement := coalesce(v_entitlement, 0);
+  v_service := private.payroll_complete_months(p_start, p_end);
+  v_months := private.payroll_complete_months(greatest(p_start, make_date(v_year, 1, 1)), p_end);
+  select greatest(-coalesce(sum(l.days), 0), 0)::integer into v_taken
+  from public.leave_ledger l
+  where l.organisation_id = p_organisation_id and l.worker_id = p_worker_id
+    and l.leave_type_id = v_type and l.leave_year = v_year
+    and l.kind in ('taken', 'returned');
+  v_days := case
+    when v_service < 6 then 0
+    else greatest(floor(v_entitlement * v_months / 12.0)::integer - v_taken, 0)
+  end;
+  return jsonb_build_object(
+    'entitlement_days', v_entitlement, 'months_in_year', v_months, 'taken_days', v_taken,
+    'service_months', v_service, 'days', v_days, 'year', v_year
+  );
+end;
+$$;
+
+revoke all on function private.payroll_leave_in_lieu(uuid, uuid, date, date)
+  from public, anon, authenticated;
 
 -- What the screen pre-fills from, for each worker on a final-pay run (owner, hr, finance): the
 -- last day, the basic of the monthly pay version in force on it (null for daily and hourly), the
@@ -551,13 +663,8 @@ begin
         limit 1
       ),
       'divisor_days', o.hourly_rate_divisor_days,
-      'annual_balance_days', (
-        select private.leave_balance(
-          p_organisation_id, w.id, t.id,
-          extract(year from coalesce(w.end_date, v_run.period_end))::integer
-        )
-        from public.leave_types t
-        where t.organisation_id = p_organisation_id and t.code = 'annual' and t.status = 'active'
+      'leave', private.payroll_leave_in_lieu(
+        p_organisation_id, w.id, w.start_date, coalesce(w.end_date, v_run.period_end)
       ),
       'exempt_cap_kobo', private.payroll_exempt_cap(p_organisation_id, v_run)::text,
       'exempt_used_kobo', (
@@ -629,6 +736,7 @@ declare
   v_divisor integer;
   v_computed bigint;
   v_balance integer;
+  v_leave jsonb;
   v_settlement boolean := coalesce(p_part_of_settlement, false) and p_item_type = 'notice_in_lieu';
   v_exempting boolean;
   v_cap bigint;
@@ -682,6 +790,7 @@ begin
   if v_end is null then
     raise exception 'That worker isn''t on this final-pay run.' using errcode = 'MLTB2';
   end if;
+  perform set_config('metalira.audit_channel', 'web', true);
   -- One worker's exemption at a time, across runs.
   perform pg_advisory_xact_lock(
     hashtextextended('payroll_final_pay:' || p_organisation_id::text || ':' || p_worker_id::text, 0)
@@ -708,10 +817,11 @@ begin
         using errcode = 'MLTB5';
     end if;
     if p_item_type = 'leave_in_lieu' then
-      select private.leave_balance(p_organisation_id, p_worker_id, t.id, extract(year from v_end)::integer)
-      into v_balance
-      from public.leave_types t
-      where t.organisation_id = p_organisation_id and t.code = 'annual' and t.status = 'active';
+      select private.payroll_leave_in_lieu(p_organisation_id, w.id, w.start_date, v_end)
+      into v_leave
+      from public.workers w
+      where w.organisation_id = p_organisation_id and w.id = p_worker_id;
+      v_balance := (v_leave ->> 'days')::integer;
     end if;
     if v_change is null and (
       v_computed is null or v_amount <> v_computed
@@ -743,7 +853,7 @@ begin
   end if;
 
   insert into public.payroll_final_pay_items (
-    id, organisation_id, run_id, worker_id, item_type, days, balance_days, basic_monthly_kobo,
+    id, organisation_id, run_id, worker_id, item_type, days, prefill_days, basic_monthly_kobo,
     divisor_days, computed_kobo, amount_kobo, exempt_kobo, exempt_cap_kobo, exempt_used_kobo,
     part_of_settlement, reason, change_reason, created_by
   )
@@ -805,7 +915,7 @@ begin
     jsonb_build_object(
       'item_id', v_id, 'worker_id', p_worker_id, 'item_type', p_item_type, 'days', p_days,
       'amount_kobo', v_amount::text, 'exempt_kobo', v_exempt::text,
-      'computed_kobo', v_computed::text, 'balance_days', v_balance,
+      'computed_kobo', v_computed::text, 'prefill_days', v_balance,
       'part_of_settlement', v_settlement, 'change_reason', v_change
     ),
     v_reason
@@ -852,3 +962,101 @@ revoke all on function public.add_final_pay_item(
 grant execute on function public.add_final_pay_item(
   uuid, uuid, uuid, text, text, text, integer, text, text, boolean, text
 ) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. Review fixes: no other path exempts pay; final pay waits for the adviser engine
+-- ---------------------------------------------------------------------------
+
+-- BEFORE INSERT on payroll_adjustments (ENABLE ALWAYS; money and security review M1): an earning
+-- that isn't taxed is only a final-pay item's exempt row, so the loss-of-office cap can't be
+-- bypassed through add_payroll_adjustment with p_taxable false. No other kind of earning is
+-- exempt today (corrections and carried instalments copy taxable earnings; deductions are never
+-- taxable and aren't checked here).
+create function private.payroll_adjustments_exempt_only_final_pay()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.kind = 'earning' and not new.taxable and new.final_pay_item_id is null then
+    raise exception 'An earning is taxed. Only a redundancy payment''s exempt part is not, as a final-pay item.'
+      using errcode = 'MLTB9';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payroll_adjustments_exempt_only_final_pay() from public, anon, authenticated;
+
+create trigger payroll_adjustments_exempt_only_final_pay before insert on public.payroll_adjustments
+  for each row execute function private.payroll_adjustments_exempt_only_final_pay();
+alter table public.payroll_adjustments enable always trigger payroll_adjustments_exempt_only_final_pay;
+
+-- Whether a rule set version carries the tax adviser's engine (slice 5.9a's contract): its
+-- `rules` hold the adviser's part, which brings year-to-date PAYE, with NSITF on regular pay only
+-- (`rules -> 'adviser' ->> 'nsitf_regular_only'` true). Until 5.9a merges no version has it.
+create function private.tax_rule_set_has_adviser_engine(p_organisation_id uuid, p_rule_set_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce((
+    select (t.rules ? 'adviser')
+      and coalesce((t.rules -> 'adviser' ->> 'nsitf_regular_only')::boolean, false)
+    from public.tax_rule_sets t
+    where t.organisation_id = p_organisation_id and t.id = p_rule_set_id
+  ), false)
+$$;
+
+revoke all on function private.tax_rule_set_has_adviser_engine(uuid, uuid)
+  from public, anon, authenticated;
+
+-- BEFORE UPDATE on payroll_runs (ENABLE ALWAYS; coordinator, money review H1): a final-pay run
+-- holding final-pay items moves from draft to review only on a rule set with the adviser's engine.
+-- The month-annualised PAYE of the earlier engine would tax a lump sum as if paid every month, and
+-- NSITF would fall on the redundancy payment.
+create function private.payroll_runs_final_pay_engine()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if old.status = 'draft' and new.status = 'review'
+    and exists (
+      select 1 from public.payroll_final_pay_items i
+      where i.organisation_id = new.organisation_id and i.run_id = new.id
+    )
+    and not private.tax_rule_set_has_adviser_engine(new.organisation_id, new.rule_set_id)
+  then
+    raise exception 'Final-pay items need the payroll rules with the tax adviser''s year-to-date PAYE. Add that version of the rules, recalculate, then submit.'
+      using errcode = 'MLTB8';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.payroll_runs_final_pay_engine() from public, anon, authenticated;
+
+create trigger payroll_runs_final_pay_engine before update of status on public.payroll_runs
+  for each row execute function private.payroll_runs_final_pay_engine();
+alter table public.payroll_runs enable always trigger payroll_runs_final_pay_engine;
+
+-- Personal numbers (security review L3): every character but letters and digits is ignored before
+-- the digit test, so dots, slashes and brackets can't split a number. src/lib/personal-number.ts
+-- is the same rule (tests/rls/payroll-off-cycle.test.ts and payroll-leavers.test.ts compare them).
+create or replace function private.has_personal_number(p_text text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  select coalesce(
+    regexp_replace(p_text, '[^[:alnum:]]', '', 'g') ~ '[0-9]{10}'
+    or regexp_replace(p_text, '[^[:alnum:]]', '', 'g') ~* 'PEN[0-9]{12}',
+    false
+  )
+$$;

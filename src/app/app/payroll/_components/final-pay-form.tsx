@@ -11,8 +11,10 @@ import {
   basicDailyRateText,
   basicDaysAmount,
   isFinalPayItemType,
+  leavePrefillText,
   serviceMonths,
   type FinalPayItemType,
+  type LeaveInLieuPrefill,
   type FinalPayPrefill,
 } from "@/lib/payroll/final-pay";
 import { addFinalPayItemAction } from "@/server/payroll/leavers-actions";
@@ -31,7 +33,7 @@ export interface FinalPayWorker {
   endDate: string;
   basicMonthlyKobo: string | null;
   divisorDays: number;
-  annualBalanceDays: number | null;
+  leave: LeaveInLieuPrefill | null;
   exemptCapKobo: string;
   exemptUsedKobo: string;
 }
@@ -43,7 +45,7 @@ function prefillOf(w: FinalPayWorker): FinalPayPrefill {
     endDate: w.endDate,
     basicMonthlyKobo: w.basicMonthlyKobo === null ? null : toKobo(w.basicMonthlyKobo),
     divisorDays: w.divisorDays,
-    annualBalanceDays: w.annualBalanceDays,
+    leave: w.leave,
     exemptCapKobo: toKobo(w.exemptCapKobo),
     exemptUsedKobo: toKobo(w.exemptUsedKobo),
   };
@@ -80,9 +82,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
   const worker = workers.find((w) => w.id === workerId) ?? null;
   const prefill = worker ? prefillOf(worker) : null;
   const defaultDays = (t: FinalPayItemType, p: FinalPayPrefill | null) =>
-    t === "leave_in_lieu" && p?.annualBalanceDays && p.annualBalanceDays > 0
-      ? String(p.annualBalanceDays)
-      : "";
+    t === "leave_in_lieu" && p?.leave && p.leave.days > 0 ? String(p.leave.days) : "";
   const [days, setDays] = useState(valueOf(state, "days", defaultDays(type, prefill)));
   const firstAmount = computed(type, days, prefill);
   const [amount, setAmount] = useState(
@@ -101,7 +101,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
   const amountKobo = koboOf(amount);
   const daysChanged =
     type === "leave_in_lieu" &&
-    (prefill?.annualBalanceDays === null || Number(days) !== prefill?.annualBalanceDays);
+    (!prefill?.leave || Number(days) !== prefill.leave.days);
   const amountChanged = rule.byDays && (prefilled === null || amountKobo !== prefilled);
   const needsChange = rule.byDays && (daysChanged || amountChanged);
   const rate = prefill ? basicDailyRateText(prefill) : null;
@@ -164,9 +164,9 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
             }}
             hint={
               type === "leave_in_lieu"
-                ? prefill?.annualBalanceDays === null || prefill === null
-                  ? "No annual leave balance on file: enter the days."
-                  : `Annual leave balance: ${prefill.annualBalanceDays} days.`
+                ? prefill
+                  ? `Pre-filled: ${leavePrefillText(prefill.leave)}`
+                  : "Choose the worker first."
                 : "Working days: 1 week is 5, 1 month is 20."
             }
             error={errors?.days}
@@ -227,7 +227,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
           name="changeReason"
           required
           maxLength={500}
-          placeholder="Two leave days taken in October, not yet on the balance"
+          placeholder="Two leave days taken in October, not yet on the ledger"
           defaultValue={valueOf(state, "changeReason")}
           hint="The days or amount differ from the pre-filled figure."
           error={errors?.changeReason}
