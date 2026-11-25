@@ -2719,13 +2719,13 @@ isOneToOne: false
               "applies_after": string,"bank_account_last4": string,"id": string,"status": Database["public"]['Enums']["org_bank_account_status"]
             }[]
                            },
-"declare_payroll_relief":
-{ Args: { "p_annual_kobo": string,"p_kind": string,"p_organisation_id": string,"p_reason": string,"p_supersedes_id"?: string,"p_tax_year": number,"p_worker_id": string }; Returns: string
-                           },
 "decide_owner_change":
 { Args: { "p_change_id": string,"p_decision": string,"p_organisation_id": string }; Returns: {
               "change_id": string,"change_status": Database["public"]['Enums']["owner_change_status"],"invite_token": string
             }[]
+                           },
+"declare_payroll_relief":
+{ Args: { "p_annual_kobo": string,"p_kind": string,"p_organisation_id": string,"p_reason": string,"p_supersedes_id"?: string,"p_tax_year": number,"p_worker_id": string }; Returns: string
                            },
 "discard_off_cycle_run":
 { Args: { "p_organisation_id": string,"p_reason": string,"p_run_id": string }; Returns: undefined
@@ -3090,7 +3090,7 @@ isOneToOne: false
 { Args: { "p_organisation_id": string,"p_reason": string,"p_value": boolean }; Returns: undefined
                            },
 "set_payroll_nhf_number":
-{ Args: { "p_nhf_number": string | null,"p_organisation_id": string,"p_reason": string,"p_worker_id": string }; Returns: string
+{ Args: { "p_nhf_number": string,"p_organisation_id": string,"p_reason": string,"p_worker_id": string }; Returns: string
                            },
 "set_remittance_due_days":
 { Args: { "p_itf"?: number,"p_nhf"?: number,"p_nsitf"?: number,"p_organisation_id": string,"p_paye"?: number }; Returns: undefined
@@ -3154,7 +3154,7 @@ isOneToOne: false
 { Args: { "p_contract": Json,"p_contract_id": string,"p_organisation_id": string,"p_site_ids"?: (string)[] }; Returns: string
                            },
 "verify_payroll_relief":
-{ Args: { "p_decision": string,"p_note"?: string,"p_organisation_id": string,"p_declaration_id": string }; Returns: string
+{ Args: { "p_decision": string,"p_declaration_id": string,"p_note"?: string,"p_organisation_id": string }; Returns: string
                            },
 "void_statutory_payment":
 { Args: { "p_organisation_id": string,"p_payment_id": string,"p_reason": string }; Returns: string

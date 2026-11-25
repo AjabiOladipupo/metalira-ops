@@ -1047,7 +1047,8 @@ export const nhfNumberSpec: MutationSpec<typeof nhfNumberSchema, { id: string }>
     const { data: id, error } = await supabase.rpc("set_payroll_nhf_number", {
       p_organisation_id: organisationId,
       p_worker_id: data.workerId,
-      p_nhf_number: data.nhfNumber === "" ? null : data.nhfNumber,
+      // An empty number records its removal (the function trims it to null).
+      p_nhf_number: data.nhfNumber,
       p_reason: data.reason,
     });
     if (error) fromTaxRecordsDbError(error);
