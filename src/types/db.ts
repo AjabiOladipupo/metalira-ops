@@ -677,6 +677,26 @@ isOneToOne: false
       referencedColumns: ["organisation_id","id"]
     }
                   ]
+                },"official_holidays": {
+                  Row: {
+                    "created_at": string,"entry": string,"holiday_date": string | null,"id": string,"name": string | null,"reason": string | null,"recorded_by": string,"scope": string | null,"source": string | null,"state_key": string | null,"withdraws_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "created_at"?: string,"entry": string,"holiday_date"?: string | null,"id"?: string,"name"?: string | null,"reason"?: string | null,"recorded_by": string,"scope"?: string | null,"source"?: string | null,"state_key"?: string | null,"withdraws_id"?: string | null
+                  }
+                  Update: {
+                    "created_at"?: string,"entry"?: string,"holiday_date"?: string | null,"id"?: string,"name"?: string | null,"reason"?: string | null,"recorded_by"?: string,"scope"?: string | null,"source"?: string | null,"state_key"?: string | null,"withdraws_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "official_holidays_withdraws_id_fkey"
+      columns: ["withdraws_id"]
+isOneToOne: true
+      referencedRelation: "official_holidays"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"organisation_bank_accounts": {
                   Row: {
                     "account_name": string,"activated_at": string | null,"applied_notified_at": string | null,"applies_after": string | null,"approved_by": string | null,"approved_notified_at": string | null,"bank_account_digest": string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string | null,"bank_lookup_id": string | null,"bank_name": string,"cancelled_at": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"name_check": Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected": string | null,"name_check_reason": string | null,"name_check_source": string | null,"organisation_id": string,"reason": string | null,"rejected_by": string | null,"requested_by": string,"requested_notified_at": string | null,"retired_at": string | null,"single_approver": boolean,"status": Database["public"]['Enums']["org_bank_account_status"],"updated_at": string

@@ -2,11 +2,12 @@
  * Slice 5.6 (docs/PHASE_5.md 5.6): statutory remittances and schedules, pure parts.
  * - Grouping by tax state and PFA, and the golden statutory totals from the engine's payslip
  *   lines: pension ₦156,600, NSITF ₦8,700, ITF ₦8,700 (fixtures/october-2026-golden.json).
- * - Pension's due date: the 7th working day counting the pay date (rolled back to a working day)
- *   as the first, skipping weekends and holidays (money review M3).
+ * - Due dates (slice 5.9b, the tax adviser's answers): pension by the 7th working day counting
+ *   the day salary is paid (or the next working day) as day 1; PAYE the 10th, NHF a month on,
+ *   NSITF the 15th, ITF 1 April; the official calendar only; a company day only when earlier.
  * - Authorities grouped on a normalised key (money review M2); short and over payments are never
  *   "paid" (money review H1).
- * - Other kinds: only the company's own day; status worked out on read.
+ * - Status worked out on read; PAYE past its penalty date flagged.
  * - Schedules: formula-injection escaping, kobo to naira with 2 decimals, totals equal the
  *   remittance, exact bytes for a small PAYE file.
  */
@@ -18,17 +19,25 @@ import type { EarningLine } from "@/lib/payroll/contract";
 import { grossToNet } from "@/lib/payroll/gross-to-net";
 import { NTA_2025_V1 } from "@/lib/payroll/rule-set";
 import {
+  EMPTY_CALENDAR,
   addWorkingDays,
+  annualPayeReturnDue,
   authorityLabel,
+  deadlineHolidays,
   groupStatutory,
   normalisePfa,
   normaliseTaxState,
-  remittanceDueDate,
+  officialCalendar,
+  payePenaltyAfter,
+  remittanceDeadline,
   remittanceIsOverdue,
+  remittanceIsPastPenalty,
   remittanceOutstanding,
   remittanceStatus,
-  workingDayOnOrBefore,
   remittanceTitle,
+  statutoryDeadline,
+  workingDayOnOrAfter,
+  type RemittanceKind,
   type StatutorySlip,
 } from "@/lib/payroll/statutory";
 import { csvCell, nairaCell, toCsv } from "@/server/payroll/schedules/csv";
@@ -173,45 +182,168 @@ describe("grouping the October 2026 golden run", () => {
   });
 });
 
-describe("due dates", () => {
-  it("rolls a pay date that isn't a working day back, then counts it as day 1 of 7 (Sun 25 Oct 2026 gives Mon 2 Nov)", () => {
-    expect(workingDayOnOrBefore("2026-10-25", new Set())).toBe("2026-10-23");
-    expect(remittanceDueDate("pension", "2026-10-25", NO_DUE_DAYS, new Set())).toBe("2026-11-02");
-    // A working pay date counts itself: Friday 25 Sep 2026 gives Monday 5 Oct.
-    expect(remittanceDueDate("pension", "2026-09-25", NO_DUE_DAYS, new Set())).toBe("2026-10-05");
-  });
-
-  it("skips weekends and the company's public holidays", () => {
-    // Friday 25 Sep 2026; Thursday 1 Oct is Independence Day on this company's list.
-    expect(addWorkingDays("2026-09-25", 7, new Set())).toBe("2026-10-06");
-    expect(addWorkingDays("2026-09-25", 7, new Set(["2026-10-01"]))).toBe("2026-10-07");
-    // A holiday on a Saturday changes nothing.
-    expect(addWorkingDays("2026-09-25", 7, new Set(["2026-10-03"]))).toBe("2026-10-06");
-    // Paid on Christmas Day 2026 (a Friday holiday): back to Thursday 24 Dec, then Boxing Day
-    // (Saturday) and 1 Jan 2027 (Friday) skipped.
-    expect(
-      remittanceDueDate(
-        "pension",
-        "2026-12-25",
-        NO_DUE_DAYS,
-        new Set(["2026-12-25", "2026-12-26", "2027-01-01"]),
+describe("due dates (slice 5.9b, the tax adviser's answers of 24 Nov 2026)", () => {
+  const NONE = new Set<string>();
+  // The federal holidays the migration seeds around the dates used here.
+  const FEDERAL = new Set(["2026-10-01", "2026-12-25", "2026-12-26", "2027-01-01"]);
+  const calendar = (federal: string[], states: Record<string, string[]> = {}) =>
+    officialCalendar([
+      ...federal.map((date) => ({ date, scope: "federal" as const, stateKey: null })),
+      ...Object.entries(states).flatMap(([stateKey, dates]) =>
+        dates.map((date) => ({ date, scope: "state" as const, stateKey })),
       ),
-    ).toBe("2027-01-05");
-    // A holiday inside the 7 days moves it on a day: 1 Oct after a Friday 25 Sep pay date.
-    expect(remittanceDueDate("pension", "2026-09-25", NO_DUE_DAYS, new Set(["2026-10-01"]))).toBe(
-      "2026-10-06",
-    );
+    ]);
+  const deadline = (
+    over: Partial<Parameters<typeof remittanceDeadline>[0]> & { kind: RemittanceKind },
+  ) =>
+    remittanceDeadline({
+      authorityKey: null,
+      payDate: "2026-10-25",
+      releasedOn: null,
+      dueDays: NO_DUE_DAYS,
+      calendar: EMPTY_CALENDAR,
+      ...over,
+    });
+
+  it("counts pension from a weekend payday's next working day as day 1 (Sun 25 Oct 2026 gives Tue 3 Nov)", () => {
+    // The golden run: paid Sunday 25 Oct, day 1 is Monday 26 Oct, day 7 Tuesday 3 Nov.
+    expect(workingDayOnOrAfter("2026-10-25", NONE)).toBe("2026-10-26");
+    expect(statutoryDeadline("pension", "2026-10-25", NONE)).toBe("2026-11-03");
+    // Saturday 24 Oct gives the same day 1.
+    expect(statutoryDeadline("pension", "2026-10-24", NONE)).toBe("2026-11-03");
+    // A working payday counts itself: Friday 25 Sep 2026 gives Monday 5 Oct.
+    expect(statutoryDeadline("pension", "2026-09-25", NONE)).toBe("2026-10-05");
+    // Paid on Monday 26 Oct: the same day 1 as the Sunday.
+    expect(statutoryDeadline("pension", "2026-10-26", NONE)).toBe("2026-11-03");
   });
 
-  it("gives PAYE, NHF, NSITF and ITF a due date only when the company set a day", () => {
-    for (const kind of ["paye", "nhf", "nsitf", "itf"] as const) {
-      expect(remittanceDueDate(kind, "2026-10-25", NO_DUE_DAYS, new Set())).toBeNull();
-    }
-    const days = { paye: 10, nhf: 28, nsitf: 1, itf: null };
-    expect(remittanceDueDate("paye", "2026-10-25", days, new Set())).toBe("2026-11-10");
-    expect(remittanceDueDate("nhf", "2026-12-25", days, new Set())).toBe("2027-01-28");
-    expect(remittanceDueDate("nsitf", "2026-10-25", days, new Set())).toBe("2026-11-01");
-    expect(remittanceDueDate("itf", "2026-10-25", days, new Set())).toBeNull();
+  it("counts pension from the next working day when payday is a public holiday", () => {
+    // Paid on Independence Day, Thursday 1 Oct 2026: day 1 is Friday 2 Oct, day 7 Monday 12 Oct.
+    expect(statutoryDeadline("pension", "2026-10-01", FEDERAL)).toBe("2026-10-12");
+    // Without the holiday it would count itself: Friday 9 Oct.
+    expect(statutoryDeadline("pension", "2026-10-01", NONE)).toBe("2026-10-09");
+    // Paid on Christmas Day 2026: Boxing Day (Saturday) and 1 Jan 2027 skipped; day 1 Monday
+    // 28 Dec, day 7 Wednesday 6 Jan 2027.
+    expect(statutoryDeadline("pension", "2026-12-25", FEDERAL)).toBe("2027-01-06");
+    // A federal holiday inside the 7 days moves it on a day: Friday 25 Sep 2026, 1 Oct skipped.
+    expect(statutoryDeadline("pension", "2026-09-25", FEDERAL)).toBe("2026-10-06");
+  });
+
+  it("counts from the day the bank file was uploaded, provisionally from the pay date before", () => {
+    expect(deadline({ kind: "pension" })).toMatchObject({
+      dueDate: "2026-11-03",
+      paidOn: "2026-10-25",
+      provisional: true,
+    });
+    // Released Tuesday 27 Oct: day 7 is Wednesday 4 Nov, no longer provisional.
+    expect(deadline({ kind: "pension", releasedOn: "2026-10-27" })).toMatchObject({
+      dueDate: "2026-11-04",
+      paidOn: "2026-10-27",
+      provisional: false,
+    });
+    // A release in the next month moves the month-based deadlines too.
+    expect(deadline({ kind: "paye", releasedOn: "2026-11-02" }).dueDate).toBe("2026-12-10");
+  });
+
+  it("uses only the official calendar: a state's holiday moves its own PAYE, nothing else", () => {
+    // Paid Wednesday 25 Nov 2026: PAYE is due Thursday 10 Dec.
+    const cal = calendar(["2026-12-25"], { lagos: ["2026-12-10", "2026-12-15"] });
+    expect(deadline({ kind: "paye", payDate: "2026-11-25", calendar: cal }).dueDate).toBe(
+      "2026-12-10",
+    );
+    // A Lagos holiday on the 10th brings Lagos PAYE back to Wednesday 9 Dec.
+    expect(
+      deadline({ kind: "paye", payDate: "2026-11-25", authorityKey: "lagos", calendar: cal })
+        .dueDate,
+    ).toBe("2026-12-09");
+    // Ogun PAYE, and the federal levies, don't count Lagos's holidays.
+    expect(
+      deadline({ kind: "paye", payDate: "2026-11-25", authorityKey: "ogun", calendar: cal })
+        .dueDate,
+    ).toBe("2026-12-10");
+    expect(
+      deadline({ kind: "nsitf", payDate: "2026-11-25", authorityKey: "lagos", calendar: cal })
+        .dueDate,
+    ).toBe("2026-12-15");
+    expect(deadlineHolidays(cal, "pension", "lagos")).toBe(cal.federal);
+  });
+
+  it("gives PAYE the 10th of the next month, back to the working day before, with the penalty after the 21st", () => {
+    expect(deadline({ kind: "paye" })).toMatchObject({
+      dueDate: "2026-11-10",
+      penaltyAfter: "2026-11-21",
+    });
+    // Paid 25 Sep 2026: 10 Oct is a Saturday, so Friday 9 Oct; penalty after 21 Oct.
+    expect(deadline({ kind: "paye", payDate: "2026-09-25" })).toMatchObject({
+      dueDate: "2026-10-09",
+      penaltyAfter: "2026-10-21",
+    });
+    expect(payePenaltyAfter("2026-12-24")).toBe("2027-01-21");
+    expect(deadline({ kind: "nsitf" }).penaltyAfter).toBeNull();
+    expect(annualPayeReturnDue(2026)).toBe("2027-01-31");
+  });
+
+  it("flags PAYE past the penalty date only while something is owed", () => {
+    const owed = { penaltyAfter: "2026-11-21", amountKobo: 100_000n, paidKobo: null };
+    expect(remittanceIsPastPenalty(owed, "2026-11-21")).toBe(false);
+    expect(remittanceIsPastPenalty(owed, "2026-11-22")).toBe(true);
+    expect(remittanceIsPastPenalty({ ...owed, paidKobo: 100_000n }, "2026-12-01")).toBe(false);
+    expect(remittanceIsPastPenalty({ ...owed, paidKobo: 50_000n }, "2026-12-01")).toBe(true);
+    expect(remittanceIsPastPenalty({ ...owed, penaltyAfter: null }, "2026-12-01")).toBe(false);
+  });
+
+  it("gives NHF the same day of the next month, or that month's last day at month end", () => {
+    expect(statutoryDeadline("nhf", "2026-10-25", NONE)).toBe("2026-11-25");
+    // 31 Oct 2026: November has no 31st, so Monday 30 Nov.
+    expect(statutoryDeadline("nhf", "2026-10-31", NONE)).toBe("2026-11-30");
+    // 31 Jan 2028 (a leap year): Tuesday 29 Feb.
+    expect(statutoryDeadline("nhf", "2028-01-31", NONE)).toBe("2028-02-29");
+    // 31 Jan 2027: 28 Feb is a Sunday, so back to Friday 26 Feb.
+    expect(statutoryDeadline("nhf", "2027-01-31", NONE)).toBe("2027-02-26");
+    // December rolls into the next year.
+    expect(statutoryDeadline("nhf", "2026-12-24", FEDERAL)).toBe("2027-01-22");
+  });
+
+  it("gives NSITF the 15th of the next month and ITF 1 April of the next year", () => {
+    // 15 Nov 2026 is a Sunday: Friday 13 Nov.
+    expect(statutoryDeadline("nsitf", "2026-10-25", NONE)).toBe("2026-11-13");
+    expect(statutoryDeadline("nsitf", "2026-11-25", NONE)).toBe("2026-12-15");
+    // ITF for any 2026 month: Thursday 1 Apr 2027.
+    expect(statutoryDeadline("itf", "2026-01-25", NONE)).toBe("2027-04-01");
+    expect(statutoryDeadline("itf", "2026-12-24", NONE)).toBe("2027-04-01");
+    // 1 Apr 2028 is a Saturday: Friday 31 Mar 2028.
+    expect(statutoryDeadline("itf", "2027-10-25", NONE)).toBe("2028-03-31");
+    // A holiday on 1 April brings it back a day.
+    expect(statutoryDeadline("itf", "2026-10-25", new Set(["2027-04-01"]))).toBe("2027-03-31");
+  });
+
+  it("applies the company's own day only when it is earlier than the statutory date", () => {
+    const days = { paye: 5, nhf: null, nsitf: 20, itf: 28 };
+    // PAYE: the 5th is earlier than the statutory 10 Nov, so it applies.
+    expect(deadline({ kind: "paye", dueDays: days })).toMatchObject({
+      dueDate: "2026-11-05",
+      statutoryDate: "2026-11-10",
+      customDay: { day: 5, date: "2026-11-05", applied: true },
+    });
+    // NSITF: the 20th is later than the statutory 13 Nov, so it is ignored (the screen says so).
+    expect(deadline({ kind: "nsitf", dueDays: days })).toMatchObject({
+      dueDate: "2026-11-13",
+      statutoryDate: "2026-11-13",
+      customDay: { day: 20, date: "2026-11-20", applied: false },
+    });
+    // ITF: the 28th of the next month is long before 1 April.
+    expect(deadline({ kind: "itf", dueDays: days }).dueDate).toBe("2026-11-28");
+    // The same day as the statutory one changes nothing; none set is the statutory date.
+    expect(deadline({ kind: "paye", dueDays: { ...days, paye: 10 } })).toMatchObject({
+      dueDate: "2026-11-10",
+      customDay: { applied: false },
+    });
+    expect(deadline({ kind: "nhf", dueDays: days })).toMatchObject({
+      dueDate: "2026-11-25",
+      customDay: null,
+    });
+    // Pension has no company day.
+    expect(deadline({ kind: "pension", dueDays: days }).customDay).toBeNull();
   });
 
   it("works status out on read", () => {

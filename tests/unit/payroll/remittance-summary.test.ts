@@ -33,11 +33,36 @@ describe("summariseRemittances", () => {
       overpaid: 0,
       due: 1,
       overdue: 0,
+      pastPenalty: 0,
+      provisional: 0,
       noDueDate: 1,
       voided: 2,
       outstandingKobo: "16530000",
       nextDueDate: "2026-11-02",
     });
+  });
+
+  it("counts PAYE past its penalty date and provisional due dates, voided ones left out (slice 5.9b)", () => {
+    const summary = summariseRemittances([
+      row({
+        status: "overdue",
+        overdue: true,
+        pastPenalty: true,
+        outstandingKobo: 100_000n,
+        dueDate: "2026-11-10",
+        deadline: { provisional: true },
+      }),
+      row({
+        status: "due",
+        outstandingKobo: 200_000n,
+        dueDate: "2026-12-03",
+        deadline: { provisional: false },
+      }),
+      // Paid: nothing owed, so not counted as provisional.
+      row({ status: "paid", deadline: { provisional: true } }),
+      row({ status: "voided", pastPenalty: false, deadline: { provisional: true } }),
+    ]);
+    expect(summary).toMatchObject({ overdue: 1, pastPenalty: 1, provisional: 1, voided: 1 });
   });
 
   it("gives zeros when every remittance is voided", () => {

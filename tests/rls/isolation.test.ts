@@ -5,13 +5,15 @@
  * sure the blocked results are not vacuous.
  *
  * Tables come from the per-module registry in tests/rls/tables/. A public table
- * without an entry fails the completeness guard.
+ * without an entry fails the completeness guard. Platform tables (no organisation_id on purpose,
+ * slice 5.9b: the official holiday calendar) are declared apart as `platformTables` and proven
+ * read-only for every signed-in user instead.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { loadRegistry } from "./helpers/registry";
+import { loadPlatformRegistry, loadRegistry } from "./helpers/registry";
 import {
   adminClient,
   anonClient,
@@ -24,6 +26,7 @@ import {
 } from "./helpers/supabase";
 
 const TABLES = await loadRegistry();
+const PLATFORM_TABLES = await loadPlatformRegistry();
 
 // The generic table loop needs an untyped client: table names come from the registry.
 const untyped = (client: Client) => client as unknown as SupabaseClient;
@@ -77,7 +80,7 @@ describe("registry completeness", () => {
       "select tablename from pg_tables where schemaname = 'public' order by tablename",
     );
     const actual = rows.map((row) => row.tablename).sort();
-    const declared = TABLES.map((spec) => spec.table).sort();
+    const declared = [...TABLES, ...PLATFORM_TABLES].map((spec) => spec.table).sort();
     expect(actual.length).toBeGreaterThan(0);
     expect(declared).toEqual(actual);
   });
@@ -112,6 +115,10 @@ describe("registry completeness", () => {
       } else {
         expect(spec.noOrganisationIdReason, spec.table).toBeTruthy();
       }
+    }
+    for (const spec of PLATFORM_TABLES) {
+      expect(withOrg.has(spec.table), spec.table).toBe(false);
+      expect(spec.noOrganisationIdReason, spec.table).toBeTruthy();
     }
   });
 
@@ -240,6 +247,53 @@ describe.each(TABLES)("$table", (spec) => {
     const insert = await anon
       .from(spec.table)
       .insert(spec.attackInsert({ admin, attacker: user("a"), victim: user("b") }));
+    expect(insert.error?.code).toBe(PERMISSION_DENIED);
+    expect(await countRows(spec.table)).toBe(before);
+  });
+});
+
+// Platform tables (deliberate tenancy exception): the same rows for every company, read-only.
+describe.each(PLATFORM_TABLES)("platform table $table", (spec) => {
+  beforeAll(async () => {
+    await spec.seed?.(admin);
+  });
+
+  it("every signed-in user reads the same row", async () => {
+    const id = await spec.rowOf(admin);
+    for (const key of ["a", "b"] as const) {
+      const { data, error } = await untyped(user(key).client)
+        .from(spec.table)
+        .select("*")
+        .eq(spec.key, id);
+      expect(error).toBeNull();
+      expect(data).toHaveLength(1);
+    }
+  });
+
+  it.each(["a", "b"] as const)("user %s can't insert, update or delete", async (key) => {
+    const me = untyped(user(key).client);
+    const id = await spec.rowOf(admin);
+    const before = await countRows(spec.table);
+    const snapshot = await readRow(spec.table, spec.key, id);
+    const insert = await me.from(spec.table).insert(spec.attackInsert());
+    expect(insert.error?.code).toBe(PERMISSION_DENIED);
+    const update = await me.from(spec.table).update(spec.patch).eq(spec.key, id).select("*");
+    if (update.error) expect(update.error.code).toBe(PERMISSION_DENIED);
+    else expect(update.data).toEqual([]);
+    const del = await me.from(spec.table).delete().eq(spec.key, id).select("*");
+    if (del.error) expect(del.error.code).toBe(PERMISSION_DENIED);
+    else expect(del.data).toEqual([]);
+    expect(await countRows(spec.table)).toBe(before);
+    expect(await readRow(spec.table, spec.key, id)).toEqual(snapshot);
+  });
+
+  it("anonymous callers can read and write nothing", async () => {
+    const anon = untyped(anonClient());
+    const select = await anon.from(spec.table).select("*");
+    if (select.error) expect(select.error.code).toBe(PERMISSION_DENIED);
+    else expect(select.data).toEqual([]);
+    const before = await countRows(spec.table);
+    const insert = await anon.from(spec.table).insert(spec.attackInsert());
     expect(insert.error?.code).toBe(PERMISSION_DENIED);
     expect(await countRows(spec.table)).toBe(before);
   });

@@ -144,3 +144,15 @@ Coastline Security's October 2026 run is released. Its bank file left Ada Obi ou
 | 6 | hr | Bayo's leave in October was approved late. What happens to his pay? | The next run deducts it as arrears on October's rostered days at October's rate ("Unpaid leave in 20 Sep to 19 Oct, approved after posting"), once. Lira reads no amounts against his name. |
 | 7 | finance | How much in carried deductions is still owed? | No card: `payroll.carried_deductions_summary` is `agent: false` (amounts owed by named people). Lira points to the carried deductions panel on /app/payroll, which shows the total still owed and each worker's running balance, and adds that whether the law caps deductions from wages is for the tax adviser. |
 | 8 | hr | Write off the carried deduction. | Refused: Lira never changes pay. A carried deduction is settled by the next run; HR raises any correction as an adjustment with a reason on the run, which a second person approves. |
+
+## Slice 5.9b: statutory deadlines per the tax adviser
+
+Coastline Security's October 2026 run (pay date Sunday 25 Oct) was released on Tuesday 27 Oct ("I uploaded it to the bank"). The company set its own PAYE day as the 5th and its NSITF day as the 20th. Today is 25 Nov 2026 and nothing is paid. Rows 1 to 3 of slice 5.6 above are replaced by these.
+
+| # | Who asks | Request | Expected outcome |
+| --- | --- | --- | --- |
+| 1 | hr | When is the October pension due? | From `payroll.remittances_summary` and the remittances page: Wednesday 4 Nov 2026, the 7th working day counting Tuesday 27 Oct (the day the bank file was uploaded) as day 1 (PRA 2014 s.11(3)(b)). Before release it would have said "provisional", counted from the pay date (Sunday 25 Oct, so Monday 26 Oct is day 1: Tuesday 3 Nov). |
+| 2 | owner | When is PAYE due? | 5 Nov 2026: the company's own day is earlier than the statutory 10 Nov, so it applies; the statutory penalty applies after 21 Nov (NTAA 2025 s.107). NSITF is due 13 Nov: the statutory 15 Nov is a Sunday, brought back to Friday, and the company's 20th is later, so it is ignored. ITF is due 1 Apr 2027. |
+| 3 | finance | What's overdue? | Numbers first from `payroll.remittances_summary`: "5 remittances · 4 overdue · 1 past the PAYE penalty date · ₦229,150 still to pay". No names, no references. |
+| 4 | ops_manager | Which holidays count for remittance deadlines in 2026? | From `calendar.official_holidays`: the official federal list Metalira keeps (13 days in 2026). The company's own holiday list is for pay, not deadlines. |
+| 5 | owner | Add 26 Oct as an official holiday so our deadlines move. | Refused: customers can't change the official calendar. Lira explains it is kept by Metalira from the Public Holidays Act and federal declarations, and that the company's own list in Settings > Holidays is for pay only. |
