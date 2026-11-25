@@ -288,6 +288,17 @@ import {
 } from "@/server/payroll/remittances";
 import { PAYSLIP_PUBLISHERS } from "@/server/payroll/payslip-documents";
 import {
+  declareReliefSpec,
+  importOpeningSpec,
+  itfFlagSpec,
+  nhfNumberSpec,
+  proofLinkSpec,
+  recordOpeningSpec,
+  recordProofSpec,
+  startProofSpec,
+  verifyReliefSpec,
+} from "@/server/payroll/tax-records";
+import {
   askHrSchema,
   downloadPayslipSpec,
   payslipIdSchema,
@@ -369,6 +380,11 @@ import {
   previewReturnPayrollRun,
   previewSubmitPayrollRun,
   previewVoidRemittancePayment,
+  previewDeclarePayrollRelief,
+  previewImportOpeningBalances,
+  previewRecordOpeningBalance,
+  previewSetItfTurnover,
+  previewVerifyPayrollRelief,
 } from "./payroll-previews";
 import {
   previewBulkDepartment,
@@ -392,6 +408,9 @@ import { fromSpec, type ActionRef, type Capability } from "./types";
 
 const NO_PAYROLL =
   "Lira never prepares, changes, submits, approves or releases payroll (docs/PHASE_5.md decision 8).";
+
+const TAX_RECORDS_NOTE =
+  "Opening balances, reliefs and their proofs change what PAYE withholds: a person enters and verifies them with the documents in hand (docs/PHASE_5.md decision 8).";
 
 const REMITTANCE_NOTE =
   "Recording a statutory remittance is a person's step with the bank's receipt in hand; Lira never records payments or moves money (docs/LIRA.md).";
@@ -3249,6 +3268,118 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("payroll/payslip-actions", "askHrAboutPayslipAction"),
     agent: false,
     agentNote: "A question is the worker's own words, written in the worker app.",
+  },
+  // -------------------------------------------------------------------------
+  // Payroll tax records (payroll/tax-records-actions.ts, slice 5.9a)
+  // -------------------------------------------------------------------------
+  {
+    name: "payroll.record_opening_balance",
+    description:
+      "Records or corrects a worker's opening balance for the tax year: gross, chargeable pay, PAYE and pension to a month.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(recordOpeningSpec),
+    changes: "one",
+    action: at("payroll/tax-records-actions", "recordOpeningBalanceAction"),
+    preview: previewRecordOpeningBalance,
+    agent: false,
+    agentNote: TAX_RECORDS_NOTE,
+  },
+  {
+    name: "payroll.import_opening_balances",
+    description:
+      "Imports opening balances for many workers at go-live from pasted rows, correcting any already on file.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(importOpeningSpec),
+    changes: "many",
+    action: at("payroll/tax-records-actions", "importOpeningBalancesAction"),
+    preview: previewImportOpeningBalances,
+    agent: false,
+    agentNote: TAX_RECORDS_NOTE,
+  },
+  {
+    name: "payroll.declare_relief",
+    description:
+      "Declares or corrects a worker's rent, NHIS or life assurance relief for a tax year, counted once verified.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(declareReliefSpec),
+    changes: "one",
+    action: at("payroll/tax-records-actions", "declareReliefAction"),
+    preview: previewDeclarePayrollRelief,
+    agent: false,
+    agentNote: TAX_RECORDS_NOTE,
+  },
+  {
+    name: "payroll.start_relief_proof",
+    description: "Prepares the upload of a relief's proof file to the private proof store.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(startProofSpec),
+    changes: "none",
+    action: at("payroll/tax-records-actions", "startReliefProofAction"),
+    agent: false,
+    agentNote: FILES,
+  },
+  {
+    name: "payroll.record_relief_proof",
+    description: "Checks an uploaded proof file by its bytes and records it against the relief.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(recordProofSpec),
+    changes: "one",
+    action: at("payroll/tax-records-actions", "recordReliefProofAction"),
+    agent: false,
+    agentNote: FILES,
+  },
+  {
+    name: "payroll.verify_relief",
+    description:
+      "Verifies or rejects a relief's proof, which decides whether PAYE counts the relief.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(verifyReliefSpec),
+    changes: "one",
+    action: at("payroll/tax-records-actions", "verifyReliefAction"),
+    preview: previewVerifyPayrollRelief,
+    agent: false,
+    agentNote: TAX_RECORDS_NOTE,
+  },
+  {
+    name: "payroll.open_relief_proof",
+    description: "Gives a 60-second link to a relief's proof file, audited.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(proofLinkSpec),
+    changes: "none",
+    action: at("payroll/tax-records-actions", "reliefProofLinkAction"),
+    agent: false,
+    agentNote: OPEN_FILE,
+  },
+  {
+    name: "payroll.set_nhf_number",
+    description: "Records or removes a worker's NHF number on file, shown masked to the last 4.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(nhfNumberSpec),
+    changes: "one",
+    action: at("payroll/tax-records-actions", "setNhfNumberAction"),
+    agent: false,
+    agentNote: REVEAL,
+  },
+  {
+    name: "payroll.set_itf_turnover",
+    description:
+      "Sets whether the company's turnover is N50 million or more, which makes ITF apply whatever the headcount.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(itfFlagSpec),
+    changes: "one",
+    action: at("payroll/tax-records-actions", "setItfTurnoverAction"),
+    preview: previewSetItfTurnover,
+    agent: false,
+    agentNote: TAX_RECORDS_NOTE,
   },
   // -------------------------------------------------------------------------
   // Statutory remittances (payroll/remittance-actions.ts, slice 5.6)

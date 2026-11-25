@@ -62,7 +62,7 @@ test("HR sees the bands with the adviser line, previews and saves a version from
   await form.getByLabel("NSITF (%)").fill("1.5");
   await form.getByRole("button", { name: "Preview changes" }).click();
   await expect(form.getByTestId("rule-set-preview")).toContainText(
-    `NTA 2025 v2 changes 1 figure from ${formatDate(addDays(lagosToday(), 1))}`,
+    `NTA 2025 v3 changes 1 figure from ${formatDate(addDays(lagosToday(), 1))}`,
   );
   await expect(form.getByRole("listitem").filter({ hasText: "NSITF" })).toContainText(
     "1% of monthly payroll → 1.5% of monthly payroll",
@@ -70,7 +70,7 @@ test("HR sees the bands with the adviser line, previews and saves a version from
   await form.getByRole("button", { name: "Save version" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Version saved" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible();
-  await expect(page.getByText(/NTA 2025 v2 · from .* · 1 figure changes/)).toBeVisible();
+  await expect(page.getByText(/NTA 2025 v3 · from .* · 1 figure changes/)).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 900 });
   await page.reload();

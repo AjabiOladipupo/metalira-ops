@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { Status } from "@/components/status";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime, lagosToday } from "@/lib/dates";
 import { formatNaira } from "@/lib/money";
 import {
   TAX_ADVISER_LINE,
@@ -18,10 +18,16 @@ import { canSetRemittanceDueDays } from "@/server/payroll/remittances";
 import { canConfirmPayrollRules, canEditPayrollRules } from "@/server/payroll/rule-sets";
 import { loadPayrollRules, type RuleSetVersion } from "@/server/payroll/rule-sets-data";
 import { peoplePageContext } from "@/server/people/page-context";
+import {
+  RELIEF_LABELS,
+  canWriteTaxRecords,
+  loadCompanyTaxRecords,
+} from "@/server/payroll/tax-records";
 
 import { RouteGate } from "../../_shell/slots";
 import { RemitDueDaysForm } from "../../payroll/remittances/_components/remittance-forms";
 import { ConfirmAdviserForm } from "./_components/payroll-rules-forms";
+import { ImportOpeningForm, ItfTurnoverForm } from "../../people/_components/tax-relief-forms";
 
 export const metadata: Metadata = { title: "Payroll rules" };
 
@@ -68,10 +74,13 @@ async function PayrollRulesPage({
   searchParams: PageProps<"/app/settings/payroll">["searchParams"];
 }) {
   const [ctx, query] = await Promise.all([peoplePageContext(), searchParams]);
-  const [rules, dueDays] = await Promise.all([
+  const taxYear = Number(ctx.today.slice(0, 4));
+  const [rules, dueDays, tax] = await Promise.all([
     loadPayrollRules(ctx.supabase, ctx.organisationId),
     loadRemitDueDays(ctx.supabase, ctx.organisationId),
+    loadCompanyTaxRecords(ctx.supabase, ctx.organisationId, taxYear),
   ]);
+  const canEditTax = canWriteTaxRecords(ctx.role);
   const canEdit = canEditPayrollRules(ctx.role);
   const canConfirm = canConfirmPayrollRules(ctx.role);
   const added = first(query.added);
@@ -160,8 +169,9 @@ async function PayrollRulesPage({
           </table>
         </div>
         <p className="m-0 text-[13px] text-fg-muted">
-          Taxable income is yearly pay less employee pension, NHF and rent relief. Monthly PAYE is
-          the year&apos;s tax ÷ 12, rounded to the kobo once.
+          {v.ruleSet.rules.adviser
+            ? "PAYE is cumulative: chargeable pay so far this tax year (pay less employee pension and NHF, with any opening balance) is scaled to a year, the year's verified reliefs come off, and the tax due to date less PAYE already withheld is this month's PAYE, rounded to the kobo once."
+            : "Taxable income is yearly pay less employee pension, NHF and rent relief. PAYE is worked out on the tax year so far and rounded to the kobo once."}
         </p>
         <FigureList set={v.ruleSet} />
         <p className="m-0 text-[13px] text-fg-muted">
@@ -287,6 +297,70 @@ async function PayrollRulesPage({
             ))}
           </dl>
         )}
+      </section>
+
+      <section aria-labelledby="itf-turnover" className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 id="itf-turnover" className="m-0 type-h2">
+            ITF and turnover
+          </h2>
+          <p className="m-0 text-sm text-fg-muted">
+            ITF applies when the company has 5 or more employees on the pay date, or a turnover of
+            ₦50 million or more. Metalira can&apos;t know your turnover, so say it here. Now:{" "}
+            {tax.itfTurnoverOver50m ? "₦50 million or more" : "under ₦50 million"}.
+          </p>
+        </div>
+        {canEditTax ? (
+          <ItfTurnoverForm value={tax.itfTurnoverOver50m} today={lagosToday()} />
+        ) : null}
+      </section>
+
+      <section aria-labelledby="opening-balances" className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 id="opening-balances" className="m-0 type-h2">
+            Opening balances for {taxYear}
+          </h2>
+          <p className="m-0 text-sm text-fg-muted">
+            {tax.openingBalances} {tax.openingBalances === 1 ? "worker has" : "workers have"} an
+            opening balance on file. When you move to Metalira during the year, import each
+            worker&apos;s gross pay, chargeable pay, PAYE and pension so far, so year-to-date PAYE
+            starts from the right figures. A worker with one on file gets a correcting row; earlier
+            rows are kept.
+          </p>
+        </div>
+        {canEditTax ? <ImportOpeningForm taxYear={taxYear} /> : null}
+      </section>
+
+      <section aria-labelledby="reliefs-waiting" className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 id="reliefs-waiting" className="m-0 type-h2">
+            Reliefs to verify
+          </h2>
+          <p className="m-0 text-sm text-fg-muted">
+            {tax.awaiting.length} {tax.awaiting.length === 1 ? "relief" : "reliefs"} for {taxYear}{" "}
+            not verified. PAYE counts a relief only once its proof (for rent: tenancy agreement,
+            receipts and payment record) is verified on the worker&apos;s page.
+          </p>
+        </div>
+        {tax.awaiting.length > 0 ? (
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {tax.awaiting.map((a) => (
+              <li
+                key={a.id}
+                className="flex flex-col gap-0.5 rounded-lg border border-line p-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4"
+              >
+                <Link href={`/app/people/${a.workerId}#tax`} className="text-sm font-semibold">
+                  {a.workerName}
+                </Link>
+                <span className="text-sm text-fg-muted">
+                  {formatNaira(a.annualKobo, { whole: a.annualKobo % 100n === 0n })} ·{" "}
+                  {RELIEF_LABELS[a.kind]} · {a.proofs} {a.proofs === 1 ? "proof" : "proofs"}
+                  {a.rejected ? " · rejected" : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <p className="m-0 text-[13px] text-fg-muted">

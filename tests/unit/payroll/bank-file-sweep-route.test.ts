@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const uploads = vi.hoisted(() => vi.fn(async () => ({ removed: 2 })));
 const receipts = vi.hoisted(() => vi.fn(async () => ({ deleted: 0 })));
 const bankFiles = vi.hoisted(() => vi.fn(async () => ({ removed: 1 })));
+const proofs = vi.hoisted(() => vi.fn(async () => ({ deleted: 3 })));
 
 vi.mock("@/server/business/contract-document-sweep", () => ({
   runContractDocumentSweep: uploads,
 }));
 vi.mock("@/server/payroll/receipt-sweep", () => ({ runReceiptSweep: receipts }));
 vi.mock("@/server/payroll/payout-sweep", () => ({ runPayrollFileSweep: bankFiles }));
+vi.mock("@/server/payroll/relief-proof-sweep", () => ({ runReliefProofSweep: proofs }));
 
 import { GET } from "@/app/api/cron/contract-documents/route";
 
@@ -36,8 +38,14 @@ describe("the daily sweep removes bank files too", () => {
     vi.stubEnv("CRON_SECRET", SECRET);
     const response = await call();
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ removed: 2, bankFilesDeleted: 1 });
+    expect(await response.json()).toMatchObject({
+      removed: 2,
+      bankFilesDeleted: 1,
+      proofUploadsDeleted: 3,
+    });
     expect(bankFiles).toHaveBeenCalledTimes(1);
+    // Slice 5.9a (security review M1): relief-proof uploads that never became a proof.
+    expect(proofs).toHaveBeenCalledTimes(1);
     expect(uploads).toHaveBeenCalledTimes(1);
   });
 

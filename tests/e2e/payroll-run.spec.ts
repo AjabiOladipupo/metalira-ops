@@ -11,6 +11,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import golden from "../../fixtures/october-2026-golden.json";
 import { adminClient } from "../rls/helpers/supabase";
+import { signedInClient, verifyDeclaredRents } from "../rls/helpers/reliefs";
 import {
   NEEDS_SUPABASE,
   addMembership,
@@ -78,6 +79,12 @@ test("HR prepares the October run, sees the golden figures and Explain, and subm
   const hr = await createAccount("prun-hr", "Oluwaseun Adeyemi");
   await addMembership(owner.orgId, hr.userId, "hr");
   const workers = await seedGoldenWorkers(owner.orgId);
+  // Slice 5.9a: rent relief needs verified proof under NTA 2025 v2 (the tax adviser).
+  await verifyDeclaredRents(
+    adminClient(),
+    { client: await signedInClient(owner.email, owner.password), userId: owner.userId },
+    owner.orgId,
+  );
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await signInViaUi(page, hr.email, hr.password);

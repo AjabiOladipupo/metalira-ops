@@ -4,9 +4,9 @@ import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 import { LAGOS_TIME_ZONE, todayIn } from "@/lib/dates";
 import {
-  NTA_2025_V1,
-  NTA_2025_V1_EFFECTIVE_FROM,
-  NTA_2025_V1_SOURCE,
+  NTA_2025_V2,
+  NTA_2025_V2_EFFECTIVE_FROM,
+  NTA_2025_V2_SOURCE,
   diffRuleSets,
   parseRuleSet,
   type FigureChange,
@@ -54,11 +54,11 @@ export interface PayrollRules {
 
 const TEMPLATE: RuleSetVersion = {
   id: null,
-  name: NTA_2025_V1.name,
-  effectiveFrom: NTA_2025_V1_EFFECTIVE_FROM,
+  name: NTA_2025_V2.name,
+  effectiveFrom: NTA_2025_V2_EFFECTIVE_FROM,
   effectiveTo: null,
-  ruleSet: NTA_2025_V1,
-  sourceLabel: NTA_2025_V1_SOURCE,
+  ruleSet: NTA_2025_V2,
+  sourceLabel: NTA_2025_V2_SOURCE,
   reason: null,
   adviserConfirmedAt: null,
   adviserNote: null,

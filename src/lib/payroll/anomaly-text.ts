@@ -220,6 +220,52 @@ export function describeAnomaly(
         body: "The leave refund pays back the arrears in full, but part of them is still in this worker's carried deductions. Check it before submitting.",
       };
     }
+    // Slice 5.9a: the tax adviser's answers of 24 Nov 2026.
+    case "deduction_capped":
+      return {
+        title: `Other deductions capped at a third of gross · ${name}`,
+        body: "Other deductions capped at a third of gross; the rest carries forward (Labour Act s.5(7)). PAYE, pension and NHF came off in full.",
+      };
+    case "paye_overwithheld":
+      return {
+        title: `More PAYE withheld this year than is due · ${name}`,
+        body: "PAYE already withheld this tax year is more than the tax due to date, so this payslip withholds ₦0. Explain shows the amount over; settle it with your tax adviser.",
+      };
+    case "nhf_not_deducted": {
+      const why =
+        detail.no_number === true
+          ? "no NHF number is on file. Add it on their page, then recalculate"
+          : detail.below_minimum_wage === true
+            ? "their regular monthly pay is below the minimum wage"
+            : "the NHF conditions aren't met";
+      return {
+        title: `NHF not taken · ${name}`,
+        body: `Opted in to NHF, but ${why}.`,
+      };
+    }
+    case "paye_not_withheld": {
+      const amount =
+        typeof detail.naira === "string"
+          ? `₦${detail.naira}${typeof detail.kobo === "number" && detail.kobo > 0 ? `.${String(detail.kobo).padStart(2, "0")}` : ""}`
+          : "Some PAYE";
+      return {
+        title: `PAYE ${amount} couldn't be withheld this month · ${name}`,
+        body:
+          detail.year_end === true
+            ? "This payslip can't pay all the PAYE due to date, and it is their last payslip of the tax year, so it needs settling at year end."
+            : "This payslip can't pay all the PAYE due to date; it will be caught up next month by the year-to-date maths.",
+      };
+    }
+    case "recovery_carried":
+      return {
+        title: `Clawback larger than this month's pay · ${name}`,
+        body: "What this month's pay could bear came off before tax; the rest is carried forward and comes off after tax in later runs.",
+      };
+    case "rent_relief_unverified":
+      return {
+        title: `Rent relief not applied: proof not verified · ${name}`,
+        body: "Rent is declared, but no tenancy agreement, receipts and payment record are verified for this tax year. Add and verify them on their page, then recalculate.",
+      };
     default:
       return {
         title: `${code.replace(/_/g, " ")} · ${name}`,

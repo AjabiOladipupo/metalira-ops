@@ -42,6 +42,45 @@ export interface TaxRules {
   itf: { rateBps: number; minStaff: number };
   /** Daily workers pay no PAYE, pension, NHF, NSITF or ITF and are left out of the levy base. */
   dailyWorkersExempt: boolean;
+  /**
+   * Slice 5.9a: the tax adviser's answers of 24 Nov 2026 (NTA 2025, NTAA 2025, PRA 2014, the NHF
+   * Act, ECA 2010, the ITF Act and the Labour Act). Null on versions made before them (NTA 2025
+   * v1), which keep their own figures.
+   */
+  adviser: AdviserRules | null;
+}
+
+/** The figures and switches the tax adviser's answers added (slice 5.9a). */
+export interface AdviserRules {
+  /**
+   * The PAYE method: cumulative year to date (slice 5.9a). A stored flag so other code (5.9c's
+   * final-pay guard) can require it of a run's rule set; the engine applies it to every run.
+   */
+  payeMethod: "cumulative_ytd";
+  /**
+   * The national minimum wage a month (N70,000; N840,000 a year). A worker whose annualised
+   * total income on the year-to-date basis is at or below 12 x this pays no PAYE; NHF is taken
+   * only from pay at or above it.
+   */
+  minimumWageMonthlyKobo: Kobo;
+  /** Pension applies only when the company has this many employees or more on the pay date (3). */
+  pensionMinEmployees: number;
+  /** A daily rate has no split, so the consolidated daily pay counts toward the pension base. */
+  dailyPayPensionable: boolean;
+  /** NHF only when opted in, with an NHF number on file and pay at or above the minimum wage. */
+  nhfNeedsNumberAndMinimumWage: boolean;
+  /** NSITF on regular monthly payroll only (no overtime, off-day pay, bonuses, one-offs, arrears). */
+  nsitfRegularOnly: boolean;
+  /** Non-statutory deductions in a month are capped at this fraction of that month's gross (1/3). */
+  deductionCap: { numerator: number; denominator: number };
+  /**
+   * Clawbacks: a deduction correction of an overpaid earning and late unpaid leave reduce taxable
+   * pay and the pension base when the original payslip is in the same tax year; an overpayment
+   * older than `maxAgeMonths` at discovery can't be deducted (Labour Act s.5(5)).
+   */
+  clawback: { preTaxSameTaxYear: boolean; maxAgeMonths: number };
+  /** Reliefs on chargeable income, each counted only once HR verified its proof. */
+  reliefs: { rentProofRequired: boolean; nhis: boolean; lifeAssurance: boolean };
 }
 
 export const PUBLIC_HOLIDAY_MODES = ["worked_minutes_at_overtime_rate"] as const;
@@ -85,6 +124,7 @@ export const NTA_2025_V1: RuleSet = {
     nsitf: { rateBps: 100 },
     itf: { rateBps: 100, minStaff: 5 },
     dailyWorkersExempt: true,
+    adviser: null,
   },
   policy: {
     overtimeMultiplierBps: 10_000,
@@ -96,6 +136,36 @@ export const NTA_2025_V1: RuleSet = {
 export const NTA_2025_V1_EFFECTIVE_FROM = "2026-01-01";
 export const NTA_2025_V1_SOURCE =
   "Nigeria Tax Act 2025 bands from 1 Jan 2026, Pension Reform Act 2014, NHF, NSITF and ITF; Metalira's default pay policy";
+
+/**
+ * NTA 2025 v2 (slice 5.9a): v1's bands and rates with the tax adviser's answers of 24 Nov 2026,
+ * which the owner approved. The starting version for every company from now on
+ * (private.tax_rule_set_template()); a company that already holds v1 gets it as a new version
+ * (migration 20261122230000). Daily workers are no longer exempt (owner decision).
+ */
+export const NTA_2025_V2: RuleSet = {
+  name: "NTA 2025 v2",
+  rules: {
+    ...NTA_2025_V1.rules,
+    dailyWorkersExempt: false,
+    adviser: {
+      payeMethod: "cumulative_ytd",
+      minimumWageMonthlyKobo: naira(70_000n),
+      pensionMinEmployees: 3,
+      dailyPayPensionable: true,
+      nhfNeedsNumberAndMinimumWage: true,
+      nsitfRegularOnly: true,
+      deductionCap: { numerator: 1, denominator: 3 },
+      clawback: { preTaxSameTaxYear: true, maxAgeMonths: 3 },
+      reliefs: { rentProofRequired: true, nhis: true, lifeAssurance: true },
+    },
+  },
+  policy: { ...NTA_2025_V1.policy },
+};
+
+export const NTA_2025_V2_EFFECTIVE_FROM = "2026-01-01";
+export const NTA_2025_V2_SOURCE =
+  "Tax adviser's answers of 24 Nov 2026: NTA 2025, NTAA 2025, PRA 2014, NHF Act, ECA 2010, ITF Act, Labour Act";
 
 // ---------------------------------------------------------------------------
 // The jsonb shape (snake case, kobo as digit strings) and its Zod schema
@@ -115,6 +185,31 @@ const components = z
   .max(SALARY_COMPONENTS.length)
   .refine((v) => new Set(v).size === v.length, "each component once");
 
+/** The adviser's part of `rules` (slice 5.9a); private.tax_rules_valid checks the same. */
+export const adviserJsonSchema = z.strictObject({
+  paye_method: z.literal("cumulative_ytd"),
+  minimum_wage_monthly_kobo: koboString,
+  pension_min_employees: z.number().int().min(1).max(100_000),
+  daily_pay_pensionable: z.boolean(),
+  nhf_needs_number_and_minimum_wage: z.boolean(),
+  nsitf_regular_only: z.boolean(),
+  deduction_cap: z
+    .strictObject({
+      numerator: z.number().int().min(1).max(100),
+      denominator: z.number().int().min(1).max(100),
+    })
+    .refine((v) => v.numerator <= v.denominator, "a fraction of 1 or less"),
+  clawback: z.strictObject({
+    pre_tax_same_tax_year: z.boolean(),
+    max_age_months: z.number().int().min(1).max(120),
+  }),
+  reliefs: z.strictObject({
+    rent_proof_required: z.boolean(),
+    nhis: z.boolean(),
+    life_assurance: z.boolean(),
+  }),
+});
+
 export const taxRulesJsonSchema = z
   .strictObject({
     paye_bands: z
@@ -127,6 +222,7 @@ export const taxRulesJsonSchema = z
     nsitf: z.strictObject({ rate_bps: bps }),
     itf: z.strictObject({ rate_bps: bps, min_staff: z.number().int().min(1).max(100_000) }),
     daily_workers_exempt: z.boolean(),
+    adviser: adviserJsonSchema.optional(),
   })
   .superRefine((v, ctx) => {
     v.paye_bands.forEach((band, i) => {
@@ -175,6 +271,26 @@ export function parseRuleSet(name: string, rules: unknown, policy: unknown): Rul
       nsitf: { rateBps: r.nsitf.rate_bps },
       itf: { rateBps: r.itf.rate_bps, minStaff: r.itf.min_staff },
       dailyWorkersExempt: r.daily_workers_exempt,
+      adviser: r.adviser
+        ? {
+            payeMethod: r.adviser.paye_method,
+            minimumWageMonthlyKobo: r.adviser.minimum_wage_monthly_kobo,
+            pensionMinEmployees: r.adviser.pension_min_employees,
+            dailyPayPensionable: r.adviser.daily_pay_pensionable,
+            nhfNeedsNumberAndMinimumWage: r.adviser.nhf_needs_number_and_minimum_wage,
+            nsitfRegularOnly: r.adviser.nsitf_regular_only,
+            deductionCap: { ...r.adviser.deduction_cap },
+            clawback: {
+              preTaxSameTaxYear: r.adviser.clawback.pre_tax_same_tax_year,
+              maxAgeMonths: r.adviser.clawback.max_age_months,
+            },
+            reliefs: {
+              rentProofRequired: r.adviser.reliefs.rent_proof_required,
+              nhis: r.adviser.reliefs.nhis,
+              lifeAssurance: r.adviser.reliefs.life_assurance,
+            },
+          }
+        : null,
     },
     policy: {
       overtimeMultiplierBps: p.overtime_multiplier_bps,
@@ -204,6 +320,29 @@ export function ruleSetRulesJson(rules: TaxRules): TaxRulesJson {
     nsitf: { rate_bps: rules.nsitf.rateBps },
     itf: { rate_bps: rules.itf.rateBps, min_staff: rules.itf.minStaff },
     daily_workers_exempt: rules.dailyWorkersExempt,
+    ...(rules.adviser ? { adviser: adviserJson(rules.adviser) } : {}),
+  };
+}
+
+/** The jsonb `adviser` part of `rules` (slice 5.9a). */
+export function adviserJson(a: AdviserRules): z.input<typeof adviserJsonSchema> {
+  return {
+    paye_method: a.payeMethod,
+    minimum_wage_monthly_kobo: a.minimumWageMonthlyKobo.toString(),
+    pension_min_employees: a.pensionMinEmployees,
+    daily_pay_pensionable: a.dailyPayPensionable,
+    nhf_needs_number_and_minimum_wage: a.nhfNeedsNumberAndMinimumWage,
+    nsitf_regular_only: a.nsitfRegularOnly,
+    deduction_cap: { numerator: a.deductionCap.numerator, denominator: a.deductionCap.denominator },
+    clawback: {
+      pre_tax_same_tax_year: a.clawback.preTaxSameTaxYear,
+      max_age_months: a.clawback.maxAgeMonths,
+    },
+    reliefs: {
+      rent_proof_required: a.reliefs.rentProofRequired,
+      nhis: a.reliefs.nhis,
+      life_assurance: a.reliefs.lifeAssurance,
+    },
   };
 }
 
@@ -296,6 +435,7 @@ export function ruleSetFigures(set: RuleSet): RuleFigure[] {
         ? "No PAYE, pension, NHF, NSITF or ITF; left out of the levy base"
         : "Same deductions as monthly workers",
     },
+    ...adviserFigures(rules),
     {
       key: "overtime_multiplier",
       label: "Overtime rate",
@@ -313,6 +453,70 @@ export function ruleSetFigures(set: RuleSet): RuleFigure[] {
     },
   );
   return out;
+}
+
+/** The adviser's figures (slice 5.9a), or none on a version made before them. */
+function adviserFigures(rules: TaxRules): RuleFigure[] {
+  const a = rules.adviser;
+  if (!a) return [];
+  return [
+    {
+      key: "paye_method",
+      label: "PAYE method",
+      value: "Cumulative year to date: tax due to date less PAYE already withheld this year",
+    },
+    {
+      key: "minimum_wage",
+      label: "Minimum wage",
+      value: `${formatNaira(a.minimumWageMonthlyKobo, { whole: true })} a month (${formatNaira(a.minimumWageMonthlyKobo * 12n, { whole: true })} a year); at or below it, no PAYE`,
+    },
+    {
+      key: "pension_min_employees",
+      label: "Pension applies from",
+      value: `${a.pensionMinEmployees} employees on the pay date`,
+    },
+    {
+      key: "daily_pay_pensionable",
+      label: "Daily pay in the pension base",
+      value: a.dailyPayPensionable ? "Yes, the consolidated daily pay" : "No",
+    },
+    {
+      key: "nhf_conditions",
+      label: "NHF needs",
+      value: a.nhfNeedsNumberAndMinimumWage
+        ? "Opted in, an NHF number on file, and pay at or above the minimum wage"
+        : "Opted in",
+    },
+    {
+      key: "nsitf_base",
+      label: "NSITF base",
+      value: a.nsitfRegularOnly
+        ? "Regular monthly pay only (no overtime, off-day pay, bonuses, one-offs or arrears)"
+        : "All pay",
+    },
+    {
+      key: "deduction_cap",
+      label: "Other deductions capped at",
+      value: `${a.deductionCap.numerator}/${a.deductionCap.denominator} of the month's gross; the rest carries forward`,
+    },
+    {
+      key: "clawback",
+      label: "Clawbacks",
+      value: `${a.clawback.preTaxSameTaxYear ? "Before tax in the same tax year, after tax for an earlier year" : "After tax"}; not older than ${a.clawback.maxAgeMonths} months`,
+    },
+    {
+      key: "reliefs",
+      label: "Reliefs on verified proof",
+      value:
+        [
+          a.reliefs.rentProofRequired ? "rent" : null,
+          a.reliefs.nhis ? "NHIS" : null,
+          a.reliefs.lifeAssurance ? "life assurance" : null,
+        ]
+          .filter((x) => x !== null)
+          .join(", ") || "None",
+    },
+  ];
 }
 
 /** "1.0×", "1.5×". */
@@ -364,4 +568,20 @@ export function diffRuleSets(before: RuleSet, after: RuleSet): FigureChange[] {
 /** Whether a component counts toward a base (pension, NHF). */
 export function inBase(base: readonly SalaryComponent[], component: SalaryComponent): boolean {
   return base.includes(component);
+}
+
+/**
+ * The rule-set policy flags other slices check (slice 5.9a; 5.9c's final-pay guard requires
+ * both): the PAYE method and whether NSITF is on regular pay only. Stored in the adviser part of
+ * `rules` as `adviser.paye_method` ('cumulative_ytd') and `adviser.nsitf_regular_only`; a version
+ * without the adviser's part (NTA 2025 v1) has neither.
+ */
+export function ruleSetPolicyFlags(set: RuleSet): {
+  payeMethod: "cumulative_ytd" | null;
+  nsitfRegularOnly: boolean;
+} {
+  return {
+    payeMethod: set.rules.adviser?.payeMethod ?? null,
+    nsitfRegularOnly: set.rules.adviser?.nsitfRegularOnly === true,
+  };
 }

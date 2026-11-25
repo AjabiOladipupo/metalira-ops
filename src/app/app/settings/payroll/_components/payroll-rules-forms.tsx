@@ -56,11 +56,16 @@ export function AddVersionForm({
       className="flex flex-col gap-6"
       onChange={() => setEditedAfter(state)}
     >
-      {["bandCount", "pensionBase", "nhfBase", "dailyWorkersExempt", "publicHolidayMode"].map(
-        (name) => (
-          <input key={name} type="hidden" name={name} value={saved[name] ?? ""} />
-        ),
-      )}
+      {[
+        "bandCount",
+        "pensionBase",
+        "nhfBase",
+        "dailyWorkersExempt",
+        "publicHolidayMode",
+        "adviser",
+      ].map((name) => (
+        <input key={name} type="hidden" name={name} value={saved[name] ?? ""} />
+      ))}
 
       <fieldset className="m-0 flex flex-col gap-4 border-0 p-0">
         <legend className="mb-3 type-h3">The version</legend>
