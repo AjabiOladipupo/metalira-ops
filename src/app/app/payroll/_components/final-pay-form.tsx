@@ -65,6 +65,9 @@ function computed(type: FinalPayItemType, days: string, p: FinalPayPrefill | nul
   return basicDaysAmount(n, p.basicMonthlyKobo, p.divisorDays);
 }
 
+// The selects and the tick box are uncontrolled (defaultValue, tracked on change): React resets a
+// form after its action to the inputs' default attributes, and a controlled select has none, so
+// it would fall back to its first option and the confirm press would send a different worker.
 function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWorker[] }) {
   const errors = state && !state.ok ? state.fieldErrors : undefined;
   const [workerId, setWorkerId] = useState(
@@ -112,7 +115,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
           name="workerId"
           required
           placeholder="Choose a worker"
-          value={workerId}
+          defaultValue={workerId}
           onChange={(e) => {
             const id = e.target.value;
             setWorkerId(id);
@@ -132,7 +135,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
           label="Item"
           name="itemType"
           required
-          value={type}
+          defaultValue={type}
           onChange={(e) => {
             const t = isFinalPayItemType(e.target.value) ? e.target.value : "leave_in_lieu";
             setType(t);
@@ -211,7 +214,7 @@ function Fields({ state, workers }: { state: RunFormState; workers: FinalPayWork
           <input
             type="checkbox"
             name="partOfSettlement"
-            checked={settlement}
+            defaultChecked={settlement}
             onChange={(e) => setSettlement(e.target.checked)}
             className="size-4 accent-foreground"
           />
