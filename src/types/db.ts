@@ -2681,6 +2681,9 @@ isOneToOne: false
 "bulk_end_employment_preview":
 { Args: { "p_end_date": string,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
                            },
+"bulk_map_workers":
+{ Args: { "p_dry_run"?: boolean,"p_mode"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id": string,"p_worker_ids": (string)[] }; Returns: Json
+                           },
 "bulk_resend_worker_invites":
 { Args: { "p_dry_run"?: boolean,"p_global_cap"?: number,"p_org_cap"?: number,"p_organisation_id": string,"p_worker_ids": (string)[] }; Returns: Json
                            },

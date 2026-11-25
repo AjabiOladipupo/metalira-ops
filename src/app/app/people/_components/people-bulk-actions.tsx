@@ -6,16 +6,10 @@ import { useState, useTransition } from "react";
 import { Field, FormAlert, SelectField } from "@/components/form";
 import { SelectionBar, type RowSelectionValue } from "@/components/row-selection";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { formatDate } from "@/lib/dates";
 import { peopleFilterParams, type PeopleFilters } from "@/lib/people-filters";
 import type { BulkEndPreview, BulkProblem, BulkReassignPreview } from "@/server/people/bulk";
+import type { BulkMappingTarget } from "@/server/people/people-data";
 import {
   bulkEndEmploymentAction,
   bulkSetDepartmentAction,
@@ -24,9 +18,8 @@ import {
   previewBulkReassignAction,
 } from "@/server/people/bulk-actions";
 
-/** What the server needs for a selection: the ticked ids, or the filters to re-run. */
-type SelectionInput =
-  { kind: "ids"; ids: string[] } | { kind: "filters"; filters: Record<string, string> };
+import { Problems, SheetFrame, type SelectionInput } from "./bulk-sheet";
+import { BulkMappingSheet } from "./people-bulk-mapping";
 
 function toInput(value: RowSelectionValue, filters: PeopleFilters): SelectionInput {
   return value.mode === "ids"
@@ -52,15 +45,20 @@ export function PeopleBulkActions({
   filters,
   lineManagers,
   departments,
+  sites = [],
+  projects = [],
   today,
 }: {
   canManage: boolean;
   filters: PeopleFilters;
   lineManagers: readonly Option[];
   departments: readonly Option[];
+  /** For "Map to site and project"; left out where people can't be mapped. */
+  sites?: readonly BulkMappingTarget[];
+  projects?: readonly BulkMappingTarget[];
   today: string;
 }) {
-  const [open, setOpen] = useState<null | "end" | "line_manager" | "department">(null);
+  const [open, setOpen] = useState<null | "end" | "line_manager" | "department" | "map">(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   return (
@@ -101,6 +99,14 @@ export function PeopleBulkActions({
                   >
                     Change department
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 rounded-lg lg:h-9"
+                    onClick={() => setOpen("map")}
+                  >
+                    Map to site and project
+                  </Button>
                 </>
               ) : null}
               <ExportButton selection={selection} onDone={setNotice} />
@@ -127,6 +133,14 @@ export function PeopleBulkActions({
                     onOpenChange={(o) => setOpen(o ? "department" : null)}
                     selection={selection}
                     options={departments}
+                    onDone={done}
+                  />
+                  <BulkMappingSheet
+                    open={open === "map"}
+                    onOpenChange={(o) => setOpen(o ? "map" : null)}
+                    selection={selection}
+                    sites={sites}
+                    projects={projects}
                     onDone={done}
                   />
                 </>
@@ -205,47 +219,6 @@ function ExportButton({
         </p>
       ) : null}
     </>
-  );
-}
-
-function Problems({ problems }: { problems: readonly BulkProblem[] }) {
-  if (problems.length === 0) return null;
-  return (
-    <ul aria-label="People who can't be changed" className="m-0 flex list-none flex-col gap-1 p-0">
-      {problems.map((p) => (
-        <li key={p.workerId} className="text-sm">
-          <span className="font-semibold">{p.name ?? "Unknown employee"}</span>
-          {p.staffId ? <span className="text-fg-muted"> · {p.staffId}</span> : null}
-          <span>: {p.reason}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SheetFrame({
-  open,
-  onOpenChange,
-  title,
-  description,
-  children,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
-        <SheetHeader className="pr-12">
-          <SheetTitle className="type-h3">{title}</SheetTitle>
-          <SheetDescription>{description}</SheetDescription>
-        </SheetHeader>
-        <div className="flex flex-col gap-4 px-4 pb-6">{children}</div>
-      </SheetContent>
-    </Sheet>
   );
 }
 

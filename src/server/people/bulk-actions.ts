@@ -7,6 +7,7 @@ import { after } from "next/server";
 import { SIGN_IN_PATH } from "@/lib/auth/routes";
 import { formatDate } from "@/lib/dates";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { ListChanged } from "@/server/identity/bulk-selection";
 import { MutationError, mutate } from "@/server/identity/mutate";
 
 import {
@@ -21,6 +22,8 @@ import {
   type BulkProblem,
   type BulkReassignPreview,
 } from "./bulk";
+import { bulkMapSpec, previewBulkMapSpec, type BulkMapPreview } from "./bulk-mapping";
+import { planBulkMappingNotices, sendPlannedNotices } from "./bulk-mapping-notices";
 import { notifyNewLineManager } from "./bulk-notices";
 
 /**
@@ -43,7 +46,7 @@ export type BulkResult<T> =
 const FAILED = "That didn't work. Try again in a minute.";
 
 function refusal(error: unknown): BulkResult<never> {
-  if (error instanceof SelectionChanged) {
+  if (error instanceof SelectionChanged || error instanceof ListChanged) {
     return { ok: false, message: error.message, changed: true };
   }
   if (error instanceof BulkRefusal) {
@@ -133,6 +136,43 @@ export async function bulkSetDepartmentAction(
       ok: true,
       value: { changed: result.changed },
       message: `Department changed for ${people(result.changed)}.`,
+    };
+  } catch (error) {
+    return refusal(error);
+  }
+}
+
+export async function previewBulkMapAction(input: unknown): Promise<BulkResult<BulkMapPreview>> {
+  try {
+    return { ok: true, value: await mutate(previewBulkMapSpec, input) };
+  } catch (error) {
+    return refusal(error);
+  }
+}
+
+export interface BulkMapOutcome {
+  changed: number;
+  /** People whose line manager wasn't emailed: the daily email limit was reached. */
+  notEmailed: { workerId: string; name: string }[];
+}
+
+export async function bulkMapAction(input: unknown): Promise<BulkResult<BulkMapOutcome>> {
+  try {
+    const result = await mutate(bulkMapSpec, input);
+    revalidatePath("/app/people", "layout");
+    // The single save's email to each person's line manager, claimed under the daily caps now
+    // and sent after the response.
+    const supabase = await createServerSupabase();
+    const plan = await planBulkMappingNotices(supabase, result);
+    if (plan.send.length > 0) after(() => sendPlannedNotices(plan));
+    const skipped =
+      plan.skipped.length > 0
+        ? ` The line managers of ${people(plan.skipped.length)} weren't emailed: the daily email limit was reached.`
+        : "";
+    return {
+      ok: true,
+      value: { changed: result.changed, notEmailed: plan.skipped },
+      message: `Mapping saved for ${people(result.changed)}.${skipped}`,
     };
   } catch (error) {
     return refusal(error);

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { BULK_MAP_MODE_TEXT, bulkMapSummary, bulkMapWhen } from "@/lib/bulk-mapping";
 import { formatDate } from "@/lib/dates";
 import {
   previewBulkEndSpec,
@@ -10,6 +11,11 @@ import {
   type bulkEndEmploymentSchema,
   type bulkLineManagerSchema,
 } from "@/server/people/bulk";
+import {
+  previewBulkMapSpec,
+  type BulkMapPreview,
+  type bulkMapSchema,
+} from "@/server/people/bulk-mapping";
 
 import type { CapabilityPreview, PreviewFn } from "./types";
 
@@ -75,4 +81,30 @@ export const previewBulkLineManager: PreviewFn<typeof bulkLineManagerSchema> = a
 export const previewBulkDepartment: PreviewFn<typeof bulkDepartmentSchema> = async (ctx) =>
   describeBulkReassign(
     await previewBulkReassignSpec.run({ ...ctx, data: { ...ctx.data, change: "department" } }),
+  );
+
+export function describeBulkMap(preview: BulkMapPreview): CapabilityPreview {
+  return {
+    summary: `${BULK_MAP_MODE_TEXT[preview.mode].label}: ${bulkMapSummary(preview.rows, preview.siteName)}`,
+    changes: preview.rows.map((row) => ({
+      label: row.name ? `${row.name} · ${row.staffId ?? ""}` : "Not found",
+      before: row.before ? `${row.before.sites}; ${row.before.projects}` : "",
+      after: row.after
+        ? `${row.after.sites}; ${row.after.projects} (${bulkMapWhen(row)})`
+        : bulkMapWhen(row),
+    })),
+  };
+}
+
+export const previewBulkMap: PreviewFn<typeof bulkMapSchema> = async (ctx) =>
+  describeBulkMap(
+    await previewBulkMapSpec.run({
+      ...ctx,
+      data: {
+        selection: { kind: "ids", ids: ctx.data.workerIds },
+        siteId: ctx.data.siteId,
+        projectIds: ctx.data.projectIds,
+        mode: ctx.data.mode,
+      },
+    }),
   );

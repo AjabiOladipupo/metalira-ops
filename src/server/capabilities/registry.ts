@@ -161,6 +161,7 @@ import {
   previewBulkEndSpec,
   previewBulkReassignSpec,
 } from "@/server/people/bulk";
+import { bulkMapSpec, previewBulkMapSpec } from "@/server/people/bulk-mapping";
 import { checkWorkerBankSchema } from "@/server/people/schemas";
 import {
   ownBankChangeSchema,
@@ -400,6 +401,7 @@ import {
   previewBulkDepartment,
   previewBulkEnd,
   previewBulkLineManager,
+  previewBulkMap,
 } from "./people-bulk-previews";
 import { previewBulkLeave, previewBulkTimesheet, previewInviteBulk } from "./list-bulk-previews";
 import { previewCopyWeek, previewPublishWeek } from "./roster-previews";
@@ -1055,6 +1057,33 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(previewBulkReassignSpec),
     changes: "none",
     action: at("people/bulk-actions", "previewBulkReassignAction"),
+    agent: false,
+    agentNote: BULK_PEOPLE,
+  },
+
+  // Bulk mapping (people/bulk-actions.ts, slice U.3)
+  {
+    name: "people.bulk_map",
+    description:
+      "Maps up to 200 selected employees to one site and its projects, replacing or adding, all or nothing.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(bulkMapSpec),
+    changes: "many",
+    action: at("people/bulk-actions", "bulkMapAction"),
+    preview: previewBulkMap,
+    agent: false,
+    agentNote: BULK_PEOPLE,
+  },
+  {
+    name: "people.preview_bulk_map",
+    description:
+      "Lists each selected employee's site and projects now and after a bulk mapping, and who can't be mapped.",
+    kind: "read",
+    audience: "manager",
+    ...fromSpec(previewBulkMapSpec),
+    changes: "none",
+    action: at("people/bulk-actions", "previewBulkMapAction"),
     agent: false,
     agentNote: BULK_PEOPLE,
   },
