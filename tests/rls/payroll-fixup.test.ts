@@ -826,7 +826,39 @@ describe("the rule set and pay rate guards are ENABLE ALWAYS", () => {
         "timesheets_no_truncate",
       ].map((tgname) => ({ tgname, tgenabled: "A" })),
     );
-    const pay = await asDbOwner("delete from public.leave_request_pay", [], true);
+    // A row of its own, so the row guard has something to refuse whatever ran before (the
+    // table may be empty when this file runs first).
+    const own = await company("paydel");
+    const { workerId } = await addPayrollWorker(admin, own.owner.orgId);
+    const typeId = randomUUID();
+    const requestId = randomUUID();
+    for (const [sql, params] of [
+      [
+        `insert into public.leave_types (id, organisation_id, code, name, counting, paid)
+         values ($1, $2, 'unpaid', 'Unpaid', 'working_days', false)`,
+        [typeId, own.owner.orgId],
+      ],
+      [
+        `insert into public.leave_requests (id, organisation_id, worker_id, leave_type_id,
+           leave_year, start_date, end_date, days, status, decided_at)
+         values ($1, $2, $3, $4, 2026, '2026-08-03', '2026-08-04', 2, 'approved', now())`,
+        [requestId, own.owner.orgId, workerId, typeId],
+      ],
+      [
+        `insert into public.leave_request_pay (request_id, organisation_id, pay_percent,
+           pay_below_service)
+         values ($1, $2, 0, false)`,
+        [requestId, own.owner.orgId],
+      ],
+    ] as const) {
+      const seeded = await asDbOwner(sql, [...params], true);
+      expect(seeded.error).toBeNull();
+    }
+    const pay = await asDbOwner(
+      "delete from public.leave_request_pay where request_id = $1",
+      [requestId],
+      true,
+    );
     expect(pay.error).not.toBeNull();
   });
 });
