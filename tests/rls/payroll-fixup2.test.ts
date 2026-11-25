@@ -159,7 +159,9 @@ describe("declared rent: owner and hr only, audited (security review round 2, M1
       .from("workers")
       .update({ rent_declared_by: c.finance.id, job_title: "Supervisor" })
       .eq("id", workerId);
-    expect(forged.error).toBeNull();
+    // Not in the columns signed-in users may update (column grants), and the guard would put it
+    // back anyway.
+    expect(forged.error?.code).toBe("42501");
     const { data: row } = await admin
       .from("workers")
       .select("rent_declared_by")
