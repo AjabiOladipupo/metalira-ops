@@ -17,12 +17,15 @@ const PAY_OPTIONS = Object.entries(PAY_TYPE_LABELS).map(([value, label]) => ({ v
  * (owner or HR) the first pay rate. The role is the invite's and isn't on this form.
  */
 export function ApproveOnboardingForm({
+  approvedAs,
   inviteId,
   onPayroll,
   canSetPay,
   today,
   hasBank,
 }: {
+  /** Set once approved (the role's label): shows the outcome instead of the form. */
+  approvedAs: string | null;
   inviteId: string;
   onPayroll: boolean;
   canSetPay: boolean;
@@ -35,10 +38,10 @@ export function ApproveOnboardingForm({
   const e = failed?.fieldErrors ?? {};
   const [payType, setPayType] = useState<string>(v.payType ?? "");
 
-  if (state?.ok) {
+  if (state?.ok || approvedAs) {
     return (
       <p role="status" className="m-0 rounded-xl bg-surface p-4 text-sm sm:p-5">
-        {state.message}
+        {state?.ok ? state.message : `Approved as ${approvedAs}.`}
       </p>
     );
   }

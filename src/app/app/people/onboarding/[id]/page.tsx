@@ -95,8 +95,11 @@ async function Review({ params }: { params: PageProps<"/app/people/onboarding/[i
       {review.status === "submitted" && !canOnboardRole(ctx.role, review.role) ? (
         <p className="m-0 text-sm text-fg-muted">Only the owner can approve a manager.</p>
       ) : null}
-      {review.status === "submitted" && canOnboardRole(ctx.role, review.role) ? (
+      {/* Mounted for approved too, so the outcome sentence survives the refresh after approving. */}
+      {(review.status === "submitted" || review.status === "approved") &&
+      canOnboardRole(ctx.role, review.role) ? (
         <ApproveOnboardingForm
+          approvedAs={review.status === "approved" ? ONBOARDING_ROLE_LABELS[review.role] : null}
           inviteId={review.id}
           onPayroll={review.onPayroll}
           canSetPay={ctx.canEditPay}
