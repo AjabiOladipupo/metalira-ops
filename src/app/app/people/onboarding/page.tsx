@@ -4,6 +4,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { Status, type StatusTone } from "@/components/status";
 import {
+  rolesFor,
   ONBOARDING_ROLE_LABELS,
   ONBOARDING_STATUS_LABELS,
   type OnboardingListStatus,
@@ -48,6 +49,7 @@ async function Onboarding() {
         lineManagers={options.lineManagers}
         emailsLeft={emails.left}
         emailCap={emails.cap}
+        roles={rolesFor(ctx.role)}
       />
       <section aria-labelledby="onboarding-list" className="flex flex-col gap-2">
         <h2 id="onboarding-list" className="m-0 type-h3">

@@ -3,7 +3,11 @@ import { notFound } from "next/navigation";
 
 import { PageHeader } from "@/components/page-header";
 import { formatNaira } from "@/lib/money";
-import { ONBOARDING_ROLE_LABELS, ONBOARDING_STATUS_LABELS } from "@/lib/self-onboarding";
+import {
+  canOnboardRole,
+  ONBOARDING_ROLE_LABELS,
+  ONBOARDING_STATUS_LABELS,
+} from "@/lib/self-onboarding";
 import { peoplePageContext } from "@/server/people/page-context";
 import { loadOnboardingReview } from "@/server/people/self-onboarding";
 
@@ -23,7 +27,8 @@ function Row({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-async function Review({ id }: { id: string }) {
+async function Review({ params }: { params: PageProps<"/app/people/onboarding/[id]">["params"] }) {
+  const { id } = await params;
   const ctx = await peoplePageContext();
   const review = /^[0-9a-f-]{36}$/.test(id)
     ? await loadOnboardingReview(ctx.supabase, ctx.organisationId, id)
@@ -87,7 +92,10 @@ async function Review({ id }: { id: string }) {
           ) : null}
         </dl>
       </section>
-      {review.status === "submitted" ? (
+      {review.status === "submitted" && !canOnboardRole(ctx.role, review.role) ? (
+        <p className="m-0 text-sm text-fg-muted">Only the owner can approve a manager.</p>
+      ) : null}
+      {review.status === "submitted" && canOnboardRole(ctx.role, review.role) ? (
         <ApproveOnboardingForm
           inviteId={review.id}
           onPayroll={review.onPayroll}
@@ -100,11 +108,10 @@ async function Review({ id }: { id: string }) {
   );
 }
 
-export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+export default function Page({ params }: PageProps<"/app/people/onboarding/[id]">) {
   return (
     <RouteGate href="/app/people/onboarding/[id]">
-      <Review id={id} />
+      <Review params={params} />
     </RouteGate>
   );
 }

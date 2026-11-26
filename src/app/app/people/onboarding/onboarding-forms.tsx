@@ -10,7 +10,7 @@ import {
   isOnboardingRole,
   ONBOARDING_ROLE_HINTS,
   ONBOARDING_ROLE_LABELS,
-  ONBOARDING_ROLES,
+  type OnboardingRole,
 } from "@/lib/self-onboarding";
 import {
   cancelOnboardingInviteAction,
@@ -20,11 +20,6 @@ import {
 import type { OnboardingActionState } from "@/server/people/self-onboarding-state";
 
 type Option = { value: string; label: string };
-
-const ROLE_OPTIONS = ONBOARDING_ROLES.map((role) => ({
-  value: role,
-  label: ONBOARDING_ROLE_LABELS[role],
-}));
 
 function Outcome({ state }: { state: OnboardingActionState }) {
   if (!state) return null;
@@ -73,11 +68,14 @@ export function OnboardInviteForm({
   lineManagers,
   emailsLeft,
   emailCap,
+  roles,
 }: {
   departments: Option[];
   lineManagers: Option[];
   emailsLeft: number;
   emailCap: number;
+  /** The roles this caller may offer (owner: all; HR: worker roles). */
+  roles: readonly OnboardingRole[];
 }) {
   const [state, action] = useActionState(inviteToOnboardAction, null);
   const failed = state && !state.ok ? state : null;
@@ -116,7 +114,7 @@ export function OnboardInviteForm({
         <SelectField
           label="Role"
           name="role"
-          options={ROLE_OPTIONS}
+          options={roles.map((r) => ({ value: r, label: ONBOARDING_ROLE_LABELS[r] }))}
           value={role}
           onChange={(e) => setRole(e.currentTarget.value)}
           hint={isOnboardingRole(role) ? ONBOARDING_ROLE_HINTS[role] : undefined}

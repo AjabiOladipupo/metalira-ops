@@ -8,11 +8,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { decryptPii } from "@/server/crypto/pii";
+import { isAuditSecretKey } from "@/server/identity/audit";
 import {
+  canOnboardRole,
   emailsLeft,
   isManagerOnboardingRole,
   listStatus,
   ONBOARDING_ROLES,
+  rolesFor,
 } from "@/lib/self-onboarding";
 import { buildSubmission } from "@/server/people/self-onboarding-public";
 import {
@@ -198,6 +201,20 @@ describe("approve form", () => {
   });
 });
 
+describe("who may onboard which role (security review H1)", () => {
+  it("keeps manager roles for the owner; HR offers worker roles only", () => {
+    expect(rolesFor("owner")).toEqual([...ONBOARDING_ROLES]);
+    expect(rolesFor("hr")).toEqual(["supervisor", "guard", "cleaner"]);
+    expect(canOnboardRole("hr", "finance")).toBe(false);
+    expect(canOnboardRole("hr", "guard")).toBe(true);
+  });
+
+  it("keeps date of birth and home address out of audit rows (L5)", () => {
+    expect(isAuditSecretKey("date_of_birth")).toBe(true);
+    expect(isAuditSecretKey("homeAddress")).toBe(true);
+  });
+});
+
 describe("shared helpers", () => {
   it("shows an open invite past its date as expired", () => {
     const now = new Date("2026-11-25T12:00:00Z");
@@ -237,6 +254,7 @@ describe("the submission sent to the database", () => {
       expect(text).not.toContain(secret);
     }
     expect(sent.nin_last4).toBe("8901");
+    expect(sent.bank_account_digest).toMatch(/^[0-9a-f]{64}$/);
     expect(sent.bank_account_last4).toBe("6789");
     expect(sent.bank_name).toBe("GTBank (Guaranty Trust Bank)");
     expect(

@@ -27,8 +27,12 @@ BVN: the app stores no BVN anywhere, so the form doesn't ask for it.
 | HR, Finance, Ops manager, Line manager | `memberships.role` hr / finance / ops_manager / line_manager | A manager is a membership (manager app, email + password). If the inviter ticks "Also paid through payroll", the invitee can add employee details and approval also creates a worker record with job title = the role (no worker login: a sign-in can't be both, MLTM2). |
 | Supervisor, Guard, Cleaner | a worker with job title Supervisor / Guard / Cleaner | Worker (phone app, company code + staff ID + PIN). A supervisor leads a crew through the existing line-manager mapping. |
 
-Who invites and approves: owner, or HR (none of these roles is owner or admin). Pay rates on
-approval: owner and HR only (as today; both approver roles qualify).
+Who invites and approves (security review H1, coordinator decision 26 Nov): the OWNER invites and
+approves manager roles (HR, Finance, Ops manager, Line manager), since HR and finance are owner-only
+roles and HR can't make managers today. HR invites and approves worker roles only (supervisor,
+guard, cleaner). Enforced in create, resend and approve in the database (re-checked at approval,
+since the approver can differ from the sender), in the specs, and in the form (HR is offered worker
+roles only). Pay rates on approval: owner and HR only, as today.
 
 ## Table
 
@@ -91,6 +95,18 @@ Refusal codes MLSO1-MLSO9 (no collisions: `grep MLSO` was empty).
 - The role, company, department and line manager come from the invite row inside the database. The
   submission has no role field and any extra field is dropped.
 - Nothing is active until owner or HR approves. Bank details wait for a second person.
+- Worker binding is a typed-email check (security review L2): holding the link is not enough; the
+  invitee must also type the address it was sent to, which the server compares. It is weaker than a
+  manager's email-link session, and accepted for worker roles because the details still wait for
+  HR, and bank details for a second person.
+- Bank details carry a keyed digest (HMAC from the personal data key, bound to company and bank) of
+  the number sent; approval recomputes it from the decrypted number and the database refuses a
+  digest that differs (L1). Approval re-checks the manager's address and confirmation (L3).
+- Submissions nobody decides within 14 days are cancelled and cleared by the daily
+  bank-detail-changes cron route (L4). Date of birth and home address are audit-secret keys (L5).
+  The "approved" email is claimed under the shared caps (L6). A closed invite's `next_path` is
+  ignored: the page shows the closed state, and a manager's submit clears it (L7). The email-link
+  request counts in the attempt limiter (L8). Invite, resend and cancel have previews (L9).
 - Public endpoints are rate-limited by token and by `x-real-ip`. Logs carry error codes only.
 - Registry: invite, resend, cancel, approve are `agent: false`.
 

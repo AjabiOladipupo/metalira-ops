@@ -7,6 +7,7 @@ import { connection } from "next/server";
 import { bankByCode } from "@/lib/banks";
 import { CONSENT_NOTICES } from "@/lib/messages/consent";
 import { isOnboardingRole, isOnboardingToken, type OnboardingRole } from "@/lib/self-onboarding";
+import { bankAccountDigest } from "@/server/billing/bank-lookup";
 import { encryptPiiForDb, type PiiContext } from "@/server/crypto/pii";
 import { clientIp } from "@/server/identity/worker-sign-in";
 import { createAdminSupabase } from "@/server/supabase/admin";
@@ -165,6 +166,11 @@ export function buildSubmission(
     account_name: bank && details.bankAccountNumber ? details.accountName : null,
     bank_account_enc: bank ? seal(details.bankAccountNumber, "bank_account_enc") : null,
     bank_account_last4: bank ? tail(details.bankAccountNumber) : null,
+    // Security review L1: approval proves the number it re-encrypts is this one.
+    bank_account_digest:
+      bank && details.bankAccountNumber
+        ? bankAccountDigest(organisationId, bank.code, details.bankAccountNumber)
+        : null,
     ...(details.locationConsent
       ? { location_consent_version: CONSENT_NOTICES.location.version }
       : {}),

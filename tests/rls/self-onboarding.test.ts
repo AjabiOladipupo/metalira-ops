@@ -67,6 +67,7 @@ function workerDetails(extra: Record<string, unknown> = {}) {
     account_name: "Musa Ibrahim",
     bank_account_enc: fakeEnc(),
     bank_account_last4: "6789",
+    bank_account_digest: randomBytes(32).toString("hex"),
     location_consent_version: "1.0",
     ...extra,
   };
@@ -85,6 +86,12 @@ async function submit(
 }
 
 async function approveWorker(by: TestUser, orgId: string, inviteId: string) {
+  // The server proves the number it re-encrypts is the one sent (its keyed digest).
+  const { data: sent } = await admin
+    .from("onboarding_invites")
+    .select("bank_account_digest")
+    .eq("id", inviteId)
+    .maybeSingle();
   return by.client.rpc("approve_self_onboarding", {
     p_organisation_id: orgId,
     p_invite_id: inviteId,
@@ -94,6 +101,7 @@ async function approveWorker(by: TestUser, orgId: string, inviteId: string) {
       employment_type: "permanent",
       start_date: "2026-11-30",
       nin_enc: fakeEnc(),
+      bank_account_digest: sent?.bank_account_digest ?? null,
     },
     p_bank_account_enc: fakeEnc(),
   });
@@ -112,7 +120,8 @@ beforeAll(async () => {
 describe("inviting", () => {
   it("lets the owner and HR invite, not finance, and never as owner or admin", async () => {
     await invite(owner, owner.orgId, email("a"), "guard");
-    await invite(hr, owner.orgId, email("b"), "finance");
+    await invite(owner, owner.orgId, email("b"), "finance");
+    await invite(hr, owner.orgId, email("b2"), "cleaner");
     const byFinance = await finance.client.rpc("create_self_onboarding_invite", {
       p_organisation_id: owner.orgId,
       p_email: email("c"),
@@ -127,6 +136,24 @@ describe("inviting", () => {
       });
       expect(error?.code).toBe("22023");
     }
+  });
+
+  it("keeps manager roles for the owner: HR can't invite them (security review H1)", async () => {
+    for (const role of ["hr", "finance", "ops_manager", "line_manager"]) {
+      const { error } = await hr.client.rpc("create_self_onboarding_invite", {
+        p_organisation_id: owner.orgId,
+        p_email: email(`hr-${role}`),
+        p_role: role,
+      });
+      expect(error?.code, role).toBe("42501");
+    }
+    // Nor resend one the owner sent.
+    const sent = await invite(owner, owner.orgId, email("ownersent"), "hr");
+    const resend = await hr.client.rpc("resend_self_onboarding_invite", {
+      p_organisation_id: owner.orgId,
+      p_invite_id: sent.id,
+    });
+    expect(resend.error?.code).toBe("42501");
   });
 
   it("refuses a second open invite for one address and an existing member", async () => {
@@ -362,7 +389,7 @@ describe("approval", () => {
 
   it("makes a manager a member with the invite's role, only once approved", async () => {
     const person = await createTestUser("so-new-finance", "Ngozi Eze");
-    const { id, token } = await invite(hr, owner.orgId, person.email, "finance");
+    const { id, token } = await invite(owner, owner.orgId, person.email, "finance");
 
     // Someone else's account can't send it.
     const wrong = await submit(
@@ -395,6 +422,13 @@ describe("approval", () => {
       .eq("organisation_id", owner.orgId);
     expect(none.data).toEqual([]);
 
+    // HR can't approve a manager, even one the owner invited (security review H1).
+    const byHr = await hr.client.rpc("approve_self_onboarding", {
+      p_organisation_id: owner.orgId,
+      p_invite_id: id,
+    });
+    expect(byHr.error?.code).toBe("42501");
+
     const approved = await owner.client.rpc("approve_self_onboarding", {
       p_organisation_id: owner.orgId,
       p_invite_id: id,
@@ -407,6 +441,68 @@ describe("approval", () => {
       .eq("organisation_id", owner.orgId)
       .single();
     expect(membership?.role).toBe("finance");
+  });
+
+  it("lets HR invite and approve a guard on their own", async () => {
+    const { id, token } = await invite(hr, owner.orgId, email("hrguard"), "guard");
+    expect((await submit(token, workerDetails())).error).toBeNull();
+    const approved = await approveWorker(hr, owner.orgId, id);
+    expect(approved.error).toBeNull();
+    const { data: worker } = await admin
+      .from("workers")
+      .select("job_title")
+      .eq("id", approved.data![0]!.worker_id)
+      .single();
+    expect(worker?.job_title).toBe("Guard");
+  });
+
+  it("refuses ciphertext for another bank account than the one sent (security review L1)", async () => {
+    const { id, token } = await invite(owner, owner.orgId, email("swap"), "guard");
+    expect((await submit(token, workerDetails())).error).toBeNull();
+    const swapped = await owner.client.rpc("approve_self_onboarding", {
+      p_organisation_id: owner.orgId,
+      p_invite_id: id,
+      p_worker: {
+        id: randomUUID(),
+        staff_id: `SO-${randomUUID().slice(0, 8)}`,
+        employment_type: "permanent",
+        start_date: "2026-11-30",
+        nin_enc: fakeEnc(),
+        bank_account_digest: randomBytes(32).toString("hex"),
+      },
+      p_bank_account_enc: fakeEnc(),
+    });
+    expect(swapped.error?.code).toBe("22023");
+  });
+
+  it("closes submissions nobody decided within 14 days and clears them (security review L4)", async () => {
+    const { id, token } = await invite(owner, owner.orgId, email("stale"), "guard");
+    expect((await submit(token, workerDetails())).error).toBeNull();
+    const db = await pgClient();
+    try {
+      await db.query(
+        "update public.onboarding_invites set submitted_at = now() - interval '15 days' where id = $1",
+        [id],
+      );
+    } finally {
+      await db.end();
+    }
+    const swept = await admin.rpc("expire_self_onboarding_submissions");
+    expect(swept.error).toBeNull();
+    expect(swept.data).toBeGreaterThanOrEqual(1);
+    const { data: inv } = await admin
+      .from("onboarding_invites")
+      .select("status, nin_enc, bank_account_enc, bank_account_digest")
+      .eq("id", id)
+      .single();
+    expect(inv).toEqual({
+      status: "cancelled",
+      nin_enc: null,
+      bank_account_enc: null,
+      bank_account_digest: null,
+    });
+    const asOwner = await owner.client.rpc("expire_self_onboarding_submissions");
+    expect(asOwner.error).not.toBeNull();
   });
 
   it("is for the owner or HR only", async () => {

@@ -145,6 +145,10 @@ create table public.onboarding_invites (
   account_name text constraint onboarding_invites_account_name_text check (private.onboarding_text_ok(account_name, 200)),
   bank_account_enc bytea,
   bank_account_last4 text constraint onboarding_invites_bank_last4 check (bank_account_last4 ~ '^[0-9]{4}$'),
+  -- HMAC of the account number keyed from the personal data key, bound to the company and bank
+  -- (src/server/billing/bank-lookup.ts bankAccountDigest), so approval proves the number it
+  -- re-encrypts is the one the invitee sent.
+  bank_account_digest text constraint onboarding_invites_bank_digest check (bank_account_digest ~ '^[0-9a-f]{64}$'),
   location_consent_version text constraint onboarding_invites_location_version check (location_consent_version ~ '^[0-9]{1,3}\.[0-9]{1,3}$'),
   location_consent_at timestamptz,
   selfie_consent_version text constraint onboarding_invites_selfie_version check (selfie_consent_version ~ '^[0-9]{1,3}\.[0-9]{1,3}$'),
@@ -175,6 +179,7 @@ create table public.onboarding_invites (
     and (rsa_pin_enc is null) = (rsa_pin_last4 is null)
     and (nhf_number_enc is null) = (nhf_number_last4 is null)
     and (bank_account_enc is null) = (bank_account_last4 is null)
+    and (bank_account_enc is null) = (bank_account_digest is null)
     and (bank_account_enc is null or num_nulls(bank_code, bank_name, account_name) = 0)
   )
 );
@@ -445,7 +450,8 @@ as $$
       next_of_kin_phone = null, nin_enc = null, nin_last4 = null, pfa_name = null,
       rsa_pin_enc = null, rsa_pin_last4 = null, tax_state = null, nhf_number_enc = null,
       nhf_number_last4 = null, annual_rent_declared_kobo = null, bank_code = null,
-      bank_name = null, account_name = null, bank_account_enc = null, bank_account_last4 = null
+      bank_name = null, account_name = null, bank_account_enc = null, bank_account_last4 = null,
+      bank_account_digest = null
   where i.id = p_invite_id
 $$;
 
@@ -479,6 +485,13 @@ begin
   ) then
     raise exception 'Choose HR, finance, operations manager, line manager, supervisor, guard or cleaner.'
       using errcode = '22023';
+  end if;
+  -- Security review H1: manager roles are the owner's to grant (HR and finance are owner-only
+  -- roles since 20261119110100, and HR can't make managers today). HR onboards worker roles only.
+  if private.onboarding_is_manager_role(p_role)
+    and not private.has_role(p_organisation_id, array['owner']) then
+    raise exception 'Only the owner can invite managers. HR invites supervisors, guards and cleaners.'
+      using errcode = '42501';
   end if;
   if v_email is null or char_length(v_email) not between 3 and 320
     or v_email !~ '^[^@[:space:]]+@[^@[:space:]]+$' then
@@ -602,6 +615,10 @@ begin
   end if;
   if inv.status not in ('sent', 'opened') then
     raise exception 'Only an invite nobody has sent details for can be sent again.' using errcode = 'MLSO6';
+  end if;
+  if private.onboarding_is_manager_role(inv.role)
+    and not private.has_role(p_organisation_id, array['owner']) then
+    raise exception 'Only the owner can send a manager invite.' using errcode = '42501';
   end if;
   perform private.onboarding_assert_address(p_organisation_id, inv.email);
 
@@ -874,6 +891,7 @@ begin
       account_name = case when v_employee then nullif(btrim(d ->> 'account_name'), '') end,
       bank_account_enc = case when v_employee then nullif(d ->> 'bank_account_enc', '')::bytea end,
       bank_account_last4 = case when v_employee then nullif(d ->> 'bank_account_last4', '') end,
+      bank_account_digest = case when v_employee then nullif(d ->> 'bank_account_digest', '') end,
       location_consent_version = case when v_employee then nullif(d ->> 'location_consent_version', '') end,
       location_consent_at = case when v_employee and nullif(d ->> 'location_consent_version', '') is not null then now() end,
       selfie_consent_version = case when v_employee then nullif(d ->> 'selfie_consent_version', '') end,
@@ -931,6 +949,8 @@ declare
   v_worker uuid;
   v_membership uuid;
   v_login text;
+  v_email text;
+  v_confirmed timestamptz;
   v_supervisor boolean;
 begin
   select * into inv
@@ -946,9 +966,19 @@ begin
   end if;
 
   -- The membership, with the invite's role.
+  -- Security review H1, checked again here: the approver may not be who sent the invite.
+  if private.onboarding_is_manager_role(inv.role)
+    and not private.has_role(p_organisation_id, array['owner']) then
+    raise exception 'Only the owner can approve a manager.' using errcode = '42501';
+  end if;
+
   if private.onboarding_is_manager_role(inv.role) then
-    select u.raw_app_meta_data ->> 'login' into v_login from auth.users u where u.id = inv.user_id;
-    if inv.user_id is null or not found or v_login = 'worker' then
+    -- Security review L3: still the invited, confirmed address and no worker's sign-in.
+    select u.raw_app_meta_data ->> 'login', lower(u.email), u.email_confirmed_at
+    into v_login, v_email, v_confirmed
+    from auth.users u where u.id = inv.user_id;
+    if inv.user_id is null or not found or v_login = 'worker'
+      or v_email is distinct from inv.email or v_confirmed is null then
       raise exception 'This person''s account is no longer valid. Cancel the invite and send a new one.'
         using errcode = 'MLSO7';
     end if;
@@ -972,6 +1002,9 @@ begin
     if (inv.nin_enc is null) <> (nullif(p_worker ->> 'nin_enc', '') is null)
       or (inv.rsa_pin_enc is null) <> (nullif(p_worker ->> 'rsa_pin_enc', '') is null)
       or (inv.bank_account_enc is null) <> (p_bank_account_enc is null)
+      -- Security review L1: the number re-encrypted is the one the invitee sent.
+      or (inv.bank_account_enc is not null
+        and (p_worker ->> 'bank_account_digest') is distinct from inv.bank_account_digest)
       or (inv.nhf_number_enc is null) <> (p_nhf_enc is null)
       or (p_nhf_enc is null) <> (p_nhf_id is null) then
       raise exception 'The personal numbers sent don''t match the details. Reload and try again.'
@@ -1126,6 +1159,56 @@ $$;
 revoke all on function public.self_onboarding_emails_sent(uuid) from public, anon;
 grant execute on function public.self_onboarding_emails_sent(uuid) to authenticated;
 
+-- 4h. Submissions nobody decided within 14 days are cancelled and their personal data cleared
+-- (security review L4). Server secret key only: the daily bank-detail-changes cron route calls
+-- it. Returns how many it closed.
+create function private.expire_self_onboarding_submissions()
+returns integer
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  inv record;
+  v_count integer := 0;
+begin
+  for inv in
+    select i.id, i.organisation_id, i.role
+    from public.onboarding_invites i
+    where i.status = 'submitted' and i.submitted_at < now() - interval '14 days'
+    order by i.id
+    for update skip locked
+  loop
+    perform private.onboarding_clear_personal(inv.id);
+    update public.onboarding_invites i
+    set status = 'cancelled', decided_at = now(), decided_by = null
+    where i.id = inv.id;
+    perform private.onboarding_audit(
+      inv.organisation_id, null, 'onboarding.expired', inv.id, jsonb_build_object('role', inv.role)
+    );
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end;
+$$;
+
+revoke all on function private.expire_self_onboarding_submissions() from public, anon, authenticated;
+grant execute on function private.expire_self_onboarding_submissions() to service_role;
+
+create function public.expire_self_onboarding_submissions()
+returns integer
+language sql
+volatile
+security invoker
+set search_path = ''
+as $$
+  select private.expire_self_onboarding_submissions()
+$$;
+
+revoke all on function public.expire_self_onboarding_submissions() from public, anon, authenticated;
+grant execute on function public.expire_self_onboarding_submissions() to service_role;
+
 -- ---------------------------------------------------------------------------
 -- 5. Consents recorded at approval
 -- ---------------------------------------------------------------------------
@@ -1133,6 +1216,27 @@ grant execute on function public.self_onboarding_emails_sent(uuid) to authentica
 alter table public.worker_consents
   drop constraint worker_consents_channel_value,
   add constraint worker_consents_channel_value check (channel in ('worker_app', 'onboarding'));
+
+-- ---------------------------------------------------------------------------
+-- 5b. Date of birth and home address never reach audit_log (security review L5): 20261116090000's
+--     private.audit_secret_key with the two parts added (src/server/identity/audit.ts in step).
+-- ---------------------------------------------------------------------------
+
+create or replace function private.audit_secret_key(k text)
+returns boolean
+language sql
+immutable
+set search_path = ''
+as $$
+  with n as (
+    select lower(
+      regexp_replace(regexp_replace(k, '([a-z0-9])([A-Z])', '\1_\2', 'g'), '[^a-zA-Z0-9]+', '_', 'g')
+    ) as key
+  )
+  select n.key ~ '(_enc$|password|secret)'
+    or n.key ~ '(^|_)(nin|bvn|pin|pin_hash|rsa_pin|passwd|passcode|token|token_hash|api_key|apikey|account_number|account_no|bank_account|nuban|otp|date_of_birth|home_address)(_|$)'
+  from n
+$$;
 
 -- ---------------------------------------------------------------------------
 -- 6. public.log_audit refuses onboarding.% (5.10's version, migration 20261122280000, with that

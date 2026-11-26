@@ -24,6 +24,7 @@ import { createServerSupabase } from "@/lib/supabase/server";
 import {
   approveOnboardingSpec,
   cancelOnboardingSpec,
+  claimOnboardingEmail,
   emailOnboardingInvite,
   inviteOnboardingSpec,
   resendOnboardingSpec,
@@ -186,6 +187,10 @@ function managerNoticesAfter(
       await notifyOwnerGrantedRole(organisationId, userId, role, actorId, inviteId);
       const company = await getCompany(organisationId);
       if (!company) return;
+      // Security review L6: under the shared daily caps, once per invite.
+      if (!(await claimOnboardingEmail(organisationId, "self_onboarding_approved", inviteId))) {
+        return;
+      }
       await sendSelfOnboardingApprovedEmail({
         to: email,
         inviteId,

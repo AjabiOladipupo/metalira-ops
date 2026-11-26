@@ -118,6 +118,10 @@ export async function emailOnboardingLinkAction(
 ): Promise<OnboardingActionState> {
   const token = formFields(formData).token ?? "";
   if (!isOnboardingToken(token)) return { ok: false, formError: NOT_OPEN };
+  // Security review L8: the lookup behind an email link counts like a submit.
+  if (!(await onboardingAttemptAllowed({ kind: "submit", token }, await headers()))) {
+    return { ok: false, formError: TOO_MANY };
+  }
   const invite = await lookupOnboarding(token);
   if (invite.state !== "pending" || !isManagerOnboardingRole(invite.role)) {
     return { ok: false, formError: NOT_OPEN };

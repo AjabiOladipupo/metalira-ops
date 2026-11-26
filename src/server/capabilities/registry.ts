@@ -358,7 +358,12 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
-import { previewApproveOnboarding } from "./onboarding-previews";
+import {
+  previewApproveOnboarding,
+  previewCancelOnboarding,
+  previewInviteOnboarding,
+  previewResendOnboarding,
+} from "./onboarding-previews";
 import { previewSetModules } from "./company-previews";
 import { previewAddPayrollFinalPayItem, previewSetPayrollHolidayPay } from "./leavers-previews";
 import {
@@ -1111,6 +1116,7 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(inviteOnboardingSpec),
     changes: "one",
     action: at("people/self-onboarding-actions", "inviteToOnboardAction"),
+    preview: previewInviteOnboarding,
     agent: false,
     agentNote: ONBOARDING,
   },
@@ -1122,6 +1128,7 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(resendOnboardingSpec),
     changes: "one",
     action: at("people/self-onboarding-actions", "resendOnboardingInviteAction"),
+    preview: previewResendOnboarding,
     agent: false,
     agentNote: ONBOARDING,
   },
@@ -1133,6 +1140,7 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(cancelOnboardingSpec),
     changes: "one",
     action: at("people/self-onboarding-actions", "cancelOnboardingInviteAction"),
+    preview: previewCancelOnboarding,
     agent: false,
     agentNote: ONBOARDING,
   },

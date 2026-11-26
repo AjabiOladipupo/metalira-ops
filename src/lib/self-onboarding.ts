@@ -94,6 +94,22 @@ export const ONBOARDING_STATUS_LABELS: Record<OnboardingListStatus, string> = {
 /** Who may invite and approve: the owner or HR (none of the roles offered is owner or admin). */
 export const ONBOARDING_STAFF = ["owner", "hr"] as const;
 
+export const MANAGERS_OWNER_ONLY =
+  "Only the owner can invite managers. HR invites supervisors, guards and cleaners.";
+
+/**
+ * Security review H1: manager roles (HR, finance, ops manager, line manager) are the owner's to
+ * invite and approve; HR onboards worker roles only. The database checks the same.
+ */
+export function canOnboardRole(callerRole: string, role: OnboardingRole): boolean {
+  return callerRole === "owner" || !isManagerOnboardingRole(role);
+}
+
+/** The roles a caller may offer: all for the owner, worker roles for HR. */
+export function rolesFor(callerRole: string): OnboardingRole[] {
+  return ONBOARDING_ROLES.filter((role) => canOnboardRole(callerRole, role));
+}
+
 /** Invite links: /onboard/<64 hex characters>. */
 export const ONBOARDING_PATH = "/onboard";
 

@@ -8,8 +8,10 @@ import { INBOX_EMAIL_CAPS } from "@/lib/inbox";
 import { canEditPay } from "@/lib/pay-access";
 import { isManagerRole } from "@/lib/roles";
 import {
+  canOnboardRole,
   emailsLeft,
   isOnboardingRole,
+  MANAGERS_OWNER_ONLY,
   ONBOARDING_ROLE_LABELS,
   ONBOARDING_STAFF,
   listStatus,
@@ -24,6 +26,8 @@ import { getCompany } from "@/server/identity/company-data";
 import { MutationError, type MutationSpec } from "@/server/identity/mutate";
 import { createAdminSupabase } from "@/server/supabase/admin";
 import type { Database } from "@/types/db";
+
+import { bankAccountDigest } from "@/server/billing/bank-lookup";
 
 import { bankAccountContext } from "./bank-changes";
 import {
@@ -273,7 +277,8 @@ export const inviteOnboardingSpec: MutationSpec<
   module: "people",
   schema: onboardingInviteSchema,
   roles: ONBOARDING_STAFF,
-  run: async ({ supabase, organisationId, data }) => {
+  run: async ({ supabase, organisationId, role, data }) => {
+    if (!canOnboardRole(role, data.role)) throw new MutationError("forbidden", MANAGERS_OWNER_ONLY);
     const { data: rows, error } = await supabase.rpc("create_self_onboarding_invite", {
       p_organisation_id: organisationId,
       p_email: data.email,
@@ -340,6 +345,28 @@ export const cancelOnboardingSpec: MutationSpec<
   },
 };
 
+/**
+ * Claims one email under the shared daily caps (30 a company, 80 overall). True when it may go.
+ * Without a Resend key nothing is claimed (nothing is sent either). Throws on a database error.
+ */
+export async function claimOnboardingEmail(
+  organisationId: string,
+  kind: "self_onboarding" | "self_onboarding_approved",
+  refId: string,
+): Promise<boolean> {
+  if (!emailIsConfigured()) return true;
+  const claim = await createAdminSupabase().rpc("claim_manager_email", {
+    p_organisation_id: organisationId,
+    p_kind: kind,
+    p_ref_id: refId,
+    p_recipients: 1,
+    p_org_cap: INBOX_EMAIL_CAPS.perCompany,
+    p_global_cap: INBOX_EMAIL_CAPS.overall,
+  });
+  if (claim.error) throw new Error(`Could not check the email caps (${claim.error.code})`);
+  return claim.data === true;
+}
+
 export type InviteEmailOutcome = "sent" | "skipped" | "capped" | "failed";
 
 /**
@@ -356,17 +383,8 @@ export async function emailOnboardingInvite(
   try {
     const company = await getCompany(organisationId);
     if (!company) return "failed";
-    if (emailIsConfigured()) {
-      const claim = await createAdminSupabase().rpc("claim_manager_email", {
-        p_organisation_id: organisationId,
-        p_kind: "self_onboarding",
-        p_ref_id: randomUUID(),
-        p_recipients: 1,
-        p_org_cap: INBOX_EMAIL_CAPS.perCompany,
-        p_global_cap: INBOX_EMAIL_CAPS.overall,
-      });
-      if (claim.error) throw new Error(`Could not check the email caps (${claim.error.code})`);
-      if (!claim.data) return "capped";
+    if (!(await claimOnboardingEmail(organisationId, "self_onboarding", randomUUID()))) {
+      return "capped";
     }
     const result = await sendSelfOnboardingInviteEmail({
       to: invite.email,
@@ -426,7 +444,7 @@ export const approveOnboardingSpec: MutationSpec<
     const { data: inv, error: readError } = await supabase
       .from("onboarding_invites")
       .select(
-        "id, email, role, on_payroll, status, user_id, nin_enc, rsa_pin_enc, bank_account_enc, bank_account_last4, nhf_number_enc",
+        "id, email, role, on_payroll, status, user_id, nin_enc, rsa_pin_enc, bank_code, bank_account_enc, bank_account_last4, bank_account_digest, nhf_number_enc",
       )
       .eq("organisation_id", organisationId)
       .eq("id", data.inviteId)
@@ -437,6 +455,9 @@ export const approveOnboardingSpec: MutationSpec<
     }
     if (inv.status !== "submitted") {
       throw new MutationError("invalid", DB_MESSAGES.MLSO6!.message);
+    }
+    if (!canOnboardRole(role, inv.role)) {
+      throw new MutationError("forbidden", "Only the owner can approve a manager.");
     }
 
     let worker: Record<string, string | null> | null = null;
@@ -475,13 +496,17 @@ export const approveOnboardingSpec: MutationSpec<
       if (inv.bank_account_enc) {
         const number = decryptPii(inv.bank_account_enc, from("bank_account_enc"));
         // The approver sees the last 4 on the review: they must belong to the number paid.
-        if (last4(number) !== inv.bank_account_last4) {
+        const digest = inv.bank_code
+          ? bankAccountDigest(organisationId, inv.bank_code, number)
+          : null;
+        if (last4(number) !== inv.bank_account_last4 || digest !== inv.bank_account_digest) {
           throw new MutationError(
             "invalid",
             "The bank details sent can't be checked. Cancel this invite and send a new one.",
           );
         }
         bankEnc = encryptPiiForDb(number, bankAccountContext(organisationId, workerId));
+        worker.bank_account_digest = digest;
       }
       if (inv.nhf_number_enc) {
         const nhfId = randomUUID();

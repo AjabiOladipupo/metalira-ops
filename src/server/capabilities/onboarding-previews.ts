@@ -1,7 +1,11 @@
 import "server-only";
 
 import { ONBOARDING_ROLE_LABELS, isOnboardingRole } from "@/lib/self-onboarding";
-import type { approveOnboardingSchema } from "@/server/people/self-onboarding-schemas";
+import type {
+  approveOnboardingSchema,
+  onboardingInviteIdSchema,
+  onboardingInviteSchema,
+} from "@/server/people/self-onboarding-schemas";
 
 import type { CapabilityPreview, PreviewFn } from "./types";
 
@@ -35,4 +39,44 @@ export const previewApproveOnboarding: PreviewFn<typeof approveOnboardingSchema>
     });
   }
   return { summary: `Approves ${name} as ${role}.`, changes };
+};
+
+/** Inviting (security review L9): who gets the link, with which fixed role. */
+export const previewInviteOnboarding: PreviewFn<typeof onboardingInviteSchema> = ({ data }) => {
+  const role = ONBOARDING_ROLE_LABELS[data.role];
+  return {
+    summary: `Emails ${data.email} a link to fill in their details as ${role}. It works for 7 days.`,
+    changes: [{ label: "Role (fixed)", after: role }],
+  };
+};
+
+async function readInvite(
+  ctx: Parameters<PreviewFn<typeof onboardingInviteIdSchema>>[0],
+): Promise<{ email: string; role: string; status: string } | null> {
+  const { data, error } = await ctx.supabase
+    .from("onboarding_invites")
+    .select("email, role, status")
+    .eq("organisation_id", ctx.organisationId)
+    .eq("id", ctx.data.inviteId)
+    .maybeSingle();
+  if (error) throw new Error(`Could not read the invite (${error.code})`);
+  return data;
+}
+
+export const previewResendOnboarding: PreviewFn<typeof onboardingInviteIdSchema> = async (ctx) => {
+  const invite = await readInvite(ctx);
+  if (!invite) return { summary: "That invite wasn't found.", changes: [] };
+  return {
+    summary: `Sends ${invite.email} a new link for 7 days. The old link stops working.`,
+    changes: [{ label: "Link", before: "Current link", after: "New link" }],
+  };
+};
+
+export const previewCancelOnboarding: PreviewFn<typeof onboardingInviteIdSchema> = async (ctx) => {
+  const invite = await readInvite(ctx);
+  if (!invite) return { summary: "That invite wasn't found.", changes: [] };
+  return {
+    summary: `Cancels the invite for ${invite.email}. Its link stops working and any details sent are cleared.`,
+    changes: [{ label: "Status", before: invite.status, after: "cancelled" }],
+  };
 };
