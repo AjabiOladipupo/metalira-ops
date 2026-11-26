@@ -67,6 +67,11 @@ function isTeamJoin(pathname: string): boolean {
   return /^\/join\/[0-9a-f]{64}$/.test(pathname);
 }
 
+/** A self-onboarding invite page, /onboard/<64 hex characters> (slice U.4). */
+function isOnboardingInvite(pathname: string): boolean {
+  return /^\/onboard\/[0-9a-f]{64}$/.test(pathname);
+}
+
 function isWorkerApp(pathname: string): boolean {
   return pathname === WORKER_HOME_PATH || pathname.startsWith(`${WORKER_HOME_PATH}/`);
 }
@@ -105,6 +110,7 @@ export function safeNextPath(
   if (
     !isProtected(url.pathname) &&
     !isTeamJoin(url.pathname) &&
+    !isOnboardingInvite(url.pathname) &&
     url.pathname !== SET_PASSWORD_PATH
   ) {
     return fallback;

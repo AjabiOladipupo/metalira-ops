@@ -108,6 +108,12 @@ import {
   requestBankChangeSpec,
   withdrawBankChangeSpec,
 } from "@/server/people/bank-changes";
+import {
+  approveOnboardingSpec,
+  cancelOnboardingSpec,
+  inviteOnboardingSpec,
+  resendOnboardingSpec,
+} from "@/server/people/self-onboarding";
 import { lookupWorkerBankSchema } from "@/server/people/bank-lookups";
 import { resolveChangeRequestSpec } from "@/server/people/change-requests";
 import { createDepartmentSpec, updateDepartmentSpec } from "@/server/people/departments";
@@ -351,6 +357,7 @@ import {
   previewUpdateHeadcount,
 } from "./previews";
 import { previewActivateContract, previewEndContract } from "./activation-previews";
+import { previewApproveOnboarding } from "./onboarding-previews";
 import { previewSetModules } from "./company-previews";
 import { previewAddPayrollFinalPayItem, previewSetPayrollHolidayPay } from "./leavers-previews";
 import {
@@ -458,6 +465,8 @@ const BULK_PEOPLE =
   "Changes many employees at once (owner decision, slice U.1): a person confirms the preview on the screen.";
 const BULK_LIST =
   "Approves, resends or cancels many rows at once (owner decision, slice U.2): a person confirms the preview on the screen.";
+const ONBOARDING =
+  "Grants access or adds an employee with personal data (slice U.4): kept to the owner and HR.";
 const PERSONAL =
   "Takes personal data (NIN, bank, RSA PIN) as input: the agent sees masked values only.";
 
@@ -1057,6 +1066,104 @@ export const CAPABILITIES: readonly Capability[] = [
     action: at("people/bulk-actions", "previewBulkReassignAction"),
     agent: false,
     agentNote: BULK_PEOPLE,
+  },
+
+  // -------------------------------------------------------------------------
+  // Self-onboarding (people/self-onboarding-actions.ts, self-onboarding-public-actions.ts; U.4)
+  // -------------------------------------------------------------------------
+  {
+    name: "onboarding.invite",
+    description: "Emails someone a link to fill in their own details, with one fixed role.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(inviteOnboardingSpec),
+    changes: "one",
+    action: at("people/self-onboarding-actions", "inviteToOnboardAction"),
+    agent: false,
+    agentNote: ONBOARDING,
+  },
+  {
+    name: "onboarding.resend",
+    description: "Sends an onboarding invite again with a new link.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(resendOnboardingSpec),
+    changes: "one",
+    action: at("people/self-onboarding-actions", "resendOnboardingInviteAction"),
+    agent: false,
+    agentNote: ONBOARDING,
+  },
+  {
+    name: "onboarding.cancel",
+    description: "Cancels an onboarding invite and clears any details sent.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(cancelOnboardingSpec),
+    changes: "one",
+    action: at("people/self-onboarding-actions", "cancelOnboardingInviteAction"),
+    agent: false,
+    agentNote: ONBOARDING,
+  },
+  {
+    name: "onboarding.approve",
+    description:
+      "Approves self-onboarding details: adds the member or employee with the invite's role.",
+    kind: "money",
+    audience: "manager",
+    ...fromSpec(approveOnboardingSpec),
+    changes: "many",
+    action: at("people/self-onboarding-actions", "approveOnboardingAction"),
+    preview: previewApproveOnboarding,
+    agent: false,
+    agentNote: ONBOARDING,
+  },
+  {
+    name: "onboarding.submit_worker",
+    description: "Sends a worker's own details from their onboarding link.",
+    kind: "write",
+    audience: "public",
+    roles: [],
+    input: null,
+    changes: "one",
+    action: at("people/self-onboarding-public-actions", "submitWorkerOnboardingAction"),
+    agent: false,
+    agentNote: AUTH,
+  },
+  {
+    name: "onboarding.email_link",
+    description: "Emails a sign-in link to the address an onboarding invite was sent to.",
+    kind: "write",
+    audience: "public",
+    roles: [],
+    input: null,
+    changes: "none",
+    action: at("people/self-onboarding-public-actions", "emailOnboardingLinkAction"),
+    agent: false,
+    agentNote: AUTH,
+  },
+  {
+    name: "onboarding.submit_manager",
+    description: "Sends an invited manager's own details, choosing a password if new.",
+    kind: "write",
+    audience: "public",
+    roles: [],
+    input: null,
+    changes: "one",
+    action: at("people/self-onboarding-public-actions", "submitManagerOnboardingAction"),
+    agent: false,
+    agentNote: AUTH,
+  },
+  {
+    name: "onboarding.sign_out",
+    description: "Signs out so an onboarding invite can be used with another account.",
+    kind: "write",
+    audience: "public",
+    roles: [],
+    input: null,
+    changes: "none",
+    action: at("people/self-onboarding-public-actions", "signOutForOnboardingAction"),
+    agent: false,
+    agentNote: AUTH,
   },
 
   // -------------------------------------------------------------------------

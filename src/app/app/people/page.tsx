@@ -231,6 +231,7 @@ async function PeopleList({
         canEdit={ctx.canEdit}
         canImport={ctx.canEditPay}
         canInvite={canAccessHref(ctx.role, "/app/people/invites")}
+        canOnboard={canAccessHref(ctx.role, "/app/people/onboarding")}
       />
     </>
   );
