@@ -31,6 +31,7 @@ import {
 } from "@/lib/people-filters";
 import { canViewBankChanges, countPendingBankChanges } from "@/server/people/bank-changes";
 import {
+  loadBulkMappingTargets,
   loadMappingTargets,
   loadPeopleDirectory,
   loadWorkerFormOptions,
@@ -211,7 +212,7 @@ async function PeopleList({
       />
     );
   }
-  const [directory, pendingBankChanges, bulkOptions] = await Promise.all([
+  const [directory, pendingBankChanges, bulkOptions, bulkTargets] = await Promise.all([
     loadPeopleDirectory(
       ctx.supabase,
       ctx.organisationId,
@@ -223,6 +224,9 @@ async function PeopleList({
       ? countPendingBankChanges(ctx.supabase, ctx.organisationId)
       : Promise.resolve(0),
     ctx.canEdit ? loadWorkerFormOptions(ctx.supabase, ctx.organisationId) : Promise.resolve(null),
+    ctx.canEdit
+      ? loadBulkMappingTargets(ctx.supabase, ctx.organisationId)
+      : Promise.resolve(null),
   ]);
   const actions = (
     <>
@@ -335,6 +339,8 @@ async function PeopleList({
               filters={filters}
               lineManagers={bulkOptions?.lineManagers ?? []}
               departments={bulkOptions?.departments ?? []}
+              sites={bulkTargets?.sites ?? []}
+              projects={bulkTargets?.projects ?? []}
               today={ctx.today}
             />
             <DataTable
