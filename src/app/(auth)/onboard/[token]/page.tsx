@@ -14,17 +14,10 @@ import {
 import { createServerSupabase } from "@/lib/supabase/server";
 import { invitePasswordStepFor } from "@/server/identity/invite-password";
 import { getPageSession } from "@/server/identity/session";
-import {
-  lookupOnboarding,
-  onboardingAttemptAllowed,
-} from "@/server/people/self-onboarding-public";
+import { lookupOnboarding, onboardingAttemptAllowed } from "@/server/people/self-onboarding-public";
 import { signOutForOnboardingAction } from "@/server/people/self-onboarding-public-actions";
 
-import {
-  ManagerOnboardForm,
-  OnboardEmailLinkForm,
-  WorkerOnboardForm,
-} from "./onboard-forms";
+import { ManagerOnboardForm, OnboardEmailLinkForm, WorkerOnboardForm } from "./onboard-forms";
 
 // The token is in the path: keep it out of Referer headers and search engines.
 export const metadata: Metadata = {
@@ -37,8 +30,10 @@ const STATE_MESSAGES = {
   invalid: "This invite link is not valid. Check you copied the whole link from the email.",
   unavailable: "We couldn't check this invite just now. Try again in a minute.",
   limited: "Too many tries from this network. Wait an hour and try again.",
-  submitted: "Thanks. Your details were sent and are waiting for HR review. We email you once you are approved.",
-  approved: "Your details were approved. Workers get a separate email to set their phone app PIN; managers can sign in.",
+  submitted:
+    "Thanks. Your details were sent and are waiting for HR review. We email you once you are approved.",
+  approved:
+    "Your details were approved. Workers get a separate email to set their phone app PIN; managers can sign in.",
   cancelled: "This invite was cancelled. Ask the person who invited you for a new one.",
   expired: "This invite has expired. Ask the person who invited you to send it again.",
 } as const;
@@ -74,7 +69,9 @@ async function Onboard({ token }: { token: string }) {
     return (
       <>
         <Heading
-          eyebrow={"role" in invite ? `Onboarding · ${ONBOARDING_ROLE_LABELS[invite.role]}` : "Onboarding"}
+          eyebrow={
+            "role" in invite ? `Onboarding · ${ONBOARDING_ROLE_LABELS[invite.role]}` : "Onboarding"
+          }
           title={title}
         />
         {done ? (
@@ -119,7 +116,10 @@ async function Onboard({ token }: { token: string }) {
           </h2>
           <OnboardEmailLinkForm token={token} />
         </section>
-        <section aria-labelledby="onboard-sign-in" className="flex flex-col gap-3 border-t border-line pt-5">
+        <section
+          aria-labelledby="onboard-sign-in"
+          className="flex flex-col gap-3 border-t border-line pt-5"
+        >
           <h2 id="onboard-sign-in" className="m-0 type-h3">
             Already have an account?
           </h2>

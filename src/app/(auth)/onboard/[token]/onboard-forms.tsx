@@ -21,7 +21,7 @@ type Values = Partial<Record<string, string>>;
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <fieldset className="m-0 flex min-w-0 flex-col gap-4 border-0 border-t border-line p-0 pt-5">
-      <legend className="type-h3 float-left mb-1 w-full">{title}</legend>
+      <legend className="float-left mb-1 w-full type-h3">{title}</legend>
       {children}
     </fieldset>
   );
@@ -54,9 +54,33 @@ function Check({
 function PersonFields({ v, e }: { v: Values; e: Values }) {
   return (
     <>
-      <Field label="First name" name="firstName" autoComplete="given-name" required defaultValue={v.firstName ?? ""} error={e.firstName} />
-      <Field label="Last name" name="lastName" autoComplete="family-name" required defaultValue={v.lastName ?? ""} error={e.lastName} />
-      <Field label="Phone number" name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="0803 123 4567" required defaultValue={v.phone ?? ""} error={e.phone} />
+      <Field
+        label="First name"
+        name="firstName"
+        autoComplete="given-name"
+        required
+        defaultValue={v.firstName ?? ""}
+        error={e.firstName}
+      />
+      <Field
+        label="Last name"
+        name="lastName"
+        autoComplete="family-name"
+        required
+        defaultValue={v.lastName ?? ""}
+        error={e.lastName}
+      />
+      <Field
+        label="Phone number"
+        name="phone"
+        type="tel"
+        inputMode="tel"
+        autoComplete="tel"
+        placeholder="0803 123 4567"
+        required
+        defaultValue={v.phone ?? ""}
+        error={e.phone}
+      />
     </>
   );
 }
@@ -67,38 +91,132 @@ function EmployeeFields({ v, e, required }: { v: Values; e: Values; required: bo
   return (
     <>
       <Section title="About you">
-        <Field label={`Date of birth${optional}`} name="dateOfBirth" type="date" defaultValue={v.dateOfBirth ?? ""} error={e.dateOfBirth} />
-        <Field label={`Home address${optional}`} name="homeAddress" autoComplete="street-address" defaultValue={v.homeAddress ?? ""} error={e.homeAddress} />
-        <Field label={`Emergency contact name${optional}`} name="nextOfKinName" defaultValue={v.nextOfKinName ?? ""} error={e.nextOfKinName} />
-        <Field label={`Emergency contact phone${optional}`} name="nextOfKinPhone" type="tel" inputMode="tel" defaultValue={v.nextOfKinPhone ?? ""} error={e.nextOfKinPhone} />
-        <Field label="NIN (optional)" name="nin" inputMode="numeric" autoComplete="off" hint="11 digits. Only HR sees it." error={e.nin} />
+        <Field
+          label={`Date of birth${optional}`}
+          name="dateOfBirth"
+          type="date"
+          defaultValue={v.dateOfBirth ?? ""}
+          error={e.dateOfBirth}
+        />
+        <Field
+          label={`Home address${optional}`}
+          name="homeAddress"
+          autoComplete="street-address"
+          defaultValue={v.homeAddress ?? ""}
+          error={e.homeAddress}
+        />
+        <Field
+          label={`Emergency contact name${optional}`}
+          name="nextOfKinName"
+          defaultValue={v.nextOfKinName ?? ""}
+          error={e.nextOfKinName}
+        />
+        <Field
+          label={`Emergency contact phone${optional}`}
+          name="nextOfKinPhone"
+          type="tel"
+          inputMode="tel"
+          defaultValue={v.nextOfKinPhone ?? ""}
+          error={e.nextOfKinPhone}
+        />
+        <Field
+          label="NIN (optional)"
+          name="nin"
+          inputMode="numeric"
+          autoComplete="off"
+          hint="11 digits. Only HR sees it."
+          error={e.nin}
+        />
       </Section>
       <Section title="Where you are paid">
-        <SelectField label="Bank (optional)" name="bankCode" options={BANK_OPTIONS} placeholder="Choose your bank" defaultValue={v.bankCode ?? ""} error={e.bankCode} />
-        <Field label="Account number" name="bankAccountNumber" inputMode="numeric" autoComplete="off" hint="10 digits. A second person at your company checks it before it is used." error={e.bankAccountNumber} />
-        <Field label="Name on the account" name="accountName" defaultValue={v.accountName ?? ""} error={e.accountName} />
+        <SelectField
+          label="Bank (optional)"
+          name="bankCode"
+          options={BANK_OPTIONS}
+          placeholder="Choose your bank"
+          defaultValue={v.bankCode ?? ""}
+          error={e.bankCode}
+        />
+        <Field
+          label="Account number"
+          name="bankAccountNumber"
+          inputMode="numeric"
+          autoComplete="off"
+          hint="10 digits. A second person at your company checks it before it is used."
+          error={e.bankAccountNumber}
+        />
+        <Field
+          label="Name on the account"
+          name="accountName"
+          defaultValue={v.accountName ?? ""}
+          error={e.accountName}
+        />
       </Section>
       <Section title="Pension and tax">
-        <Field label="Pension fund (PFA) (optional)" name="pfaName" defaultValue={v.pfaName ?? ""} error={e.pfaName} />
-        <Field label="RSA PIN (optional)" name="rsaPin" autoComplete="off" placeholder="PEN100012344421" error={e.rsaPin} />
-        <Field label="State you pay tax in (optional)" name="taxState" defaultValue={v.taxState ?? ""} error={e.taxState} />
-        <Check name="nhfOptIn" label="I contribute to the National Housing Fund (NHF)" defaultChecked={v.nhfOptIn === "true"} />
-        <Field label="NHF number (optional)" name="nhfNumber" autoComplete="off" error={e.nhfNumber} />
-        <Field label="Annual rent you pay, in naira (optional)" name="annualRentDeclared" inputMode="decimal" hint="For rent relief on your tax. HR may ask for proof." defaultValue={v.annualRentDeclared ?? ""} error={e.annualRentDeclared} />
+        <Field
+          label="Pension fund (PFA) (optional)"
+          name="pfaName"
+          defaultValue={v.pfaName ?? ""}
+          error={e.pfaName}
+        />
+        <Field
+          label="RSA PIN (optional)"
+          name="rsaPin"
+          autoComplete="off"
+          placeholder="PEN100012344421"
+          error={e.rsaPin}
+        />
+        <Field
+          label="State you pay tax in (optional)"
+          name="taxState"
+          defaultValue={v.taxState ?? ""}
+          error={e.taxState}
+        />
+        <Check
+          name="nhfOptIn"
+          label="I contribute to the National Housing Fund (NHF)"
+          defaultChecked={v.nhfOptIn === "true"}
+        />
+        <Field
+          label="NHF number (optional)"
+          name="nhfNumber"
+          autoComplete="off"
+          error={e.nhfNumber}
+        />
+        <Field
+          label="Annual rent you pay, in naira (optional)"
+          name="annualRentDeclared"
+          inputMode="decimal"
+          hint="For rent relief on your tax. HR may ask for proof."
+          defaultValue={v.annualRentDeclared ?? ""}
+          error={e.annualRentDeclared}
+        />
       </Section>
       <Section title="Clock-in">
         <div className="flex flex-col gap-1 text-sm text-fg-muted">
           {CONSENT_NOTICES.location.body.map((line) => (
-            <p key={line} className="m-0">{line}</p>
+            <p key={line} className="m-0">
+              {line}
+            </p>
           ))}
         </div>
-        <Check name="locationConsent" label={CONSENT_NOTICES.location.agree} defaultChecked={v.locationConsent === "true"} />
+        <Check
+          name="locationConsent"
+          label={CONSENT_NOTICES.location.agree}
+          defaultChecked={v.locationConsent === "true"}
+        />
         <div className="flex flex-col gap-1 text-sm text-fg-muted">
           {CONSENT_NOTICES.selfie.body.map((line) => (
-            <p key={line} className="m-0">{line}</p>
+            <p key={line} className="m-0">
+              {line}
+            </p>
           ))}
         </div>
-        <Check name="selfieConsent" label={CONSENT_NOTICES.selfie.agree} defaultChecked={v.selfieConsent === "true"} />
+        <Check
+          name="selfieConsent"
+          label={CONSENT_NOTICES.selfie.agree}
+          defaultChecked={v.selfieConsent === "true"}
+        />
         <p className="m-0 text-xs text-fg-muted">
           If you don&apos;t agree, your supervisor clocks you in instead.
         </p>
@@ -145,7 +263,12 @@ export function OnboardEmailLinkForm({ token }: { token: string }) {
   const [state, action] = useActionState(emailOnboardingLinkAction, null);
   const { formError } = errorsOf(state);
   return (
-    <form action={action} noValidate aria-label="Create your account" className="flex flex-col gap-3">
+    <form
+      action={action}
+      noValidate
+      aria-label="Create your account"
+      className="flex flex-col gap-3"
+    >
       <input type="hidden" name="token" value={token} />
       <p className="m-0 text-sm text-fg-muted">
         We email a link to the address this invite was sent to. Open it on this device to continue.
