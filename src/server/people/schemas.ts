@@ -566,3 +566,18 @@ export const saveMappingSchema = z
 
 export type SaveMappingInput = z.input<typeof saveMappingSchema>;
 export type SaveMappingData = z.output<typeof saveMappingSchema>;
+
+// ---------------------------------------------------------------------------
+// Shared with self-onboarding (slice U.4): the same field rules as a create.
+// ---------------------------------------------------------------------------
+
+export {
+  checkPayAmounts,
+  emailSchema,
+  formBoolean,
+  note as noteField,
+  optional as optionalField,
+  payAmountFields,
+  text as textField,
+};
+export type { PayAmounts };

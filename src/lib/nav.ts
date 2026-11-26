@@ -333,6 +333,8 @@ export const EXTRA_PAGES: readonly {
   { href: "/app/people/import", roles: ["owner", "hr"] },
   // Worker invites and PIN resets (slice 1.9): the roles that may create invites.
   { href: "/app/people/invites", roles: ["owner", "admin", "hr"] },
+  // Self-onboarding invites and their review (slice U.4): the owner or HR.
+  { href: "/app/people/onboarding", roles: ["owner", "hr"] },
   // Bank-detail approvals (slice 1.7): finance approves too, without the People list.
   { href: "/app/people/approvals", roles: ["owner", "admin", "hr", "finance"] },
   // "Export CSV" from the People list (slice U.1, a route handler): every role that reads the

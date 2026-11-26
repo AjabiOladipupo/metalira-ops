@@ -34,6 +34,7 @@ export const config = {
     "/sign-up",
     "/no-access",
     "/join/:path*",
+    "/onboard/:path*",
     "/set-password",
   ],
 };

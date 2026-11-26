@@ -63,7 +63,7 @@ function piiContext(organisationId: string, rowId: string, column: string): PiiC
 const PAGE = 1000;
 
 /** Every staff ID in the organisation, a page at a time (PostgREST caps one read at 1000). */
-async function loadStaffIds(supabase: Client, organisationId: string): Promise<string[]> {
+export async function loadStaffIds(supabase: Client, organisationId: string): Promise<string[]> {
   const ids: string[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase

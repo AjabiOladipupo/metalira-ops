@@ -72,6 +72,8 @@ const NOT_WORK_RECORDS: Record<string, string> = {
     "location and selfie consents (slice 3.1); the punches they allow are the work records",
   worker_credentials: "the phone login",
   worker_invites: "invite links",
+  onboarding_invites:
+    "self-onboarding invites (slice U.4); points at the worker approval created, records no work",
 };
 
 let db: pg.Client;

@@ -697,6 +697,50 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"onboarding_invites": {
+                  Row: {
+                    "account_name": string | null,"annual_rent_declared_kobo": number | null,"bank_account_digest": string | null,"bank_account_enc": string | null,"bank_account_last4": string | null,"bank_code": string | null,"bank_name": string | null,"created_at": string,"created_by": string,"currency": string,"date_of_birth": string | null,"decided_at": string | null,"decided_by": string | null,"department_id": string | null,"email": string,"expires_at": string,"first_name": string | null,"home_address": string | null,"id": string,"last_name": string | null,"line_manager_membership_id": string | null,"line_manager_worker_id": string | null,"location_consent_at": string | null,"location_consent_version": string | null,"membership_id": string | null,"next_of_kin_name": string | null,"next_of_kin_phone": string | null,"nhf_number_enc": string | null,"nhf_number_last4": string | null,"nhf_opt_in": boolean,"nin_enc": string | null,"nin_last4": string | null,"on_payroll": boolean,"opened_at": string | null,"organisation_id": string,"pfa_name": string | null,"phone": string | null,"role": string,"rsa_pin_enc": string | null,"rsa_pin_last4": string | null,"selfie_consent_at": string | null,"selfie_consent_version": string | null,"sent_at": string,"status": string,"submitted_at": string | null,"tax_state": string | null,"token_hash": string,"user_id": string | null,"worker_id": string | null
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "account_name"?: string | null,"annual_rent_declared_kobo"?: number | null,"bank_account_digest"?: string | null,"bank_account_enc"?: string | null,"bank_account_last4"?: string | null,"bank_code"?: string | null,"bank_name"?: string | null,"created_at"?: string,"created_by": string,"currency"?: string,"date_of_birth"?: string | null,"decided_at"?: string | null,"decided_by"?: string | null,"department_id"?: string | null,"email": string,"expires_at"?: string,"first_name"?: string | null,"home_address"?: string | null,"id"?: string,"last_name"?: string | null,"line_manager_membership_id"?: string | null,"line_manager_worker_id"?: string | null,"location_consent_at"?: string | null,"location_consent_version"?: string | null,"membership_id"?: string | null,"next_of_kin_name"?: string | null,"next_of_kin_phone"?: string | null,"nhf_number_enc"?: string | null,"nhf_number_last4"?: string | null,"nhf_opt_in"?: boolean,"nin_enc"?: string | null,"nin_last4"?: string | null,"on_payroll"?: boolean,"opened_at"?: string | null,"organisation_id": string,"pfa_name"?: string | null,"phone"?: string | null,"role": string,"rsa_pin_enc"?: string | null,"rsa_pin_last4"?: string | null,"selfie_consent_at"?: string | null,"selfie_consent_version"?: string | null,"sent_at"?: string,"status"?: string,"submitted_at"?: string | null,"tax_state"?: string | null,"token_hash": string,"user_id"?: string | null,"worker_id"?: string | null
+                  }
+                  Update: {
+                    "account_name"?: string | null,"annual_rent_declared_kobo"?: number | null,"bank_account_digest"?: string | null,"bank_account_enc"?: string | null,"bank_account_last4"?: string | null,"bank_code"?: string | null,"bank_name"?: string | null,"created_at"?: string,"created_by"?: string,"currency"?: string,"date_of_birth"?: string | null,"decided_at"?: string | null,"decided_by"?: string | null,"department_id"?: string | null,"email"?: string,"expires_at"?: string,"first_name"?: string | null,"home_address"?: string | null,"id"?: string,"last_name"?: string | null,"line_manager_membership_id"?: string | null,"line_manager_worker_id"?: string | null,"location_consent_at"?: string | null,"location_consent_version"?: string | null,"membership_id"?: string | null,"next_of_kin_name"?: string | null,"next_of_kin_phone"?: string | null,"nhf_number_enc"?: string | null,"nhf_number_last4"?: string | null,"nhf_opt_in"?: boolean,"nin_enc"?: string | null,"nin_last4"?: string | null,"on_payroll"?: boolean,"opened_at"?: string | null,"organisation_id"?: string,"pfa_name"?: string | null,"phone"?: string | null,"role"?: string,"rsa_pin_enc"?: string | null,"rsa_pin_last4"?: string | null,"selfie_consent_at"?: string | null,"selfie_consent_version"?: string | null,"sent_at"?: string,"status"?: string,"submitted_at"?: string | null,"tax_state"?: string | null,"token_hash"?: string,"user_id"?: string | null,"worker_id"?: string | null
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "onboarding_invites_department_fkey"
+      columns: ["organisation_id","department_id"]
+isOneToOne: false
+      referencedRelation: "departments"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "onboarding_invites_line_manager_membership_fkey"
+      columns: ["organisation_id","line_manager_membership_id"]
+isOneToOne: false
+      referencedRelation: "memberships"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "onboarding_invites_line_manager_worker_fkey"
+      columns: ["organisation_id","line_manager_worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    },{
+      foreignKeyName: "onboarding_invites_organisation_id_fkey"
+      columns: ["organisation_id"]
+isOneToOne: false
+      referencedRelation: "organisations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "onboarding_invites_worker_fkey"
+      columns: ["organisation_id","worker_id"]
+isOneToOne: false
+      referencedRelation: "workers"
+      referencedColumns: ["organisation_id","id"]
+    }
+                  ]
                 },"organisation_bank_accounts": {
                   Row: {
                     "account_name": string,"activated_at": string | null,"applied_notified_at": string | null,"applies_after": string | null,"approved_by": string | null,"approved_notified_at": string | null,"bank_account_digest": string | null,"bank_account_enc": string,"bank_account_last4": string,"bank_code": string | null,"bank_lookup_id": string | null,"bank_name": string,"cancelled_at": string | null,"cancelled_by": string | null,"created_at": string,"decided_at": string | null,"decision_note": string | null,"id": string,"name_check": Database["public"]['Enums']["bank_name_check"] | null,"name_check_expected": string | null,"name_check_reason": string | null,"name_check_source": string | null,"organisation_id": string,"reason": string | null,"rejected_by": string | null,"requested_by": string,"requested_notified_at": string | null,"retired_at": string | null,"single_approver": boolean,"status": Database["public"]['Enums']["org_bank_account_status"],"updated_at": string
@@ -2533,14 +2577,14 @@ isOneToOne: false
                   ]
                 },"workers": {
                   Row: {
-                    "account_name": string | null,"annual_rent_declared_kobo": number | null,"bank_account_enc": string | null,"bank_account_last4": string | null,"bank_checked_at": string | null,"bank_checked_by": string | null,"bank_checked_code": string | null,"bank_checked_name": string | null,"bank_checked_source": string | null,"bank_code": string | null,"bank_name": string | null,"created_at": string,"created_by": string | null,"currency": string,"department_id": string | null,"email": string | null,"employment_type": Database["public"]['Enums']["employment_type"],"end_date": string | null,"first_name": string,"id": string,"job_title": string | null,"last_name": string,"line_manager_membership_id": string | null,"line_manager_worker_id": string | null,"needs_pay_details": boolean,"next_of_kin_name": string | null,"next_of_kin_phone": string | null,"nhf_opt_in": boolean,"nin_enc": string | null,"organisation_id": string,"pfa_name": string | null,"phone": string | null,"rent_declared_at": string | null,"rent_declared_by": string | null,"rsa_pin_enc": string | null,"rsa_pin_last4": string | null,"staff_id": string,"start_date": string,"status": Database["public"]['Enums']["worker_status"],"supervisor_clock_in": boolean,"tax_state": string | null,"tin": string | null,"updated_at": string,"usual_work_days": (number)[] | null
+                    "account_name": string | null,"annual_rent_declared_kobo": number | null,"bank_account_enc": string | null,"bank_account_last4": string | null,"bank_checked_at": string | null,"bank_checked_by": string | null,"bank_checked_code": string | null,"bank_checked_name": string | null,"bank_checked_source": string | null,"bank_code": string | null,"bank_name": string | null,"created_at": string,"created_by": string | null,"currency": string,"date_of_birth": string | null,"department_id": string | null,"email": string | null,"employment_type": Database["public"]['Enums']["employment_type"],"end_date": string | null,"first_name": string,"home_address": string | null,"id": string,"job_title": string | null,"last_name": string,"line_manager_membership_id": string | null,"line_manager_worker_id": string | null,"needs_pay_details": boolean,"next_of_kin_name": string | null,"next_of_kin_phone": string | null,"nhf_opt_in": boolean,"nin_enc": string | null,"organisation_id": string,"pfa_name": string | null,"phone": string | null,"rent_declared_at": string | null,"rent_declared_by": string | null,"rsa_pin_enc": string | null,"rsa_pin_last4": string | null,"staff_id": string,"start_date": string,"status": Database["public"]['Enums']["worker_status"],"supervisor_clock_in": boolean,"tax_state": string | null,"tin": string | null,"updated_at": string,"usual_work_days": (number)[] | null
                   }
                   ComputedFields: never
                   Insert: {
-                    "account_name"?: string | null,"annual_rent_declared_kobo"?: number | null,"bank_account_enc"?: string | null,"bank_account_last4"?: string | null,"bank_checked_at"?: string | null,"bank_checked_by"?: string | null,"bank_checked_code"?: string | null,"bank_checked_name"?: string | null,"bank_checked_source"?: string | null,"bank_code"?: string | null,"bank_name"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"department_id"?: string | null,"email"?: string | null,"employment_type": Database["public"]['Enums']["employment_type"],"end_date"?: string | null,"first_name": string,"id"?: string,"job_title"?: string | null,"last_name": string,"line_manager_membership_id"?: string | null,"line_manager_worker_id"?: string | null,"needs_pay_details"?: boolean,"next_of_kin_name"?: string | null,"next_of_kin_phone"?: string | null,"nhf_opt_in"?: boolean,"nin_enc"?: string | null,"organisation_id": string,"pfa_name"?: string | null,"phone"?: string | null,"rent_declared_at"?: string | null,"rent_declared_by"?: string | null,"rsa_pin_enc"?: string | null,"rsa_pin_last4"?: string | null,"staff_id": string,"start_date": string,"status"?: Database["public"]['Enums']["worker_status"],"supervisor_clock_in"?: boolean,"tax_state"?: string | null,"tin"?: string | null,"updated_at"?: string,"usual_work_days"?: (number)[] | null
+                    "account_name"?: string | null,"annual_rent_declared_kobo"?: number | null,"bank_account_enc"?: string | null,"bank_account_last4"?: string | null,"bank_checked_at"?: string | null,"bank_checked_by"?: string | null,"bank_checked_code"?: string | null,"bank_checked_name"?: string | null,"bank_checked_source"?: string | null,"bank_code"?: string | null,"bank_name"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"date_of_birth"?: string | null,"department_id"?: string | null,"email"?: string | null,"employment_type": Database["public"]['Enums']["employment_type"],"end_date"?: string | null,"first_name": string,"home_address"?: string | null,"id"?: string,"job_title"?: string | null,"last_name": string,"line_manager_membership_id"?: string | null,"line_manager_worker_id"?: string | null,"needs_pay_details"?: boolean,"next_of_kin_name"?: string | null,"next_of_kin_phone"?: string | null,"nhf_opt_in"?: boolean,"nin_enc"?: string | null,"organisation_id": string,"pfa_name"?: string | null,"phone"?: string | null,"rent_declared_at"?: string | null,"rent_declared_by"?: string | null,"rsa_pin_enc"?: string | null,"rsa_pin_last4"?: string | null,"staff_id": string,"start_date": string,"status"?: Database["public"]['Enums']["worker_status"],"supervisor_clock_in"?: boolean,"tax_state"?: string | null,"tin"?: string | null,"updated_at"?: string,"usual_work_days"?: (number)[] | null
                   }
                   Update: {
-                    "account_name"?: string | null,"annual_rent_declared_kobo"?: number | null,"bank_account_enc"?: string | null,"bank_account_last4"?: string | null,"bank_checked_at"?: string | null,"bank_checked_by"?: string | null,"bank_checked_code"?: string | null,"bank_checked_name"?: string | null,"bank_checked_source"?: string | null,"bank_code"?: string | null,"bank_name"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"department_id"?: string | null,"email"?: string | null,"employment_type"?: Database["public"]['Enums']["employment_type"],"end_date"?: string | null,"first_name"?: string,"id"?: string,"job_title"?: string | null,"last_name"?: string,"line_manager_membership_id"?: string | null,"line_manager_worker_id"?: string | null,"needs_pay_details"?: boolean,"next_of_kin_name"?: string | null,"next_of_kin_phone"?: string | null,"nhf_opt_in"?: boolean,"nin_enc"?: string | null,"organisation_id"?: string,"pfa_name"?: string | null,"phone"?: string | null,"rent_declared_at"?: string | null,"rent_declared_by"?: string | null,"rsa_pin_enc"?: string | null,"rsa_pin_last4"?: string | null,"staff_id"?: string,"start_date"?: string,"status"?: Database["public"]['Enums']["worker_status"],"supervisor_clock_in"?: boolean,"tax_state"?: string | null,"tin"?: string | null,"updated_at"?: string,"usual_work_days"?: (number)[] | null
+                    "account_name"?: string | null,"annual_rent_declared_kobo"?: number | null,"bank_account_enc"?: string | null,"bank_account_last4"?: string | null,"bank_checked_at"?: string | null,"bank_checked_by"?: string | null,"bank_checked_code"?: string | null,"bank_checked_name"?: string | null,"bank_checked_source"?: string | null,"bank_code"?: string | null,"bank_name"?: string | null,"created_at"?: string,"created_by"?: string | null,"currency"?: string,"date_of_birth"?: string | null,"department_id"?: string | null,"email"?: string | null,"employment_type"?: Database["public"]['Enums']["employment_type"],"end_date"?: string | null,"first_name"?: string,"home_address"?: string | null,"id"?: string,"job_title"?: string | null,"last_name"?: string,"line_manager_membership_id"?: string | null,"line_manager_worker_id"?: string | null,"needs_pay_details"?: boolean,"next_of_kin_name"?: string | null,"next_of_kin_phone"?: string | null,"nhf_opt_in"?: boolean,"nin_enc"?: string | null,"organisation_id"?: string,"pfa_name"?: string | null,"phone"?: string | null,"rent_declared_at"?: string | null,"rent_declared_by"?: string | null,"rsa_pin_enc"?: string | null,"rsa_pin_last4"?: string | null,"staff_id"?: string,"start_date"?: string,"status"?: Database["public"]['Enums']["worker_status"],"supervisor_clock_in"?: boolean,"tax_state"?: string | null,"tin"?: string | null,"updated_at"?: string,"usual_work_days"?: (number)[] | null
                   }
                   Relationships: [
                     {
@@ -2646,6 +2690,11 @@ isOneToOne: false
 "approve_payroll_run":
 { Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
                            },
+"approve_self_onboarding":
+{ Args: { "p_bank_account_enc"?: string,"p_invite_id": string,"p_nhf_enc"?: string,"p_nhf_id"?: string,"p_organisation_id": string,"p_pay_rate"?: Json,"p_worker"?: Json }; Returns: {
+              "membership_id": string,"worker_id": string
+            }[]
+                           },
 "approve_timesheet_line":
 { Args: { "p_line_id": string,"p_organisation_id": string,"p_reason"?: string }; Returns: Json
                            },
@@ -2707,6 +2756,9 @@ isOneToOne: false
                            },
 "cancel_rate_card_version":
 { Args: { "p_organisation_id": string,"p_rate_card_id": string }; Returns: undefined
+                           },
+"cancel_self_onboarding_invite":
+{ Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: undefined
                            },
 "carry_payroll_instalment":
 { Args: { "p_organisation_id": string,"p_run_id": string,"p_series_id": string }; Returns: string
@@ -2798,6 +2850,11 @@ isOneToOne: false
 "create_payroll_run":
 { Args: { "p_organisation_id": string,"p_pay_date"?: string,"p_period_start": string }; Returns: string
                            },
+"create_self_onboarding_invite":
+{ Args: { "p_department_id"?: string,"p_email": string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_on_payroll"?: boolean,"p_organisation_id": string,"p_role": string }; Returns: {
+              "invite_expires_at": string,"invite_id": string,"token": string
+            }[]
+                           },
 "create_worker":
 { Args: { "p_pay_rate"?: Json,"p_worker": Json }; Returns: string
                            },
@@ -2866,6 +2923,9 @@ isOneToOne: false
                            },
 "ensure_tax_rule_set":
 { Args: { "p_organisation_id": string }; Returns: string
+                           },
+"expire_self_onboarding_submissions":
+{ Args: Record<PropertyKey, never>; Returns: number
                            },
 "finish_bank_account_lookup":
 { Args: { "p_account_name"?: string,"p_id": string,"p_source"?: string,"p_status": Database["public"]['Enums']["bank_lookup_status"] }; Returns: boolean
@@ -2949,6 +3009,9 @@ isOneToOne: false
 { Args: { "p_from": string,"p_to": string }; Returns: {
               "holiday_date": string,"id": string,"name": string,"scope": string,"source": string,"state_key": string
             }[]
+                           },
+"onboarding_attempt_allowed":
+{ Args: { "p_keys": (string)[] }; Returns: boolean
                            },
 "open_payslip_document":
 { Args: { "p_organisation_id": string,"p_payslip_id": string }; Returns: Json
@@ -3156,6 +3219,11 @@ isOneToOne: false
               "invite_email": string,"invite_expires_at": string,"invite_role": Database["public"]['Enums']["membership_role"],"token": string
             }[]
                            },
+"resend_self_onboarding_invite":
+{ Args: { "p_invite_id": string,"p_organisation_id": string }; Returns: {
+              "invite_email": string,"invite_expires_at": string,"invite_role": string,"token": string
+            }[]
+                           },
 "return_payroll_run":
 { Args: { "p_organisation_id": string,"p_reason": string,"p_run_id": string }; Returns: string
                            },
@@ -3204,6 +3272,16 @@ isOneToOne: false
 "save_worker_mapping":
 { Args: { "p_department_id"?: string,"p_line_manager_membership_id"?: string,"p_line_manager_worker_id"?: string,"p_organisation_id": string,"p_project_ids"?: (string)[],"p_site_id"?: string,"p_worker_id": string }; Returns: Json
                            },
+"self_onboarding_emails_sent":
+{ Args: { "p_organisation_id": string }; Returns: {
+              "company": number,"overall": number
+            }[]
+                           },
+"self_onboarding_lookup":
+{ Args: { "p_mark_opened"?: boolean,"p_token": string }; Returns: {
+              "email": string,"expires_at": string,"invite_id": string,"on_payroll": boolean,"organisation_id": string,"organisation_name": string,"role": string,"state": string,"user_id": string
+            }[]
+                           },
 "set_client_tax_settings":
 { Args: { "p_client_id": string,"p_deducts_wht": string,"p_organisation_id": string,"p_reason"?: string,"p_withholds_vat": boolean }; Returns: undefined
                            },
@@ -3243,6 +3321,9 @@ isOneToOne: false
                            },
 "submit_payroll_run":
 { Args: { "p_organisation_id": string,"p_run_id": string }; Returns: string
+                           },
+"submit_self_onboarding":
+{ Args: { "p_details": Json,"p_token": string,"p_user_id": string }; Returns: string
                            },
 "tax_rule_set_on":
 { Args: { "p_on": string,"p_organisation_id": string }; Returns: {

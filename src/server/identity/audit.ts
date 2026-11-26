@@ -44,7 +44,7 @@ const SECRET_ANYWHERE = /(_enc$|password|secret)/;
  * must never reach the log.
  */
 const SECRET_PART =
-  /(^|_)(nin|bvn|pin|pin_hash|rsa_pin|passwd|passcode|token|token_hash|api_key|apikey|account_number|account_no|bank_account|nuban|otp)(_|$)/;
+  /(^|_)(nin|bvn|pin|pin_hash|rsa_pin|passwd|passcode|token|token_hash|api_key|apikey|account_number|account_no|bank_account|nuban|otp|date_of_birth|home_address)(_|$)/;
 
 /**
  * True when a key is never written to the log, at any depth (rule 9). The key is normalised
