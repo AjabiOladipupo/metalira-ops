@@ -284,6 +284,8 @@ The owner wants staff who don't work at a client's site (HR, finance, the operat
 - Tests: unit (office vs client site rules), RLS (an office site with a client refused, a client site without one refused, a contract or post on an office site refused, office sites absent from the unbilled read and client lists, isolation for the new column), Playwright: HR bulk-maps HR, both Finance and the ops manager to Head office at 1440px, and the Head office card at 390px.
 - **security-reviewer** (a nullability change on `sites` and every read that assumed a client) and **money-reviewer** (office sites can never reach an invoice).
 
+- **Rule for 6.1, 6.2 and later (money review of 6.11):** every new Phase 6 table with a `site_id` (unbilled entries, recorded jobs, invoice lines) gets a `refuse_office_site` trigger, and the unbilled read filters `sites.kind = 'client'`; office sites never reach an invoice.
+
 **Accept:** HR selects the finance, HR and operations staff, uses **Map to site and project** with "Head office", and each person's page shows "Head office"; the unbilled queue and invoices never list Head office, and a contract can't be created on it.
 
 ### 6.4 Bank statement import (independent of 6.0 to 6.3; wave 1)
