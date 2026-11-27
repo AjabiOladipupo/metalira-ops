@@ -123,3 +123,92 @@ describe("no-shift weekday clock-ins of a monthly worker", () => {
     expect(timesheetSources(r.lines.filter((l) => l.code === "basic"))).toEqual([]);
   });
 });
+
+const arrearsDay = (workDate: string, otMinutes = 0, hasShift = false) => ({
+  id: randomUUID(),
+  workDate,
+  workedMinutes: 480,
+  otMinutes,
+  hasShift,
+  projectId: null,
+  periodStart: OCT.start,
+  weekShiftDays: 0,
+  weekShiftRank: 0,
+  weekOffDaysPaid: 0,
+});
+
+describe("a no-shift weekday approved after its cycle posted (money review H1-a)", () => {
+  it("brings ₦0 arrears: the posted cycle's calendar has Mon 12 Oct as a working day", () => {
+    const day = arrearsDay("2026-10-12");
+    const r = run(worker({ arrears: [day] }), NOV);
+    expect(r.lines.filter((l) => l.code === "arrears" || l.code === "off_day")).toEqual([]);
+    expect(total(r.lines)).toBe(12_000_000n);
+    // Settled by this run (a source of the salary line), so it doesn't come back next month.
+    expect(timesheetSources(r.lines)).toEqual([day.id]);
+  });
+
+  it("pays only its overtime minutes on that working day", () => {
+    const r = run(worker({ arrears: [arrearsDay("2026-10-12", 60)] }), NOV);
+    const arrears = r.lines.filter((l) => l.code === "arrears");
+    expect(arrears).toHaveLength(1);
+    // 60 min of overtime at 1.5x of ₦120,000 / 20 days / 8 h: ₦1,125.00, never a full off day.
+    expect(arrears[0]!.amountKobo).toBeLessThan(600_000n);
+    expect(arrears[0]!.amountKobo).toBeGreaterThan(0n);
+  });
+
+  it("still pays a rostered worker's no-shift day as off-day work when that cycle had it off", () => {
+    // Shifts every weekday of the posted cycle but Mon 12 Oct: the 12th was an off day then.
+    const shifts = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"].map(
+      (date) => ({ date, onLeave: false }),
+    );
+    const r = run(
+      worker({
+        arrears: [arrearsDay("2026-10-12")],
+        arrearsShifts: shifts,
+        lastRostered: "2026-10-16",
+      }),
+      NOV,
+    );
+    expect(r.lines.filter((l) => l.code === "arrears")).toHaveLength(1);
+    expect(total(r.lines)).toBeGreaterThan(12_000_000n);
+  });
+});
+
+describe("an office worker with a stray client shift (money review H1-b)", () => {
+  const weekdays = ["2026-10-01", "2026-10-02", "2026-10-05", "2026-10-06", "2026-10-07"];
+  const officeLines = weekdays.map((d) => ({
+    id: randomUUID(),
+    workDate: d,
+    workedMinutes: 480,
+    otMinutes: 0,
+    hasShift: false,
+    projectId: null,
+  }));
+  // A client shift on Wed 14 Oct, never worked: a zero-minute shift line.
+  const shiftLine = {
+    id: randomUUID(),
+    workDate: "2026-10-14",
+    workedMinutes: 0,
+    otMinutes: 0,
+    hasShift: true,
+    projectId: null,
+  };
+  const base = {
+    lines: [...officeLines, shiftLine],
+    shifts: [{ date: "2026-10-14", onLeave: false }],
+    lastRostered: "2026-10-14",
+  };
+
+  it("pays the salary once: office weekdays stay working days, the zero-minute line pays nothing", () => {
+    const r = run(worker({ ...base, officeDays: [{ from: "2025-01-06", to: OCT.end }] }));
+    expect(r.days).toMatchObject({ rostered: 21 });
+    expect(r.lines.some((l) => l.code === "off_day")).toBe(false);
+    expect(total(r.lines)).toBe(12_000_000n);
+    expect(timesheetSources(r.lines)).not.toContain(shiftLine.id);
+  });
+
+  it("would pay each office weekday as off-day work without the office days (the bug it fixes)", () => {
+    const r = run(worker(base));
+    expect(r.lines.some((l) => l.code === "off_day")).toBe(true);
+  });
+});

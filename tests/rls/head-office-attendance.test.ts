@@ -6,9 +6,10 @@
  * - Money review M1: an office clock-in never matches a leftover shift at a client's site, so the
  *   approved day makes no Work Unit; mapping someone to an office takes them off their future
  *   client shifts in the same save.
- * - Money review H1 / M2: a monthly worker's no-shift weekday is covered by salary in its own
- *   cycle and recorded as a source of the salary line, so the next cycle's arrears read
- *   (payroll_run_inputs) leaves it out: no off-day arrears.
+ * - Money review round 2: a clock-out naming no site pairs with the office clock-in (L4); a
+ *   department-only edit of someone already at the office removes no shift (M1-a); the shift
+ *   release refuses someone not mapped to an office (L1). Payroll across cycles is in
+ *   head-office-payroll.test.ts.
  */
 import { randomUUID } from "node:crypto";
 
@@ -16,12 +17,8 @@ import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { lagosToday } from "@/lib/dates";
-import { sumKobo } from "@/lib/money";
-import { computeEarnings, POLICY_DEFAULTS } from "@/lib/payroll/earnings";
-import { parsePayrollInputs, type PayrollInputs } from "@/lib/payroll/inputs";
 import type { Database } from "@/types/db";
 
-import { resultsFor, saveResults } from "./helpers/payroll";
 import {
   adminClient,
   anonClient,
@@ -158,7 +155,7 @@ function punch(
   w: Worker,
   args: {
     kind?: "in" | "out";
-    site?: string;
+    site?: string | null;
     point?: { lat: number; lng: number };
     agoMs?: number;
     reason?: string | null;
@@ -175,7 +172,7 @@ function punch(
     p_device_time: new Date(now - ago).toISOString(),
     p_sent_device_time: new Date(now).toISOString(),
     p_elapsed_ms: ago,
-    p_site_id: (args.site ?? headOffice) as string,
+    p_site_id: (args.site === undefined ? headOffice : args.site) as string,
     p_latitude: point.lat,
     p_longitude: point.lng,
     p_accuracy_m: 10,
@@ -193,6 +190,48 @@ async function recorded(w: Worker, args: Parameters<typeof punch>[1] = {}): Prom
   return data as unknown as Recorded;
 }
 
+/**
+ * A client shift assignment made before slice 6.11's guard existed (MLHO6 refuses one for
+ * someone mapped to an office): inserted as the database owner with the guard off for the
+ * transaction only.
+ */
+async function insertLegacyAssignment(values: {
+  id: string;
+  worker: string;
+  date: string;
+  startsAt: string;
+  endsAt: string;
+}) {
+  await db.query("begin");
+  try {
+    await db.query("set local session_replication_role = replica");
+    await db.query(
+      "alter table public.shift_assignments disable trigger shift_assignments_00_office_guard",
+    );
+    await db.query(
+      `insert into public.shift_assignments
+         (id, organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at)
+       values ($1, $2, gen_random_uuid(), $3, $4::date, $5, $6, $7)`,
+      [
+        values.id,
+        owner.orgId,
+        clientSite,
+        values.date,
+        values.worker,
+        values.startsAt,
+        values.endsAt,
+      ],
+    );
+    await db.query(
+      "alter table public.shift_assignments enable always trigger shift_assignments_00_office_guard",
+    );
+    await db.query("commit");
+  } catch (error) {
+    await db.query("rollback");
+    throw error;
+  }
+}
+
 /** Runs `sql` as the database owner with ordinary triggers (and foreign keys) off. */
 async function seedRaw(sql: string, params: unknown[]) {
   await db.query("begin");
@@ -204,51 +243,6 @@ async function seedRaw(sql: string, params: unknown[]) {
     await db.query("rollback");
     throw error;
   }
-}
-
-/** payroll_run_inputs as the secret key; with `postedBefore`, days before it count as posted. */
-async function runInputs(
-  periodStart: string,
-  workerIds: string[],
-  postedBefore?: string,
-): Promise<PayrollInputs> {
-  await db.query("begin");
-  try {
-    if (postedBefore) {
-      await db.query(
-        `create or replace function private.timesheet_period_posted(p_organisation_id uuid, p_work_date date)
-         returns boolean language sql stable set search_path = ''
-         as $$ select p_work_date < date '${postedBefore}' $$`,
-      );
-    }
-    await db.query("select set_config('request.jwt.claims', $1, true)", [
-      JSON.stringify({ role: "service_role" }),
-    ]);
-    const { rows } = await db.query<{ doc: unknown }>(
-      "select private.payroll_run_inputs($1, $2, $3::uuid[], null) as doc",
-      [owner.orgId, periodStart, workerIds],
-    );
-    return parsePayrollInputs(rows[0]!.doc);
-  } finally {
-    await db.query("rollback");
-  }
-}
-
-function earnings(parsed: PayrollInputs) {
-  return computeEarnings(
-    {
-      period: parsed.period,
-      holidays: parsed.holidays,
-      defaultWorkDays: parsed.organisation.defaultWorkDays,
-      worker: parsed.workers[0]!,
-    },
-    {
-      standardShiftMinutes: parsed.organisation.standardShiftMinutes,
-      hourlyRateDivisorDays: parsed.organisation.hourlyRateDivisorDays,
-      workDaysPerWeek: parsed.organisation.workDaysPerWeek,
-      ...POLICY_DEFAULTS,
-    },
-  );
 }
 
 beforeAll(async () => {
@@ -346,20 +340,13 @@ describe("an office day never becomes a Work Unit (money review M1)", () => {
     // A leftover assignment at the client's site covering now (seeded directly).
     const leftover = randomUUID();
     const now = Date.now();
-    await seedRaw(
-      `insert into public.shift_assignments
-         (id, organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at)
-       values ($1, $2, gen_random_uuid(), $3, $4::date, $5, $6, $7)`,
-      [
-        leftover,
-        owner.orgId,
-        clientSite,
-        lagosToday(),
-        w.id,
-        new Date(now - 9 * HOUR).toISOString(),
-        new Date(now + HOUR).toISOString(),
-      ],
-    );
+    await insertLegacyAssignment({
+      id: leftover,
+      worker: w.id,
+      date: lagosToday(),
+      startsAt: new Date(now - 9 * HOUR).toISOString(),
+      endsAt: new Date(now + HOUR).toISOString(),
+    });
 
     const clockIn = await recorded(w, { agoMs: 8 * HOUR });
     expect(clockIn.flags).toContain("no_shift");
@@ -448,73 +435,110 @@ describe("an office day never becomes a Work Unit (money review M1)", () => {
   });
 });
 
-describe("a no-shift weekday is never paid twice (money review H1)", () => {
-  it("is covered by salary in its own cycle and brings no arrears in the next", async () => {
+describe("money review round 2", () => {
+  it("refuses a new client shift for someone mapped to Head office (MLHO6), the secret key too", async () => {
     const w = await addWorker(headOffice);
-    // Thu 1 Oct 2026, a weekday at Head office with no shift, approved.
-    const sheet = randomUUID();
-    await seedRaw(
-      `insert into public.timesheets (id, organisation_id, worker_id, period_start, period_end)
-       values ($1, $2, $3, date '2026-09-20', date '2026-10-19')`,
-      [sheet, owner.orgId, w.id],
-    );
-    const lineId = randomUUID();
-    await seedRaw(
-      `insert into public.timesheet_lines (id, organisation_id, timesheet_id, worker_id, work_date,
-         no_shift_punch_id, scheduled_minutes, worked_minutes, ot_minutes, status, exceptions)
-       values ($1, $2, $3, $4, date '2026-10-01', gen_random_uuid(), 0, 480, 0, 'approved',
-               array['no_shift'])`,
-      [lineId, owner.orgId, sheet, w.id],
-    );
-
-    // Its own cycle: the salary only, with the day recorded as a source of the salary line.
-    const october = earnings(await runInputs("2026-09-20", [w.id]));
-    expect(sumKobo(october.lines.map((l) => l.amountKobo))).toBe(12_000_000n);
-    expect(october.lines.some((l) => l.code === "off_day")).toBe(false);
-    const basic = october.lines.find((l) => l.code === "basic")!;
-    expect(basic.sources).toContainEqual({
-      kind: "timesheet_line",
-      id: lineId,
-      workDate: "2026-10-01",
+    const refused = await admin.from("shift_assignments").insert({
+      organisation_id: owner.orgId,
+      shift_id: randomUUID(),
+      site_id: clientSite,
+      shift_date: lagosToday(),
+      worker_id: w.id,
+      starts_at: new Date(Date.now() + HOUR).toISOString(),
+      ends_at: new Date(Date.now() + 9 * HOUR).toISOString(),
     });
+    expect(refused.error?.code).toBe("MLHO6");
+    expect(refused.error?.message).toBe(
+      "This person is mapped to Head office. Map them to the client site first.",
+    );
+  });
 
-    // The run saves it so (the source on the basic line), as the engine produced.
-    const created = await owner.client.rpc("create_payroll_run", {
+  it("pairs a clock-out that names no site with the office clock-in, never a shift (L4)", async () => {
+    const w = await addWorker(headOffice);
+    const now = Date.now();
+    // A legacy client shift covering the clock-out, to show it isn't picked up.
+    await insertLegacyAssignment({
+      id: randomUUID(),
+      worker: w.id,
+      date: lagosToday(),
+      startsAt: new Date(now - HOUR).toISOString(),
+      endsAt: new Date(now + 7 * HOUR).toISOString(),
+    });
+    const clockIn = await recorded(w, { agoMs: 3 * HOUR });
+    const clockOut = await recorded(w, { kind: "out", site: null });
+    expect(clockOut.flags).toContain("no_shift");
+    const { rows } = await db.query<{ site_id: string; shift_assignment_id: string | null }>(
+      `select site_id::text, shift_assignment_id::text from public.punches
+       where id = any($1::uuid[]) order by recorded_at`,
+      [[clockIn.id, clockOut.id]],
+    );
+    expect(rows).toEqual([
+      { site_id: headOffice, shift_assignment_id: null },
+      { site_id: headOffice, shift_assignment_id: null },
+    ]);
+  });
+
+  it("removes no shift when a save only changes the department of someone already at the office (M1-a)", async () => {
+    // At the client's site first, with a shift in three days; then put at Head office directly
+    // (no save), as data from before the release existed would be.
+    const w = await addWorker(clientSite);
+    const shift = randomUUID();
+    const later = Date.now() + 3 * 24 * HOUR;
+    await seedRaw(
+      `insert into public.shift_assignments
+         (id, organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at)
+       values ($1, $2, gen_random_uuid(), $3, ($4::timestamptz at time zone 'Africa/Lagos')::date,
+               $5, $4::timestamptz, $4::timestamptz + interval '8 hours')`,
+      [shift, owner.orgId, clientSite, new Date(later).toISOString(), w.id],
+    );
+    await db.query(
+      "update public.worker_assignments set effective_to = '2025-12-31' where worker_id = $1",
+      [w.id],
+    );
+    const office = await admin.from("worker_assignments").insert({
+      organisation_id: owner.orgId,
+      worker_id: w.id,
+      site_id: headOffice,
+      effective_from: "2026-01-01",
+    });
+    expect(office.error).toBeNull();
+    const department = await hr.client
+      .from("departments")
+      .insert({ organisation_id: owner.orgId, name: `Finance ${randomUUID().slice(0, 6)}` })
+      .select("id")
+      .single();
+    expect(department.error).toBeNull();
+
+    const { data, error } = await hr.client.rpc("save_worker_mapping", {
       p_organisation_id: owner.orgId,
-      p_period_start: "2026-09-20",
+      p_worker_id: w.id,
+      p_department_id: department.data!.id,
+      p_site_id: headOffice,
     });
-    expect(created.error).toBeNull();
-    const saved = await saveResults(
-      admin,
-      owner,
-      created.data!,
-      resultsFor(
-        { workerId: w.id, payRateId: w.payRateId, adjustmentId: null },
-        {
-          period: { start: "2026-09-20", end: "2026-10-19" },
-          anomalies: [],
-          mutate: (doc) => {
-            const slip = (doc.payslips as { lines: { code: string; sources: unknown[] }[] }[])[0]!;
-            slip.lines
-              .find((l) => l.code === "basic")!
-              .sources.push({
-                kind: "timesheet_line",
-                id: lineId,
-                from: "2026-10-01",
-                to: "2026-10-01",
-                off_day: false,
-              });
-          },
-        },
-      ),
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ department_changed: true, released_shifts: [] });
+    const { rows } = await db.query<{ status: string }>(
+      "select status from public.shift_assignments where id = $1",
+      [shift],
     );
-    expect(saved.error).toBeNull();
+    expect(rows).toEqual([{ status: "assigned" }]);
+  });
 
-    // The next cycle, with October posted: no arrears for the day, so no off-day pay.
-    const next = await runInputs("2026-10-20", [w.id], "2026-10-20");
-    expect(next.workers[0]!.arrears.map((a) => a.id)).not.toContain(lineId);
-    const november = earnings(next);
-    expect(november.lines.filter((l) => l.code === "arrears" || l.code === "off_day")).toEqual([]);
-    expect(sumKobo(november.lines.map((l) => l.amountKobo))).toBe(12_000_000n);
+  it("refuses to release shifts for someone not mapped to an office (L1, MLHO7)", async () => {
+    const w = await addWorker(clientSite);
+    await db.query("begin");
+    try {
+      await db.query("select set_config('request.jwt.claims', $1, true)", [
+        JSON.stringify({ sub: hr.id, role: "authenticated", amr: [{ method: "otp" }] }),
+      ]);
+      await expect(
+        db.query("select private.release_shifts_for_office($1, $2, current_date + 1)", [
+          owner.orgId,
+          w.id,
+        ]),
+      ).rejects.toMatchObject({ code: "MLHO7" });
+    } finally {
+      await db.query("rollback");
+    }
   });
 });

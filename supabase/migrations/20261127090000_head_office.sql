@@ -323,6 +323,18 @@ begin
     raise exception 'Only an owner, an admin or HR can change employee records.'
       using errcode = '42501';
   end if;
+  -- Security re-check L1: only for someone mapped to an office from that day.
+  if p_from is null or not exists (
+    select 1
+    from public.worker_assignments wa
+    join public.sites s on s.organisation_id = wa.organisation_id and s.id = wa.site_id
+    where wa.organisation_id = p_organisation_id and wa.worker_id = p_worker_id
+      and s.kind = 'office'
+      and wa.effective_from <= p_from
+      and (wa.effective_to is null or wa.effective_to >= p_from)
+  ) then
+    raise exception 'That employee isn''t mapped to an office from that day.' using errcode = 'MLHO7';
+  end if;
 
   with released as (
     update public.shift_assignments a
@@ -500,6 +512,14 @@ begin
     insert into public.worker_assignments (organisation_id, worker_id, site_id, effective_from)
     values (p_organisation_id, p_worker_id, p_site_id, v_from);
     v_assignments_changed := true;
+    -- Slice 6.11: newly at an office from v_from, so off clients' shifts from then (money review
+    -- round 2, M1-a: only when this save moves them onto the office, never on a later edit).
+    if exists (
+      select 1 from public.sites s
+      where s.id = p_site_id and s.organisation_id = p_organisation_id and s.kind = 'office'
+    ) then
+      v_released := private.release_shifts_for_office(p_organisation_id, p_worker_id, v_from);
+    end if;
   end if;
 
   insert into public.worker_assignments (organisation_id, worker_id, project_id, effective_from)
@@ -510,17 +530,6 @@ begin
   get diagnostics v_inserted = row_count;
   if v_inserted > 0 then
     v_assignments_changed := true;
-  end if;
-
-  -- Slice 6.11: at an office from v_from, so off clients' shifts from then.
-  if p_site_id is not null and exists (
-    select 1 from public.sites s
-    where s.id = p_site_id and s.organisation_id = p_organisation_id and s.kind = 'office'
-  ) then
-    v_released := private.release_shifts_for_office(p_organisation_id, p_worker_id, v_from);
-    if jsonb_array_length(v_released) > 0 then
-      v_assignments_changed := true;
-    end if;
   end if;
 
   return jsonb_build_object(
@@ -1348,6 +1357,8 @@ begin
   -- Slice 6.11 (money review M1): a clock-in at an office the worker is mapped to is office
   -- work. It never matches a shift at another site (a leftover client shift), so it can't
   -- become a Work Unit there.
+  -- (Round 2, L2: mapped there on the company's own today. L4: a clock-out naming no site that
+  -- closes an office clock-in with no shift is office work too.)
   if p_site_id is not null then
     v_at_office := exists (
       select 1
@@ -1356,8 +1367,14 @@ begin
         on wa.organisation_id = s.organisation_id and wa.site_id = s.id
       where s.organisation_id = v_org and s.id = p_site_id and s.kind = 'office'
         and wa.worker_id = v_worker
-        and wa.effective_from <= private.org_today(v_org) + 1
-        and (wa.effective_to is null or wa.effective_to >= private.org_today(v_org) - 1)
+        and wa.effective_from <= private.org_today(v_org)
+        and (wa.effective_to is null or wa.effective_to >= private.org_today(v_org))
+    );
+  elsif p_kind = 'out' and v_prev.kind = 'in' and v_prev.shift_assignment_id is null
+    and v_prev.recorded_at > v_recorded - interval '20 hours' then
+    v_at_office := exists (
+      select 1 from public.sites s
+      where s.organisation_id = v_org and s.id = v_prev.site_id and s.kind = 'office'
     );
   end if;
   if v_asg_id is null and not v_at_office then
@@ -1469,3 +1486,558 @@ begin
   );
 end;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- 7. Payroll inputs for office staff (money review round 2, H1-a and H1-b)
+-- ---------------------------------------------------------------------------
+-- private.payroll_run_inputs: its only definition (20261122120000_payroll_runs.sql), unchanged
+-- except for two new keys per worker: `office_days` (the ranges whose site of record is an
+-- office) and `arrears_shifts` (shifts in the posted periods arrears come from). The engine
+-- (src/lib/payroll/inputs.ts rosteredCalendar, earnings.ts arrears) uses them so that a no-shift
+-- weekday is never paid as off-day work just because it was approved late, or because the
+-- office worker once had a client shift. Same roles and checks (require_payroll_reader).
+create or replace function private.payroll_run_inputs(
+  p_organisation_id uuid,
+  p_period_start date,
+  p_worker_ids uuid[],
+  p_run_id uuid
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_org public.organisations%rowtype;
+  v_start date;
+  v_end date;
+  v_pay_date date;
+  v_context_from date;
+  v_arrears_from date;
+  v_workers uuid[];
+  v_result jsonb;
+begin
+  perform private.require_payroll_reader(p_organisation_id);
+  if p_period_start is null then
+    raise exception 'Choose the pay period.' using errcode = '22023';
+  end if;
+  if p_worker_ids is not null and cardinality(p_worker_ids) > 2000 then
+    raise exception 'Ask for 2000 workers or fewer at a time.' using errcode = '22023';
+  end if;
+
+  select * into v_org from public.organisations o where o.id = p_organisation_id;
+  if not found then
+    raise exception 'That company wasn''t found.' using errcode = '22023';
+  end if;
+  if p_run_id is not null and not exists (
+    select 1 from public.payroll_runs r
+    where r.organisation_id = p_organisation_id and r.id = p_run_id
+  ) then
+    raise exception 'That payroll run wasn''t found.' using errcode = '22023';
+  end if;
+
+  select p.period_start, p.period_end, p.pay_date into v_start, v_end, v_pay_date
+  from private.payroll_period_for(p_organisation_id, p_period_start) p;
+  if v_start <> p_period_start then
+    raise exception 'A pay period starts on day % of the month.', v_org.pay_cycle_start_day
+      using errcode = '22023';
+  end if;
+  v_context_from := v_start - 6;
+  v_arrears_from := v_start - 400;
+
+  select coalesce(array_agg(w.id order by w.id), '{}') into v_workers
+  from public.workers w
+  where w.organisation_id = p_organisation_id
+    and (p_worker_ids is null or w.id = any (p_worker_ids))
+    and (
+      p_worker_ids is not null
+      or (w.start_date <= v_end and (w.end_date is null or w.end_date >= v_start))
+      or exists (
+        select 1
+        from public.timesheet_lines l
+        where l.organisation_id = p_organisation_id and l.worker_id = w.id
+          and l.status = 'approved'
+          and l.work_date >= v_arrears_from and l.work_date < v_start
+          and private.timesheet_period_posted(p_organisation_id, l.work_date)
+          and not private.payroll_source_paid(
+            p_organisation_id, 'timesheet_line', l.id, l.work_date, l.work_date, p_run_id
+          )
+      )
+    );
+  if cardinality(v_workers) > 2000 then
+    raise exception 'This company has more than 2000 workers in the period: ask for them in batches.'
+      using errcode = '22023';
+  end if;
+
+  select jsonb_build_object(
+    'version', 1,
+    'organisation', jsonb_build_object(
+      'pay_cycle_start_day', v_org.pay_cycle_start_day,
+      'pay_day', v_org.pay_day,
+      'standard_shift_minutes', v_org.standard_shift_minutes,
+      'hourly_rate_divisor_days', v_org.hourly_rate_divisor_days,
+      'work_days_per_week', v_org.work_days_per_week,
+      'default_work_days', to_jsonb(v_org.default_work_days),
+      'shifts_enabled', v_org.shifts_enabled
+    ),
+    'period', jsonb_build_object('start', v_start, 'end', v_end, 'pay_date', v_pay_date),
+    'holidays', coalesce((
+      select jsonb_agg(distinct h.holiday_date order by h.holiday_date)
+      from public.public_holidays h
+      where h.organisation_id = p_organisation_id and h.removed_at is null
+        and h.holiday_date between v_arrears_from and v_end
+    ), '[]'::jsonb),
+    'workers', coalesce((
+      select jsonb_agg(
+        jsonb_build_object(
+          'worker_id', w.id,
+          'employment_type', w.employment_type,
+          'start_date', w.start_date,
+          'end_date', w.end_date,
+          'status', w.status,
+          'usual_work_days', to_jsonb(w.usual_work_days),
+          'statutory', jsonb_build_object(
+            'tax_state', w.tax_state,
+            'pfa_name', w.pfa_name,
+            'nhf_opt_in', w.nhf_opt_in,
+            'annual_rent_declared_kobo', w.annual_rent_declared_kobo::text,
+            'has_tin', w.tin is not null,
+            'has_rsa_pin', w.rsa_pin_enc is not null
+          ),
+          'pay_rates', coalesce((
+            select jsonb_agg(
+              jsonb_build_object(
+                'id', r.id,
+                'pay_type', r.pay_type,
+                'currency', r.currency,
+                'basic_kobo', r.basic_kobo::text,
+                'housing_kobo', r.housing_kobo::text,
+                'transport_kobo', r.transport_kobo::text,
+                'other_allowances_kobo', r.other_allowances_kobo::text,
+                'daily_rate_kobo', r.daily_rate_kobo::text,
+                'hourly_rate_kobo', r.hourly_rate_kobo::text,
+                'effective_from', r.effective_from,
+                'effective_to', r.effective_to
+              ) order by r.effective_from, r.id
+            )
+            from public.pay_rates r
+            where r.organisation_id = p_organisation_id and r.worker_id = w.id
+              and r.effective_from <= v_end
+              and (r.effective_to is null or r.effective_to >= v_arrears_from)
+          ), '[]'::jsonb),
+          'shifts', coalesce((
+            select jsonb_agg(
+              jsonb_build_object('date', a.shift_date, 'on_leave', a.status = 'removed')
+              order by a.shift_date, a.id
+            )
+            from public.shift_assignments a
+            where a.organisation_id = p_organisation_id and a.worker_id = w.id
+              and a.shift_date between v_start and v_end
+              and (a.status = 'assigned' or a.removed_reason = 'on_leave')
+          ), '[]'::jsonb),
+          'last_rostered', (
+            select max(a.shift_date)
+            from public.shift_assignments a
+            where a.organisation_id = p_organisation_id and a.worker_id = w.id
+              and (a.status = 'assigned' or a.removed_reason = 'on_leave')
+          ),
+          'lines', coalesce((
+            select jsonb_agg(
+              jsonb_build_object(
+                'id', l.id,
+                'work_date', l.work_date,
+                'worked_minutes', l.worked_minutes,
+                'ot_minutes', l.ot_minutes,
+                'has_shift', l.shift_assignment_id is not null,
+                'project_id', u.project_id
+              ) order by l.work_date, l.id
+            )
+            from public.timesheet_lines l
+            left join public.work_units u
+              on u.organisation_id = l.organisation_id and u.id = l.work_unit_id
+            where l.organisation_id = p_organisation_id and l.worker_id = w.id
+              and l.status = 'approved'
+              and l.work_date between v_context_from and v_end
+          ), '[]'::jsonb),
+          'arrears', coalesce((
+            select jsonb_agg(
+              jsonb_build_object(
+                'id', l.id,
+                'work_date', l.work_date,
+                'worked_minutes', l.worked_minutes,
+                'ot_minutes', l.ot_minutes,
+                'has_shift', l.shift_assignment_id is not null,
+                'project_id', u.project_id,
+                'period_start', private.timesheet_period_start(l.work_date, v_org.pay_cycle_start_day),
+                'week_shift_rank', (
+                  select count(distinct l2.work_date)
+                  from public.timesheet_lines l2
+                  where l2.organisation_id = p_organisation_id and l2.worker_id = w.id
+                    and l2.status = 'approved'
+                    and l2.shift_assignment_id is not null
+                    and l2.worked_minutes + l2.ot_minutes > 0
+                    and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
+                    and l2.work_date <= l.work_date
+                ),
+                -- Only days before the cycle: a week that runs into the cycle has its off day paid by
+                -- the current run's own off-day rule (money review M1).
+                'week_shift_days', (
+                  select count(distinct l2.work_date)
+                  from public.timesheet_lines l2
+                  where l2.organisation_id = p_organisation_id and l2.worker_id = w.id
+                    and l2.status = 'approved'
+                    and l2.shift_assignment_id is not null
+                    and l2.worked_minutes + l2.ot_minutes > 0
+                    and date_trunc('week', l2.work_date) = date_trunc('week', l.work_date)
+                    and l2.work_date < v_start
+                ),
+                -- Shift days of this ISO week another standing payslip paid as off-day work.
+                'week_off_days_paid', (
+                  select count(distinct s.from_date)
+                  from public.payslip_sources s
+                  join public.timesheet_lines l3
+                    on l3.organisation_id = s.organisation_id and l3.id = s.source_id
+                  where s.organisation_id = p_organisation_id and s.worker_id = w.id
+                    and s.source_kind = 'timesheet_line'
+                    and s.off_day and s.stands
+                    and (p_run_id is null or s.run_id <> p_run_id)
+                    and l3.shift_assignment_id is not null
+                    and date_trunc('week', s.from_date) = date_trunc('week', l.work_date)
+                )
+              ) order by l.work_date, l.id
+            )
+            from public.timesheet_lines l
+            left join public.work_units u
+              on u.organisation_id = l.organisation_id and u.id = l.work_unit_id
+            where l.organisation_id = p_organisation_id and l.worker_id = w.id
+              and l.status = 'approved'
+              and l.work_date >= v_arrears_from and l.work_date < v_start
+              and private.timesheet_period_posted(p_organisation_id, l.work_date)
+              and not private.payroll_source_paid(
+                p_organisation_id, 'timesheet_line', l.id, l.work_date, l.work_date, p_run_id
+              )
+          ), '[]'::jsonb),
+          'no_show_dates', coalesce((
+            select jsonb_agg(distinct l.work_date order by l.work_date)
+            from public.timesheet_lines l
+            where l.organisation_id = p_organisation_id and l.worker_id = w.id
+              and l.work_date between v_start and v_end
+              and (l.status = 'rejected' or 'no_show' = any (l.exceptions))
+          ), '[]'::jsonb),
+          'open_line_count', (
+            select count(*)
+            from public.timesheet_lines l
+            where l.organisation_id = p_organisation_id and l.worker_id = w.id
+              and l.work_date between v_start and v_end
+              and l.status in ('pending', 'disputed')
+          ),
+          -- Slice 6.11 (money review H1-b): the days the worker's site of record is an office;
+          -- the engine counts their working days by the usual days, never by client shifts.
+          'office_days', coalesce((
+            select jsonb_agg(
+              jsonb_build_object(
+                'from', greatest(wa.effective_from, v_arrears_from),
+                'to', least(coalesce(wa.effective_to, v_end), v_end)
+              ) order by wa.effective_from, wa.id
+            )
+            from public.worker_assignments wa
+            join public.sites s on s.organisation_id = wa.organisation_id and s.id = wa.site_id
+            where wa.organisation_id = p_organisation_id and wa.worker_id = w.id
+              and s.kind = 'office'
+              and wa.effective_from <= v_end
+              and (wa.effective_to is null or wa.effective_to >= v_arrears_from)
+          ), '[]'::jsonb),
+          -- Slice 6.11 (money review H1-a): shifts in the posted periods arrears come from, so a
+          -- no-shift arrears day is an off day only when its own period's calendar has it off.
+          'arrears_shifts', coalesce((
+            select jsonb_agg(
+              jsonb_build_object('date', a.shift_date, 'on_leave', a.status = 'removed')
+              order by a.shift_date, a.id
+            )
+            from public.shift_assignments a
+            where a.organisation_id = p_organisation_id and a.worker_id = w.id
+              and a.shift_date >= v_arrears_from and a.shift_date < v_start
+              and (a.status = 'assigned' or a.removed_reason = 'on_leave')
+          ), '[]'::jsonb),
+          'leave', coalesce((
+            select jsonb_agg(
+              jsonb_build_object(
+                'request_id', q.id,
+                'type_code', t.code,
+                'counting', t.counting,
+                'start_date', q.start_date,
+                'end_date', q.end_date,
+                'pay_percent', p.pay_percent,
+                'pay_below_service', p.pay_below_service
+              ) order by q.start_date, q.id
+            )
+            from public.leave_requests q
+            join public.leave_types t
+              on t.organisation_id = q.organisation_id and t.id = q.leave_type_id
+            left join public.leave_request_pay p
+              on p.organisation_id = q.organisation_id and p.request_id = q.id
+            where q.organisation_id = p_organisation_id and q.worker_id = w.id
+              and q.status = 'approved'
+              and q.start_date <= v_end and q.end_date >= v_start
+              and not private.payroll_source_paid(
+                p_organisation_id, 'leave_request', q.id,
+                greatest(q.start_date, v_start), least(q.end_date, v_end), p_run_id
+              )
+          ), '[]'::jsonb)
+        ) order by w.id
+      )
+      from public.workers w
+      where w.organisation_id = p_organisation_id and w.id = any (v_workers)
+    ), '[]'::jsonb)
+  ) into v_result;
+
+  return v_result;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 8. No client shifts for office staff (money review round 2, H1-b)
+-- ---------------------------------------------------------------------------
+-- BEFORE INSERT on shift_assignments (ENABLE ALWAYS): someone whose mapping on the shift's day
+-- is an office can't be put on a client's shift (MLHO6); map them to the client site first. Only
+-- new assignments are checked: removing one is never refused. Named to run before
+-- shift_assignments_guard (triggers fire in name order), so this refusal is the one people see.
+create function private.shift_assignments_office_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_office text;
+begin
+  if new.status is distinct from 'assigned' then
+    return new;
+  end if;
+  select s.name into v_office
+  from public.worker_assignments wa
+  join public.sites s on s.organisation_id = wa.organisation_id and s.id = wa.site_id
+  where wa.organisation_id = new.organisation_id
+    and wa.worker_id = new.worker_id
+    and s.kind = 'office'
+    and wa.effective_from <= new.shift_date
+    and (wa.effective_to is null or wa.effective_to >= new.shift_date)
+  order by wa.effective_from desc
+  limit 1;
+  if v_office is not null then
+    raise exception 'This person is mapped to %. Map them to the client site first.', v_office
+      using errcode = 'MLHO6';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.shift_assignments_office_guard() from public, anon, authenticated;
+
+create trigger shift_assignments_00_office_guard before insert on public.shift_assignments
+  for each row execute function private.shift_assignments_office_guard();
+alter table public.shift_assignments enable always trigger shift_assignments_00_office_guard;
+
+-- private.copy_last_week: its latest definition (20261121190000_leave_roster.sql), unchanged
+-- except that someone now mapped to an office (MLHO6) is skipped with the reason, like a leaver
+-- or someone on leave, instead of stopping the whole copy.
+create or replace function private.copy_last_week(
+  p_organisation_id uuid,
+  p_site_id uuid,
+  p_week_start date,
+  p_dry_run boolean default false
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_source record;
+  v_target date;
+  v_shift_id uuid;
+  v_copied integer := 0;
+  v_already integer := 0;
+  v_total integer := 0;
+  v_skipped jsonb := '[]'::jsonb;
+  v_code text;
+  v_message text;
+  v_result jsonb;
+  v_existing uuid;
+  v_required integer;
+  v_leave record;
+  v_lock_worker uuid;
+begin
+  perform private.require_roster_role(p_organisation_id);
+  if p_week_start is null or extract(isodow from p_week_start) <> 1 then
+    raise exception 'A roster week starts on a Monday.' using errcode = '22023';
+  end if;
+  if not exists (
+    select 1 from public.sites s where s.id = p_site_id and s.organisation_id = p_organisation_id
+  ) then
+    raise exception 'That site wasn''t found.' using errcode = 'P0002';
+  end if;
+  -- One copy per site at a time.
+  perform pg_advisory_xact_lock(hashtextextended('roster_copy:' || p_site_id::text, 0));
+
+  -- Slice 4.5: every source worker's leave lock, shared, up front and in worker order (the guard
+  -- takes the same key per insert; HR's approval takes it exclusively). Taking them all first, in
+  -- one order, keeps two copies and two approvals from waiting on each other in a cycle.
+  for v_lock_worker in
+    select distinct a.worker_id
+    from public.shift_assignments a
+    where a.organisation_id = p_organisation_id
+      and a.site_id = p_site_id
+      and a.status = 'assigned'
+      and a.shift_date between p_week_start - 7 and p_week_start - 1
+    order by a.worker_id
+  loop
+    perform pg_advisory_xact_lock_shared(hashtextextended('leave_requests:' || v_lock_worker::text, 0));
+  end loop;
+
+  begin
+    for v_source in
+      select a.worker_id, s.post_id, s.shift_date, p.name as post_name,
+        w.first_name || ' ' || w.last_name as worker_name
+      from public.shift_assignments a
+      join public.shifts s on s.id = a.shift_id
+      join public.posts p on p.id = s.post_id
+      join public.workers w on w.id = a.worker_id
+      where a.organisation_id = p_organisation_id
+        and a.site_id = p_site_id
+        and a.status = 'assigned'
+        and a.shift_date between p_week_start - 7 and p_week_start - 1
+      order by a.shift_date, a.starts_at, p.name, w.last_name, w.first_name, a.id
+      limit 1000
+    loop
+      v_total := v_total + 1;
+      v_target := v_source.shift_date + 7;
+
+      -- Slice 4.5: approved leave on the target day.
+      v_leave := null;
+      select r.start_date, r.end_date into v_leave
+      from public.leave_requests r
+      where r.organisation_id = p_organisation_id
+        and r.worker_id = v_source.worker_id
+        and r.status = 'approved'
+        and v_target between r.start_date and r.end_date
+      limit 1;
+      if v_leave.start_date is not null then
+        v_skipped := v_skipped || jsonb_build_object(
+          'post_id', v_source.post_id,
+          'post_name', v_source.post_name,
+          'shift_date', v_target,
+          'worker_id', v_source.worker_id,
+          'worker_name', v_source.worker_name,
+          'code', 'MLRSL',
+          'reason', 'On approved leave ' || private.leave_short_range(v_leave.start_date, v_leave.end_date) || '.'
+        );
+        continue;
+      end if;
+
+      -- The cheap refusals in plain SQL first (no subtransaction): already on the shift, or the
+      -- shift already full by the requirement in force. The block below stays as the backstop.
+      select s.id into v_existing
+      from public.shifts s
+      where s.post_id = v_source.post_id and s.shift_date = v_target
+        and s.organisation_id = p_organisation_id;
+      if v_existing is not null then
+        if exists (
+          select 1 from public.shift_assignments a
+          where a.shift_id = v_existing and a.worker_id = v_source.worker_id
+            and a.status = 'assigned'
+        ) then
+          v_already := v_already + 1;
+          continue;
+        end if;
+        select r.required_count into v_required
+        from private.post_day_requirement(p_organisation_id, v_source.post_id, v_target) r;
+        if v_required is not null and (
+          select count(*) from public.shift_assignments a
+          where a.shift_id = v_existing and a.status = 'assigned'
+        ) >= v_required then
+          v_skipped := v_skipped || jsonb_build_object(
+            'post_id', v_source.post_id,
+            'post_name', v_source.post_name,
+            'shift_date', v_target,
+            'worker_id', v_source.worker_id,
+            'worker_name', v_source.worker_name,
+            'code', 'MLRS4',
+            'reason', format('%s on %s already has the %s %s it needs.', v_source.post_name,
+              to_char(v_target, 'FMDy FMDD Mon'), v_required,
+              case when v_required = 1 then 'person' else 'people' end)
+          );
+          continue;
+        end if;
+      end if;
+
+      begin
+        v_shift_id := private.materialise_shift(p_organisation_id, v_source.post_id, v_target);
+        insert into public.shift_assignments (
+          organisation_id, shift_id, site_id, shift_date, worker_id, starts_at, ends_at
+        )
+        values (
+          p_organisation_id, v_shift_id, p_site_id, v_target, v_source.worker_id,
+          now(), now() + interval '1 minute'
+        );
+        v_copied := v_copied + 1;
+      exception
+        when sqlstate 'MLRS7' then
+          v_already := v_already + 1;
+        when sqlstate 'MLRS1' or sqlstate 'MLRS2' or sqlstate 'MLRS3' or sqlstate 'MLRS4'
+          or sqlstate 'MLRS5' or sqlstate 'MLRS6' or sqlstate 'MLRS9' or sqlstate 'MLRSL'
+          or sqlstate 'MLHO6' or sqlstate '23P01' or sqlstate '23505' then
+          get stacked diagnostics v_code = returned_sqlstate, v_message = message_text;
+          if v_code = '23P01' then
+            v_code := 'MLRS5';
+            v_message := v_source.worker_name || ' is already on an overlapping shift.';
+          elsif v_code = '23505' then
+            v_code := 'MLRS7';
+            v_message := v_source.worker_name || ' is already on this shift.';
+          end if;
+          v_skipped := v_skipped || jsonb_build_object(
+            'post_id', v_source.post_id,
+            'post_name', v_source.post_name,
+            'shift_date', v_target,
+            'worker_id', v_source.worker_id,
+            'worker_name', v_source.worker_name,
+            'code', v_code,
+            'reason', v_message
+          );
+      end;
+    end loop;
+
+    v_result := jsonb_build_object(
+      'week_start', p_week_start,
+      'source', v_total,
+      'copied', v_copied,
+      'already', v_already,
+      'skipped', v_skipped,
+      'dry_run', coalesce(p_dry_run, false)
+    );
+
+    if coalesce(p_dry_run, false) then
+      -- Undo everything above; v_result survives (variables aren't transactional).
+      raise exception 'dry run' using errcode = 'MLRSD';
+    end if;
+  exception
+    when sqlstate 'MLRSD' then
+      return v_result;
+  end;
+
+  if v_copied > 0 then
+    perform private.log_audit_impl(
+      p_organisation_id, 'roster.week_copied', 'sites', p_site_id, null,
+      jsonb_build_object(
+        'week_start', p_week_start, 'copied', v_copied, 'already', v_already,
+        'skipped', jsonb_array_length(v_skipped)
+      ),
+      null
+    );
+  end if;
+  return v_result;
+end;
+$$;
+

@@ -172,7 +172,18 @@ export const tables: TableSpec[] = [
     ...byOrg,
     seed: async ({ admin, side }) => {
       const workerId = await firstId(admin, "workers", side.orgId);
-      const siteId = await firstId(admin, "sites", side.orgId);
+      // A client's site, as before slice 6.11: every company's first site is now its Head
+      // office, and a person mapped there can't be put on a client's shift (roster.ts seeds one).
+      const { data: clientSite, error: siteError } = await admin
+        .from("sites")
+        .select("id")
+        .eq("organisation_id", side.orgId)
+        .eq("kind", "client")
+        .order("created_at")
+        .limit(1);
+      if (siteError) throw new Error(siteError.message);
+      const siteId = clientSite?.[0]?.id;
+      if (!siteId) throw new Error("fixture row not found in sites");
       check(
         (
           await admin.from("worker_assignments").insert({
