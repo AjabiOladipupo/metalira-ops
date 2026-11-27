@@ -482,7 +482,7 @@ describe("the people import with a Head office (security review H1)", () => {
             start_date: "2024-03-03",
           },
           pay_rate: null,
-          department: null,
+          department: { name: "Security services" },
           line_manager: null,
           client: { name: "Coastline Logistics" },
           site: { name: "Apapa Warehouse 3" },
