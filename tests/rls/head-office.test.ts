@@ -403,11 +403,18 @@ describe("office sites are left out of the client site reads", () => {
   it("lists only the client's sites, counts no office and opens the office only as an office", async () => {
     const clientSites = await listClientSites(owner.client, owner.orgId, clientId);
     expect(clientSites.map((s) => s.id)).toEqual([apapa]);
+    // Security review M1: an office with no geofence is listed (first, linking to its office
+    // page) and counted, so it gets one; clients' sites keep their client.
     const without = await listSitesWithoutGeofence(owner.client, owner.orgId);
-    expect(without.map((s) => s.siteId)).not.toContain(headOffice);
-    expect(without.every((s) => s.clientId === clientId)).toBe(true);
+    const unfencedOffices = without.filter((s) => s.clientId === null);
+    expect(unfencedOffices.map((s) => s.siteId)).toContain(headOffice);
+    expect(unfencedOffices.every((s) => s.href === `/app/settings/offices/${s.siteId}`)).toBe(true);
+    expect(without.slice(0, unfencedOffices.length)).toEqual(unfencedOffices);
+    const clientRows = without.filter((s) => s.clientId !== null);
+    expect(clientRows.map((s) => s.siteId)).toEqual([apapa]);
     const summary = await loadSitesSummary(owner.client, owner.orgId);
-    expect(summary.active + summary.archived).toBe(1);
+    // Apapa, Head office and the Ikeja branch added above, none with a geofence.
+    expect(summary).toMatchObject({ active: 3, archived: 0, withoutGeofence: 3 });
 
     expect(await loadSite(owner.client, owner.orgId, clientId, headOffice)).toBeNull();
     const office = await loadOfficeSite(owner.client, owner.orgId, headOffice);
@@ -423,6 +430,71 @@ describe("office sites are left out of the client site reads", () => {
       .select("id, sites(id)")
       .eq("organisation_id", owner.orgId);
     expect(clients!.flatMap((c) => c.sites.map((s) => s.id))).not.toContain(headOffice);
+  });
+});
+
+describe("the people import with a Head office (security review H1)", () => {
+  it("commits an import in a company that has a Head office, and never maps a row to it", async () => {
+    const batchId = randomUUID();
+    const created = await hr.client.from("import_batches").insert({
+      id: batchId,
+      organisation_id: owner.orgId,
+      file_name: "employees.csv",
+      file_format: "csv",
+      file_path: `${owner.orgId}/${batchId}.csv`,
+    });
+    expect(created.error).toBeNull();
+    const rowId = randomUUID();
+    const checked = await hr.client.rpc("save_import_check", {
+      p_organisation_id: owner.orgId,
+      p_batch_id: batchId,
+      p_check: {
+        columns: ["employee_id", "first_name"],
+        file_notes: [],
+        summary: { rows: 1 },
+        rows_expected: 1,
+      },
+      p_rows: [
+        {
+          id: rowId,
+          row_number: 2,
+          raw: { first_name: "Imported", last_name: "Guard" },
+          status: "ready",
+        },
+      ],
+      p_final: true,
+    });
+    expect(checked.error).toBeNull();
+    const workerId = randomUUID();
+    const { data, error } = await hr.client.rpc("commit_import_batch", {
+      p_organisation_id: owner.orgId,
+      p_batch_id: batchId,
+      p_rows: [
+        {
+          row_id: rowId,
+          worker: {
+            id: workerId,
+            staff_id: "HO-IMP-1",
+            first_name: "Imported",
+            last_name: "Guard",
+            phone: null,
+            employment_type: "permanent",
+            start_date: "2024-03-03",
+          },
+          pay_rate: null,
+          department: null,
+          line_manager: null,
+          client: { name: "Coastline Logistics" },
+          site: { name: "Apapa Warehouse 3" },
+          project: null,
+        },
+      ] as unknown as Json,
+    });
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ created: 1, clients: 0, sites: 0 });
+    expect(await openRowsOf(workerId)).toEqual([
+      { client_id: clientId, site_id: apapa, project_id: null, effective_to: null },
+    ]);
   });
 });
 

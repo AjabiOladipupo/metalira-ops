@@ -164,7 +164,18 @@ async function ClientsList({
         }${
           summary.archived ? `, ${summary.archived.toLocaleString("en-NG")} archived` : ""
         }. A client needs a billing address and a billing contact before it can be invoiced.`}
-        actions={addAction}
+        actions={
+          ctx.canEdit ? (
+            <div className="flex flex-wrap gap-3">
+              {/* Slice 6.11: the company's own offices aren't clients; ops managers reach them
+                  here, since Settings is closed to them. */}
+              <Button asChild variant="outline" className="h-11 px-4">
+                <Link href="/app/settings/offices">Your offices</Link>
+              </Button>
+              {addAction}
+            </div>
+          ) : null
+        }
       />
       <section aria-label="Clients" className="flex min-w-0 flex-col gap-3">
         <ClientSearch query={query} />

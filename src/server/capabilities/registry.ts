@@ -2076,7 +2076,8 @@ export const CAPABILITIES: readonly Capability[] = [
   },
   {
     name: "sites.without_geofence",
-    description: "Lists active sites with no geofence yet, by client, with a link to each.",
+    description:
+      "Lists active sites and offices with no geofence yet, by client, with a link to each.",
     kind: "read",
     audience: "manager",
     roles: CLIENT_READERS,

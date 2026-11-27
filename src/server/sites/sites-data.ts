@@ -225,7 +225,7 @@ export async function listOffices(supabase: Client, organisationId: string): Pro
  * (docs/LIRA.md). Counts only: no names or addresses.
  */
 export interface SitesSummary {
-  /** Active sites of active clients. */
+  /** Active sites of active clients, and the company's own active offices (slice 6.11). */
   active: number;
   archived: number;
   /** Active sites with no geofence: clock-in can't be checked there yet. */
@@ -265,12 +265,24 @@ async function listActiveClientSites(supabase: Client, organisationId: string) {
   }));
 }
 
+/**
+ * The company's own offices (slice 6.11) beside clients' sites, so an office with no geofence
+ * is counted and listed too (security review M1): its clock-ins aren't checked until it has one.
+ */
+async function listOfficeSiteRows(supabase: Client, organisationId: string) {
+  const offices = await listOffices(supabase, organisationId);
+  return offices.map((row) => ({ row, clientName: "Your office" }));
+}
+
 export async function loadSitesSummary(
   supabase: Client,
   organisationId: string,
 ): Promise<SitesSummary> {
-  const sites = await listActiveClientSites(supabase, organisationId);
-  return summariseSites(sites.map((s) => s.row));
+  const [sites, offices] = await Promise.all([
+    listActiveClientSites(supabase, organisationId),
+    listOfficeSiteRows(supabase, organisationId),
+  ]);
+  return summariseSites([...sites, ...offices].map((s) => s.row));
 }
 
 export interface SiteWithoutGeofence {
@@ -281,14 +293,28 @@ export interface SiteWithoutGeofence {
   href: string;
 }
 
-/** Active sites of active clients that have no geofence yet, by client then site. */
+/**
+ * Active sites of active clients that have no geofence yet, by client then site, after the
+ * company's own offices without one (slice 6.11), which link to their office page.
+ */
 export async function listSitesWithoutGeofence(
   supabase: Client,
   organisationId: string,
 ): Promise<SiteWithoutGeofence[]> {
-  const sites = await listActiveClientSites(supabase, organisationId);
-  return sites
-    .filter((s) => s.row.status === "active" && s.row.geofence === null)
+  const [sites, offices] = await Promise.all([
+    listActiveClientSites(supabase, organisationId),
+    listOfficeSiteRows(supabase, organisationId),
+  ]);
+  const unfenced = (s: { row: SiteRow }) => s.row.status === "active" && s.row.geofence === null;
+  const officeRows = offices.filter(unfenced).map((s) => ({
+    siteId: s.row.id,
+    siteName: s.row.name,
+    clientId: null,
+    clientName: s.clientName,
+    href: `/app/settings/offices/${s.row.id}`,
+  }));
+  const clientRows = sites
+    .filter(unfenced)
     .map((s) => ({
       siteId: s.row.id,
       siteName: s.row.name,
@@ -299,6 +325,7 @@ export async function listSitesWithoutGeofence(
     .sort(
       (a, b) => a.clientName.localeCompare(b.clientName) || a.siteName.localeCompare(b.siteName),
     );
+  return [...officeRows, ...clientRows];
 }
 
 /**

@@ -55,7 +55,7 @@ async function OfficePage({
   const back =
     ctx.role === "owner" || ctx.role === "admin"
       ? { href: "/app/settings/company#head-office", label: "Company" }
-      : { href: "/app", label: "Home" };
+      : { href: "/app/settings/offices", label: "Your offices" };
 
   return (
     <>

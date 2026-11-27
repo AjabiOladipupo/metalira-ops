@@ -57,6 +57,25 @@ const refusalSchema = z.object({
   reason: z.string(),
 });
 
+/** A shift at a client's site someone came off when mapped to an office (slice 6.11). */
+export const releasedShiftSchema = z.object({
+  assignment_id: z.string(),
+  shift_date: z.iso.date(),
+  site_id: z.string(),
+  site_name: z.string().nullable(),
+});
+
+/** "Comes off 3 shifts at Apapa Gate from 28 Nov 2026", or null when none. */
+export function releasedShiftsText(
+  released: readonly { shift_date: string; site_name: string | null }[],
+): string | null {
+  if (released.length === 0) return null;
+  const sites = [...new Set(released.map((r) => r.site_name ?? "a client's site"))].sort();
+  const first = [...released].map((r) => r.shift_date).sort()[0]!;
+  const n = released.length;
+  return `Comes off ${n.toLocaleString("en-NG")} ${n === 1 ? "shift" : "shifts"} at ${sites.join(", ")} from ${formatDate(first)}`;
+}
+
 /** What public.bulk_map_workers returns. */
 export const bulkMapResultSchema = z.object({
   dry_run: z.boolean(),
@@ -73,6 +92,8 @@ export const bulkMapResultSchema = z.object({
       effective_from: z.iso.date(),
       before: snapshotSchema,
       after: snapshotSchema,
+      // Slice 6.11: shifts at clients' sites they come off when mapped to an office.
+      released_shifts: z.array(releasedShiftSchema).default([]),
     }),
   ),
   refusals: z.array(refusalSchema),
@@ -92,6 +113,8 @@ export interface BulkMapRow {
   /** False when they are already mapped exactly so. */
   changed: boolean;
   refusal: string | null;
+  /** Slice 6.11: the client shifts they come off when mapped to an office, or null. */
+  releasedShifts?: string | null;
 }
 
 const sitesText = (s: MappingSnapshot) => namesOf(s.sites, "No site");
@@ -118,6 +141,7 @@ export function bulkMapRows(result: BulkMapResult): BulkMapRow[] {
     effectiveFrom: p.assignments_changed ? p.effective_from : null,
     changed: p.changed,
     refusal: null,
+    releasedShifts: releasedShiftsText(p.released_shifts),
   }));
   const byName = (a: BulkMapRow, b: BulkMapRow) =>
     (a.name ?? "~").localeCompare(b.name ?? "~", "en", { sensitivity: "base" }) ||

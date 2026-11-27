@@ -214,6 +214,11 @@ export function BulkMappingSheet({
                       After: {row.after?.sites}; {row.after?.projects}
                     </span>
                     <span className="text-[13px] text-fg-muted">{bulkMapWhen(row)}</span>
+                    {row.releasedShifts ? (
+                      <span className="text-[13px] font-medium" data-testid="bulk-map-released">
+                        {row.releasedShifts}
+                      </span>
+                    ) : null}
                   </>
                 )}
               </li>

@@ -275,6 +275,7 @@ export const EXTRA_PAGES: readonly {
   { href: "/app/settings/company", roles: ["owner", "admin"] },
   // Slice 6.11: the company's own offices (Head office and branches), edited by the roles that
   // edit sites. Listed on Settings > Company.
+  { href: "/app/settings/offices", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/settings/offices/new", roles: ["owner", "admin", "ops_manager"] },
   { href: "/app/settings/offices/[id]", roles: ["owner", "admin", "ops_manager"] },
   {

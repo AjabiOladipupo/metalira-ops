@@ -19,6 +19,9 @@ export const PUNCH_FLAGS = [
   "time_unverified",
   "double_in",
   "out_without_in",
+  // Slice 6.11: a punch at an office with no geofence yet (recorded, never refused). Set by
+  // record_punch, not by the pure rules below.
+  "no_geofence",
 ] as const;
 
 export type PunchFlag = (typeof PUNCH_FLAGS)[number];
@@ -59,6 +62,7 @@ export const PUNCH_FLAG_LABELS: Record<PunchFlag, string> = {
   time_unverified: "Time not checked",
   double_in: "Clocked in twice",
   out_without_in: "Clock-out without clock-in",
+  no_geofence: "Office has no geofence",
 };
 
 export function punchFlags(input: FlagInput): PunchFlag[] {
@@ -93,6 +97,8 @@ export function punchFlags(input: FlagInput): PunchFlag[] {
     time_unverified: input.timeSource === "device",
     double_in: input.kind === "in" && previousIn,
     out_without_in: input.kind === "out" && !previousIn,
+    // Set by record_punch from the site (an office with no geofence), never by these rules.
+    no_geofence: false,
   };
   return PUNCH_FLAGS.filter((flag) => hits[flag]);
 }

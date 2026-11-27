@@ -3,6 +3,7 @@ import "server-only";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { releasedShiftSchema, releasedShiftsText } from "@/lib/bulk-mapping";
 import type { MappingSnapshot } from "@/lib/mapping";
 import { MutationError, mutate, type MutationSpec } from "@/server/identity/mutate";
 
@@ -51,6 +52,7 @@ const resultSchema = z.object({
   effective_from: z.iso.date(),
   before: snapshotSchema,
   after: snapshotSchema,
+  released_shifts: z.array(releasedShiftSchema).default([]),
 });
 
 export interface SavedMapping {
@@ -65,6 +67,12 @@ export interface SavedMapping {
   effectiveFrom: string;
   before: MappingSnapshot;
   after: MappingSnapshot;
+  /**
+   * Slice 6.11: "Comes off 3 shifts at Apapa Gate from 28 Nov 2026" when mapped to an office
+   * took them off shifts at clients' sites (the database removed them in the same save), or null.
+   */
+  releasedShifts?: string | null;
+  releasedShiftIds?: string[];
 }
 
 function fromDbError(error: PostgrestError): never {
@@ -137,6 +145,8 @@ export const saveMappingSpec: MutationSpec<typeof saveMappingSchema, SavedMappin
       effectiveFrom: result.effective_from,
       before: result.before,
       after: result.after,
+      releasedShifts: releasedShiftsText(result.released_shifts),
+      releasedShiftIds: result.released_shifts.map((r) => r.assignment_id),
     };
   },
   // One entry for the whole change, before and after by id and name. The row triggers log each
@@ -151,6 +161,9 @@ export const saveMappingSpec: MutationSpec<typeof saveMappingSchema, SavedMappin
           after: {
             ...result.after,
             assignmentsFrom: result.assignmentsChanged ? result.effectiveFrom : null,
+            ...(result.releasedShiftIds && result.releasedShiftIds.length > 0
+              ? { releasedShiftIds: result.releasedShiftIds }
+              : {}),
           },
         }
       : null,

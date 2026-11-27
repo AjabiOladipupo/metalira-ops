@@ -834,6 +834,32 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     }
   }
 
+  // Slice 6.11 (money review H1): a monthly worker's no-shift clock-in on a working day (Head
+  // office staff every weekday) is covered by salary and adds no earning. It is still paid by this
+  // cycle, so it is recorded as a source of the salary line: otherwise the next run's arrears read
+  // would find an approved day in a posted cycle with no source and pay it again as an off day.
+  const sourced = new Set(
+    [...buckets.values()].flatMap((b) =>
+      b.sources.flatMap((src) => (src.kind === "timesheet_line" ? [src.id] : [])),
+    ),
+  );
+  for (const day of cycleDays) {
+    if (day.anyShift || !workingOn.get(day.date) || extra.has(day.date)) continue;
+    const rate = versionOn(worker.payRates, day.date);
+    if (!rate || rate.payType !== "monthly") continue;
+    const salary = lines.find(
+      (l) =>
+        COMPONENTS.some((c) => c.code === l.code) &&
+        l.sources.some((src) => src.kind === "pay_rate" && src.id === rate.id),
+    );
+    if (!salary) continue;
+    for (const id of day.lineIds) {
+      if (sourced.has(id)) continue;
+      sourced.add(id);
+      salary.sources.push({ kind: "timesheet_line", id, workDate: day.date });
+    }
+  }
+
   // --- Arrears: days from posted cycles approved after posting -------------------------------
   const arrearsDays = groupByDate(worker.arrears);
   const arrearsWeek = new Map(worker.arrears.map((a) => [a.workDate, a]));
