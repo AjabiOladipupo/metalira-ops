@@ -272,6 +272,20 @@ As in Phases 2 to 5 (docs/LIRA.md): every new Server Action goes in `src/server/
 
 **Accept:** with the golden October shifts approved, `/app/unbilled` "Up to 31 October" shows Coastline ₦597,500, Marina ₦418,000 and Greenfield ₦396,000 before VAT, and a Night shift with no rate line is listed as held out, not priced.
 
+### 6.11 Head office site for non-service staff (owner request, 27 Nov 2026; independent, wave 2)
+The owner wants staff who don't work at a client's site (HR, finance, the operations manager, admin) mapped to the company's own **Head office** as their site. Today every site belongs to a client (`sites.client_id not null`), so there is nowhere to put them.
+- Migration `20261127125000_head_office.sql`.
+- `sites.kind` (`client` default, `office`); an office site has `client_id` null and a client site must have one (check constraint). Every company gets one office site named "Head office" (backfilled for existing companies, created with each new company); more offices (branches) can be added the same way. Its address, geofence and checkpoints are edited like any site (SITE_EDITORS: owner, admin, ops_manager), on a new **Settings > Company > Head office** card rather than under a client.
+- Office sites are never a client's site: they are left out of the Clients pages, contracts, posts, rate cards, the unbilled queue and invoices (no posts, so no Work Units are made there). A guard against a contract, post or headcount on an office site (MLHO codes).
+- Mapping: `save_worker_mapping` and 6.11's change to U.3's **Map to site and project** accept an office site; projects can't be chosen for it (office sites have no client, so no projects). HR, owner and admin map people there, as today.
+- Attendance: staff mapped to Head office can clock in there with the existing no-shift clock-in and its geofence check; there is no office roster in this slice (an office-hours roster is a later option). Their days show in Timesheets as non-billable.
+- Payroll and Phase 7: a worker's site of record marks their pay as **overhead** rather than a client site's labour cost; 6.11 only stores and shows it ("Head office · overhead"), and Phase 7's overhead allocation reads it.
+- Managers who are also on payroll (U.4's "Also paid through payroll") get a worker record, so they can be mapped to Head office like anyone else. Managers who aren't on payroll have no worker record and aren't mapped.
+- Tests: unit (office vs client site rules), RLS (an office site with a client refused, a client site without one refused, a contract or post on an office site refused, office sites absent from the unbilled read and client lists, isolation for the new column), Playwright: HR bulk-maps HR, both Finance and the ops manager to Head office at 1440px, and the Head office card at 390px.
+- **security-reviewer** (a nullability change on `sites` and every read that assumed a client) and **money-reviewer** (office sites can never reach an invoice).
+
+**Accept:** HR selects the finance, HR and operations staff, uses **Map to site and project** with "Head office", and each person's page shows "Head office"; the unbilled queue and invoices never list Head office, and a contract can't be created on it.
+
 ### 6.4 Bank statement import (independent of 6.0 to 6.3; wave 1)
 - Migration `20261127120000_bank_statements.sql`.
 - Private bucket `bank-statements` (CSV and XLSX by magic bytes, 10 MB), path `{organisation_id}/{account_id}/{import_id}.{ext}`, no Storage policy (the 5.4 pattern): the browser uploads through a signed upload token for one path; the server checks the bytes and records it with the secret key.
@@ -391,16 +405,17 @@ Plus `fixtures/statements/overlap-november-2026.csv` (rows 1, 2 and 4 again, and
                                                           └───────┬── 6.5 matching, payments ─┴── 6.7 credit notes ──────┘
 6.4 statement import ─────────────────────────────────────────────┤
                                                                   └── 6.9 payout debits (from 6.4; beside 6.2)
+6.11 head office site (independent; wave 2, before 6.2 merges so drafts never see office sites)
 ```
 
 At most three agents at once:
 - **Wave 1:** 6.0, 6.1 and 6.4, in parallel (6.1 against the engine contract in "Calculation and matching design"; 6.4 needs nothing new).
-- **Wave 2:** 6.2 from 6.1's branch with 6.0 merged in, and 6.9 from 6.4's branch.
+- **Wave 2:** 6.2 from 6.1's branch with 6.0 merged in, 6.9 from 6.4's branch, and 6.11 head office from `main` (it merges before 6.2).
 - **Wave 3:** 6.3 from 6.2's branch, and 6.5 from 6.2's branch with 6.4 merged in.
 - **Wave 4:** 6.6 (from 6.5 with 6.3 merged in), 6.7 (from 6.5) and 6.8 (from 6.3 with 6.5 merged in), in parallel; merged in migration order.
 - **Wave 5:** 6.10, the review fix-up and sign-off.
 
-Migrations, after `20261122300000_self_onboarding.sql` (the latest on `main`): `20261127100000` (6.0), `20261127110000` (6.1), `20261127120000` (6.4), `20261127130000` (6.2), `20261127140000` (6.9), `20261127150000` (6.3), `20261127160000` (6.5), `20261127170000` (6.6), `20261127180000` (6.7), `20261127190000` (6.8), `20261127200000` (6.10). A slice whose migration would land on `main` after a later-numbered one takes the next free slot instead (as 5.4 did).
+Migrations, after `20261122300000_self_onboarding.sql` (the latest on `main`): `20261127100000` (6.0), `20261127110000` (6.1), `20261127120000` (6.4), `20261127125000` (6.11), `20261127130000` (6.2), `20261127140000` (6.9), `20261127150000` (6.3), `20261127160000` (6.5), `20261127170000` (6.6), `20261127180000` (6.7), `20261127190000` (6.8), `20261127200000` (6.10). A slice whose migration would land on `main` after a later-numbered one takes the next free slot instead (as 5.4 did).
 
 Reviews: **money-reviewer** on every slice (6.0 to 6.10). **security-reviewer** on 6.1 to 6.10 (definer reads of work records, a nullability change on `work_units`, file uploads, private buckets, decrypted account numbers in PDFs and emails, narrations naming workers, the cron route and outbound email) and once on the whole phase in 6.10.
 
@@ -413,12 +428,12 @@ Phase 5 was planned at 18 to 21.5 hours for 8 slices and took more in practice: 
 | Wave | Slices | Size | Runs | Time |
 | --- | --- | --- | --- | --- |
 | 1 | 6.0 engine, VAT, numbering · 6.1 unbilled queue and jobs · 6.4 statement import | M · M · L | in parallel | 4 to 5 h |
-| 2 | 6.2 drafts and posting · 6.9 payout debits | L · M | in parallel | 4 to 4.5 h |
+| 2 | 6.2 drafts and posting · 6.9 payout debits · 6.11 head office | L · M · S | in parallel | 4 to 5 h |
 | 3 | 6.3 PDF and email · 6.5 matching and payments | M · L | in parallel | 4 to 5 h |
 | 4 | 6.6 receipts · 6.7 credit notes · 6.8 ageing and reminders | M · M · M | in parallel | 3.5 to 4.5 h |
 | 5 | 6.10 review fix-up | M | alone | 2.5 to 3.5 h |
 | | Sign-off and live-site checklist | | | 0.5 h |
-| | **Total** | | | **18.5 to 23 h** |
+| | **Total** | | | **18.5 to 23.5 h** |
 
 Starting each wave from the previous slice's open branch (the build-speed rule) overlaps the waves by about an hour each, bringing the plan to about **17 to 21 hours** of continuous running. **In reality expect more, about 24 to 30 hours**, as in Phase 5: review rounds with fixes on every money slice, CI reruns, merge conflicts in `src/types/db.ts` and the capability registry, and a second fix-up wave when the accountant's answers or the pilot banks' statement samples arrive. Waves 2, 3 and 5 hold the critical path (6.2, then 6.5, then 6.10), so more agents would not shorten them. The risks that stretch it: real statement exports that don't fit the generic mapping (pilot samples late), the accountant changing VAT or WHT handling after 6.0, PDF rendering of the ₦ sign and long client names at 390px-friendly sizes, Resend limits in e2e, and the local database stack failing.
 
@@ -449,6 +464,7 @@ Each item: what, why, format, and the wave that needs it. Items for later waves 
 4. **Per-bank narration conventions the pilots know**: how a client's transfer narration appears on the statement at each bank (does "INV-0412" survive, is it cut to 30 characters, does the sender's name come first), and how a bulk salary upload appears (one debit or one per worker). A short note per bank, by wave 1 (it sets the matcher's normaliser in 6.0 and 6.5).
 
 **By wave 2 (6.2 posting)**
+- **Head office address and location (6.11)**: the street address, and either the GPS point or a pin on the map for the geofence, so office staff can clock in there. Also say whether you have branch offices to add as more office sites. A short note by wave 2.
 5. **The company's VAT registration and TIN details for invoices**: the TIN as printed on the FIRS/NRS certificate, whether the company is VAT registered (and from when), RC number, registered address and the legal name exactly as it should print. Entered in Settings > Company; posting is refused without a TIN. A screenshot or text.
 6. **Default payment terms** (30 days today; 14 days or on receipt are the other setup options), and any client with different terms. A reply.
 7. **Invoice numbering preference** (open question 1) and the **first number** for the live company (continue from the company's current invoice book, for example 412). A reply.
