@@ -2,6 +2,7 @@ import "server-only";
 
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
+import { compareSiteOptions, isOffice, siteLabel } from "@/lib/office-sites";
 import { canReadPay } from "@/lib/pay-access";
 import {
   EMPTY_FILTERS,
@@ -121,6 +122,7 @@ async function loadNames(
   table: "departments" | "sites" | "projects" | "clients",
   organisationId: string,
 ): Promise<Map<string, string>> {
+  if (table === "sites") return loadSiteNames(supabase, organisationId);
   const rows = await readAll<NamedRow>(table, (from, to) =>
     supabase
       .from(table)
@@ -130,6 +132,22 @@ async function loadNames(
       .range(from, to),
   );
   return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+/**
+ * Site names as a person's mapping shows them: an office reads "Head office · overhead" (slice
+ * 6.11), so pay there is plainly overhead rather than a client's labour cost.
+ */
+async function loadSiteNames(supabase: Client, organisationId: string) {
+  const rows = await readAll<NamedRow & { kind: string }>("sites", (from, to) =>
+    supabase
+      .from("sites")
+      .select("id, name, kind")
+      .eq("organisation_id", organisationId)
+      .order("id")
+      .range(from, to),
+  );
+  return new Map(rows.map((r) => [r.id, isOffice(r.kind) ? siteLabel(r) : r.name]));
 }
 
 interface AssignmentRow {
@@ -545,22 +563,41 @@ export function filterOptionsFor(
 // ---------------------------------------------------------------------------
 
 export interface MappingTargets {
-  /** Sites, labelled "Site · Client". */
-  sites: Option[];
+  /** Sites, labelled "Site · Client", offices first as "Head office · overhead" (slice 6.11). */
+  sites: SiteOption[];
   /** Projects, labelled "Project · Client". */
   projects: Option[];
+}
+
+/** A site to map people to; an office (slice 6.11) takes no projects. */
+export interface SiteOption extends Option {
+  office: boolean;
+}
+
+interface SiteTargetRow {
+  id: string;
+  name: string;
+  client_id: string | null;
+  kind: string;
+  status: string;
 }
 
 /**
  * The sites and projects a worker can be mapped to, by name, with their client for context.
  * Archived clients and archived sites are left out (slice 2.2), except the ones in `keep` (the
- * worker's current mapping), so saving the panel never drops a mapping silently.
+ * worker's current mapping), so saving the panel never drops a mapping silently. The company's
+ * offices come first (slice 6.11).
  */
 export async function loadMappingTargets(
   supabase: Client,
   organisationId: string,
   keep: readonly string[] = [],
 ): Promise<MappingTargets> {
+  const { targets } = await loadTargetRows(supabase, organisationId, keep);
+  return targets;
+}
+
+async function loadTargetRows(supabase: Client, organisationId: string, keep: readonly string[]) {
   const [clients, sites, projects] = await Promise.all([
     readAll<{ id: string; name: string; status: string }>("clients", (from, to) =>
       supabase
@@ -570,10 +607,10 @@ export async function loadMappingTargets(
         .order("id")
         .range(from, to),
     ),
-    readAll<{ id: string; name: string; client_id: string; status: string }>("sites", (from, to) =>
+    readAll<SiteTargetRow>("sites", (from, to) =>
       supabase
         .from("sites")
-        .select("id, name, client_id, status")
+        .select("id, name, client_id, kind, status")
         .eq("organisation_id", organisationId)
         .order("id")
         .range(from, to),
@@ -589,63 +626,79 @@ export async function loadMappingTargets(
   ]);
   const clientOf = new Map(clients.map((c) => [c.id, c]));
   const kept = new Set(keep);
-  const open = (row: { id: string; client_id: string; status?: string }) =>
+  const open = (row: { id: string; client_id: string | null; status?: string }) =>
     kept.has(row.id) ||
-    (row.status !== "archived" && clientOf.get(row.client_id)?.status !== "archived");
-  const toOption = (row: { id: string; name: string; client_id: string }): Option => {
-    const client = clientOf.get(row.client_id)?.name;
-    return { value: row.id, label: client ? `${row.name} · ${client}` : row.name };
-  };
+    (row.status !== "archived" &&
+      (row.client_id === null || clientOf.get(row.client_id)?.status !== "archived"));
   const byLabel = (a: Option, b: Option) =>
     a.label.localeCompare(b.label, "en", { sensitivity: "base" });
+  const openSites = sites.filter(open);
+  const siteOptions = openSites
+    .map((row) => ({
+      option: {
+        value: row.id,
+        label: siteLabel({
+          name: row.name,
+          kind: row.kind,
+          clientName: row.client_id ? clientOf.get(row.client_id)?.name : null,
+        }),
+        office: isOffice(row.kind),
+      },
+      name: row.name,
+    }))
+    .sort((a, b) =>
+      compareSiteOptions({ ...a.option, name: a.name }, { ...b.option, name: b.name }),
+    )
+    .map((s) => s.option);
+  const projectOptions = projects
+    .filter(open)
+    .map((row): Option => {
+      const client = clientOf.get(row.client_id)?.name;
+      return { value: row.id, label: client ? `${row.name} · ${client}` : row.name };
+    })
+    .sort(byLabel);
   return {
-    sites: sites.filter(open).map(toOption).sort(byLabel),
-    projects: projects.filter(open).map(toOption).sort(byLabel),
+    targets: { sites: siteOptions, projects: projectOptions },
+    clientOf: new Map<string, string | null>([
+      ...sites.map((row) => [row.id, row.client_id] as const),
+      ...projects.map((row) => [row.id, row.client_id] as const),
+    ]),
   };
 }
 
-/** A site or project for the bulk mapping sheet (slice U.3), with its client to pair them. */
+/**
+ * A site or project for the bulk mapping sheet (slice U.3), with its client to pair them. An
+ * office (slice 6.11) has no client, so it offers no projects.
+ */
 export interface BulkMappingTarget {
   value: string;
   label: string;
-  clientId: string;
+  clientId: string | null;
+  office: boolean;
 }
 
 /**
  * The open sites and projects for "Map to site and project" (slice U.3): the same list the
- * mapping panel offers (archived sites and clients left out), each with its client, so the sheet
- * offers only the chosen site's client's projects.
+ * mapping panel offers (archived sites and clients left out, offices first), each with its
+ * client, so the sheet offers only the chosen site's client's projects, and none for an office.
  */
 export async function loadBulkMappingTargets(
   supabase: Client,
   organisationId: string,
 ): Promise<{ sites: BulkMappingTarget[]; projects: BulkMappingTarget[] }> {
-  const [targets, sites, projects] = await Promise.all([
-    loadMappingTargets(supabase, organisationId),
-    readAll<{ id: string; client_id: string }>("sites", (from, to) =>
-      supabase
-        .from("sites")
-        .select("id, client_id")
-        .eq("organisation_id", organisationId)
-        .order("id")
-        .range(from, to),
-    ),
-    readAll<{ id: string; client_id: string }>("projects", (from, to) =>
-      supabase
-        .from("projects")
-        .select("id, client_id")
-        .eq("organisation_id", organisationId)
-        .order("id")
-        .range(from, to),
-    ),
-  ]);
-  const clientOf = new Map([...sites, ...projects].map((row) => [row.id, row.client_id]));
-  const withClient = (options: readonly Option[]): BulkMappingTarget[] =>
-    options.flatMap((o) => {
+  const { targets, clientOf } = await loadTargetRows(supabase, organisationId, []);
+  return {
+    sites: targets.sites.map((o) => ({
+      value: o.value,
+      label: o.label,
+      clientId: clientOf.get(o.value) ?? null,
+      office: o.office,
+    })),
+    projects: targets.projects.flatMap((o) => {
       const clientId = clientOf.get(o.value);
-      return clientId ? [{ value: o.value, label: o.label, clientId }] : [];
-    });
-  return { sites: withClient(targets.sites), projects: withClient(targets.projects) };
+      return clientId ? [{ value: o.value, label: o.label, clientId, office: false }] : [];
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------

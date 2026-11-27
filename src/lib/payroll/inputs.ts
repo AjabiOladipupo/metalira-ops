@@ -139,6 +139,10 @@ const workerSchema = z
     no_show_dates: z.array(isoDate),
     open_line_count: z.number().int().min(0),
     leave: z.array(leaveSchema),
+    // Slice 6.11 (money review H1-b): the days the worker's site of record is an office.
+    office_days: z.array(z.object({ from: isoDate, to: isoDate })).optional(),
+    // Slice 6.11 (money review H1-a): shifts in the posted periods arrears days come from.
+    arrears_shifts: z.array(z.object({ date: isoDate, on_leave: z.boolean() })).optional(),
   })
   .transform((w) => ({
     workerId: w.worker_id,
@@ -163,6 +167,8 @@ const workerSchema = z
     noShowDates: w.no_show_dates,
     openLineCount: w.open_line_count,
     leave: w.leave,
+    officeDays: w.office_days ?? [],
+    arrearsShifts: (w.arrears_shifts ?? []).map((s) => ({ date: s.date, onLeave: s.on_leave })),
   }));
 
 export const payrollInputsSchema = z
@@ -336,6 +342,12 @@ export interface CalendarInput {
   usualWorkDays: readonly number[] | null;
   shifts: readonly { date: string; onLeave: boolean }[];
   lastRostered: string | null;
+  /**
+   * Slice 6.11 (money review H1-b): days whose site of record is an office. Their working days
+   * are the usual days (the worker's, else the company's): client shifts and the last rostered
+   * day don't count there, so one stray client shift never turns office weekdays into off days.
+   */
+  officeDays?: readonly { from: string; to: string }[];
 }
 
 /**
@@ -408,6 +420,19 @@ export function rosteredCalendar(
     const date = addDays(period.start, i);
     const employed =
       date >= worker.startDate && (worker.endDate === null || date <= worker.endDate);
+    const atOffice =
+      employed && (worker.officeDays ?? []).some((r) => r.from <= date && date <= r.to);
+    if (atOffice) {
+      const working =
+        countLeaveDays(date, date, "working_days", {
+          workDays: usual,
+          lastRostered: null,
+          holidays,
+          shifts: [],
+        }).days === 1;
+      out.push({ date, working, employed });
+      continue;
+    }
     const working =
       countLeaveDays(date, date, "working_days", {
         workDays: employed ? usual : outside,

@@ -25,7 +25,8 @@ export function fromHeadcountDbError(error: PostgrestError): never {
   if (error.code === "42501") {
     throw new MutationError("forbidden", "Your role can't make this change.");
   }
-  if (error.code === "MLHC1" || error.code === "MLHC2") {
+  // Slice 6.11: MLHO3, headcount at an office (refused by the database, never offered).
+  if (error.code === "MLHC1" || error.code === "MLHC2" || error.code === "MLHO3") {
     throw new MutationError("invalid", error.message);
   }
   if (error.code === "23505" && text.includes("headcount_requirements_post_key")) {

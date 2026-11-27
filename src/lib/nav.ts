@@ -273,6 +273,15 @@ export const EXTRA_PAGES: readonly {
 }[] = [
   { href: "/app/setup", roles: ["owner", "admin"] },
   { href: "/app/settings/company", roles: ["owner", "admin"] },
+  // Slice 6.11: the company's own offices (Head office and branches), edited by the roles that
+  // edit sites. Listed on Settings > Company.
+  { href: "/app/settings/offices", roles: ["owner", "admin", "ops_manager"] },
+  { href: "/app/settings/offices/new", roles: ["owner", "admin", "ops_manager"] },
+  { href: "/app/settings/offices/[id]", roles: ["owner", "admin", "ops_manager"] },
+  {
+    href: "/app/settings/offices/[id]/checkpoints/print",
+    roles: ["owner", "admin", "ops_manager"],
+  },
   // Slice 2.3: the company's collection bank account. Finance approves changes to it.
   { href: "/app/settings/bank-account", roles: ["owner", "admin", "finance"] },
   { href: "/app/settings/departments", roles: ["owner", "admin", "hr"] },

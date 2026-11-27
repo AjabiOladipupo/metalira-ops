@@ -9,6 +9,7 @@ import { MutationError, mutate, type MutationSpec } from "@/server/identity/muta
 import {
   addCheckpointSchema,
   checkpointIdSchema,
+  createOfficeSchema,
   createSiteSchema,
   moveCheckpointSchema,
   renameCheckpointSchema,
@@ -30,6 +31,7 @@ import {
 export const SITE_EDITORS = CLIENT_EDITORS;
 
 const DUPLICATE_SITE = "This client already has a site with this name.";
+const DUPLICATE_OFFICE = "You already have an office with this name.";
 const DUPLICATE_CHECKPOINT = "This site already has a checkpoint with this name.";
 
 const DB_REFUSALS: Record<string, { message: string; field?: string }> = {
@@ -41,6 +43,8 @@ const DB_REFUSALS: Record<string, { message: string; field?: string }> = {
   MLST3: { message: "An outline can cover 4 square kilometres or less.", field: "outline" },
   MLST4: { message: "The geofence must be in Nigeria.", field: "lat" },
   MLST5: { message: "A site can't move to another client." },
+  // Slice 6.11: a site never changes between a client's site and an office.
+  MLHO1: { message: "A client's site can't become an office, or an office a client's site." },
   MLCP1: { message: "A retired checkpoint can't be changed. Add a new one." },
   MLCP2: { message: "This site is archived. Restore it to add checkpoints." },
   MLCP3: { message: "A checkpoint can't move to another site." },
@@ -67,6 +71,9 @@ export function fromSiteDbError(error: PostgrestError): never {
       known.message,
       known.field ? { [known.field]: known.message } : {},
     );
+  }
+  if (error.code === "23505" && text.includes("sites_office_name_key")) {
+    throw new MutationError("invalid", DUPLICATE_OFFICE, { name: DUPLICATE_OFFICE });
   }
   if (error.code === "23505" && text.includes("sites_client_name_key")) {
     throw new MutationError("invalid", DUPLICATE_SITE, { name: DUPLICATE_SITE });
@@ -110,7 +117,7 @@ export const createSiteSpec: MutationSpec<
       if (error.code === "23503") throw new MutationError("invalid", "That client wasn't found.");
       fromSiteDbError(error);
     }
-    return { id: row.id, clientId: row.client_id };
+    return { id: row.id, clientId: row.client_id ?? data.clientId };
   },
 };
 
@@ -118,9 +125,41 @@ export function createSite(input: unknown) {
   return mutate(createSiteSpec, input);
 }
 
+/**
+ * Adds one of the company's own offices (slice 6.11): a branch beside Head office, where staff
+ * who don't work at a client's site are mapped. No client; the database refuses a contract,
+ * post or headcount there (MLHO2 to MLHO4). Its address, geofence and checkpoints are then set
+ * like any site's.
+ */
+export const createOfficeSpec: MutationSpec<typeof createOfficeSchema, { id: string }> = {
+  schema: createOfficeSchema,
+  roles: SITE_EDITORS,
+  run: async ({ supabase, organisationId, data }) => {
+    const { data: row, error } = await supabase
+      .from("sites")
+      .insert({
+        organisation_id: organisationId,
+        kind: "office",
+        client_id: null,
+        name: data.name,
+        address: data.address,
+        state: data.state,
+        landmark: data.landmark,
+      })
+      .select("id")
+      .single();
+    if (error) fromSiteDbError(error);
+    return { id: row.id };
+  },
+};
+
+export function createOffice(input: unknown) {
+  return mutate(createOfficeSpec, input);
+}
+
 export const updateSiteSpec: MutationSpec<
   typeof updateSiteSchema,
-  { id: string; clientId: string }
+  { id: string; clientId: string | null }
 > = {
   schema: updateSiteSchema,
   roles: SITE_EDITORS,
@@ -153,7 +192,7 @@ export function updateSite(input: unknown) {
  */
 export const setGeofenceSpec: MutationSpec<
   typeof setGeofenceSchema,
-  { id: string; clientId: string }
+  { id: string; clientId: string | null }
 > = {
   schema: setGeofenceSchema,
   roles: SITE_EDITORS,
@@ -183,7 +222,7 @@ export function setGeofence(input: unknown) {
 /** Archive or restore. Archived sites keep their checkpoints, assignments and history. */
 export const setSiteStatusSpec: MutationSpec<
   typeof setSiteStatusSchema,
-  { id: string; clientId: string }
+  { id: string; clientId: string | null }
 > = {
   schema: setSiteStatusSchema,
   roles: SITE_EDITORS,

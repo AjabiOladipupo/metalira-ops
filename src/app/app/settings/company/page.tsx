@@ -8,6 +8,7 @@ import { loadCollectionRails } from "@/server/billing/collection-rails";
 import { loadAttendanceSettings } from "@/server/identity/attendance-settings";
 import { getActiveCompany, getActiveCompanyLogoUrl } from "@/server/identity/company-data";
 import { getPageSession } from "@/server/identity/session";
+import { countPeopleAtSites, listOffices } from "@/server/sites/sites-data";
 
 import { AttendanceForm } from "../../_company/attendance-form";
 import { BusinessForm } from "../../_company/business-form";
@@ -16,6 +17,8 @@ import { LogoForm } from "../../_company/logo-form";
 import { ModulesForm } from "../../_company/modules-form";
 import { PlanForm } from "../../_company/plan-form";
 import { RouteGate } from "../../_shell/slots";
+import { clientsPageContext } from "../../clients/_components/context";
+import { OfficesCard } from "./_components/offices-card";
 
 export const metadata: Metadata = { title: "Company settings" };
 
@@ -51,10 +54,19 @@ async function CompanySettings() {
     getPageSession(),
   ]);
   if (!company || !session?.active) redirect("/no-access");
-  const [rails, attendance] = await Promise.all([
-    loadCollectionRails(await createServerSupabase(), company.id, session.active.role),
+  const supabase = await createServerSupabase();
+  const [rails, attendance, offices, ctx] = await Promise.all([
+    loadCollectionRails(supabase, company.id, session.active.role),
     loadAttendanceSettings(company.id),
+    listOffices(supabase, company.id),
+    clientsPageContext(),
   ]);
+  const mapped = await countPeopleAtSites(
+    supabase,
+    company.id,
+    offices.map((o) => o.id),
+    ctx.today,
+  );
 
   return (
     <>
@@ -87,6 +99,14 @@ async function CompanySettings() {
       >
         <LogoForm logoUrl={logoUrl} companyName={company.name} />
         <BusinessForm mode="settings" company={company} />
+      </Section>
+
+      <Section
+        id="head-office"
+        title="Head office"
+        description="Where staff who don't work at a client's site are mapped: HR, finance, operations and admin. They clock in here, and their pay is overhead, never a client's labour cost."
+      >
+        <OfficesCard offices={offices} mapped={mapped} canEdit={ctx.canEdit} />
       </Section>
 
       <Section

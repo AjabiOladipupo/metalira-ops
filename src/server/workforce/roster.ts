@@ -73,7 +73,14 @@ export function fromRosterDbError(error: PostgrestError): never {
     throw new MutationError("invalid", "This employee is already on this shift.");
   }
   // MLRSL (slice 4.5): the worker is on approved leave that day ("On approved leave 4 to 6 Nov.").
-  if (/^MLR[SP]\d$/.test(error.code) || error.code === "MLRSL" || error.code === "22023") {
+  // MLHO6 (slice 6.11): the person is mapped to an office that day ("This person is mapped to
+  // Head office. Map them to the client site first.").
+  if (
+    /^MLR[SP]\d$/.test(error.code) ||
+    error.code === "MLRSL" ||
+    error.code === "MLHO6" ||
+    error.code === "22023"
+  ) {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code}): ${error.message}`);

@@ -57,7 +57,7 @@ async function SitePage({
   return (
     <>
       <PageHeader
-        back={{ href: `/app/clients/${site.clientId}?tab=sites`, label: site.clientName }}
+        back={{ href: `/app/clients/${clientId}?tab=sites`, label: site.clientName }}
         eyebrow={site.clientName}
         title={site.name}
         description={`${geofence ?? "No geofence"} · ${plural(
@@ -79,7 +79,7 @@ async function SitePage({
 
       <Section id="site-details" title="Details">
         {canEdit ? (
-          <SiteDetailsForm mode="edit" clientId={site.clientId} site={site} />
+          <SiteDetailsForm mode="edit" clientId={clientId} site={site} />
         ) : (
           <DetailList
             items={[
@@ -127,7 +127,7 @@ async function SitePage({
         actions={
           ctx.canEdit && site.checkpoints.length > 0 ? (
             <Button asChild variant="outline" className="h-11 px-4">
-              <Link href={`/app/clients/${site.clientId}/sites/${site.id}/checkpoints/print`}>
+              <Link href={`/app/clients/${clientId}/sites/${site.id}/checkpoints/print`}>
                 Print QR sheet
               </Link>
             </Button>

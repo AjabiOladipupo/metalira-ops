@@ -8,7 +8,7 @@ import { StatusDot } from "@/components/status";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { formatDate } from "@/lib/dates";
 import { saveMappingAction } from "@/server/people/actions";
-import type { Option } from "@/server/people/people-data";
+import type { Option, SiteOption } from "@/server/people/people-data";
 
 /** The worker the panel maps, as the People list already has them. */
 export interface MappingWorker {
@@ -29,7 +29,8 @@ export interface MappingWorker {
 export interface MappingOptions {
   departments: Option[];
   lineManagers: Option[];
-  sites: Option[];
+  /** Offices first (slice 6.11); an office takes no projects. */
+  sites: SiteOption[];
   projects: Option[];
 }
 
@@ -136,6 +137,8 @@ function MappingForm({
   const [edited, setEdited] = useState(false);
   const titleId = useId();
   const errors = state && !state.ok ? state.fieldErrors : undefined;
+  // Slice 6.11: an office has no client, so no projects. None are sent, and saving closes any.
+  const atOffice = options.sites.find((s) => s.value === siteId)?.office ?? false;
 
   const edit =
     <T,>(set: (value: T) => void) =>
@@ -220,7 +223,12 @@ function MappingForm({
 
       <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
         <legend className="mb-1.5 text-[13px] font-medium">Projects</legend>
-        {options.projects.length === 0 ? (
+        {atOffice ? (
+          <p className="m-0 text-xs text-fg-muted" data-testid="mapping-office-note">
+            An office has no projects. People here are overhead, not a client&apos;s labour cost.
+            {worker.projectIds.length > 0 ? " Saving takes them off their projects." : ""}
+          </p>
+        ) : options.projects.length === 0 ? (
           <p className="m-0 text-xs text-fg-muted">No projects yet.</p>
         ) : (
           <div className="flex max-h-64 flex-col overflow-y-auto">

@@ -1895,14 +1895,14 @@ isOneToOne: false
                   ]
                 },"sites": {
                   Row: {
-                    "address": string | null,"boundary": unknown,"centre": unknown,"client_id": string,"created_at": string,"created_by": string | null,"geofence": unknown,"geofence_set_at": string | null,"geofence_set_by": string | null,"id": string,"landmark": string | null,"name": string,"organisation_id": string,"radius_m": number,"state": string | null,"status": string,"updated_at": string
+                    "address": string | null,"boundary": unknown,"centre": unknown,"client_id": string | null,"created_at": string,"created_by": string | null,"geofence": unknown,"geofence_set_at": string | null,"geofence_set_by": string | null,"id": string,"kind": string,"landmark": string | null,"name": string,"organisation_id": string,"radius_m": number,"state": string | null,"status": string,"updated_at": string
                   }
                   ComputedFields: never
                   Insert: {
-                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id": string,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"landmark"?: string | null,"name": string,"organisation_id": string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
+                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id"?: string | null,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"kind"?: string,"landmark"?: string | null,"name": string,"organisation_id": string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
                   }
                   Update: {
-                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id"?: string,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"landmark"?: string | null,"name"?: string,"organisation_id"?: string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
+                    "address"?: string | null,"boundary"?: unknown,"centre"?: unknown,"client_id"?: string | null,"created_at"?: string,"created_by"?: string | null,"geofence"?: unknown,"geofence_set_at"?: string | null,"geofence_set_by"?: string | null,"id"?: string,"kind"?: string,"landmark"?: string | null,"name"?: string,"organisation_id"?: string,"radius_m"?: number,"state"?: string | null,"status"?: string,"updated_at"?: string
                   }
                   Relationships: [
                     {

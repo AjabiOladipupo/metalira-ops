@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import QRCode from "qrcode";
 
 import { pointsFromGeoJson, type LatLng } from "@/lib/geofence";
+import { HEAD_OFFICE_NAME, isOffice, type SiteKind } from "@/lib/office-sites";
 import type { Database } from "@/types/db";
 
 import type { SiteStatus } from "./schemas";
@@ -29,7 +30,9 @@ export function siteNeedsDetails(site: { address: string | null; hasGeofence: bo
 
 export interface SiteRow {
   id: string;
-  clientId: string;
+  /** Null for one of the company's own offices (slice 6.11). */
+  clientId: string | null;
+  kind: SiteKind;
   name: string;
   address: string | null;
   state: string | null;
@@ -42,7 +45,8 @@ export interface SiteRow {
 
 interface RawSite {
   id: string;
-  client_id: string;
+  client_id: string | null;
+  kind: string;
   name: string;
   address: string | null;
   state: string | null;
@@ -58,6 +62,7 @@ function toRow(s: RawSite): SiteRow {
   return {
     id: s.id,
     clientId: s.client_id,
+    kind: isOffice(s.kind) ? "office" : "client",
     name: s.name,
     address: s.address,
     state: s.state,
@@ -70,7 +75,7 @@ function toRow(s: RawSite): SiteRow {
 }
 
 const SITE_COLUMNS =
-  "id, client_id, name, address, state, status, geofence_set_at, boundary, radius_m, site_checkpoints(status)";
+  "id, client_id, kind, name, address, state, status, geofence_set_at, boundary, radius_m, site_checkpoints(status)";
 
 /** A client's sites, active first, each by name. */
 export async function listClientSites(
@@ -119,14 +124,39 @@ export async function loadSite(
   siteId: string,
 ): Promise<SiteDetail | null> {
   if (!UUID.test(siteId) || !UUID.test(clientId)) return null;
+  return loadSiteDetail(supabase, organisationId, siteId, { clientId });
+}
+
+/**
+ * One of the company's own offices (slice 6.11) with its geofence and checkpoints, or null when
+ * it isn't there or isn't an office (a client's site opens under its client).
+ */
+export async function loadOfficeSite(
+  supabase: Client,
+  organisationId: string,
+  siteId: string,
+): Promise<SiteDetail | null> {
+  if (!UUID.test(siteId)) return null;
+  return loadSiteDetail(supabase, organisationId, siteId, { office: true });
+}
+
+async function loadSiteDetail(
+  supabase: Client,
+  organisationId: string,
+  siteId: string,
+  scope: { clientId: string } | { office: true },
+): Promise<SiteDetail | null> {
+  let query = supabase
+    .from("sites")
+    .select(`${SITE_COLUMNS}, landmark, clients(name, status)`)
+    .eq("organisation_id", organisationId)
+    .eq("id", siteId);
+  query =
+    "clientId" in scope
+      ? query.eq("client_id", scope.clientId).eq("kind", "client")
+      : query.eq("kind", "office");
   const [site, shape, checkpoints] = await Promise.all([
-    supabase
-      .from("sites")
-      .select(`${SITE_COLUMNS}, landmark, clients(name, status)`)
-      .eq("organisation_id", organisationId)
-      .eq("client_id", clientId)
-      .eq("id", siteId)
-      .maybeSingle(),
+    query.maybeSingle(),
     supabase.rpc("site_geofences", { p_organisation_id: organisationId, p_site_id: siteId }),
     supabase
       .from("site_checkpoints")
@@ -168,11 +198,34 @@ export async function loadSite(
 }
 
 /**
+ * The company's own offices (slice 6.11): Head office first, then branches by name, archived
+ * last. Read by every role that reads sites; owner, admin and ops_manager change them.
+ */
+export async function listOffices(supabase: Client, organisationId: string): Promise<SiteRow[]> {
+  const { data, error } = await supabase
+    .from("sites")
+    .select(SITE_COLUMNS)
+    .eq("organisation_id", organisationId)
+    .eq("kind", "office")
+    .order("name")
+    .limit(200);
+  if (error) throw new Error(`Could not read offices: ${error.message}`);
+  return (data ?? [])
+    .map((s) => toRow(s as RawSite))
+    .sort(
+      (a, b) =>
+        Number(a.status === "archived") - Number(b.status === "archived") ||
+        Number(b.name === HEAD_OFFICE_NAME) - Number(a.name === HEAD_OFFICE_NAME) ||
+        a.name.localeCompare(b.name, "en", { sensitivity: "base" }),
+    );
+}
+
+/**
  * The compact summary of an organisation's sites, for dashboards and later the ops agent
  * (docs/LIRA.md). Counts only: no names or addresses.
  */
 export interface SitesSummary {
-  /** Active sites of active clients. */
+  /** Active sites of active clients, and the company's own active offices (slice 6.11). */
   active: number;
   archived: number;
   /** Active sites with no geofence: clock-in can't be checked there yet. */
@@ -212,30 +265,56 @@ async function listActiveClientSites(supabase: Client, organisationId: string) {
   }));
 }
 
+/**
+ * The company's own offices (slice 6.11) beside clients' sites, so an office with no geofence
+ * is counted and listed too (security review M1): its clock-ins aren't checked until it has one.
+ */
+async function listOfficeSiteRows(supabase: Client, organisationId: string) {
+  const offices = await listOffices(supabase, organisationId);
+  return offices.map((row) => ({ row, clientName: "Your office" }));
+}
+
 export async function loadSitesSummary(
   supabase: Client,
   organisationId: string,
 ): Promise<SitesSummary> {
-  const sites = await listActiveClientSites(supabase, organisationId);
-  return summariseSites(sites.map((s) => s.row));
+  const [sites, offices] = await Promise.all([
+    listActiveClientSites(supabase, organisationId),
+    listOfficeSiteRows(supabase, organisationId),
+  ]);
+  return summariseSites([...sites, ...offices].map((s) => s.row));
 }
 
 export interface SiteWithoutGeofence {
   siteId: string;
   siteName: string;
-  clientId: string;
+  clientId: string | null;
   clientName: string;
   href: string;
 }
 
-/** Active sites of active clients that have no geofence yet, by client then site. */
+/**
+ * Active sites of active clients that have no geofence yet, by client then site, after the
+ * company's own offices without one (slice 6.11), which link to their office page.
+ */
 export async function listSitesWithoutGeofence(
   supabase: Client,
   organisationId: string,
 ): Promise<SiteWithoutGeofence[]> {
-  const sites = await listActiveClientSites(supabase, organisationId);
-  return sites
-    .filter((s) => s.row.status === "active" && s.row.geofence === null)
+  const [sites, offices] = await Promise.all([
+    listActiveClientSites(supabase, organisationId),
+    listOfficeSiteRows(supabase, organisationId),
+  ]);
+  const unfenced = (s: { row: SiteRow }) => s.row.status === "active" && s.row.geofence === null;
+  const officeRows = offices.filter(unfenced).map((s) => ({
+    siteId: s.row.id,
+    siteName: s.row.name,
+    clientId: null,
+    clientName: s.clientName,
+    href: `/app/settings/offices/${s.row.id}`,
+  }));
+  const clientRows = sites
+    .filter(unfenced)
     .map((s) => ({
       siteId: s.row.id,
       siteName: s.row.name,
@@ -246,6 +325,7 @@ export async function listSitesWithoutGeofence(
     .sort(
       (a, b) => a.clientName.localeCompare(b.clientName) || a.siteName.localeCompare(b.siteName),
     );
+  return [...officeRows, ...clientRows];
 }
 
 /**
@@ -297,4 +377,37 @@ export async function loadCheckpointSheet(
       };
     }),
   );
+}
+
+/**
+ * How many people are mapped to each of these sites on `today` (slice 6.11's Head office card).
+ * Counts only; RLS decides what the caller reads (owner, admin, hr, finance and ops_manager read
+ * every assignment).
+ */
+export async function countPeopleAtSites(
+  supabase: Client,
+  organisationId: string,
+  siteIds: readonly string[],
+  today: string,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (siteIds.length === 0) return counts;
+  const { data, error } = await supabase
+    .from("worker_assignments")
+    .select("site_id, worker_id")
+    .eq("organisation_id", organisationId)
+    .in("site_id", [...siteIds])
+    .lte("effective_from", today)
+    .or(`effective_to.is.null,effective_to.gte.${today}`)
+    .limit(10000);
+  if (error) throw new Error(`Could not read assignments (${error.code})`);
+  const seen = new Set<string>();
+  for (const row of data ?? []) {
+    if (!row.site_id) continue;
+    const key = `${row.site_id}:${row.worker_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    counts.set(row.site_id, (counts.get(row.site_id) ?? 0) + 1);
+  }
+  return counts;
 }

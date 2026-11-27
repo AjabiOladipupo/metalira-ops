@@ -144,6 +144,13 @@ export interface EarningsWorker {
   leaveArrears?: readonly LeaveArrearsInput[];
   /** Slice 5.7c: leave cancelled after a posted payslip deducted it (refunded now). */
   leaveRefunds?: readonly LeaveRefundInput[];
+  /** Slice 6.11 (money review H1-b): days whose site of record is an office. */
+  officeDays?: readonly { from: string; to: string }[];
+  /**
+   * Slice 6.11 (money review H1-a): the worker's shifts in the posted periods arrears days come
+   * from, so a no-shift arrears day is an off day only when that period's calendar has it off.
+   */
+  arrearsShifts?: readonly { date: string; onLeave: boolean }[];
 }
 
 export interface EarningsInput {
@@ -834,7 +841,54 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
     }
   }
 
+  // Slice 6.11 (money review H1): a monthly worker's no-shift clock-in on a working day (Head
+  // office staff every weekday) is covered by salary and adds no earning. It is still paid by this
+  // cycle, so it is recorded as a source of the salary line: otherwise the next run's arrears read
+  // would find an approved day in a posted cycle with no source and pay it again as an off day.
+  const sourced = new Set(
+    [...buckets.values()].flatMap((b) =>
+      b.sources.flatMap((src) => (src.kind === "timesheet_line" ? [src.id] : [])),
+    ),
+  );
+  for (const day of cycleDays) {
+    if (day.anyShift || !workingOn.get(day.date) || extra.has(day.date)) continue;
+    const rate = versionOn(worker.payRates, day.date);
+    if (!rate || rate.payType !== "monthly") continue;
+    const salary = lines.find(
+      (l) =>
+        COMPONENTS.some((c) => c.code === l.code) &&
+        l.sources.some((src) => src.kind === "pay_rate" && src.id === rate.id),
+    );
+    if (!salary) continue;
+    for (const id of day.lineIds) {
+      if (sourced.has(id)) continue;
+      sourced.add(id);
+      salary.sources.push({ kind: "timesheet_line", id, workDate: day.date });
+    }
+  }
+
   // --- Arrears: days from posted cycles approved after posting -------------------------------
+  const arrearsCalendars = new Map<string, Map<string, boolean>>();
+  const arrearsWorking = (periodStart: string, date: string): boolean => {
+    let days = arrearsCalendars.get(periodStart);
+    if (!days) {
+      const end = periodEnd(periodStart);
+      days = new Map(
+        rosteredCalendar(
+          { start: periodStart, end },
+          {
+            ...worker,
+            shifts: (worker.arrearsShifts ?? []).filter(
+              (s) => s.date >= periodStart && s.date <= end,
+            ),
+          },
+          input.defaultWorkDays,
+        ).map((d) => [d.date, d.working] as const),
+      );
+      arrearsCalendars.set(periodStart, days);
+    }
+    return days.get(date) ?? false;
+  };
   const arrearsDays = groupByDate(worker.arrears);
   const arrearsWeek = new Map(worker.arrears.map((a) => [a.workDate, a]));
   // Off days owed per ISO week: approved shift days past work_days_per_week, less the off days the
@@ -865,10 +919,16 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
       continue;
     }
     usedRates.add(rate.id);
-    // (The earlier cycle's calendar isn't gathered, so a no-shift arrears day is an off day.)
-    const offDay = !day.anyShift || arrearsOffDays.has(day.date);
+    // Slice 6.11 (money review H1-a): a no-shift arrears day is an off day only when its posted
+    // period's own calendar has it off (that period's shifts, else the usual days; an office's
+    // days by the usual days). On a working day it is covered by that period's salary, so only
+    // its overtime minutes are paid.
+    const offDay =
+      (!day.anyShift && !arrearsWorking(meta.periodStart, day.date)) ||
+      arrearsOffDays.has(day.date);
     const p = dayPolicy(day.date);
-    for (const c of dayContributions(day, rate, offDay, holidays.has(day.date), p)) {
+    const owed = dayContributions(day, rate, offDay, holidays.has(day.date), p);
+    for (const c of owed) {
       addTo(
         `arrears|${meta.periodStart}`,
         { code: "arrears", rate: null, periodStart: meta.periodStart, policy: p },
@@ -876,6 +936,21 @@ export function computeEarnings(input: EarningsInput, policy: PayPolicy): Earnin
         day,
         offDay && rate.payType === "monthly",
       );
+    }
+    // A covered arrears day (a monthly worker's working day, nothing owed) is settled by this
+    // run: recorded as a source of the salary line, so it doesn't come back every month.
+    if (owed.length === 0 && !day.anyShift && rate.payType === "monthly") {
+      const salary = lines.find(
+        (l) =>
+          COMPONENTS.some((c) => c.code === l.code) && l.sources.some((s) => s.kind === "pay_rate"),
+      );
+      if (salary) {
+        for (const id of day.lineIds) {
+          if (!salary.sources.some((s) => s.kind === "timesheet_line" && s.id === id)) {
+            salary.sources.push({ kind: "timesheet_line", id, workDate: day.date });
+          }
+        }
+      }
     }
   }
 

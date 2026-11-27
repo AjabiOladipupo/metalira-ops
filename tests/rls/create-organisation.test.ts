@@ -71,6 +71,13 @@ describe("create_organisation", () => {
         actor_id: owner.id,
         entity_id: orgId,
       },
+      // Slice 6.11: every new company gets its Head office site.
+      {
+        action: "sites.insert",
+        entity: "sites",
+        actor_id: owner.id,
+        entity_id: expect.any(String),
+      },
     ]);
 
     // The owner can read their organisation and its audit log through RLS.
@@ -80,7 +87,7 @@ describe("create_organisation", () => {
       .from("audit_log")
       .select("id")
       .eq("organisation_id", orgId!);
-    expect(ownAudit.data).toHaveLength(2);
+    expect(ownAudit.data).toHaveLength(3);
   });
 
   it.each([

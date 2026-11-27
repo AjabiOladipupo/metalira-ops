@@ -111,7 +111,8 @@ export async function loadRosterSites(
     .eq("organisation_id", organisationId)
     .in("id", siteIds);
   if (error) throw new Error(`Could not read sites: ${error.message}`);
-  const clientIds = [...new Set((sites ?? []).map((s) => s.client_id))];
+  // Sites with posts are clients' sites: an office never has posts (slice 6.11, MLHO4).
+  const clientIds = [...new Set((sites ?? []).flatMap((s) => (s.client_id ? [s.client_id] : [])))];
   const { data: clients, error: clientError } = clientIds.length
     ? await supabase
         .from("clients")
@@ -125,7 +126,7 @@ export async function loadRosterSites(
     .map((s) => ({
       id: s.id,
       name: s.name,
-      clientName: clientName.get(s.client_id) ?? "",
+      clientName: (s.client_id && clientName.get(s.client_id)) || "",
       archived: s.status === "archived",
     }))
     .sort((a, b) => a.clientName.localeCompare(b.clientName) || a.name.localeCompare(b.name));
@@ -403,7 +404,7 @@ export async function loadRosterCandidates(
 ): Promise<RosterCandidates> {
   const start = mondayOf(weekStart);
   const end = weekEnd(start);
-  const [workers, mappings, rows, leave] = await Promise.all([
+  const [workers, mappings, rows, leave, offices] = await Promise.all([
     allPages(
       (from, to) =>
         supabase
@@ -431,6 +432,18 @@ export async function loadRosterCandidates(
     ),
     loadAssignments(supabase, organisationId, addDays(start, -1), addDays(end, 1)),
     loadRosterLeave(supabase, organisationId, start, end),
+    // Slice 6.11: the company's offices. Someone mapped only to an office this week isn't offered
+    // for a client's shift (the database refuses it, MLHO6).
+    supabase
+      .from("sites")
+      .select("id")
+      .eq("organisation_id", organisationId)
+      .eq("kind", "office")
+      .limit(200)
+      .then(({ data, error }) => {
+        if (error) throw new Error(`Could not read offices: ${error.message}`);
+        return new Set((data ?? []).map((s) => s.id));
+      }),
   ]);
 
   const shiftPosts = await loadShiftPosts(supabase, organisationId, [
@@ -448,8 +461,14 @@ export async function loadRosterCandidates(
     mappingsByWorker.set(m.worker_id, list);
   }
 
+  const officeOnly = (workerId: string) => {
+    const list = mappingsByWorker.get(workerId) ?? [];
+    return list.length > 0 && list.every((m) => offices.has(m.siteId));
+  };
+
   return {
     workers: workers
+      .filter((w) => !officeOnly(w.id))
       .map((w) => ({
         id: w.id,
         staffId: w.staff_id,

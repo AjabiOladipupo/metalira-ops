@@ -142,6 +142,8 @@ describe("ensureOrganisationForNewUser", () => {
     expect(audit).toEqual([
       { action: "memberships.insert", actor_id: user.id },
       { action: "organisations.insert", actor_id: user.id },
+      // Slice 6.11: every new company gets its Head office site.
+      { action: "sites.insert", actor_id: user.id },
     ]);
 
     // The pending name is cleared, and a second call (another sign-in) creates nothing.

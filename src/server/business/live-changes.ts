@@ -150,7 +150,8 @@ export function fromLiveChangeDbError(
     const field = fields[error.code] ?? FIELD[error.code];
     throw new MutationError("invalid", error.message, field ? { [field]: error.message } : {});
   }
-  if (/^ML(PO|CO)\d$/.test(error.code)) {
+  // Slice 6.11: MLHO2 and MLHO4, an office on a contract or a post (never offered).
+  if (/^ML(PO|CO|HO)\d$/.test(error.code)) {
     throw new MutationError("invalid", error.message);
   }
   throw new Error(`Database refused the change (${error.code}): ${error.message}`);

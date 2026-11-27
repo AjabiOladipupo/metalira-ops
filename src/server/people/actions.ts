@@ -285,7 +285,10 @@ export async function saveMappingAction(
     ok: true,
     status: 200,
     message: saved.assignmentsChanged
-      ? `Saved. Site and project changes apply from ${formatDate(saved.effectiveFrom)}.`
+      ? `Saved. Site and project changes apply from ${formatDate(saved.effectiveFrom)}.${
+          // Slice 6.11: mapped to an office, so off their shifts at clients' sites from then.
+          saved.releasedShifts ? ` ${saved.releasedShifts}.` : ""
+        }`
       : "Saved",
   };
 }

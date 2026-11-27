@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import type { CompanyFormState } from "@/server/identity/company-form-state";
 import {
   addCheckpointAction,
+  createOfficeAction,
   createSiteAction,
   moveCheckpointAction,
   renameCheckpointAction,
@@ -32,20 +33,29 @@ export interface SiteFormValues {
   landmark: string | null;
 }
 
-/** Add a site to a client, or change a site's name, address, state and landmark. */
+/**
+ * Add a site to a client, or change a site's name, address, state and landmark. With `office`,
+ * the same for one of the company's own offices (slice 6.11): no client, and Cancel goes back to
+ * Settings > Company.
+ */
 export function SiteDetailsForm({
   mode,
   clientId,
   site,
+  office = false,
 }: {
   mode: "create" | "edit";
-  clientId: string;
+  clientId?: string;
   site?: SiteFormValues;
+  office?: boolean;
 }) {
   const [state, action] = useActionState<CompanyFormState, FormData>(
-    mode === "create" ? createSiteAction : updateSiteAction,
+    mode === "edit" ? updateSiteAction : office ? createOfficeAction : createSiteAction,
     null,
   );
+  const cancelHref = office
+    ? "/app/settings/company#head-office"
+    : `/app/clients/${clientId}?tab=sites`;
   const errors = state && !state.ok ? state.fieldErrors : undefined;
   const value = (name: string, saved: string | null | undefined) => fieldValue(state, name, saved);
   const addressId = useId();
@@ -55,20 +65,30 @@ export function SiteDetailsForm({
       key={JSON.stringify(state)}
       action={action}
       noValidate
-      aria-label={mode === "create" ? "Add site" : "Site details"}
+      aria-label={
+        mode === "create"
+          ? office
+            ? "Add office"
+            : "Add site"
+          : office
+            ? "Office details"
+            : "Site details"
+      }
       className={cn(
         "flex flex-col gap-4",
         mode === "edit" ? "rounded-xl bg-surface p-4 sm:p-5" : "max-w-[880px]",
       )}
     >
-      {mode === "create" ? <input type="hidden" name="clientId" value={clientId} /> : null}
+      {mode === "create" && !office ? (
+        <input type="hidden" name="clientId" value={clientId} />
+      ) : null}
       {site ? <input type="hidden" name="siteId" value={site.id} /> : null}
       <div className={GRID}>
         <Field
-          label="Site name"
+          label={office ? "Office name" : "Site name"}
           name="name"
           required
-          placeholder="Apapa Warehouse 3"
+          placeholder={office ? "Ikeja branch" : "Apapa Warehouse 3"}
           defaultValue={value("name", site?.name)}
           error={errors?.name}
         />
@@ -119,11 +139,11 @@ export function SiteDetailsForm({
           pendingLabel={mode === "create" ? "Adding…" : "Saving…"}
           className="w-auto px-5"
         >
-          {mode === "create" ? "Add site" : "Save details"}
+          {mode === "create" ? (office ? "Add office" : "Add site") : "Save details"}
         </SubmitButton>
         {mode === "create" ? (
           <Button asChild variant="outline" className="h-11 px-4">
-            <Link href={`/app/clients/${clientId}?tab=sites`}>Cancel</Link>
+            <Link href={cancelHref}>Cancel</Link>
           </Button>
         ) : null}
         <p role="status" className="m-0 text-sm text-fg-muted">

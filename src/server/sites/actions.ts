@@ -10,6 +10,7 @@ import { formFields } from "@/server/identity/schemas";
 
 import {
   addCheckpoint,
+  createOffice,
   createSite,
   moveCheckpoint,
   renameCheckpoint,
@@ -55,6 +56,8 @@ function refusal(error: unknown, values?: Record<string, string>): SiteFormState
 
 function refreshSites(): void {
   revalidatePath("/app/clients", "layout");
+  // Slice 6.11: offices are edited under Settings, and the same actions change them.
+  revalidatePath("/app/settings", "layout");
 }
 
 export async function createSiteAction(
@@ -70,6 +73,22 @@ export async function createSiteAction(
   }
   refreshSites();
   redirect(`/app/clients/${created.clientId}/sites/${created.id}`);
+}
+
+/** Adds one of the company's own offices (slice 6.11) and opens it to set its geofence. */
+export async function createOfficeAction(
+  _prev: SiteFormState,
+  formData: FormData,
+): Promise<SiteFormState> {
+  const fields = formFields(formData);
+  let created: { id: string };
+  try {
+    created = await createOffice(fields);
+  } catch (error) {
+    return refusal(error, fields);
+  }
+  refreshSites();
+  redirect(`/app/settings/offices/${created.id}`);
 }
 
 export async function updateSiteAction(

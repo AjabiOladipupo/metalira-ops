@@ -136,12 +136,13 @@ export async function loadImportContext(
     departments,
     clients: clients.map((c) => ({ id: c.id, name: c.name, archived: c.status === "archived" })),
     projects: projects.map((p) => ({ id: p.id, clientId: p.client_id, name: p.name })),
-    sites: sites.map((s) => ({
-      id: s.id,
-      clientId: s.client_id,
-      name: s.name,
-      archived: s.status === "archived",
-    })),
+    // A row names a client and its site, so only clients' sites match: an office (slice 6.11) is
+    // mapped from the People list, never by the import.
+    sites: sites.flatMap((s) =>
+      s.client_id
+        ? [{ id: s.id, clientId: s.client_id, name: s.name, archived: s.status === "archived" }]
+        : [],
+    ),
     retiredStaffIds: retired,
   };
 }
