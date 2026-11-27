@@ -274,7 +274,7 @@ As in Phases 2 to 5 (docs/LIRA.md): every new Server Action goes in `src/server/
 
 ### 6.11 Head office site for non-service staff (owner request, 27 Nov 2026; independent, wave 2)
 The owner wants staff who don't work at a client's site (HR, finance, the operations manager, admin) mapped to the company's own **Head office** as their site. Today every site belongs to a client (`sites.client_id not null`), so there is nowhere to put them.
-- Migration `20261127125000_head_office.sql`.
+- Migration `20261127090000_head_office.sql`.
 - `sites.kind` (`client` default, `office`); an office site has `client_id` null and a client site must have one (check constraint). Every company gets one office site named "Head office" (backfilled for existing companies, created with each new company); more offices (branches) can be added the same way. Its address, geofence and checkpoints are edited like any site (SITE_EDITORS: owner, admin, ops_manager), on a new **Settings > Company > Head office** card rather than under a client.
 - Office sites are never a client's site: they are left out of the Clients pages, contracts, posts, rate cards, the unbilled queue and invoices (no posts, so no Work Units are made there). A guard against a contract, post or headcount on an office site (MLHO codes).
 - Mapping: `save_worker_mapping` and 6.11's change to U.3's **Map to site and project** accept an office site; projects can't be chosen for it (office sites have no client, so no projects). HR, owner and admin map people there, as today.
@@ -415,7 +415,7 @@ At most three agents at once:
 - **Wave 4:** 6.6 (from 6.5 with 6.3 merged in), 6.7 (from 6.5) and 6.8 (from 6.3 with 6.5 merged in), in parallel; merged in migration order.
 - **Wave 5:** 6.10, the review fix-up and sign-off.
 
-Migrations, after `20261122300000_self_onboarding.sql` (the latest on `main`): `20261127100000` (6.0), `20261127110000` (6.1), `20261127120000` (6.4), `20261127125000` (6.11), `20261127130000` (6.2), `20261127140000` (6.9), `20261127150000` (6.3), `20261127160000` (6.5), `20261127170000` (6.6), `20261127180000` (6.7), `20261127190000` (6.8), `20261127200000` (6.10). A slice whose migration would land on `main` after a later-numbered one takes the next free slot instead (as 5.4 did).
+Migrations, after `20261122300000_self_onboarding.sql` (the latest on `main`), with 6.11 head office built first as `20261127090000` (owner, 27 Nov): `20261127100000` (6.0), `20261127110000` (6.1), `20261127120000` (6.4), `20261127130000` (6.2), `20261127140000` (6.9), `20261127150000` (6.3), `20261127160000` (6.5), `20261127170000` (6.6), `20261127180000` (6.7), `20261127190000` (6.8), `20261127200000` (6.10). A slice whose migration would land on `main` after a later-numbered one takes the next free slot instead (as 5.4 did).
 
 Reviews: **money-reviewer** on every slice (6.0 to 6.10). **security-reviewer** on 6.1 to 6.10 (definer reads of work records, a nullability change on `work_units`, file uploads, private buckets, decrypted account numbers in PDFs and emails, narrations naming workers, the cron route and outbound email) and once on the whole phase in 6.10.
 
