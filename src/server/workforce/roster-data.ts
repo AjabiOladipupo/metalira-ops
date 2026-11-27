@@ -111,7 +111,8 @@ export async function loadRosterSites(
     .eq("organisation_id", organisationId)
     .in("id", siteIds);
   if (error) throw new Error(`Could not read sites: ${error.message}`);
-  const clientIds = [...new Set((sites ?? []).map((s) => s.client_id))];
+  // Sites with posts are clients' sites: an office never has posts (slice 6.11, MLHO4).
+  const clientIds = [...new Set((sites ?? []).flatMap((s) => (s.client_id ? [s.client_id] : [])))];
   const { data: clients, error: clientError } = clientIds.length
     ? await supabase
         .from("clients")
@@ -125,7 +126,7 @@ export async function loadRosterSites(
     .map((s) => ({
       id: s.id,
       name: s.name,
-      clientName: clientName.get(s.client_id) ?? "",
+      clientName: (s.client_id && clientName.get(s.client_id)) || "",
       archived: s.status === "archived",
     }))
     .sort((a, b) => a.clientName.localeCompare(b.clientName) || a.name.localeCompare(b.name));

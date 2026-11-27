@@ -51,7 +51,10 @@ export function BulkMappingSheet({
   const [problems, setProblems] = useState<BulkProblem[]>([]);
   const [pending, start] = useTransition();
 
-  const clientId = sites.find((s) => s.value === siteId)?.clientId ?? null;
+  const site = sites.find((s) => s.value === siteId);
+  const clientId = site?.clientId ?? null;
+  // Slice 6.11: an office has no client, so no projects.
+  const atOffice = site?.office ?? false;
   const siteProjects = clientId ? projects.filter((p) => p.clientId === clientId) : [];
 
   const reset = () => {
@@ -85,7 +88,12 @@ export function BulkMappingSheet({
                 setError("Choose a site.");
                 return;
               }
-              const result = await previewBulkMapAction({ selection, siteId, projectIds, mode });
+              const result = await previewBulkMapAction({
+                selection,
+                siteId,
+                projectIds: atOffice ? [] : projectIds,
+                mode,
+              });
               if (!result.ok) {
                 setError(
                   result.fieldErrors?.siteId ?? result.fieldErrors?.selection ?? result.message,
@@ -116,6 +124,11 @@ export function BulkMappingSheet({
             <legend className="mb-1.5 text-[13px] font-medium">Projects (optional)</legend>
             {!siteId ? (
               <p className="m-0 text-xs text-fg-muted">Choose a site to see its projects.</p>
+            ) : atOffice ? (
+              <p className="m-0 text-xs text-fg-muted" data-testid="bulk-map-office-note">
+                An office has no projects. People here are overhead, not a client&apos;s labour
+                cost.
+              </p>
             ) : siteProjects.length === 0 ? (
               <p className="m-0 text-xs text-fg-muted">This site&apos;s client has no projects.</p>
             ) : (
@@ -231,7 +244,7 @@ export function BulkMappingSheet({
                     actIds: preview.selection.act,
                     expectedDigest: preview.selection.digest,
                     siteId,
-                    projectIds,
+                    projectIds: atOffice ? [] : projectIds,
                     mode,
                   });
                   if (!result.ok) {

@@ -67,6 +67,10 @@ export function fromContractDbError(error: PostgrestError): never {
   if (error.code === "MLHC2") {
     throw new MutationError("invalid", error.message, { siteIds: error.message });
   }
+  // Slice 6.11: an office is never on a contract (the pickers leave offices out anyway).
+  if (error.code === "MLHO2") {
+    throw new MutationError("invalid", error.message, { siteIds: error.message });
+  }
   if (error.code === "P0002" || error.code === "23503") {
     throw new MutationError("invalid", "That contract wasn't found. Reload the page.");
   }

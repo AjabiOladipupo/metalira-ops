@@ -36,6 +36,11 @@ const siteFields = {
 };
 
 export const createSiteSchema = z.object({ clientId: id("client"), ...siteFields });
+/** One of the company's own offices (slice 6.11): no client. */
+export const createOfficeSchema = z.object({
+  ...siteFields,
+  name: text("Office name", 200),
+});
 export const updateSiteSchema = z.object({ siteId: id("site"), ...siteFields });
 
 export const setSiteStatusSchema = z.object({
@@ -142,5 +147,6 @@ export const moveCheckpointSchema = z.object({
 export const checkpointIdSchema = z.object({ checkpointId: id("checkpoint") });
 
 export type CreateSiteInput = z.output<typeof createSiteSchema>;
+export type CreateOfficeInput = z.output<typeof createOfficeSchema>;
 export type UpdateSiteInput = z.output<typeof updateSiteSchema>;
 export type SetGeofenceInput = z.output<typeof setGeofenceSchema>;

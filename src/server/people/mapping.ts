@@ -91,6 +91,8 @@ function fromDbError(error: PostgrestError): never {
     case "MLAS7":
       return invalid("siteId", error.message);
     case "MLAS5":
+    // Slice 6.11: an office takes no projects.
+    case "MLHO5":
       return invalid("projectIds", error.message);
     case "23P01":
       return invalid("siteId", "This employee is already on that site or project for these dates.");

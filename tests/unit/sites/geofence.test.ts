@@ -277,6 +277,7 @@ describe("site and checkpoint schemas", () => {
   it("summarises sites with counts only", () => {
     const base = {
       clientId: SITE,
+      kind: "client" as const,
       name: "Apapa Warehouse 3",
       address: null,
       state: null,

@@ -200,7 +200,7 @@ import {
   PEOPLE_EDITORS,
   updateWorkerSpec,
 } from "@/server/people/workers";
-import { listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
+import { listOffices, listSitesWithoutGeofence, loadSitesSummary } from "@/server/sites/sites-data";
 import { saveAttendanceSpec, loadAttendanceSettings } from "@/server/identity/attendance-settings";
 import { consentKindSchema } from "@/server/workforce/consents";
 import { CONSENT_READERS, loadConsentsSummary } from "@/server/workforce/consents-data";
@@ -225,6 +225,7 @@ import {
 import { markReadSchema } from "@/server/workforce/inbox";
 import {
   addCheckpointSpec,
+  createOfficeSpec,
   createSiteSpec,
   moveCheckpointSpec,
   renameCheckpointSpec,
@@ -2093,6 +2094,30 @@ export const CAPABILITIES: readonly Capability[] = [
     ...fromSpec(createSiteSpec),
     changes: "one",
     action: at("sites/actions", "createSiteAction"),
+    agent: true,
+  },
+  // Slice 6.11: the company's own offices (Head office and branches).
+  {
+    name: "offices.list",
+    description:
+      "Lists the company's own offices (Head office first) with their address, geofence and checkpoints.",
+    kind: "read",
+    audience: "manager",
+    roles: CLIENT_READERS,
+    input: null,
+    changes: "none",
+    action: null,
+    read: ({ supabase, organisationId }) => listOffices(supabase, organisationId),
+    agent: true,
+  },
+  {
+    name: "offices.create",
+    description: "Adds a branch office beside Head office, with its address, state and landmark.",
+    kind: "write",
+    audience: "manager",
+    ...fromSpec(createOfficeSpec),
+    changes: "one",
+    action: at("sites/actions", "createOfficeAction"),
     agent: true,
   },
   {
